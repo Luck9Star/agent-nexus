@@ -349,7 +349,11 @@ class AgentSupervisor:
 
         Includes model configuration from the platform config so agents
         can pick up model settings without reading config files directly.
+        Also forwards API keys from configured providers so agent
+        subprocesses can make LLM calls.
         """
+        import os
+
         env: dict[str, str] = {}
 
         # Load platform config for model defaults
@@ -357,6 +361,13 @@ class AgentSupervisor:
             config = self._config.load_config()
             if config.models.default:
                 env["AGENT_MODEL"] = config.models.default
+
+            # Forward API keys for each configured provider
+            for _name, provider in config.models.providers.items():
+                if provider.api_key_env:
+                    key = os.environ.get(provider.api_key_env, "")
+                    if key:
+                        env[provider.api_key_env] = key
         except Exception:
             pass  # Config loading failure should not prevent startup
 
