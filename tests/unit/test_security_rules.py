@@ -379,17 +379,11 @@ class TestRegexRuleCheckSource:
 
 
 class TestRegexRuleCheck:
-    """RegexRule.check() performs per-node regex matching via ast.unparse."""
+    """RegexRule.check() is a no-op; violations are found via check_source()."""
 
-    def test_check_detects_violation(self) -> None:
+    def test_check_returns_empty(self) -> None:
+        """check() always returns [] -- RegexRule operates via check_source()."""
         rule = RegexRule(patterns=[r"getattr"])
-        node = ast.parse("getattr(obj, 'x')").body[0]
-        violations = rule.check(node)
-        assert len(violations) >= 1
-        assert violations[0].rule_type == "regex"
-
-    def test_check_no_match(self) -> None:
-        rule = RegexRule(patterns=[r"NEVER_MATCH_THIS_PATTERN"])
         node = ast.parse("getattr(obj, 'x')").body[0]
         violations = rule.check(node)
         assert violations == []

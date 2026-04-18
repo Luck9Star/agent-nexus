@@ -245,7 +245,7 @@ class TestEvolutionStoreCounters:
     def test_increment_fallback(self, tmp_path: Path) -> None:
         r = _make_record("s1", "x", selections=3, applied=3, fallbacks=2)
         store = _store_with_records(tmp_path, r)
-        store.increment_counters("s1", fell_back=True)
+        store.increment_counters("s1", applied=True, selected=True, fell_back=True)
         got = store.get_skill_record("s1")
         assert got is not None
         assert got.total_fallbacks == 3

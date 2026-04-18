@@ -1563,44 +1563,37 @@ class TestLazyAsyncioLock:
         pm = MagicMock(spec=ProcessManager)
         router = MagicMock()
 
-        # Force no running event loop to verify lazy lock
         import asyncio
 
         try:
             loop = asyncio.get_running_loop()
             # If we're inside a test with a running loop, just verify
-            # the lock is None initially (lazy pattern)
+            # the lock is eagerly created
             gw = MCPGateway(pm, router)
-            assert gw._reg_lock is None
+            assert isinstance(gw._reg_lock, asyncio.Lock)
         except RuntimeError:
             # No running loop — this is the real test
             gw = MCPGateway(pm, router)
-            assert gw._reg_lock is None
+            assert isinstance(gw._reg_lock, asyncio.Lock)
 
     @pytest.mark.asyncio
-    async def test_lock_created_on_first_use(self) -> None:
-        """Lock is created on first call to _get_lock(), not in __init__."""
+    async def test_lock_created_eagerly(self) -> None:
+        """Lock is created in __init__, not lazily."""
         pm = MagicMock(spec=ProcessManager)
         router = MagicMock()
         gw = MCPGateway(pm, router)
 
-        # Lock should not exist yet
-        assert gw._reg_lock is None
-
-        # Accessing the lock creates it
-        lock = gw._get_lock()
-        assert isinstance(lock, asyncio.Lock)
-        assert gw._reg_lock is not None
+        assert isinstance(gw._reg_lock, asyncio.Lock)
 
     @pytest.mark.asyncio
     async def test_lock_is_same_instance(self) -> None:
-        """_get_lock() returns the same lock instance on repeated calls."""
+        """The lock attribute is the same instance on repeated access."""
         pm = MagicMock(spec=ProcessManager)
         router = MagicMock()
         gw = MCPGateway(pm, router)
 
-        lock1 = gw._get_lock()
-        lock2 = gw._get_lock()
+        lock1 = gw._reg_lock
+        lock2 = gw._reg_lock
         assert lock1 is lock2
 
 
@@ -1610,38 +1603,29 @@ class TestLazyAsyncioLock:
 
 
 class TestDeferredRegistryLazyLock:
-    """Regression 1.2: DeferredRegistry lock is created lazily.
+    """DeferredRegistry lock is created eagerly in __init__.
 
-    Creating asyncio.Lock() in __init__ raises RuntimeError when the
-    registry is instantiated outside an async context (e.g. during CLI
-    setup).  The lock must be created on first use via _get_lock().
+    In Python 3.10+, asyncio.Lock() does not require a running event
+    loop, so the lock is created eagerly to avoid lazy-init race
+    conditions.
     """
 
     def test_sync_instantiation_no_event_loop(self) -> None:
         """Creating DeferredRegistry outside async context does not raise."""
         pm = MagicMock(spec=ProcessManager)
-        # _lock must be None initially (lazy)
         registry = DeferredAgentRegistry(pm)
-        assert registry._lock is None
+        assert isinstance(registry._lock, asyncio.Lock)
 
     @pytest.mark.asyncio
-    async def test_lock_created_on_first_use(self) -> None:
-        """Lock is created on first call to _get_lock(), not in __init__."""
+    async def test_lock_created_eagerly(self) -> None:
+        """Lock is created in __init__, not lazily."""
         pm = MagicMock(spec=ProcessManager)
         registry = DeferredAgentRegistry(pm)
-        assert registry._lock is None
-
-        lock = registry._get_lock()
-        assert lock is not None
-        assert isinstance(lock, asyncio.Lock)
-
-        # Second call returns the same lock
-        lock2 = registry._get_lock()
-        assert lock2 is lock
+        assert isinstance(registry._lock, asyncio.Lock)
 
     @pytest.mark.asyncio
-    async def test_activate_uses_lazy_lock(self) -> None:
-        """activate_agent() works with the lazy lock pattern."""
+    async def test_activate_uses_lock(self) -> None:
+        """activate_agent() works with the eager lock."""
         pm = MagicMock(spec=ProcessManager)
         pm.start_agent = AsyncMock()
         registry = DeferredAgentRegistry(pm)
@@ -1658,7 +1642,7 @@ class TestDeferredRegistryLazyLock:
             start_command=["python3", "-m", "lazy_agent"],
         )
 
-        # activate_agent should create the lock internally and succeed
+        # activate_agent should use the lock and succeed
         schemas = await registry.activate_agent("lazy-agent")
         assert isinstance(schemas, list)
 
@@ -1764,8 +1748,7 @@ class TestInvokeNoLockReacquire:
 
         # Hold the lock externally to simulate the scenario where
         # _register_agent_tools still has it.  _invoke must NOT block.
-        lock = gw._get_lock()
-        async with lock:
+        async with gw._reg_lock:
             result = await asyncio.wait_for(func(x=1), timeout=1.0)
 
         assert "Error" in result

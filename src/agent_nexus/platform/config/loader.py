@@ -89,7 +89,11 @@ class ConfigLoader:
         )
 
         # Build provider registry: built-in defaults merged with config.toml
-        providers = self._build_providers(models_raw.get("providers", {}))
+        providers_raw = models_raw.get("providers", {})
+        if not isinstance(providers_raw, dict):
+            logger.warning("config.toml [models].providers is not a mapping, ignoring it")
+            providers_raw = {}
+        providers = self._build_providers(providers_raw)
 
         models = ModelConfig(default=default_model, providers=providers)
 
@@ -134,9 +138,13 @@ class ConfigLoader:
             if not isinstance(item, dict):
                 logger.warning("Skipping non-mapping source entry: %r", item)
                 continue
+            name = item.get("name")
+            if not isinstance(name, str) or not name.strip():
+                logger.error("Skipping source entry with missing/invalid 'name': %r", item)
+                continue
             try:
                 entry = SourceEntry(
-                    name=item["name"],
+                    name=name,
                     type=item.get("type", "git"),
                     url=item.get("url", ""),
                     branch=item.get("branch", "main"),

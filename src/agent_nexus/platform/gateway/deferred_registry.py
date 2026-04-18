@@ -84,17 +84,14 @@ class DeferredAgentRegistry:
         self._core_agents: dict[str, AgentInfo] = {}
         self._deferred_agents: dict[str, AgentInfo] = {}
         self._tool_adapters: dict[str, list[McpToolAdapter]] = {}
-        self._lock: asyncio.Lock | None = None
+        self._lock = asyncio.Lock()
 
     def _get_lock(self) -> asyncio.Lock:
-        """Return the activation lock, creating it lazily.
+        """Return the activation lock.
 
-        Creating ``asyncio.Lock()`` in ``__init__`` can raise
-        ``RuntimeError: no current event loop`` if the registry is
-        instantiated outside an async context (e.g. during CLI setup).
+        Kept as a property for backward compatibility with existing callers.
+        The lock is now created eagerly in ``__init__`` (Python 3.10+).
         """
-        if self._lock is None:
-            self._lock = asyncio.Lock()
         return self._lock
 
     # ------------------------------------------------------------------

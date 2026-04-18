@@ -53,7 +53,8 @@ class MCPGateway:
         self._pm = process_manager
         self._router = router
         self._registered_agents: set[str] = set()
-        self._reg_lock: asyncio.Lock | None = None
+        self._reg_lock = asyncio.Lock()
+        self._registered_tool_names: set[str] = set()
         self._registry = DeferredAgentRegistry(process_manager)
         self._mcp = FastMCP("agent-nexus-gateway")
         self._setup_core_tools()
@@ -67,17 +68,6 @@ class MCPGateway:
         self._mcp.tool(self._search_and_activate)
         self._mcp.tool(self._list_agents)
         self._mcp.tool(self._agent_info)
-
-    def _get_lock(self) -> asyncio.Lock:
-        """Return the registration lock, creating it lazily.
-
-        Creating ``asyncio.Lock()`` in ``__init__`` can raise
-        ``RuntimeError: no current event loop`` if the gateway is
-        instantiated outside an async context (e.g. CLI setup).
-        """
-        if self._reg_lock is None:
-            self._reg_lock = asyncio.Lock()
-        return self._reg_lock
 
     async def _search_and_activate(self, query: str) -> str:
         """Search agents by query and activate matching ones.
@@ -240,8 +230,12 @@ class MCPGateway:
 
         Creates a closure for each tool that captures the agent handle
         and delegates execution via the McpToolAdapter.
+
+        Detects tool name collisions caused by sanitization (e.g.
+        ``my-agent`` and ``my_agent`` both become ``my_agent``) and
+        disambiguates by appending a numeric suffix.
         """
-        async with self._get_lock():
+        async with self._reg_lock:
             if agent_name in self._registered_agents:
                 logger.debug("Agent '%s' tools already registered, skipping", agent_name)
                 return
@@ -253,18 +247,35 @@ class MCPGateway:
             adapters = self._registry.get_tool_adapters(agent_name)
 
             for adapter in adapters:
-                # Avoid duplicate registration
+                full_name = adapter.full_name
+                # Detect collision with an already-registered tool name
+                if full_name in self._registered_tool_names:
+                    # Append numeric suffix to disambiguate
+                    suffix = 2
+                    while f"{full_name}_{suffix}" in self._registered_tool_names:
+                        suffix += 1
+                    disambiguated = f"{full_name}_{suffix}"
+                    logger.warning(
+                        "Tool name collision: '%s' from agent '%s' "
+                        "already registered, renaming to '%s'",
+                        full_name,
+                        agent_name,
+                        disambiguated,
+                    )
+                    adapter.full_name = disambiguated
+                    full_name = disambiguated
+
                 try:
-                    # Capture adapter in closure scope
                     self._mcp.tool(self._make_tool_func(adapter))
+                    self._registered_tool_names.add(full_name)
                     logger.debug(
-                        "Registered gateway tool: %s", adapter.full_name
+                        "Registered gateway tool: %s", full_name
                     )
                 except Exception as exc:
                     # FastMCP may raise if tool name already registered
                     logger.warning(
                         "Tool '%s' already registered or error: %s",
-                        adapter.full_name,
+                        full_name,
                         exc,
                     )
 

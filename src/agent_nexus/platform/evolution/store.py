@@ -223,7 +223,12 @@ class EvolutionStore:
         """Load a single skill record by ID."""
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT * FROM skill_records WHERE id = ?", (skill_id,)
+                "SELECT id, name, version, lineage_origin, lineage_generation, "
+                "lineage_content_diff, lineage_content_snapshot, directory, "
+                "is_active, total_selections, total_applied, total_completions, "
+                "total_fallbacks, created_at, updated_at "
+                "FROM skill_records WHERE id = ?",
+                (skill_id,),
             ).fetchone()
             if row is None:
                 return None
@@ -233,14 +238,24 @@ class EvolutionStore:
         """Load all active skill records."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM skill_records WHERE is_active = 1"
+                "SELECT id, name, version, lineage_origin, lineage_generation, "
+                "lineage_content_diff, lineage_content_snapshot, directory, "
+                "is_active, total_selections, total_applied, total_completions, "
+                "total_fallbacks, created_at, updated_at "
+                "FROM skill_records WHERE is_active = 1"
             ).fetchall()
             return [self._row_to_record(conn, r) for r in rows]
 
     def get_all_skills(self) -> list[SkillRecord]:
         """Load all skill records (including inactive)."""
         with self._conn() as conn:
-            rows = conn.execute("SELECT * FROM skill_records").fetchall()
+            rows = conn.execute(
+                "SELECT id, name, version, lineage_origin, lineage_generation, "
+                "lineage_content_diff, lineage_content_snapshot, directory, "
+                "is_active, total_selections, total_applied, total_completions, "
+                "total_fallbacks, created_at, updated_at "
+                "FROM skill_records"
+            ).fetchall()
             return [self._row_to_record(conn, r) for r in rows]
 
     def deactivate_skill(self, skill_id: str) -> bool:
@@ -257,7 +272,11 @@ class EvolutionStore:
         """Load all versions of a named skill, sorted by generation."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM skill_records WHERE name = ? "
+                "SELECT id, name, version, lineage_origin, lineage_generation, "
+                "lineage_content_diff, lineage_content_snapshot, directory, "
+                "is_active, total_selections, total_applied, total_completions, "
+                "total_fallbacks, created_at, updated_at "
+                "FROM skill_records WHERE name = ? "
                 "ORDER BY lineage_generation ASC",
                 (name,),
             ).fetchall()
@@ -280,6 +299,14 @@ class EvolutionStore:
 
         Called within the same transaction as judgment insert.
         """
+        # Validate counter invariants: each flag requires its prerequisite
+        if fell_back and not applied:
+            raise ValueError("fell_back requires applied=True")
+        if applied and not selected:
+            raise ValueError("applied requires selected=True")
+        if completed and not applied:
+            raise ValueError("completed requires applied=True")
+
         sets: list[str] = []
         params: list[str] = []
         if selected:
@@ -354,6 +381,9 @@ class EvolutionStore:
             )
 
             for j in judgments or []:
+                sid = j.get("skill_id")
+                if not sid:
+                    continue
                 j_id = str(uuid.uuid4())
                 conn.execute(
                     """
@@ -365,7 +395,7 @@ class EvolutionStore:
                     (
                         j_id,
                         analysis_id,
-                        j["skill_id"],
+                        sid,
                         int(j.get("selected", False)),
                         int(j.get("applied", False)),
                         int(j.get("completed", False)),
@@ -392,7 +422,7 @@ class EvolutionStore:
                 if sets:
                     sets.append("updated_at = ?")
                     params.append(_now_iso())
-                    params.append(j["skill_id"])
+                    params.append(sid)
                     conn.execute(
                         f"UPDATE skill_records SET {', '.join(sets)} WHERE id = ?",
                         tuple(params),
@@ -406,7 +436,9 @@ class EvolutionStore:
         """Load all analyses for a given task."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM execution_analyses WHERE task_id = ?",
+                "SELECT id, task_id, agent_name, analysis, "
+                "evolution_suggestions, created_at "
+                "FROM execution_analyses WHERE task_id = ?",
                 (task_id,),
             ).fetchall()
             return [self._row_to_analysis_dict(conn, r) for r in rows]
@@ -417,8 +449,9 @@ class EvolutionStore:
         """Load recent judgments for a skill."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM skill_judgments WHERE skill_id = ? "
-                "ORDER BY rowid DESC LIMIT ?",
+                "SELECT id, analysis_id, skill_id, selected, applied, "
+                "completed, fell_back FROM skill_judgments "
+                "WHERE skill_id = ? ORDER BY rowid DESC LIMIT ?",
                 (skill_id, limit),
             ).fetchall()
             return [
@@ -475,7 +508,9 @@ class EvolutionStore:
         """Load recent budget log entries for an agent."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM context_budget_log WHERE agent_name = ? "
+                "SELECT id, agent_name, event_type, tokens_before, "
+                "tokens_after, details, created_at "
+                "FROM context_budget_log WHERE agent_name = ? "
                 "ORDER BY created_at DESC LIMIT ?",
                 (agent_name, limit),
             ).fetchall()
@@ -525,7 +560,7 @@ class EvolutionStore:
             )
             conn.execute(
                 """
-                INSERT OR IGNORE INTO skill_records (
+                INSERT INTO skill_records (
                     id, name, version,
                     lineage_origin, lineage_generation,
                     lineage_content_diff, lineage_content_snapshot,
@@ -588,7 +623,12 @@ class EvolutionStore:
                             continue
                         visited.add(pid)
                         row = conn.execute(
-                            "SELECT * FROM skill_records WHERE id = ?",
+                            "SELECT id, name, version, lineage_origin, "
+                            "lineage_generation, lineage_content_diff, "
+                            "lineage_content_snapshot, directory, is_active, "
+                            "total_selections, total_applied, total_completions, "
+                            "total_fallbacks, created_at, updated_at "
+                            "FROM skill_records WHERE id = ?",
                             (pid,),
                         ).fetchone()
                         if row:
@@ -702,7 +742,10 @@ class EvolutionStore:
         """Load an agent record by ID."""
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT * FROM agent_records WHERE agent_id = ?",
+                "SELECT agent_id, name, type, skill_ids, orchestration_toml, "
+                "effective_rate, avg_steps, avg_duration_ms, is_active, "
+                "created_at, updated_at "
+                "FROM agent_records WHERE agent_id = ?",
                 (agent_id,),
             ).fetchone()
             if row is None:
@@ -725,7 +768,10 @@ class EvolutionStore:
         """Load all active agent records."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM agent_records WHERE is_active = 1"
+                "SELECT agent_id, name, type, skill_ids, orchestration_toml, "
+                "effective_rate, avg_steps, avg_duration_ms, is_active, "
+                "created_at, updated_at "
+                "FROM agent_records WHERE is_active = 1"
             ).fetchall()
             return [
                 {

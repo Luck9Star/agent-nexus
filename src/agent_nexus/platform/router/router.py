@@ -17,6 +17,7 @@ Reference: docs/06-mcp-communication.md Section 8.4
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -60,6 +61,7 @@ class PlatformRouter:
         self._composite_defs: dict[str, OrchestrationDefinition] = (
             composite_definitions or {}
         )
+        self._route_locks: dict[str, asyncio.Lock] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -225,45 +227,68 @@ class PlatformRouter:
                 "error": f"Agent '{atomic_name}' process is not alive",
             }
 
-        # Send chat message via IPC
-        try:
-            await handle.ipc.send_chat(message, conversation_id=conversation_id)
-        except Exception as exc:
-            return {
-                "output": "",
-                "success": False,
-                "error": f"IPC send error: {exc}",
-            }
+        # Serialize send+receive per agent to prevent concurrent IPC
+        # calls from interleaving responses on the same handle.
+        if atomic_name not in self._route_locks:
+            self._route_locks[atomic_name] = asyncio.Lock()
+        async with self._route_locks[atomic_name]:
+            # Send chat message via IPC
+            try:
+                await handle.ipc.send_chat(
+                    message, conversation_id=conversation_id
+                )
+            except Exception as exc:
+                return {
+                    "output": "",
+                    "success": False,
+                    "error": f"IPC send error: {exc}",
+                }
 
-        # Wait for final result (progress messages are silently consumed)
-        try:
-            response = await handle.ipc.receive_until_result(timeout=300.0)
-        except Exception as exc:
-            return {
-                "output": "",
-                "success": False,
-                "error": f"IPC error: {exc}",
-            }
+            # Wait for final result (progress messages are silently consumed)
+            try:
+                response = await handle.ipc.receive_until_result(timeout=300.0)
+            except Exception as exc:
+                return {
+                    "output": "",
+                    "success": False,
+                    "error": f"IPC error: {exc}",
+                }
 
-        # Parse response
-        if response.type == AgentToPlatformType.ERROR:
-            return {
-                "output": "",
-                "success": False,
-                "error": response.error or "Agent returned an error",
-            }
+            # Parse response
+            if response.type == AgentToPlatformType.ERROR:
+                return {
+                    "output": "",
+                    "success": False,
+                    "error": response.error or "Agent returned an error",
+                }
 
-        return {
-            "output": response.content or "",
-            "success": response.status == "completed",
-        }
+            return {
+                "output": response.content or "",
+                "success": response.status == "completed",
+            }
 
     async def get_tools(self) -> list[dict]:
-        """Get aggregated tool schemas from all running agents.
+        """Get aggregated tool schemas from the gateway registry.
 
-        Queries each alive agent via IPC to request its tool schemas.
-        Returns a flat list of tool definitions.
+        Delegates to the DeferredAgentRegistry (the canonical tool source)
+        rather than independently querying agents via IPC.  This avoids
+        returning raw tool names that don't match the sanitized
+        ``mcp__server__tool`` format used by the gateway.
+
+        Falls back to querying running agents via IPC only when no
+        registry is available (backward-compatibility).
+
+        Returns:
+            Flat list of tool definition dicts with sanitized names.
         """
+        # Use the registry as the canonical source when available.
+        # The router does not own a registry directly; it accesses it
+        # through the gateway if one has been configured.
+        registry = getattr(self, "_registry", None)
+        if registry is not None:
+            return registry.get_tools_for_llm()
+
+        # Fallback: query running agents directly via IPC (legacy path)
         tools: list[dict] = []
         seen_names: set[str] = set()
         for name in self._pm.list_running():
