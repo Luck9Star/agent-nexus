@@ -14,6 +14,7 @@ Reference: docs/06-mcp-communication.md Section 8.2, 8.8
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -284,7 +285,7 @@ class MCPGateway:
         Desktop, VS Code MCP extension).
         """
         logger.info("Starting MCP Gateway in stdio mode")
-        self._mcp.run(transport="stdio")
+        await asyncio.to_thread(self._mcp.run, transport="stdio")
 
     async def run_sse(
         self,
@@ -300,7 +301,7 @@ class MCPGateway:
             port: Bind port.
         """
         logger.info("Starting MCP Gateway in SSE mode on %s:%d", host, port)
-        self._mcp.run(transport="sse", host=host, port=port)
+        await asyncio.to_thread(self._mcp.run, transport="sse", host=host, port=port)
 
     async def stop(self) -> None:
         """Stop all agents and shut down the gateway.

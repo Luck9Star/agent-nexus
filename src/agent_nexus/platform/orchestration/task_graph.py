@@ -84,18 +84,27 @@ class TaskGraph:
             conn.executescript(_SCHEMA_SQL)
 
     @contextmanager
-    def _conn(self) -> Generator[sqlite3.Connection, None, None]:
+    def _conn(
+        self, immediate: bool = False,
+    ) -> Generator[sqlite3.Connection, None, None]:
         """Context manager for DB connections.
 
         Uses check_same_thread=False for async compatibility.
         Connection is NOT shared -- create per-operation.
+
+        Args:
+            immediate: If True, use BEGIN IMMEDIATE for write serialization.
+                Prevents TOCTOU races in read-then-write mutation methods.
         """
         conn = sqlite3.connect(
             str(self._db_path),
             check_same_thread=False,
         )
-        conn.execute("PRAGMA foreign_keys=ON")
         try:
+            if immediate:
+                conn.execute("BEGIN IMMEDIATE")
+            else:
+                conn.execute("PRAGMA foreign_keys=ON")
             yield conn
             conn.commit()
         except Exception:
@@ -118,7 +127,7 @@ class TaskGraph:
 
         Raises ValueError on validation failure.
         """
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             # 1. Check duplicate
             row = conn.execute(
                 "SELECT id FROM tasks WHERE id = ?", (task.id,)
@@ -180,7 +189,7 @@ class TaskGraph:
 
         Raises ValueError if preconditions not met.
         """
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             task = self._get_task_conn(conn, task_id)
             if task is None:
                 raise ValueError(f"Task '{task_id}' not found")
@@ -211,7 +220,7 @@ class TaskGraph:
         Only allowed from 'in_progress' state.
         Raises ValueError if not in_progress.
         """
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             task = self._get_task_conn(conn, task_id)
             if task is None:
                 raise ValueError(f"Task '{task_id}' not found")
@@ -234,7 +243,7 @@ class TaskGraph:
 
         Only allowed from 'in_progress' state.
         """
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             task = self._get_task_conn(conn, task_id)
             if task is None:
                 raise ValueError(f"Task '{task_id}' not found")

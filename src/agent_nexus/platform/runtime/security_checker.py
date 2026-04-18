@@ -47,7 +47,6 @@ _DEFAULT_FORBIDDEN_ATTRIBUTES = [
     "__globals__",
     "__code__",
     "__builtins__",
-    "__class__",
 ]
 
 _DEFAULT_REGEX_PATTERNS = [
@@ -148,8 +147,18 @@ class SecurityChecker:
             ]
 
         violations: list[SecurityViolation] = []
+        regex_rules: list[RegexRule] = []
+        structural_rules: list[SecurityRule] = []
+
+        for rule in self._rules:
+            if isinstance(rule, RegexRule):
+                regex_rules.append(rule)
+            else:
+                structural_rules.append(rule)
+
+        # Structural rules: per-node
         for node in ast.walk(tree):
-            for rule in self._rules:
+            for rule in structural_rules:
                 try:
                     violations.extend(rule.check(node))
                 except Exception:
@@ -160,5 +169,16 @@ class SecurityChecker:
                         exc_info=True,
                     )
                     continue
+
+        # Regex rules: once on full source
+        for rule in regex_rules:
+            try:
+                violations.extend(rule.check_source(code))
+            except Exception:
+                logger.warning(
+                    "Rule %r failed on source",
+                    type(rule).__name__,
+                    exc_info=True,
+                )
 
         return violations

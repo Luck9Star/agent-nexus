@@ -864,8 +864,12 @@ class EvolutionStore:
         snapshot: dict[str, str] = {}
         if lineage_content_snapshot:
             try:
-                snapshot = json.loads(lineage_content_snapshot)
-            except json.JSONDecodeError:
+                loaded = json.loads(lineage_content_snapshot)
+                if isinstance(loaded, dict):
+                    # Validate all values are strings (Pydantic requirement)
+                    if all(isinstance(v, str) for v in loaded.values()):
+                        snapshot = loaded
+            except (json.JSONDecodeError, TypeError, ValueError):
                 pass
 
         lineage = SkillLineage(
