@@ -101,10 +101,9 @@ class TaskGraph:
             check_same_thread=False,
         )
         try:
+            conn.execute("PRAGMA foreign_keys=ON")
             if immediate:
                 conn.execute("BEGIN IMMEDIATE")
-            else:
-                conn.execute("PRAGMA foreign_keys=ON")
             yield conn
             conn.commit()
         except Exception:

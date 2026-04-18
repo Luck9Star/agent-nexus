@@ -183,22 +183,10 @@ class EvolutionStore:
                     lineage_content_snapshot = excluded.lineage_content_snapshot,
                     directory = excluded.directory,
                     is_active = excluded.is_active,
-                    total_selections = CASE
-                        WHEN excluded.total_selections > 0 THEN excluded.total_selections
-                        ELSE total_selections
-                    END,
-                    total_applied = CASE
-                        WHEN excluded.total_applied > 0 THEN excluded.total_applied
-                        ELSE total_applied
-                    END,
-                    total_completions = CASE
-                        WHEN excluded.total_completions > 0 THEN excluded.total_completions
-                        ELSE total_completions
-                    END,
-                    total_fallbacks = CASE
-                        WHEN excluded.total_fallbacks > 0 THEN excluded.total_fallbacks
-                        ELSE total_fallbacks
-                    END,
+                    total_selections = total_selections,
+                    total_applied = total_applied,
+                    total_completions = total_completions,
+                    total_fallbacks = total_fallbacks,
                     updated_at = excluded.updated_at
                 """,
                 (

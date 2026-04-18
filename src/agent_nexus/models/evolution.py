@@ -73,10 +73,10 @@ class SkillRecord(BaseModel):
     lineage: SkillLineage = Field(default_factory=SkillLineage)
     directory: str = ""
     is_active: bool = True
-    total_selections: int = 0
-    total_applied: int = 0
-    total_completions: int = 0
-    total_fallbacks: int = 0
+    total_selections: int = Field(default=0, ge=0)
+    total_applied: int = Field(default=0, ge=0)
+    total_completions: int = Field(default=0, ge=0)
+    total_fallbacks: int = Field(default=0, ge=0)
     first_seen: datetime = Field(default_factory=_utc_now)
     last_updated: datetime = Field(default_factory=_utc_now)
 
@@ -89,10 +89,10 @@ class EvolutionMetrics(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    total_selections: int = 0
-    total_applied: int = 0
-    total_completions: int = 0
-    total_fallbacks: int = 0
+    total_selections: int = Field(default=0, ge=0)
+    total_applied: int = Field(default=0, ge=0)
+    total_completions: int = Field(default=0, ge=0)
+    total_fallbacks: int = Field(default=0, ge=0)
 
 
 class EvolutionContext(BaseModel):

@@ -286,8 +286,8 @@ class TestEvolutionStoreCounterPreservation:
         assert loaded.total_completions == 7
         assert loaded.total_fallbacks == 1
 
-    def test_save_updates_counters_when_nonzero(self, tmp_path: Path) -> None:
-        """Saving a record with nonzero counters updates the counters."""
+    def test_save_preserves_counters_on_conflict(self, tmp_path: Path) -> None:
+        """Saving a record on conflict preserves DB counters (increment_counters is sole authority)."""
         db_path = tmp_path / "test.db"
         store = EvolutionStore(db_path)
 
@@ -298,6 +298,13 @@ class TestEvolutionStoreCounterPreservation:
         )
         store.save_skill_record(record_v1)
 
+        # Bump counters via increment_counters (the authoritative path)
+        for _ in range(5):
+            store.increment_counters("s1", selected=True, applied=True)
+        for _ in range(3):
+            store.increment_counters("s1", selected=True)
+
+        # Re-save with stale counters — must NOT overwrite the incremented values
         record_v2 = self._make_record(
             skill_id="s1",
             total_selections=20,
@@ -307,8 +314,8 @@ class TestEvolutionStoreCounterPreservation:
 
         loaded = store.get_skill_record("s1")
         assert loaded is not None
-        assert loaded.total_selections == 20
-        assert loaded.total_applied == 15
+        assert loaded.total_selections == 18  # 10 + 5 (sel+appl) + 3 (sel only)
+        assert loaded.total_applied == 13    # 8 + 5
 
     def test_save_new_record_inserts_normally(self, tmp_path: Path) -> None:
         """New records insert without any counter issues."""
@@ -362,7 +369,7 @@ class TestEvolutionStoreCounterPreservation:
         assert loaded_evolved.is_active is True
 
     def test_partial_counter_update(self, tmp_path: Path) -> None:
-        """Only nonzero counters are updated; zero counters keep existing values."""
+        """save_skill_record preserves ALL counters on conflict; increment_counters is sole authority."""
         db_path = tmp_path / "test.db"
         store = EvolutionStore(db_path)
 
@@ -386,10 +393,11 @@ class TestEvolutionStoreCounterPreservation:
 
         loaded = store.get_skill_record("s1")
         assert loaded is not None
-        assert loaded.total_selections == 20  # updated
-        assert loaded.total_applied == 8  # preserved
-        assert loaded.total_completions == 5  # preserved
-        assert loaded.total_fallbacks == 3  # preserved
+        # All counters preserved from DB, not overwritten by record_v2
+        assert loaded.total_selections == 10
+        assert loaded.total_applied == 8
+        assert loaded.total_completions == 5
+        assert loaded.total_fallbacks == 3
 
 
 # ============================================================================
