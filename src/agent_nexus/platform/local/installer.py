@@ -238,7 +238,7 @@ class GitInstaller:
         if existing.venv_path:
             venv_path = Path(existing.venv_path).resolve()
             allowed_prefix = self._venvs_dir.resolve()
-            if not str(venv_path).startswith(str(allowed_prefix)):
+            if not venv_path.is_relative_to(allowed_prefix):
                 logger.error(
                     "Refusing to remove venv_path outside allowed directory: %s",
                     venv_path,

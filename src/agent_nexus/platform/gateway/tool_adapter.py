@@ -12,6 +12,7 @@ Reference: docs/06-mcp-communication.md Section 8.1.1
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -47,6 +48,8 @@ class McpToolAdapter:
     The adapter stores the JSON-schema input definition and delegates
     execution to the agent subprocess via IPC.
     """
+
+    _ipc_locks: dict[str, asyncio.Lock] = {}
 
     def __init__(self, server_name: str, tool_schema: dict) -> None:
         self.agent_name = server_name  # original unsanitized name for lookups
@@ -91,8 +94,10 @@ class McpToolAdapter:
         )
 
         try:
-            await handle.ipc.send_chat(payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__")
-            response = await handle.ipc.receive_until_result(timeout=300.0)
+            lock = self._ipc_locks.setdefault(self.server_name, asyncio.Lock())
+            async with lock:
+                await handle.ipc.send_chat(payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__")
+                response = await handle.ipc.receive_until_result(timeout=300.0)
         except Exception as exc:
             logger.error(
                 "IPC error executing tool '%s': %s", self.full_name, exc
@@ -112,7 +117,7 @@ class McpToolAdapter:
 
         return {
             "output": response.content or "",
-            "success": response.status == "completed",
+            "success": response.status in (None, "completed"),
         }
 
     # -- Schema helpers ----------------------------------------------------

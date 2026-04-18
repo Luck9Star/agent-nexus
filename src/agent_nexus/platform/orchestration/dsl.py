@@ -417,7 +417,7 @@ class OrchestrationDSL:
             if node in visiting:
                 # Found a cycle -- extract it from path
                 cycle_start = path.index(node)
-                cycles.append(path[cycle_start:] + [node])
+                cycles.append(path[cycle_start:])
                 return
             if node in visited:
                 return
