@@ -1364,6 +1364,48 @@ class TestMcpToolAdapterExecuteStatusCompleted:
         assert result["success"] is True
 
 
+class TestMcpToolAdapterAffirmativeStatus:
+    """execute uses affirmative status check — only 'completed' is success.
+
+    Ambiguous statuses like 'running', 'pending', 'timeout' must NOT be
+    treated as success (was a defect: old code used
+    `status not in (None, 'failed')`).
+    """
+
+    @pytest.mark.asyncio
+    async def test_status_running_not_success(self) -> None:
+        adapter = _make_bare_adapter()
+        handle = _make_mock_handle_for_status()
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT, status="running", content="..."
+        )
+        handle.ipc.receive_until_result = AsyncMock(return_value=response)
+        result = await adapter.execute(handle, {})
+        assert result["success"] is False
+
+    @pytest.mark.asyncio
+    async def test_status_pending_not_success(self) -> None:
+        adapter = _make_bare_adapter()
+        handle = _make_mock_handle_for_status()
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT, status="pending", content="..."
+        )
+        handle.ipc.receive_until_result = AsyncMock(return_value=response)
+        result = await adapter.execute(handle, {})
+        assert result["success"] is False
+
+    @pytest.mark.asyncio
+    async def test_status_timeout_not_success(self) -> None:
+        adapter = _make_bare_adapter()
+        handle = _make_mock_handle_for_status()
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT, status="timeout", content=""
+        )
+        handle.ipc.receive_until_result = AsyncMock(return_value=response)
+        result = await adapter.execute(handle, {})
+        assert result["success"] is False
+
+
 # ---------------------------------------------------------------------------
 # Iteration 24 fixes: gateway activation message, registry priority
 # ---------------------------------------------------------------------------
