@@ -217,17 +217,18 @@ class ProcessManager:
         Raises:
             KeyError: Agent *name* not found.
         """
-        handle = self._agents.get(name)
-        if handle is None:
-            raise KeyError(f"Agent '{name}' not found")
-
-        process = handle.process
+        async with self._lock:
+            handle = self._agents.get(name)
+            if handle is None:
+                raise KeyError(f"Agent '{name}' not found")
+            process = handle.process
+            drain_task = handle.drain_task
 
         # Cancel the stderr drain task to prevent it from reading a closed pipe.
-        if handle.drain_task is not None and not handle.drain_task.done():
-            handle.drain_task.cancel()
+        if drain_task is not None and not drain_task.done():
+            drain_task.cancel()
             try:
-                await handle.drain_task
+                await drain_task
             except (asyncio.CancelledError, Exception):
                 pass
 
@@ -302,14 +303,13 @@ class ProcessManager:
         passed to :meth:`start_agent`.  Any keyword arguments override
         those stored values.
         """
-        handle = self._agents.get(name)
-        if handle is None:
-            raise KeyError(f"Agent '{name}' not found")
-
-        # Merge stored params with overrides.
-        command = kwargs.get("command", handle.start_command)
-        cwd = kwargs.get("cwd", handle.start_cwd)
-        env = kwargs.get("env", handle.start_env)
+        async with self._lock:
+            handle = self._agents.get(name)
+            if handle is None:
+                raise KeyError(f"Agent '{name}' not found")
+            command = kwargs.get("command", handle.start_command)
+            cwd = kwargs.get("cwd", handle.start_cwd)
+            env = kwargs.get("env", handle.start_env)
 
         await self.stop_agent(name)
         return await self.start_agent(name, command=command, cwd=cwd, env=env)
@@ -330,9 +330,10 @@ class ProcessManager:
         Raises:
             KeyError: Agent *name* not found.
         """
-        handle = self._agents.get(name)
-        if handle is None:
-            raise KeyError(f"Agent '{name}' not found")
+        async with self._lock:
+            handle = self._agents.get(name)
+            if handle is None:
+                raise KeyError(f"Agent '{name}' not found")
 
         if not handle.is_alive:
             return False
