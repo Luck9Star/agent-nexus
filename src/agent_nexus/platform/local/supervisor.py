@@ -352,7 +352,7 @@ class AgentSupervisor:
             venv_python = Path(entry.venv_path).resolve() / "bin" / "python"
             if venv_python.exists():
                 allowed = self._config_dir.resolve()
-                if not str(venv_python).startswith(str(allowed)):
+                if not venv_python.is_relative_to(allowed):
                     logger.warning(
                         "venv_path outside config_dir, skipping: %s",
                         venv_python,
@@ -374,7 +374,15 @@ class AgentSupervisor:
         return ["uvx", agent_name]
 
     def _resolve_agent_dir(self, agent_name: str) -> Path:
-        """Resolve the installed agent directory."""
+        """Resolve the installed agent directory.
+
+        Raises:
+            ValueError: If agent_name contains unsafe characters.
+        """
+        if not _SAFE_NAME_RE.match(agent_name):
+            raise ValueError(
+                f"Agent name '{agent_name}' contains unsafe characters"
+            )
         return self._config_dir / "agents" / agent_name
 
     def _build_env(
