@@ -126,13 +126,14 @@ def _fnmatch_recursive(value: str, pattern: str) -> bool:
 
     for pos in positions:
         suffix = tail[pos:]  # e.g. "c.txt", "b/c.txt"
-        if fnmatch.fnmatch(suffix, remainder.lstrip("/")):
+        if _fnmatch_recursive(suffix, remainder.lstrip("/")):
             return True
 
     # Also try matching the entire tail (including leading "/")
     # for patterns like "/*.txt" where fnmatch may handle the "/".
-    if fnmatch.fnmatch(tail, remainder):
-        return True
+    # Use recursive call so patterns with additional /** segments
+    # (e.g. /tmp/**/bar/**) are handled correctly.
+    return _fnmatch_recursive(tail, remainder)
 
     return False
 
@@ -262,6 +263,13 @@ class PermissionChecker:
 
         Checks ``denied_commands`` first, then applies mode-based rules.
         """
+        # 0. Reject empty commands
+        if not command or not command.strip():
+            return PermissionDecision(
+                allowed=False,
+                reason="Empty command is not permitted",
+            )
+
         # 1. denied_commands — substring match
         for denied in self._config.denied_commands:
             if denied in command:

@@ -100,7 +100,7 @@ def _correct_skill_ids(
 
         # Scale max_dist with suffix length to avoid loose matches on short IDs
         # e.g. "x__ab" matching "x__wxyz" at distance 4 is clearly wrong.
-        _suffix = raw_id.split("__", 1)[1] if "__" in raw_id else raw_id
+        _suffix = raw_id.split("__", 1)[1]
         _suffix_len = len(_suffix)
         if len(candidates) > 20:
             max_dist = 2
@@ -247,9 +247,11 @@ class ExecutionAnalyzer:
             )
             effective_rate = skill.total_completions / sel
 
-            # Threshold checks from docs/04
+            # Threshold checks from docs/04 — keep only the best FIX per skill
+            best_fix: EvolutionSuggestion | None = None
+
             if fallback_rate > _FALLBACK_THRESHOLD:
-                suggestions.append(EvolutionSuggestion(
+                fix1 = EvolutionSuggestion(
                     evolution_type=EvolutionType.FIX,
                     target_skill_ids=[skill_id],
                     direction=(
@@ -257,11 +259,11 @@ class ExecutionAnalyzer:
                         f"skill is frequently selected but not applied"
                     ),
                     confidence=min(fallback_rate, 1.0),
-                ))
-                fix_skills.add(skill_id)
+                )
+                best_fix = fix1
 
             if applied_rate > _HIGH_APPLIED_FOR_FIX and completion_rate < _LOW_COMPLETION_THRESHOLD:
-                suggestions.append(EvolutionSuggestion(
+                fix2 = EvolutionSuggestion(
                     evolution_type=EvolutionType.FIX,
                     target_skill_ids=[skill_id],
                     direction=(
@@ -269,7 +271,12 @@ class ExecutionAnalyzer:
                         f"despite high applied rate ({applied_rate:.0%})"
                     ),
                     confidence=min(applied_rate * (1 - completion_rate), 1.0),
-                ))
+                )
+                if best_fix is None or fix2.confidence > best_fix.confidence:
+                    best_fix = fix2
+
+            if best_fix is not None:
+                suggestions.append(best_fix)
                 fix_skills.add(skill_id)
 
             # DERIVED is lower priority than FIX: skip if already flagged.

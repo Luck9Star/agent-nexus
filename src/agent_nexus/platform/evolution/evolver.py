@@ -382,7 +382,7 @@ class SkillEvolver:
                 generation=0,
                 parent_skill_ids=[],
                 content_diff=None,
-                content_snapshot=None,
+                content_snapshot={"source_task_id": task_id or "unknown"},
             ),
             directory=directory,
             is_active=True,
