@@ -81,12 +81,14 @@ class SubtaskController:
             The last exception if all attempts fail.
         """
         attempts = max_retries if max_retries is not None else self._config.max_retries
-        last_exc: Exception = RuntimeError("no attempts made")
+        last_exc: BaseException = RuntimeError("no attempts made")
 
         for attempt in range(attempts + 1):
             try:
                 return await self.run_with_timeout(coro_factory(), timeout=timeout)
-            except Exception as exc:
+            except BaseException as exc:
+                if isinstance(exc, KeyboardInterrupt):
+                    raise
                 last_exc = exc
                 logger.warning(
                     "Subtask attempt %d/%d failed: %s",
@@ -125,7 +127,9 @@ class SubtaskController:
             async with semaphore:
                 try:
                     results[index] = await coro
-                except Exception as exc:
+                except BaseException as exc:
+                    if isinstance(exc, KeyboardInterrupt):
+                        raise
                     results[index] = exc
 
         await asyncio.gather(

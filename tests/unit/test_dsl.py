@@ -217,13 +217,11 @@ class TestOrchestrationDefinition:
             tasks=tasks,
             tool_loading=DSLToolLoading(),
         )
-        # Should NOT raise RecursionError; returns a finite integer
+        # Should NOT raise RecursionError; returns -1 for cycle
         d1 = defn.get_task_depth("T1")
         d2 = defn.get_task_depth("T2")
-        assert isinstance(d1, int)
-        assert isinstance(d2, int)
-        assert d1 >= 0
-        assert d2 >= 0
+        assert d1 == -1
+        assert d2 == -1
 
     def test_get_task_depth_self_loop_no_crash(self) -> None:
         """Self-referencing task (T1 blocked_by T1) does not crash."""
@@ -240,10 +238,9 @@ class TestOrchestrationDefinition:
             tasks=tasks,
             tool_loading=DSLToolLoading(),
         )
-        # The visiting set returns 0 for the self-reference,
-        # so depth = 1 + max(0) = 1
+        # Self-loop detected as cycle — returns -1
         d = defn.get_task_depth("T1")
-        assert isinstance(d, int) and d >= 0
+        assert d == -1
 
 
 # ============================================================================

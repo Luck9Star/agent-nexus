@@ -49,6 +49,16 @@ class WorkflowContext:
     task_graph: TaskGraph | None = None
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
+    def close(self) -> None:
+        """Release the TaskGraph reference for GC.
+
+        TaskGraph uses ephemeral SQLite connections (per-operation), so
+        there is no persistent connection to close.  Setting to ``None``
+        drops the reference so the object (and its db_path) can be
+        collected.
+        """
+        self.task_graph = None
+
 
 @dataclass
 class WorkflowResult:

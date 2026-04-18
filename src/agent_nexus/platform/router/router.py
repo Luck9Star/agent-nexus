@@ -141,25 +141,28 @@ class PlatformRouter:
             ctx.task_graph.add_task(dsl_task.to_task_item())
 
         # 3. Execute phases
-        phase_results: dict[WorkflowPhase, str] = {}
-        completed = 0
-        total = len(_PHASE_ORDER)
-        last_error: str | None = None
+        try:
+            phase_results: dict[WorkflowPhase, str] = {}
+            completed = 0
+            total = len(_PHASE_ORDER)
+            last_error: str | None = None
 
-        for phase in _PHASE_ORDER:
-            ctx.current_phase = phase
-            try:
-                result = await self._execute_phase(ctx, phase, definition, message)
-                phase_results[phase] = result
-                completed += 1
+            for phase in _PHASE_ORDER:
+                ctx.current_phase = phase
+                try:
+                    result = await self._execute_phase(ctx, phase, definition, message)
+                    phase_results[phase] = result
+                    completed += 1
 
-                # Feed previous phase output into next phase's message
-                message = self._build_phase_message(phase, result)
+                    # Feed previous phase output into next phase's message
+                    message = self._build_phase_message(phase, result)
 
-            except Exception as exc:
-                last_error = f"Phase {phase.value} failed: {exc}"
-                logger.error(last_error, exc_info=exc)
-                break
+                except Exception as exc:
+                    last_error = f"Phase {phase.value} failed: {exc}"
+                    logger.error(last_error, exc_info=exc)
+                    break
+        finally:
+            ctx.close()
 
         # 4. Build final result
         success = completed == total

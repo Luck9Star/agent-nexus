@@ -513,7 +513,7 @@ class TestIPCSendDrainTimeout:
 
     @pytest.mark.asyncio
     async def test_send_drain_timeout_raises(self) -> None:
-        """If drain() blocks beyond 5s, send() raises TimeoutError."""
+        """If drain() blocks beyond 5s, send() raises IPCTimeoutError."""
         mock_stdin = MagicMock()
         mock_stdin.write = MagicMock()
         mock_stdin.drain = AsyncMock(side_effect=asyncio.TimeoutError)
@@ -524,7 +524,7 @@ class TestIPCSendDrainTimeout:
         stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
         msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
 
-        with pytest.raises(asyncio.TimeoutError):
+        with pytest.raises(IPCTimeoutError):
             await stream.send(msg)
 
     @pytest.mark.asyncio

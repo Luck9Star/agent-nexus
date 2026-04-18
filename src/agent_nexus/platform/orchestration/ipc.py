@@ -75,8 +75,16 @@ class IPCStream:
         """
         payload = message.model_dump_json(exclude_none=True)
         line = payload + "\n"
-        self._stdin.write(line.encode("utf-8"))
-        await asyncio.wait_for(self._stdin.drain(), timeout=5.0)
+        try:
+            self._stdin.write(line.encode("utf-8"))
+        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+            raise IPCConnectionError(f"Agent stdin closed: {exc}") from exc
+        try:
+            await asyncio.wait_for(self._stdin.drain(), timeout=5.0)
+        except asyncio.TimeoutError as exc:
+            raise IPCTimeoutError("Timed out draining stdin to agent") from exc
+        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+            raise IPCConnectionError(f"Agent stdin closed during drain: {exc}") from exc
         logger.debug("IPC send: %s", payload)
 
     # -- receive ------------------------------------------------------------
@@ -127,9 +135,11 @@ class IPCStream:
             except (asyncio.TimeoutError, Exception):
                 pass
         # Drain any remaining stdout to avoid BrokenPipeError on the
-        # agent side.
+        # agent side.  Upper bound prevents a misbehaving agent from
+        # delaying close() indefinitely.
+        _MAX_DRAIN_CHUNKS = 64
         try:
-            while True:
+            for _ in range(_MAX_DRAIN_CHUNKS):
                 chunk = await asyncio.wait_for(self._stdout.read(4096), timeout=1.0)
                 if not chunk:
                     break

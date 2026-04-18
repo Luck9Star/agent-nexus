@@ -126,14 +126,23 @@ class OrchestrationDefinition:
             if tid in depth_cache:
                 return depth_cache[tid]
             if tid in visiting:
-                return 0  # cycle detected, treat as root
+                # Cycle detected — return -1 to signal invalid graph.
+                # get_task_depth is a query method and should not raise.
+                depth_cache[tid] = -1
+                return -1
             visiting.add(tid)
             task = task_map.get(tid)
             if task is None or not task.blocked_by:
                 depth_cache[tid] = 0
                 visiting.discard(tid)
                 return 0
-            d = 1 + max(_depth(dep) for dep in task.blocked_by)
+            dep_depths = [_depth(dep) for dep in task.blocked_by]
+            if -1 in dep_depths:
+                # At least one dependency is cyclic — depth undefined.
+                depth_cache[tid] = -1
+                visiting.discard(tid)
+                return -1
+            d = 1 + max(dep_depths)
             depth_cache[tid] = d
             visiting.discard(tid)
             return d
