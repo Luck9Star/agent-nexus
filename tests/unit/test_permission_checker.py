@@ -456,3 +456,20 @@ class TestEdgeCases:
         checker = _checker(mode=PermissionMode.FULL_AUTO)
         d = checker.check_tool("file_write")
         assert d.allowed and not d.requires_confirmation
+
+
+# ======================================================================
+# min_length=1 validation tests (iter30)
+# ======================================================================
+
+
+class TestPathRuleMinLength:
+    """PathRule.pattern rejects empty strings."""
+
+    def test_empty_pattern_raises(self):
+        from pydantic import ValidationError
+
+        from agent_nexus.models.permission import PathRule
+
+        with pytest.raises(ValidationError):
+            PathRule(pattern="")

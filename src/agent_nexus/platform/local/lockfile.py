@@ -86,30 +86,6 @@ class LockfileManager:
         """Return the lockfile entry for *agent_name*, or ``None``."""
         return self.load().agents.get(agent_name)
 
-    def add_entry(self, entry: LockfileEntry) -> None:
-        """Add or replace a lockfile entry and save immediately."""
-        lockfile = self.load()
-        # Pydantic frozen model: rebuild dict with new entry
-        agents = dict(lockfile.agents)
-        agents[entry.source] = agents.pop(entry.source, None)  # no-op helper
-        # We key by agent name — but LockfileEntry doesn't carry the name
-        # field directly. The caller is responsible for passing the right key.
-        # Since Lockfile.agents is dict[str, LockfileEntry], we need the name.
-        # We derive it from the Lockfile structure: the key *is* the name.
-        # However, LockfileEntry doesn't include agent_name. The caller must
-        # know the name. We accept it via the *source* field convention — no,
-        # source is the repo name. We need the caller to tell us the name.
-        #
-        # Strategy: we mutate the agents dict and reconstruct. The caller
-        # should use add_entry_by_name() for clarity, but we keep this
-        # signature compatible by storing under the first key that matches
-        # or requiring explicit name.
-        #
-        # Actually, looking at the Lockfile schema: agents is dict[str, LockfileEntry]
-        # where the key IS the agent name. LockfileEntry doesn't have a name field.
-        # So add_entry needs the agent name. We'll add a separate method.
-        raise NotImplementedError("Use add_entry_by_name(agent_name, entry) instead")
-
     def add_entry_by_name(self, agent_name: str, entry: LockfileEntry) -> None:
         """Add or update a lockfile entry keyed by *agent_name* and save."""
         lockfile = self.load()

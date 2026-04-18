@@ -164,13 +164,6 @@ class TestLockfileManager:
         mgr = LockfileManager(tmp_path / "lockfile.json")
         assert mgr.get_entry("no-such-agent") is None
 
-    def test_add_entry_raises_not_implemented(self, tmp_path: Path) -> None:
-        """add_entry() raises NotImplementedError (legacy method)."""
-        mgr = LockfileManager(tmp_path / "lockfile.json")
-        entry = _make_entry()
-        with pytest.raises(NotImplementedError):
-            mgr.add_entry(entry)
-
     def test_add_entry_by_name_creates_new(self, tmp_path: Path) -> None:
         """add_entry_by_name() adds a new entry and persists it."""
         path = tmp_path / "lockfile.json"

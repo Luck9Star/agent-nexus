@@ -90,9 +90,10 @@ class TestDSLTask:
 
     def test_to_task_item_defaults(self) -> None:
         """to_task_item() with minimal fields."""
-        task = DSLTask(id="T2", description="", agent="a")
+        task = DSLTask(id="T2", description="Minimal task", agent="a")
         item = task.to_task_item()
 
+        assert item.description == "Minimal task"
         assert item.blocked_by == []
         assert item.vars == {}
         assert item.state == TaskState.PENDING

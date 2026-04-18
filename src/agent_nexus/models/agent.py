@@ -85,10 +85,10 @@ class AgentManifest(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
-    version: str
+    name: str = Field(min_length=1)
+    version: str = Field(min_length=1)
     type: AgentType
-    description: str
+    description: str = Field(min_length=1)
     model_config_field: AgentModelConfig | None = Field(default=None, alias="model_config")
     role: AgentRole | None = None
     dependencies: AgentDependencies = Field(default_factory=AgentDependencies)
@@ -120,9 +120,9 @@ class SkillDefinition(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
+    name: str = Field(min_length=1)
     agent_type: AgentType
-    description: str
+    description: str = Field(min_length=1)
     triggers: list[str] = Field(default_factory=list)
     compatible_agents: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
@@ -135,8 +135,8 @@ class CommandDef(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
-    description: str
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
     parameters: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -145,8 +145,8 @@ class AgentDefinition(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
-    description: str
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
     role: AgentRole | None = None
     model: str | None = None
     tools: list[str] = Field(default_factory=list)

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _utc_now = lambda: datetime.now(timezone.utc)
 
@@ -97,6 +97,13 @@ class HookExecution(BaseModel):
     error: str | None = None
     duration_ms: float = Field(default=0.0, ge=0)
     executed_at: datetime = Field(default_factory=_utc_now)
+
+    @model_validator(mode='after')
+    def _validate_passed_blocked(self) -> 'HookExecution':
+        """A hook that passed cannot also be blocking."""
+        if self.passed and self.blocked:
+            raise ValueError("passed and blocked cannot both be True")
+        return self
 
 
 class AggregatedHookResult(BaseModel):

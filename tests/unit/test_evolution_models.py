@@ -373,3 +373,28 @@ class TestSkillRecordCounterValidation:
             total_fallbacks=10,
         )
         assert sr.total_selections == 10
+
+
+# ---------------------------------------------------------------------------
+# min_length=1 validation tests (iter30)
+# ---------------------------------------------------------------------------
+
+
+class TestMinLengthEvolution:
+    """Required string fields in evolution models reject empty strings."""
+
+    def test_skill_record_empty_id(self):
+        with pytest.raises(ValidationError):
+            SkillRecord(id="", name="skill")
+
+    def test_skill_record_empty_name(self):
+        with pytest.raises(ValidationError):
+            SkillRecord(id="s1", name="")
+
+    def test_evolution_context_empty_agent_id(self):
+        with pytest.raises(ValidationError):
+            EvolutionContext(agent_id="", task_id="t1")
+
+    def test_evolution_context_empty_task_id(self):
+        with pytest.raises(ValidationError):
+            EvolutionContext(agent_id="a1", task_id="")

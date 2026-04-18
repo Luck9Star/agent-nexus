@@ -43,7 +43,7 @@ class PathRule(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    pattern: str
+    pattern: str = Field(min_length=1)
     access: PathAccess = PathAccess.READ
 
 

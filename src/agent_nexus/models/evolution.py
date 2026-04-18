@@ -67,8 +67,8 @@ class SkillRecord(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    id: str
-    name: str
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
     version: str = "1.0.0"
     lineage: SkillLineage = Field(default_factory=SkillLineage)
     directory: str = ""
@@ -114,8 +114,8 @@ class EvolutionContext(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    agent_id: str
-    task_id: str
+    agent_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
     task_description: str = ""
     task_completed: bool = False
     skill_ids_used: list[str] = Field(default_factory=list)

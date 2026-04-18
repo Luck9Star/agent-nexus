@@ -364,3 +364,27 @@ class TestHookExecutionValidation:
         hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
         he = HookExecution(hook=hook, passed=True, duration_ms=150.7)
         assert he.duration_ms == 150.7
+
+
+# ---------------------------------------------------------------------------
+# Semantic validation tests (iter30)
+# ---------------------------------------------------------------------------
+
+
+class TestHookExecutionSemanticValidation:
+    """HookExecution rejects contradictory passed+blocked state."""
+
+    def test_passed_and_blocked_raises(self):
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        with pytest.raises(ValidationError, match="passed and blocked cannot both be True"):
+            HookExecution(hook=hook, passed=True, blocked=True)
+
+    def test_passed_not_blocked_ok(self):
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        exe = HookExecution(hook=hook, passed=True, blocked=False)
+        assert exe.passed and not exe.blocked
+
+    def test_not_passed_blocked_ok(self):
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        exe = HookExecution(hook=hook, passed=False, blocked=True)
+        assert exe.blocked and not exe.passed

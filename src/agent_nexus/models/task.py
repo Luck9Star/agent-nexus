@@ -35,9 +35,9 @@ class TaskItem(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    id: str
-    description: str
-    agent: str
+    id: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    agent: str = Field(min_length=1)
     blocked_by: list[str] = Field(default_factory=list)
     vars: dict[str, Any] = Field(default_factory=dict)
     state: TaskState = TaskState.PENDING

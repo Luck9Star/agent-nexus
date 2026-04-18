@@ -525,3 +525,36 @@ class TestHookDefTimeoutValidation:
             timeout_seconds=5.0,
         )
         assert h.timeout_seconds == 5.0
+
+
+# ---------------------------------------------------------------------------
+# min_length=1 validation tests (iter30)
+# ---------------------------------------------------------------------------
+
+
+class TestMinLengthValidation:
+    """Required string fields reject empty strings (min_length=1)."""
+
+    def test_agent_manifest_empty_name(self):
+        with pytest.raises(ValidationError):
+            AgentManifest(name="", version="1.0", type=AgentType.ATOMIC, description="d")
+
+    def test_agent_manifest_empty_version(self):
+        with pytest.raises(ValidationError):
+            AgentManifest(name="a", version="", type=AgentType.ATOMIC, description="d")
+
+    def test_agent_manifest_empty_description(self):
+        with pytest.raises(ValidationError):
+            AgentManifest(name="a", version="1.0", type=AgentType.ATOMIC, description="")
+
+    def test_skill_definition_empty_name(self):
+        with pytest.raises(ValidationError):
+            SkillDefinition(name="", agent_type=AgentType.ATOMIC, description="d")
+
+    def test_command_def_empty_name(self):
+        with pytest.raises(ValidationError):
+            CommandDef(name="", description="d")
+
+    def test_agent_definition_empty_name(self):
+        with pytest.raises(ValidationError):
+            AgentDefinition(name="", description="d")
