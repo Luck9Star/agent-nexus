@@ -856,6 +856,24 @@ class TestSkillEvolverPruneRecoveredTools:
         assert "tool-b" not in evolver._addressed
 
 
+class TestSkillEvolverUnknownType:
+    def test_evolve_unknown_type_returns_error(self, tmp_path: Path) -> None:
+        """Unknown evolution_type hits the else branch and returns error."""
+        from unittest.mock import MagicMock
+
+        store = _store_with_records(tmp_path)
+        evolver = SkillEvolver(store)
+
+        suggestion = MagicMock()
+        suggestion.evolution_type = "nonexistent_type"
+        result = evolver.evolve(suggestion)
+
+        assert not result.success
+        assert "Unknown evolution type" in result.error
+        assert "nonexistent_type" in result.error
+        assert result.new_record is None
+
+
 class TestSkillEvolverDiagnose:
     def test_high_fallback_suggests_fix(self) -> None:
         r = _make_record("s1", "x", selections=100, fallbacks=50)
@@ -1033,6 +1051,18 @@ class TestCompactionGuardReinject:
         if result_chars > 0:
             # Token estimate should be roughly chars//4, not chars
             assert tokens_after < result_chars
+
+    def test_compaction_empty_result_chars(self, tmp_path: Path) -> None:
+        """When result has <4 chars, tokens_after is 0 (chars//4 approximation)."""
+        store = _store_with_records(tmp_path)
+        guard = CompactionGuard(store, "agent-a")
+        # l0_content is truthy but short; l1 empty -> result is "x\n" (2 chars)
+        ctx = _make_agent_context(l0_content="x", l1_content="")
+        guard.reinject_after_compaction(ctx)
+        log = store.get_budget_log("agent-a")
+        assert len(log) == 1
+        # "x\n" is 2 chars -> 2 // 4 = 0 tokens estimated
+        assert log[0]["tokens_after"] == 0
 
 
 class TestCompactionGuardCheckAndLog:

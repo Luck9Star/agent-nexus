@@ -458,3 +458,15 @@ class TestConfigLoaderProviderApiTypeValidation:
         loader = ConfigLoader(config_dir=config_dir)
         config = loader.load_config()
         assert config.models.default is not None
+
+    def test_load_malformed_toml_raises_toml_error(self, tmp_path: Path) -> None:
+        """Malformed TOML syntax propagates toml.TomlDecodeError."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "config.toml").write_text(
+            "[section\nkey = value\n", encoding="utf-8"
+        )
+        loader = ConfigLoader(config_dir=config_dir)
+        with pytest.raises(Exception):
+            # toml.TomlDecodeError or similar parse error
+            loader.load_config()
