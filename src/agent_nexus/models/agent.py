@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_nexus.models.hooks import HookEvent, HookType
 from agent_nexus.models.permission import PermissionConfig, PermissionMode
@@ -67,6 +67,23 @@ class McpServerConfig(BaseModel):
     args: list[str] = Field(default_factory=list)
     url: str | None = None
 
+    @model_validator(mode="after")
+    def _validate_transport_fields(self) -> "McpServerConfig":
+        """Ensure transport type matches the required fields.
+
+        - stdio transport requires command to be set
+        - sse transport requires url to be set
+        """
+        if self.transport == "stdio" and not self.command:
+            raise ValueError(
+                "McpServerConfig with transport='stdio' requires 'command' to be set"
+            )
+        if self.transport == "sse" and not self.url:
+            raise ValueError(
+                "McpServerConfig with transport='sse' requires 'url' to be set"
+            )
+        return self
+
 
 class AgentDependencies(BaseModel):
     """Agent dependency specification for composite agents."""
@@ -85,7 +102,7 @@ class AgentManifest(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
     version: str = Field(min_length=1)
     type: AgentType
     description: str = Field(min_length=1)

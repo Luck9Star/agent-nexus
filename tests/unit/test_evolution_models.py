@@ -314,7 +314,7 @@ class TestSkillRecordCounterValidation:
     """Cross-field validation tests for SkillRecord counters."""
 
     def test_applied_exceeds_selections_rejected(self):
-        with pytest.raises(ValidationError, match="total_applied cannot exceed total_selections"):
+        with pytest.raises(ValidationError, match="total_applied"):
             SkillRecord(
                 id="s1",
                 name="test",
@@ -332,12 +332,13 @@ class TestSkillRecordCounterValidation:
                 total_completions=8,
             )
 
-    def test_fallbacks_exceeds_selections_rejected(self):
-        with pytest.raises(ValidationError, match="total_fallbacks cannot exceed total_selections"):
+    def test_fallbacks_exceeds_applied_rejected(self):
+        with pytest.raises(ValidationError, match="total_fallbacks cannot exceed total_applied"):
             SkillRecord(
                 id="s1",
                 name="test",
-                total_selections=3,
+                total_selections=10,
+                total_applied=3,
                 total_fallbacks=5,
             )
 
@@ -363,7 +364,19 @@ class TestSkillRecordCounterValidation:
         assert sr.total_fallbacks == 0
 
     def test_all_equal_counters_valid(self):
-        """Edge case: all counters equal is valid."""
+        """Edge case: applied equals selections, zero fallbacks is valid."""
+        sr = SkillRecord(
+            id="s1",
+            name="test",
+            total_selections=10,
+            total_applied=10,
+            total_completions=10,
+            total_fallbacks=0,
+        )
+        assert sr.total_selections == 10
+
+    def test_all_equal_with_nonzero_fallbacks_valid(self):
+        """applied=10, fallbacks=10 is valid because fallbacks <= applied."""
         sr = SkillRecord(
             id="s1",
             name="test",
@@ -372,7 +385,7 @@ class TestSkillRecordCounterValidation:
             total_completions=10,
             total_fallbacks=10,
         )
-        assert sr.total_selections == 10
+        assert sr.total_fallbacks == sr.total_applied
 
 
 # ---------------------------------------------------------------------------
@@ -398,3 +411,98 @@ class TestMinLengthEvolution:
     def test_evolution_context_empty_task_id(self):
         with pytest.raises(ValidationError):
             EvolutionContext(agent_id="a1", task_id="")
+
+
+# ---------------------------------------------------------------------------
+# Counter invariant tests: total_applied + total_fallbacks <= total_selections
+# ---------------------------------------------------------------------------
+
+
+class TestSkillRecordCounterInvariant:
+    """Counter invariants: applied <= selections, fallbacks <= applied, completions <= applied."""
+
+    def test_valid_counters_pass(self):
+        sr = SkillRecord(
+            id="s1",
+            name="test",
+            total_selections=10,
+            total_applied=8,
+            total_fallbacks=3,
+            total_completions=5,
+        )
+        assert sr.total_selections == 10
+        assert sr.total_applied == 8
+        assert sr.total_fallbacks == 3
+
+    def test_rejected_applied_exceeds_selections(self):
+        with pytest.raises(ValidationError, match="total_applied cannot exceed total_selections"):
+            SkillRecord(
+                id="s1",
+                name="test",
+                total_selections=5,
+                total_applied=6,
+                total_fallbacks=0,
+            )
+
+    def test_rejected_fallbacks_exceeds_applied(self):
+        with pytest.raises(ValidationError, match="total_fallbacks cannot exceed total_applied"):
+            SkillRecord(
+                id="s1",
+                name="test",
+                total_selections=10,
+                total_applied=3,
+                total_fallbacks=4,
+            )
+
+    def test_rejected_completions_exceeds_applied(self):
+        with pytest.raises(ValidationError, match="total_completions cannot exceed total_applied"):
+            SkillRecord(
+                id="s1",
+                name="test",
+                total_selections=10,
+                total_applied=3,
+                total_completions=4,
+            )
+
+    def test_zero_selections_requires_zero_applied(self):
+        with pytest.raises(
+            ValidationError,
+            match="zero selections requires zero applied and zero fallbacks",
+        ):
+            SkillRecord(
+                id="s1",
+                name="test",
+                total_selections=0,
+                total_applied=1,
+                total_fallbacks=0,
+            )
+
+    def test_zero_selections_with_fallbacks_rejected(self):
+        with pytest.raises(
+            ValidationError,
+            match="zero selections requires zero applied and zero fallbacks",
+        ):
+            SkillRecord(
+                id="s1",
+                name="test",
+                total_selections=0,
+                total_applied=0,
+                total_fallbacks=1,
+            )
+
+    def test_default_values_all_zero_pass(self):
+        sr = SkillRecord(id="s1", name="test")
+        assert sr.total_selections == 0
+        assert sr.total_applied == 0
+        assert sr.total_fallbacks == 0
+
+    def test_applied_equals_selections_with_fallbacks(self):
+        """Edge: all selections applied, some fell back."""
+        sr = SkillRecord(
+            id="s1",
+            name="test",
+            total_selections=10,
+            total_applied=10,
+            total_fallbacks=3,
+        )
+        assert sr.total_applied == sr.total_selections

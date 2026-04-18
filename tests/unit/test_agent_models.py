@@ -137,9 +137,9 @@ class TestAgentModelConfig:
 
 class TestMcpServerConfig:
     def test_defaults(self):
-        cfg = McpServerConfig()
+        cfg = McpServerConfig(command="uvx")
         assert cfg.transport == "stdio"
-        assert cfg.command is None
+        assert cfg.command == "uvx"
         assert cfg.args == []
         assert cfg.url is None
 
@@ -153,7 +153,7 @@ class TestMcpServerConfig:
         assert cfg.url == "http://localhost:8080/mcp"
 
     def test_frozen(self):
-        cfg = McpServerConfig()
+        cfg = McpServerConfig(command="uvx")
         with pytest.raises(ValidationError):
             cfg.transport = "sse"
 
@@ -558,3 +558,97 @@ class TestMinLengthValidation:
     def test_agent_definition_empty_name(self):
         with pytest.raises(ValidationError):
             AgentDefinition(name="", description="d")
+
+
+# ---------------------------------------------------------------------------
+# Issue 1: AgentManifest name max_length and pattern validation
+# ---------------------------------------------------------------------------
+
+
+class TestAgentManifestNameValidation:
+    """AgentManifest.name must be 1-128 chars and match ^[a-zA-Z0-9_-]+$."""
+
+    def test_valid_simple_name(self):
+        m = AgentManifest(
+            name="doc-filler", version="1.0.0", type=AgentType.ATOMIC, description="d"
+        )
+        assert m.name == "doc-filler"
+
+    def test_valid_name_with_underscores_and_digits(self):
+        m = AgentManifest(
+            name="my_agent_42", version="1.0.0", type=AgentType.ATOMIC, description="d"
+        )
+        assert m.name == "my_agent_42"
+
+    def test_valid_name_at_max_length(self):
+        name = "a" * 128
+        m = AgentManifest(
+            name=name, version="1.0.0", type=AgentType.ATOMIC, description="d"
+        )
+        assert len(m.name) == 128
+
+    def test_rejects_name_too_long(self):
+        with pytest.raises(ValidationError, match="at most 128 characters"):
+            AgentManifest(
+                name="a" * 129, version="1.0.0", type=AgentType.ATOMIC, description="d"
+            )
+
+    def test_rejects_path_traversal_characters(self):
+        with pytest.raises(ValidationError, match="should match"):
+            AgentManifest(
+                name="../../../etc/passwd",
+                version="1.0.0",
+                type=AgentType.ATOMIC,
+                description="d",
+            )
+
+    def test_rejects_spaces(self):
+        with pytest.raises(ValidationError, match="should match"):
+            AgentManifest(
+                name="my agent", version="1.0.0", type=AgentType.ATOMIC, description="d"
+            )
+
+    def test_rejects_special_characters(self):
+        with pytest.raises(ValidationError, match="should match"):
+            AgentManifest(
+                name="agent!@#", version="1.0.0", type=AgentType.ATOMIC, description="d"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Issue 2: McpServerConfig cross-field validation (transport vs command/url)
+# ---------------------------------------------------------------------------
+
+
+class TestMcpServerConfigTransportValidation:
+    """McpServerConfig validates that transport type matches required fields."""
+
+    def test_stdio_with_command_is_valid(self):
+        cfg = McpServerConfig(transport="stdio", command="uvx")
+        assert cfg.transport == "stdio"
+        assert cfg.command == "uvx"
+
+    def test_sse_with_url_is_valid(self):
+        cfg = McpServerConfig(transport="sse", url="http://localhost:8080/mcp")
+        assert cfg.transport == "sse"
+        assert cfg.url == "http://localhost:8080/mcp"
+
+    def test_stdio_without_command_rejected(self):
+        with pytest.raises(ValidationError, match="transport='stdio' requires 'command'"):
+            McpServerConfig(transport="stdio")
+
+    def test_stdio_default_transport_without_command_rejected(self):
+        """Default transport is stdio, so no command should fail."""
+        with pytest.raises(ValidationError, match="transport='stdio' requires 'command'"):
+            McpServerConfig()
+
+    def test_sse_without_url_rejected(self):
+        with pytest.raises(ValidationError, match="transport='sse' requires 'url'"):
+            McpServerConfig(transport="sse")
+
+    def test_sse_with_url_and_command_is_valid(self):
+        """Having both url and command with sse transport is allowed (command ignored)."""
+        cfg = McpServerConfig(
+            transport="sse", url="http://localhost:8080/mcp", command="helper"
+        )
+        assert cfg.url == "http://localhost:8080/mcp"

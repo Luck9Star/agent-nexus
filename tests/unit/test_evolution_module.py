@@ -237,7 +237,7 @@ class TestEvolutionStoreCounters:
         assert got.total_selections == 5
 
     def test_increment_fallback(self, tmp_path: Path) -> None:
-        r = _make_record("s1", "x", selections=3, fallbacks=2)
+        r = _make_record("s1", "x", selections=3, applied=3, fallbacks=2)
         store = _store_with_records(tmp_path, r)
         store.increment_counters("s1", fell_back=True)
         got = store.get_skill_record("s1")
@@ -282,20 +282,22 @@ class TestEvolutionStoreAnalysis:
 
     def test_analysis_increments_counters(self, tmp_path: Path) -> None:
         store = _store_with_records(tmp_path, _make_record("s1", "x"))
+        # Applied but fell back: valid single judgment where applied and fell_back
+        # are both True (skill was applied, then fell back to alternative).
         store.record_analysis(
             task_id="t1",
             agent_name="a",
             analysis_text="",
             judgments=[
                 {"skill_id": "s1", "selected": True, "applied": True,
-                 "completed": True, "fell_back": True},
+                 "completed": False, "fell_back": True},
             ],
         )
         got = store.get_skill_record("s1")
         assert got is not None
         assert got.total_selections == 1
         assert got.total_applied == 1
-        assert got.total_completions == 1
+        assert got.total_completions == 0
         assert got.total_fallbacks == 1
 
 
@@ -496,7 +498,7 @@ class TestCorrectSkillIds:
 class TestExecutionAnalyzer:
     def test_analyze_with_high_fallback(self, tmp_path: Path) -> None:
         # fallback_rate = 50/100 = 0.5 > 0.4 -> FIX
-        r = _make_record("s1", "buggy", selections=100, fallbacks=50)
+        r = _make_record("s1", "buggy", selections=100, applied=100, fallbacks=50)
         store = _store_with_records(tmp_path, r)
         analyzer = ExecutionAnalyzer(store)
 
@@ -857,7 +859,7 @@ class TestSkillEvolverToolDegradation:
 class TestSkillEvolverMetricCheck:
     def test_evolves_unhealthy_skill(self, tmp_path: Path) -> None:
         # fallback_rate = 60/100 = 0.6 > 0.4 -> FIX
-        r = _make_record("s1", "bad", selections=100, fallbacks=60)
+        r = _make_record("s1", "bad", selections=100, applied=100, fallbacks=60)
         store = _store_with_records(tmp_path, r)
         evolver = SkillEvolver(store)
 
@@ -866,7 +868,7 @@ class TestSkillEvolverMetricCheck:
         assert results[0].success
 
     def test_skips_below_min_selections(self, tmp_path: Path) -> None:
-        r = _make_record("s1", "new", selections=3, fallbacks=2)
+        r = _make_record("s1", "new", selections=3, applied=3, fallbacks=2)
         store = _store_with_records(tmp_path, r)
         evolver = SkillEvolver(store)
 
@@ -904,7 +906,7 @@ class TestSkillEvolverUnknownType:
 
 class TestSkillEvolverDiagnose:
     def test_high_fallback_suggests_fix(self) -> None:
-        r = _make_record("s1", "x", selections=100, fallbacks=50)
+        r = _make_record("s1", "x", selections=100, applied=100, completions=100, fallbacks=50)
         suggestion = SkillEvolver._diagnose_skill_health(r)
         assert suggestion is not None
         assert suggestion.evolution_type == EvolutionType.FIX
@@ -1361,7 +1363,7 @@ class TestHealthCheckerCheckHealth:
 
     def test_high_fallback_triggers_fix(self) -> None:
         # fallback_rate = 50/100 = 0.5 > 0.4
-        r = _make_record("s1", "x", selections=100, fallbacks=50)
+        r = _make_record("s1", "x", selections=100, applied=100, completions=100, fallbacks=50)
         from unittest.mock import MagicMock
 
         checker = HealthChecker(MagicMock())
@@ -1407,7 +1409,7 @@ class TestHealthCheckerCheckHealth:
 class TestHealthCheckerDiagnoseAll:
     def test_diagnose_all(self, tmp_path: Path) -> None:
         r1 = _make_record("s1", "healthy", selections=100, applied=80, completions=70, fallbacks=5)
-        r2 = _make_record("s2", "unhealthy", selections=100, fallbacks=60)
+        r2 = _make_record("s2", "unhealthy", selections=100, applied=100, fallbacks=60)
         store = _store_with_records(tmp_path, r1, r2)
         checker = HealthChecker(store)
 
@@ -1441,7 +1443,7 @@ class TestHealthCheckerDiagnoseAll:
 class TestHealthCheckerGetUnhealthy:
     def test_filters_to_unhealthy(self, tmp_path: Path) -> None:
         r1 = _make_record("s1", "healthy", selections=100, applied=80, completions=70, fallbacks=5)
-        r2 = _make_record("s2", "unhealthy", selections=100, fallbacks=60)
+        r2 = _make_record("s2", "unhealthy", selections=100, applied=100, fallbacks=60)
         store = _store_with_records(tmp_path, r1, r2)
         checker = HealthChecker(store)
 
@@ -1454,7 +1456,7 @@ class TestHealthCheckerGetUnhealthy:
 class TestHealthCheckerGetSummary:
     def test_summary_counts(self, tmp_path: Path) -> None:
         r1 = _make_record("s1", "healthy", selections=100, applied=80, completions=70, fallbacks=5)
-        r2 = _make_record("s2", "bad", selections=100, fallbacks=60)
+        r2 = _make_record("s2", "bad", selections=100, applied=100, fallbacks=60)
         r3 = _make_record("s3", "moderate", selections=100, applied=40, completions=30)
         store = _store_with_records(tmp_path, r1, r2, r3)
         checker = HealthChecker(store)
@@ -1705,11 +1707,11 @@ class TestSuggestionDeduplication:
         analyzer = ExecutionAnalyzer(store)
 
         # fallback_rate = 6/10 = 0.6 > 0.4 threshold (FIX)
-        # applied_rate = 5/10 = 0.5 > 0.4, completion_rate = 1/5 = 0.2 < 0.35 (FIX again)
+        # applied_rate = 6/10 = 0.6 > 0.4, completion_rate = 1/6 = 0.17 < 0.35 (FIX again)
         skill = self._make_skill(
             selections=10,
             fallbacks=6,
-            applied=5,
+            applied=6,
             completions=1,
         )
         store.save_skill_record(skill)
@@ -1737,12 +1739,12 @@ class TestSuggestionDeduplication:
         analyzer = ExecutionAnalyzer(store)
 
         # fallback_rate = 6/10 = 0.6 > 0.4 (FIX)
-        # effective_rate = 3/10 = 0.3 < 0.55, applied_rate = 5/10 = 0.5 > 0.25 (DERIVED)
+        # effective_rate = 3/10 = 0.3 < 0.55, applied_rate = 6/10 = 0.6 > 0.25 (DERIVED)
         # But FIX takes priority, so only FIX should appear
         skill = self._make_skill(
             selections=10,
             fallbacks=6,
-            applied=5,
+            applied=6,
             completions=3,
         )
         store.save_skill_record(skill)
@@ -1908,8 +1910,8 @@ class TestHealthCheckerDedupFix:
         from unittest.mock import MagicMock
 
         # fallback_rate = 60/100 = 0.6 > 0.4 (Rule 1: FIX)
-        # applied_rate = 50/100 = 0.5 > 0.4, completion_rate = 10/50 = 0.2 < 0.35 (Rule 2: FIX)
-        r = _make_record("s1", "x", selections=100, applied=50, completions=10, fallbacks=60)
+        # applied_rate = 60/100 = 0.6 > 0.4, completion_rate = 10/60 = 0.17 < 0.35 (Rule 2: FIX)
+        r = _make_record("s1", "x", selections=100, applied=60, completions=10, fallbacks=60)
         checker = HealthChecker(MagicMock())
         suggestions = checker.check_health(r)
 
@@ -1923,12 +1925,12 @@ class TestHealthCheckerDedupFix:
 
         This skill triggers both:
           - fallback_rate = 60/100 = 0.6 > 0.4 (FIX)
-          - effective_rate = 10/100 = 0.1 < 0.55, applied_rate = 50/100 = 0.5 > 0.25 (DERIVED)
+          - effective_rate = 10/100 = 0.1 < 0.55, applied_rate = 60/100 = 0.6 > 0.25 (DERIVED)
         After fix: only FIX, no DERIVED.
         """
         from unittest.mock import MagicMock
 
-        r = _make_record("s1", "x", selections=100, applied=50, completions=10, fallbacks=60)
+        r = _make_record("s1", "x", selections=100, applied=60, completions=10, fallbacks=60)
         checker = HealthChecker(MagicMock())
         suggestions = checker.check_health(r)
 
@@ -1957,10 +1959,10 @@ class TestHealthCheckerDedupFix:
         from unittest.mock import MagicMock
 
         # fallback_rate = 60/100 = 0.6 -> confidence = 0.6
-        # applied_rate = 50/100 = 0.5, completion_rate = 10/50 = 0.2
-        #   -> confidence = min(0.5 * 0.8, 1.0) = 0.4
-        # fallback FIX has higher confidence (0.6 > 0.4)
-        r = _make_record("s1", "x", selections=100, applied=50, completions=10, fallbacks=60)
+        # applied_rate = 60/100 = 0.6, completion_rate = 10/60 = 0.17
+        #   -> confidence = min(0.6 * 0.83, 1.0) = 0.5
+        # fallback FIX has higher confidence (0.6 > 0.5)
+        r = _make_record("s1", "x", selections=100, applied=60, completions=10, fallbacks=60)
         checker = HealthChecker(MagicMock())
         suggestions = checker.check_health(r)
 
@@ -2100,7 +2102,7 @@ class TestEvolutionEngineEvolvePostAnalysis:
     """evolve(trigger='post_analysis') delegates to analyzer then evolver."""
 
     def test_post_analysis_returns_analysis_result(self, tmp_path: Path) -> None:
-        r = _make_record("s1", "buggy", selections=100, fallbacks=50)
+        r = _make_record("s1", "buggy", selections=100, applied=100, fallbacks=50)
         store = _store_with_records(tmp_path, r)
         engine = EvolutionEngine(store)
 
@@ -2116,7 +2118,7 @@ class TestEvolutionEngineEvolvePostAnalysis:
 
     def test_post_analysis_creates_evolved_skill(self, tmp_path: Path) -> None:
         """Post-analysis on unhealthy skill produces a new evolved skill."""
-        r = _make_record("s1", "buggy", selections=100, fallbacks=60)
+        r = _make_record("s1", "buggy", selections=100, applied=100, fallbacks=60)
         store = _store_with_records(tmp_path, r)
         engine = EvolutionEngine(store)
 
@@ -2183,7 +2185,7 @@ class TestEvolutionEngineEvolveMetricCheck:
     """evolve(trigger='metric_check') delegates to evolver."""
 
     def test_metric_check_returns_evolve_results(self, tmp_path: Path) -> None:
-        r = _make_record("s1", "bad", selections=100, fallbacks=60)
+        r = _make_record("s1", "bad", selections=100, applied=100, fallbacks=60)
         store = _store_with_records(tmp_path, r)
         engine = EvolutionEngine(store)
 
@@ -2193,7 +2195,7 @@ class TestEvolutionEngineEvolveMetricCheck:
         assert results[0].success
 
     def test_metric_check_skips_below_min(self, tmp_path: Path) -> None:
-        r = _make_record("s1", "new", selections=3, fallbacks=2)
+        r = _make_record("s1", "new", selections=3, applied=3, fallbacks=2)
         store = _store_with_records(tmp_path, r)
         engine = EvolutionEngine(store)
 
@@ -2224,7 +2226,7 @@ class TestEvolutionEngineConvenienceMethods:
         assert suggestions == []
 
     def test_check_health_unhealthy(self, tmp_path: Path) -> None:
-        r = _make_record("s1", "bad", selections=100, fallbacks=60)
+        r = _make_record("s1", "bad", selections=100, applied=100, fallbacks=60)
         store = _store_with_records(tmp_path, r)
         engine = EvolutionEngine(store)
 
@@ -2241,7 +2243,7 @@ class TestEvolutionEngineConvenienceMethods:
 
     def test_diagnose_all(self, tmp_path: Path) -> None:
         r1 = _make_record("s1", "healthy", selections=100, applied=80, completions=70, fallbacks=5)
-        r2 = _make_record("s2", "bad", selections=100, fallbacks=60)
+        r2 = _make_record("s2", "bad", selections=100, applied=100, fallbacks=60)
         store = _store_with_records(tmp_path, r1, r2)
         engine = EvolutionEngine(store)
 

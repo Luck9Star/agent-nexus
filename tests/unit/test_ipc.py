@@ -11,6 +11,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from agent_nexus.models.ipc import (
     AgentToPlatform,
@@ -703,3 +704,65 @@ class TestIPCModelRoundtrip:
         a2p_json = a2p.model_dump_json()
         a2p_round = AgentToPlatform.model_validate_json(a2p_json)
         assert a2p_round.output == {"result": 42}
+
+
+# ============================================================================
+# Issue 3: IPC content fields max_length validation (64KB limit)
+# ============================================================================
+
+
+class TestIPCContentMaxLength:
+    """IPC text fields are capped at 65536 characters to prevent memory issues."""
+
+    def test_platform_to_agent_content_within_limit(self):
+        msg = PlatformToAgent(
+            type=PlatformToAgentType.CHAT, content="x" * 65536
+        )
+        assert len(msg.content) == 65536
+
+    def test_platform_to_agent_content_exceeds_limit(self):
+        with pytest.raises(ValidationError, match="at most 65536 characters"):
+            PlatformToAgent(
+                type=PlatformToAgentType.CHAT, content="x" * 65537
+            )
+
+    def test_agent_to_platform_content_within_limit(self):
+        msg = AgentToPlatform(
+            type=AgentToPlatformType.RESULT, content="x" * 65536
+        )
+        assert len(msg.content) == 65536
+
+    def test_agent_to_platform_content_exceeds_limit(self):
+        with pytest.raises(ValidationError, match="at most 65536 characters"):
+            AgentToPlatform(
+                type=AgentToPlatformType.RESULT, content="x" * 65537
+            )
+
+    def test_agent_to_platform_message_within_limit(self):
+        msg = AgentToPlatform(
+            type=AgentToPlatformType.PROGRESS, message="x" * 65536
+        )
+        assert len(msg.message) == 65536
+
+    def test_agent_to_platform_message_exceeds_limit(self):
+        with pytest.raises(ValidationError, match="at most 65536 characters"):
+            AgentToPlatform(
+                type=AgentToPlatformType.PROGRESS, message="x" * 65537
+            )
+
+    def test_agent_to_platform_error_within_limit(self):
+        msg = AgentToPlatform(
+            type=AgentToPlatformType.ERROR, error="x" * 65536
+        )
+        assert len(msg.error) == 65536
+
+    def test_agent_to_platform_error_exceeds_limit(self):
+        with pytest.raises(ValidationError, match="at most 65536 characters"):
+            AgentToPlatform(
+                type=AgentToPlatformType.ERROR, error="x" * 65537
+            )
+
+    def test_empty_content_still_valid(self):
+        """Empty string is within the limit and remains valid."""
+        msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="")
+        assert msg.content == ""

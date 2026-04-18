@@ -154,6 +154,8 @@ class TestExecutorUsesToThread:
     @pytest.mark.asyncio
     async def test_run_cell_sync_returns_execution_result(self, shared_executor) -> None:
         """_run_cell_sync should return an IPython ExecutionResult."""
+        # Ensure shell is initialized before calling _run_cell_sync
+        await shared_executor._require_shell()
         result = shared_executor._run_cell_sync("x = 42")
         # Should be an IPython ExecutionResult-like object
         assert result is not None
@@ -169,3 +171,36 @@ class TestExecutorUsesToThread:
         )
         assert result.success is False
         assert "timed out" in (result.error or "").lower()
+
+
+class TestRequireShellConcurrency:
+    """Race condition protection for _require_shell."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_require_shell_creates_one_shell(self) -> None:
+        """Multiple concurrent calls to _require_shell produce exactly one shell."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            # Launch many concurrent _require_shell calls
+            shells = await asyncio.gather(
+                *[executor._require_shell() for _ in range(10)]
+            )
+            # All results must be the exact same object
+            assert all(s is shells[0] for s in shells)
+            assert executor._shell is not None
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_run_cell_sync_without_shell_raises(self) -> None:
+        """_run_cell_sync raises RuntimeError if shell is not initialized."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            with pytest.raises(RuntimeError, match="shell initialization"):
+                executor._run_cell_sync("x = 1")
+        finally:
+            executor.close()

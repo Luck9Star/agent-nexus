@@ -43,7 +43,7 @@ class PlatformToAgent(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     type: PlatformToAgentType
-    content: str = ""
+    content: str = Field(default="", max_length=65536)
     task_id: str | None = None
     conversation_id: str | None = None
     ref_id: str | None = None
@@ -62,11 +62,11 @@ class AgentToPlatform(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     type: AgentToPlatformType
-    content: str = ""
+    content: str = Field(default="", max_length=65536)
     task_id: str | None = None
-    message: str | None = None
+    message: str | None = Field(default=None, max_length=65536)
     progress_pct: float | None = Field(default=None, ge=0.0, le=100.0)
-    error: str | None = None
+    error: str | None = Field(default=None, max_length=65536)
     status: str | None = None
     output: Any | None = None
 

@@ -74,7 +74,10 @@ class LockfileEntry(BaseModel):
 
     version: str
     source: str
-    commit_sha: str
+    commit_sha: str = Field(
+        pattern=r"^[0-9a-f]{40}$|^[0-9a-f]{64}$|^latest$|^head$",
+        description="Hex SHA-1 (40 chars), SHA-256 (64 chars), or sentinel 'latest'/'head'",
+    )
     agent_type: AgentType
     installed_at: datetime = Field(default_factory=_utc_now)
     venv_path: str = ""

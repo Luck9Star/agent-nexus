@@ -52,10 +52,30 @@ class IPythonExecutor:
         self._shell: Any | None = None
         # Pending injections that happened before shell creation.
         self._pending_injects: dict[str, Any] = {}
+        # Lock to prevent concurrent shell creation in _require_shell.
+        self._shell_lock: asyncio.Lock | None = None
 
-    def _require_shell(self) -> Any:
-        """Return the shell, creating it lazily if needed."""
-        if self._shell is None:
+    def _get_lock(self) -> asyncio.Lock:
+        """Return the lock, creating it lazily (asyncio.Lock needs a running loop)."""
+        if self._shell_lock is None:
+            self._shell_lock = asyncio.Lock()
+        return self._shell_lock
+
+    async def _require_shell(self) -> Any:
+        """Return the shell, creating it lazily if needed.
+
+        Uses an asyncio.Lock to prevent concurrent shell creation. Only the
+        first caller creates the shell; subsequent callers see the already-
+        created shell.
+        """
+        if self._shell is not None:
+            return self._shell
+
+        async with self._get_lock():
+            # Double-check after acquiring the lock
+            if self._shell is not None:
+                return self._shell
+
             from IPython.core.interactiveshell import InteractiveShell
             from traitlets.config import Config
 
@@ -146,7 +166,7 @@ class IPythonExecutor:
             )
 
         # Step 2: Execute (shell created lazily here)
-        shell = self._require_shell()
+        shell = await self._require_shell()
 
         try:
             from IPython.utils.capture import capture_output
@@ -201,8 +221,15 @@ class IPythonExecutor:
             )
 
     def _run_cell_sync(self, transformed: str) -> Any:
-        """Synchronous cell execution for use with asyncio.to_thread."""
-        return self._require_shell().run_cell(transformed, store_history=False)
+        """Synchronous cell execution for use with asyncio.to_thread.
+
+        Precondition: ``self._shell`` must already be initialized (guaranteed
+        by ``execute()`` calling ``await _require_shell()`` before dispatching
+        to ``asyncio.to_thread``).
+        """
+        if self._shell is None:
+            raise RuntimeError("_run_cell_sync called before shell initialization")
+        return self._shell.run_cell(transformed, store_history=False)
 
     def inject(self, name: str, value: Any) -> None:
         """Inject a variable into the namespace.

@@ -40,7 +40,7 @@ from agent_nexus.platform.local.supervisor import AgentSupervisor, RestartTracke
 def _make_entry(
     version: str = "1.0.0",
     source: str = "official",
-    commit_sha: str = "abc123def456",
+    commit_sha: str = "a" * 40,
     agent_type: AgentType = AgentType.ATOMIC,
     venv_path: str = "",
     dependencies: list[str] | None = None,
@@ -105,7 +105,7 @@ class TestLockfileManager:
                 "doc-filler": {
                     "version": "1.2.0",
                     "source": "official",
-                    "commit_sha": "abc123",
+                    "commit_sha": "a" * 40,
                     "agent_type": "atomic",
                     "installed_at": "2026-01-15T12:00:00",
                     "venv_path": "/venvs/doc-filler",
@@ -1609,7 +1609,7 @@ class TestSupervisorEnvForwarding:
         env = supervisor._build_env("test-agent", LockfileEntry(
             source="git+https://example.com/test-agent",
             version="1.0.0",
-            commit_sha="abc123",
+            commit_sha="a" * 40,
             agent_type="atomic",
         ))
 
@@ -1645,7 +1645,7 @@ class TestSupervisorEnvForwarding:
         env = supervisor._build_env("test-agent", LockfileEntry(
             source="git+https://example.com/test-agent",
             version="1.0.0",
-            commit_sha="abc123",
+            commit_sha="a" * 40,
             agent_type="atomic",
         ))
 
@@ -1668,7 +1668,7 @@ class TestSupervisorEnvForwarding:
         env = supervisor._build_env("test-agent", LockfileEntry(
             source="git+https://example.com/test-agent",
             version="1.0.0",
-            commit_sha="abc123",
+            commit_sha="a" * 40,
             agent_type="atomic",
         ))
         assert env == {}
@@ -1700,7 +1700,7 @@ class TestSupervisorEnvForwarding:
         env = supervisor._build_env("test-agent", LockfileEntry(
             source="git+https://example.com/test-agent",
             version="1.0.0",
-            commit_sha="abc123",
+            commit_sha="a" * 40,
             agent_type="atomic",
         ))
         assert env["AGENT_MODEL"] == "ollama:llama3"
@@ -1796,7 +1796,7 @@ class TestBuildCommandUnsafeName:
         return LockfileEntry(
             version="1.0.0",
             source="official",
-            commit_sha="abc123",
+            commit_sha="a" * 40,
             agent_type=AgentType.ATOMIC,
             venv_path="",
         )
@@ -1853,7 +1853,7 @@ class TestSupervisorConfigLoadLogsError:
             env = supervisor._build_env("test-agent", LockfileEntry(
                 source="git+https://example.com/test-agent",
                 version="1.0.0",
-                commit_sha="abc123",
+                commit_sha="a" * 40,
                 agent_type="atomic",
             ))
 
@@ -2061,11 +2061,11 @@ class TestLockfileManagerGetEntryFrom:
         lockfile_path = tmp_path / "lockfile.json"
         mgr = LockfileManager(lockfile_path)
 
-        entry1 = _make_entry(version="1.0.0", commit_sha="sha1")
+        entry1 = _make_entry(version="1.0.0", commit_sha="a" * 40)
         entry2 = _make_entry(
             version="2.0.0",
             source="git+https://example.com/other",
-            commit_sha="sha2",
+            commit_sha="b" * 40,
         )
 
         lockfile = Lockfile(
@@ -2081,7 +2081,7 @@ class TestLockfileManagerGetEntryFrom:
         result = mgr.get_entry_from(loaded, "agent-a")
         assert result is not None
         assert result.version == "1.0.0"
-        assert result.commit_sha == "sha1"
+        assert result.commit_sha == "a" * 40
 
         result_b = mgr.get_entry_from(loaded, "agent-b")
         assert result_b is not None
@@ -2168,7 +2168,7 @@ class TestSupervisorBuildEnvLogsError:
             env = supervisor._build_env("my-agent", LockfileEntry(
                 source="git+https://example.com/test-agent",
                 version="1.0.0",
-                commit_sha="abc123",
+                commit_sha="a" * 40,
                 agent_type="atomic",
             ))
 

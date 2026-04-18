@@ -73,8 +73,7 @@ class PythonRuntime:
             variable: Variable model with name, description, and value.
         """
         self._variables[variable.name] = variable
-        if variable.value is not None:
-            self._executor.inject(variable.name, variable.value)
+        self._executor.inject(variable.name, variable.value)
 
     def inject_function(self, function: Function) -> None:
         """Inject a callable function into both registry and namespace.

@@ -105,19 +105,19 @@ class TestLockfileEntry:
         le = LockfileEntry(
             version="1.0.0",
             source="official",
-            commit_sha="abc123def456",
+            commit_sha="abc123def4560000000000000000000000000000",
             agent_type=AgentType.ATOMIC,
         )
         assert le.version == "1.0.0"
         assert le.source == "official"
-        assert le.commit_sha == "abc123def456"
+        assert le.commit_sha == "abc123def4560000000000000000000000000000"
         assert le.agent_type is AgentType.ATOMIC
 
     def test_defaults(self):
         le = LockfileEntry(
             version="1.0.0",
             source="official",
-            commit_sha="abc123",
+            commit_sha="a" * 40,
             agent_type=AgentType.ATOMIC,
         )
         assert isinstance(le.installed_at, datetime)
@@ -128,7 +128,7 @@ class TestLockfileEntry:
         le = LockfileEntry(
             version="2.0.0",
             source="private",
-            commit_sha="deadbeef",
+            commit_sha="deadbeef" * 5,
             agent_type=AgentType.COMPOSITE,
             venv_path="~/.agent-nexus/venvs/my-agent",
             dependencies=["numpy", "pandas"],
@@ -138,7 +138,7 @@ class TestLockfileEntry:
 
     def test_frozen(self):
         le = LockfileEntry(
-            version="1.0.0", source="official", commit_sha="abc", agent_type=AgentType.ATOMIC
+            version="1.0.0", source="official", commit_sha="a" * 40, agent_type=AgentType.ATOMIC
         )
         with pytest.raises(ValidationError):
             le.version = "2.0.0"
@@ -147,13 +147,90 @@ class TestLockfileEntry:
         le = LockfileEntry(
             version="1.0.0",
             source="official",
-            commit_sha="abc123",
+            commit_sha="a" * 40,
             agent_type=AgentType.ATOMIC,
             venv_path="/venvs/test",
         )
         data = le.model_dump()
         le2 = LockfileEntry(**data)
         assert le2 == le
+
+
+class TestLockfileEntryCommitShaValidation:
+    """commit_sha must be a valid 40-char or 64-char hex string, or 'latest'/'head'."""
+
+    def test_valid_sha1_hash(self):
+        le = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="a" * 40,
+            agent_type=AgentType.ATOMIC,
+        )
+        assert len(le.commit_sha) == 40
+
+    def test_valid_sha256_hash(self):
+        le = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="c" * 64,
+            agent_type=AgentType.ATOMIC,
+        )
+        assert len(le.commit_sha) == 64
+
+    def test_valid_latest_sentinel(self):
+        le = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="latest",
+            agent_type=AgentType.ATOMIC,
+        )
+        assert le.commit_sha == "latest"
+
+    def test_valid_head_sentinel(self):
+        le = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="head",
+            agent_type=AgentType.ATOMIC,
+        )
+        assert le.commit_sha == "head"
+
+    def test_invalid_short_sha_rejected(self):
+        with pytest.raises(ValidationError):
+            LockfileEntry(
+                version="1.0.0",
+                source="official",
+                commit_sha="abc123",
+                agent_type=AgentType.ATOMIC,
+            )
+
+    def test_invalid_non_hex_rejected(self):
+        with pytest.raises(ValidationError):
+            LockfileEntry(
+                version="1.0.0",
+                source="official",
+                commit_sha="g" * 40,  # 'g' is not hex
+                agent_type=AgentType.ATOMIC,
+            )
+
+    def test_invalid_mixed_case_rejected(self):
+        """Only lowercase hex is accepted."""
+        with pytest.raises(ValidationError):
+            LockfileEntry(
+                version="1.0.0",
+                source="official",
+                commit_sha="A" * 40,
+                agent_type=AgentType.ATOMIC,
+            )
+
+    def test_invalid_unknown_sentinel_rejected(self):
+        with pytest.raises(ValidationError):
+            LockfileEntry(
+                version="1.0.0",
+                source="official",
+                commit_sha="tip",
+                agent_type=AgentType.ATOMIC,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +247,7 @@ class TestLockfile:
         entry = LockfileEntry(
             version="1.0.0",
             source="official",
-            commit_sha="abc123",
+            commit_sha="a" * 40,
             agent_type=AgentType.ATOMIC,
         )
         lf = Lockfile(agents={"doc-filler": entry})
@@ -179,10 +256,10 @@ class TestLockfile:
 
     def test_multiple_agents(self):
         e1 = LockfileEntry(
-            version="1.0.0", source="official", commit_sha="aaa", agent_type=AgentType.ATOMIC
+            version="1.0.0", source="official", commit_sha="a" * 40, agent_type=AgentType.ATOMIC
         )
         e2 = LockfileEntry(
-            version="2.0.0", source="private", commit_sha="bbb", agent_type=AgentType.COMPOSITE
+            version="2.0.0", source="private", commit_sha="b" * 40, agent_type=AgentType.COMPOSITE
         )
         lf = Lockfile(agents={"agent-a": e1, "agent-b": e2})
         assert len(lf.agents) == 2
@@ -196,7 +273,7 @@ class TestLockfile:
         entry = LockfileEntry(
             version="1.0.0",
             source="official",
-            commit_sha="abc123",
+            commit_sha="a" * 40,
             agent_type=AgentType.ATOMIC,
         )
         lf = Lockfile(agents={"test-agent": entry})

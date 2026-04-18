@@ -31,13 +31,13 @@ class TestInjectVariable:
 
     @pytest.mark.asyncio
     async def test_inject_without_value(self, shared_runtime) -> None:
-        """Variable with value=None is stored in registry but not in namespace."""
+        """Variable with value=None is stored in registry and injected as None."""
         var = Variable(name="placeholder", description="no value", value=None)
         shared_runtime.inject_variable(var)
         # Variable is in the registry (describe_variables shows it)
         desc = shared_runtime.describe_variables()
         assert "placeholder" in desc
-        # But not in the namespace
+        # Variable IS in the namespace with value None
         assert shared_runtime.retrieve("placeholder") is None
 
 
@@ -340,26 +340,28 @@ class TestRetrieveDistinguishesNoneFromMissing:
             executor.close()
 
     @pytest.mark.asyncio
-    async def test_runtime_retrieve_distinguishes_none_value(self) -> None:
-        """retrieve() distinguishes variable set to None from non-existent variable."""
+    async def test_runtime_retrieve_returns_none_for_explicit_none(self) -> None:
+        """retrieve() returns None when variable was explicitly injected with value=None."""
         runtime = PythonRuntime()
         try:
             runtime.inject_variable(Variable(name="x", description="test", value=None))
-            sentinel = object()
-            result = runtime.retrieve("x", default=sentinel)
-            assert result is sentinel
+            # After the fix, None is injected into namespace, so retrieve returns None
+            result = runtime.retrieve("x")
+            assert result is None
         finally:
             runtime.close()
 
     @pytest.mark.asyncio
     async def test_describer_l3_value_none_variable(self) -> None:
-        """l3_value returns empty string when variable is not in namespace, even if None."""
+        """l3_value returns 'null' when variable is explicitly set to None."""
         runtime = PythonRuntime()
         try:
             runtime.inject_variable(Variable(name="x", description="test", value=None))
             describer = TieredRuntimeDescriber(runtime)
             result = describer.l3_value("x")
-            assert result == ""
+            # After the fix, None is in namespace, so l3_value serializes it
+            assert "null" in result.lower()
+            assert "[Variable: x]" in result
         finally:
             runtime.close()
 
@@ -398,5 +400,92 @@ class TestRetrieveDistinguishesNoneFromMissing:
             describer = TieredRuntimeDescriber(runtime)
             result = describer.l3_value("s")
             assert "[Variable: s]" in result
+        finally:
+            runtime.close()
+
+
+# ============================================================================
+# Security bypass vectors (globals/vars/locals + __builtins__ subscript)
+# ============================================================================
+
+
+class TestSecurityCheckerBypass:
+    """Verify that introspection bypass vectors are blocked by the security checker.
+
+    These test that:
+    - globals(), vars(), locals() are blocked as function calls
+    - __builtins__['exec'] subscript access is blocked
+    - __builtins__['open'] subscript access is blocked
+    - Normal safe code still passes (regression)
+    """
+
+    @pytest.mark.asyncio
+    async def test_globals_blocked(self) -> None:
+        """globals() leaks the full namespace — must be blocked."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("g = globals()")
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_vars_blocked(self) -> None:
+        """vars() exposes __dict__ of the current scope — must be blocked."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("v = vars()")
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_locals_blocked(self) -> None:
+        """locals() exposes local namespace — must be blocked."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("l = locals()")
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_builtins_subscript_exec_blocked(self) -> None:
+        """__builtins__['exec'] is a sandbox escape vector — must be blocked."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("__builtins__['exec']('pass')")
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_builtins_subscript_open_blocked(self) -> None:
+        """__builtins__['open'] is a file access escape vector — must be blocked."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("__builtins__['open']('/etc/passwd')")
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_safe_code_still_passes(self) -> None:
+        """Regression: normal safe code must still execute successfully."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("x = 1 + 2")
+            assert result.success is True
+            assert runtime.retrieve("x") == 3
         finally:
             runtime.close()

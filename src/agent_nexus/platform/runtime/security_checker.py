@@ -40,6 +40,9 @@ _DEFAULT_FORBIDDEN_FUNCTIONS = [
     "compile",
     "__import__",
     "open",
+    "globals",
+    "vars",
+    "locals",
 ]
 
 _DEFAULT_FORBIDDEN_ATTRIBUTES = [
@@ -51,6 +54,8 @@ _DEFAULT_FORBIDDEN_ATTRIBUTES = [
 
 _DEFAULT_REGEX_PATTERNS = [
     r"getattr\s*\(\s*\w+\s*,\s*['\"](?:eval|exec|compile|__import__)['\"]",
+    r"__builtins__\s*\[",
+    r"__builtins__\s*\.\s*__getitem__\s*\(",
 ]
 
 
