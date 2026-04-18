@@ -53,7 +53,7 @@ class MCPGateway:
         self._pm = process_manager
         self._router = router
         self._registered_agents: set[str] = set()
-        self._reg_lock = asyncio.Lock()
+        self._reg_lock: asyncio.Lock | None = None
         self._registry = DeferredAgentRegistry(process_manager)
         self._mcp = FastMCP("agent-nexus-gateway")
         self._setup_core_tools()
@@ -67,6 +67,17 @@ class MCPGateway:
         self._mcp.tool(self._search_and_activate)
         self._mcp.tool(self._list_agents)
         self._mcp.tool(self._agent_info)
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Return the registration lock, creating it lazily.
+
+        Creating ``asyncio.Lock()`` in ``__init__`` can raise
+        ``RuntimeError: no current event loop`` if the gateway is
+        instantiated outside an async context (e.g. CLI setup).
+        """
+        if self._reg_lock is None:
+            self._reg_lock = asyncio.Lock()
+        return self._reg_lock
 
     async def _search_and_activate(self, query: str) -> str:
         """Search agents by query and activate matching ones.
@@ -230,7 +241,7 @@ class MCPGateway:
         Creates a closure for each tool that captures the agent handle
         and delegates execution via the McpToolAdapter.
         """
-        async with self._reg_lock:
+        async with self._get_lock():
             if agent_name in self._registered_agents:
                 logger.debug("Agent '%s' tools already registered, skipping", agent_name)
                 return
@@ -270,6 +281,12 @@ class MCPGateway:
             info = self._registry.get_agent_info(adapter.agent_name)
             if info is None or info.handle is None:
                 return f"Error: agent '{adapter.agent_name}' not available"
+
+            # Health check: clean up stale registration if process died
+            if info.handle is not None and not info.handle.is_alive:
+                async with self._get_lock():
+                    self._registered_agents.discard(adapter.agent_name)
+                return f"Error: agent '{adapter.agent_name}' process has died"
 
             result = await adapter.execute(info.handle, kwargs)
             if result["success"]:

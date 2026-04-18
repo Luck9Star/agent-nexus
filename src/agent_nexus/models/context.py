@@ -100,6 +100,14 @@ class TokenUsage(BaseModel):
     compaction_count: int = 0
     last_compaction_turn: int = 0
 
+    @model_validator(mode="after")
+    def _sync_total_tokens(self) -> "TokenUsage":
+        """Ensure total_tokens is derived from prompt + completion when set."""
+        expected = self.prompt_tokens + self.completion_tokens
+        if expected > 0:
+            self.total_tokens = expected
+        return self
+
     def check_budget(
         self,
         context_window: int,

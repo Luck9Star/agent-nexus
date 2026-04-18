@@ -107,19 +107,21 @@ class TestTokenUsage:
         tu.completion_tokens = 50
         tu.total_tokens = 150
         assert tu.prompt_tokens == 100
+        assert tu.completion_tokens == 50
         assert tu.total_tokens == 150
 
     def test_with_initial_values(self):
-        tu = TokenUsage(prompt_tokens=500, completion_tokens=200, total_tokens=700)
+        tu = TokenUsage(prompt_tokens=500, completion_tokens=200)
         assert tu.prompt_tokens == 500
         assert tu.completion_tokens == 200
-        assert tu.total_tokens == 700
+        assert tu.total_tokens == 700  # auto-synced by validator
 
     def test_serialization_round_trip(self):
-        tu = TokenUsage(prompt_tokens=100, total_tokens=150)
+        tu = TokenUsage(prompt_tokens=100, completion_tokens=50)
         data = tu.model_dump()
         tu2 = TokenUsage(**data)
         assert tu2 == tu
+        assert tu2.total_tokens == 150  # auto-synced by validator
 
     def test_json_serialization(self):
         tu = TokenUsage(prompt_tokens=200, completion_tokens=100)

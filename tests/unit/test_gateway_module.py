@@ -1447,3 +1447,158 @@ class TestSearchAndActivateMessage:
 
         assert "tools now available" in result
         assert "in next call" not in result
+
+
+# ============================================================================
+# Iteration 25: Dead agent cleanup + lazy asyncio.Lock
+# ============================================================================
+
+
+class TestDeadAgentCleanup:
+    """Tool invocation on dead agent must return error and clean up registration."""
+
+    @pytest.mark.asyncio
+    async def test_dead_agent_returns_error_message(self) -> None:
+        """Invoking a tool on a dead agent returns 'process has died' error."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest("dead-agent")
+        await gw.register_agent(manifest, deferred=False)
+
+        # Set up registry state: agent has tool schemas + dead handle
+        info = gw.registry.get_agent_info("dead-agent")
+        assert info is not None
+        dead_handle = _mock_agent_handle("dead-agent", alive=False)
+        info.handle = dead_handle
+        info.tool_schemas = [{"name": "do_work", "description": "Work"}]
+
+        # Inject adapter
+        schema = _make_tool_schema("do_work", "Work")
+        adapter = McpToolAdapter(server_name="dead-agent", tool_schema=schema)
+        gw.registry._tool_adapters["dead-agent"] = [adapter]
+
+        # Register tools (this adds to _registered_agents)
+        await gw._register_agent_tools("dead-agent")
+
+        # Create the tool func and invoke it
+        func = gw._make_tool_func(adapter)
+        result = await func(x=1)
+
+        assert "Error" in result
+        assert "process has died" in result
+
+    @pytest.mark.asyncio
+    async def test_dead_agent_removed_from_registered_agents(self) -> None:
+        """Dead agent is removed from _registered_agents, allowing re-registration."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest("dead-agent")
+        await gw.register_agent(manifest, deferred=False)
+
+        info = gw.registry.get_agent_info("dead-agent")
+        assert info is not None
+        dead_handle = _mock_agent_handle("dead-agent", alive=False)
+        info.handle = dead_handle
+        info.tool_schemas = [{"name": "do_work", "description": "Work"}]
+
+        schema = _make_tool_schema("do_work", "Work")
+        adapter = McpToolAdapter(server_name="dead-agent", tool_schema=schema)
+        gw.registry._tool_adapters["dead-agent"] = [adapter]
+
+        await gw._register_agent_tools("dead-agent")
+        assert "dead-agent" in gw._registered_agents
+
+        # Invoke tool — should detect dead handle and clean up
+        func = gw._make_tool_func(adapter)
+        await func(x=1)
+
+        assert "dead-agent" not in gw._registered_agents
+
+    @pytest.mark.asyncio
+    async def test_alive_agent_not_cleaned_up(self) -> None:
+        """Alive agent should NOT be removed from _registered_agents."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest("alive-agent")
+        await gw.register_agent(manifest, deferred=False)
+
+        info = gw.registry.get_agent_info("alive-agent")
+        assert info is not None
+        alive_handle = _mock_agent_handle("alive-agent", alive=True)
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="done",
+            status="completed",
+        )
+        alive_handle.ipc.receive_until_result.return_value = response
+        info.handle = alive_handle
+        info.tool_schemas = [{"name": "do_work", "description": "Work"}]
+
+        schema = _make_tool_schema("do_work", "Work")
+        adapter = McpToolAdapter(server_name="alive-agent", tool_schema=schema)
+        gw.registry._tool_adapters["alive-agent"] = [adapter]
+
+        await gw._register_agent_tools("alive-agent")
+        assert "alive-agent" in gw._registered_agents
+
+        func = gw._make_tool_func(adapter)
+        result = await func(x=1)
+
+        # Should succeed, agent should still be registered
+        assert result == "done"
+        assert "alive-agent" in gw._registered_agents
+
+
+class TestLazyAsyncioLock:
+    """Gateway can be instantiated without a running event loop."""
+
+    def test_sync_instantiation_no_event_loop(self) -> None:
+        """Creating MCPGateway outside async context does not raise."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+
+        # Force no running event loop to verify lazy lock
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+            # If we're inside a test with a running loop, just verify
+            # the lock is None initially (lazy pattern)
+            gw = MCPGateway(pm, router)
+            assert gw._reg_lock is None
+        except RuntimeError:
+            # No running loop — this is the real test
+            gw = MCPGateway(pm, router)
+            assert gw._reg_lock is None
+
+    @pytest.mark.asyncio
+    async def test_lock_created_on_first_use(self) -> None:
+        """Lock is created on first call to _get_lock(), not in __init__."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        # Lock should not exist yet
+        assert gw._reg_lock is None
+
+        # Accessing the lock creates it
+        lock = gw._get_lock()
+        assert isinstance(lock, asyncio.Lock)
+        assert gw._reg_lock is not None
+
+    @pytest.mark.asyncio
+    async def test_lock_is_same_instance(self) -> None:
+        """_get_lock() returns the same lock instance on repeated calls."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        lock1 = gw._get_lock()
+        lock2 = gw._get_lock()
+        assert lock1 is lock2
