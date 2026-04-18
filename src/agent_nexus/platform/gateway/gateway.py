@@ -251,7 +251,7 @@ class MCPGateway:
                     )
                 except Exception as exc:
                     # FastMCP may raise if tool name already registered
-                    logger.debug(
+                    logger.warning(
                         "Tool '%s' already registered or error: %s",
                         adapter.full_name,
                         exc,

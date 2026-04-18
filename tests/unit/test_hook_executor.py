@@ -266,6 +266,7 @@ class TestCommandHook:
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.blocked is True
         assert result.results[0].passed is False
+        assert result.results[0].error is not None
         assert "timed out" in result.results[0].error
 
     @pytest.mark.asyncio
@@ -280,6 +281,7 @@ class TestCommandHook:
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.blocked is True
         assert result.results[0].passed is False
+        assert result.results[0].error is not None
         assert "missing" in result.results[0].error.lower()
 
     @pytest.mark.asyncio
@@ -292,6 +294,7 @@ class TestCommandHook:
         result = await executor.execute_event(HookEvent.PRE_EXECUTION, context=ctx)
         assert result.results[0].passed is True
         # cat echoes stdin back to stdout
+        assert result.results[0].output is not None
         assert json.loads(result.results[0].output) == ctx
 
 
@@ -343,6 +346,7 @@ class TestHttpHook:
 
         assert result.blocked is True
         assert result.results[0].passed is False
+        assert result.results[0].error is not None
         assert "500" in result.results[0].error
 
     @pytest.mark.asyncio
@@ -361,6 +365,7 @@ class TestHttpHook:
 
         assert result.blocked is False
         assert result.results[0].passed is False
+        assert result.results[0].error is not None
         assert "Connection refused" in result.results[0].error
 
     @pytest.mark.asyncio
@@ -374,6 +379,8 @@ class TestHttpHook:
 
         result = await executor.execute_event(HookEvent.POST_EXECUTION)
         assert result.blocked is True
+        assert result.results[0].passed is False
+        assert result.results[0].error is not None
         assert "missing" in result.results[0].error.lower()
 
 

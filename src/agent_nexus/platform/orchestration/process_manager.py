@@ -165,30 +165,44 @@ class ProcessManager:
                     f"Failed to start agent '{name}' with command {command}: {exc}"
                 ) from exc
 
-            assert process.stdin is not None
-            assert process.stdout is not None
+            # Post-creation setup — if anything fails, kill the orphaned process.
+            try:
+                assert process.stdin is not None
+                assert process.stdout is not None
 
-            stream = IPCStream(
-                stdin=process.stdin,
-                stdout=process.stdout,
-            )
-            ipc = IPCProtocol(stream)
+                stream = IPCStream(
+                    stdin=process.stdin,
+                    stdout=process.stdout,
+                )
+                ipc = IPCProtocol(stream)
 
-            handle = AgentHandle(
-                name=name,
-                process=process,
-                ipc=ipc,
-                start_command=list(command),
-                start_cwd=cwd,
-                start_env=dict(env) if env else {},
-            )
+                handle = AgentHandle(
+                    name=name,
+                    process=process,
+                    ipc=ipc,
+                    start_command=list(command),
+                    start_cwd=cwd,
+                    start_env=dict(env) if env else {},
+                )
 
-            # Drain stderr in background to prevent pipe buffer deadlock
-            assert process.stderr is not None
-            drain_task = asyncio.create_task(self._drain_stderr(process, name))
-            handle.drain_task = drain_task
+                # Drain stderr in background to prevent pipe buffer deadlock
+                assert process.stderr is not None
+                drain_task = asyncio.create_task(self._drain_stderr(process, name))
+                handle.drain_task = drain_task
 
-            self._agents[name] = handle
+                self._agents[name] = handle
+            except Exception:
+                # Kill orphaned process to prevent resource leak
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await process.wait()
+                except Exception:
+                    pass
+                raise
+
             logger.info(
                 "Agent '%s' started (pid=%s, command=%s)",
                 name,
@@ -244,7 +258,8 @@ class ProcessManager:
                 except Exception:
                     pass
                 async with self._lock:
-                    self._agents.pop(name, None)
+                    if self._agents.get(name) is handle:
+                        self._agents.pop(name, None)
                 logger.info("Agent '%s' already exited (rc=%s)", name, process.returncode)
                 return
 
@@ -257,7 +272,8 @@ class ProcessManager:
             try:
                 await asyncio.wait_for(process.wait(), timeout=timeout)
                 async with self._lock:
-                    self._agents.pop(name, None)
+                    if self._agents.get(name) is handle:
+                        self._agents.pop(name, None)
                 logger.info("Agent '%s' exited cleanly after IPC close", name)
                 return
             except asyncio.TimeoutError:
@@ -269,13 +285,15 @@ class ProcessManager:
                 process.send_signal(signal.SIGTERM)
             except ProcessLookupError:
                 async with self._lock:
-                    self._agents.pop(name, None)
+                    if self._agents.get(name) is handle:
+                        self._agents.pop(name, None)
                 return
 
             try:
                 await asyncio.wait_for(process.wait(), timeout=timeout)
                 async with self._lock:
-                    self._agents.pop(name, None)
+                    if self._agents.get(name) is handle:
+                        self._agents.pop(name, None)
                 logger.info("Agent '%s' terminated after SIGTERM", name)
                 return
             except asyncio.TimeoutError:
@@ -294,7 +312,8 @@ class ProcessManager:
                 pass
 
             async with self._lock:
-                self._agents.pop(name, None)
+                if self._agents.get(name) is handle:
+                    self._agents.pop(name, None)
             logger.info("Agent '%s' killed", name)
         finally:
             self._stopping.discard(name)
@@ -381,10 +400,13 @@ class ProcessManager:
             return
 
         # Stop in parallel — each stop_agent has its own timeout.
-        await asyncio.gather(
+        results = await asyncio.gather(
             *(self.stop_agent(name, timeout=timeout) for name in names),
             return_exceptions=True,
         )
+        for agent_name, result in zip(names, results):
+            if isinstance(result, Exception):
+                logger.error("Error stopping agent '%s': %s", agent_name, result)
 
     # ------------------------------------------------------------------
     # Cleanup
