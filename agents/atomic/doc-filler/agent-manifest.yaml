@@ -15,4 +15,4 @@ permissions:
     - pattern: "*.docx"
       access: read-write
     - pattern: "*.doc"
-      access: read-only
+      access: read
