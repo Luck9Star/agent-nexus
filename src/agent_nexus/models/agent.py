@@ -98,6 +98,7 @@ class AgentManifest(BaseModel):
     skills: list[str] = Field(default_factory=list)
     hooks: dict[str, list[HookDef]] = Field(default_factory=dict)
     mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
+    pip_dependencies: list[str] = Field(default_factory=list)
     effort: str | None = None
     max_turns: int | None = None
     memory_scope: str | None = None

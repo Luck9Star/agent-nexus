@@ -21,7 +21,7 @@ from pathlib import Path
 
 import yaml
 
-from agent_nexus.models.agent import AgentType
+from agent_nexus.models.agent import AgentManifest, AgentType
 from agent_nexus.models.distribution import LockfileEntry, SourceEntry
 
 from .lockfile import LockfileManager
@@ -142,9 +142,10 @@ class GitInstaller:
         logger.info("Agent files copied to %s", dest)
 
         # 6. Read manifest for metadata
-        manifest = self._read_manifest(dest)
-        agent_type = AgentType(manifest.get("type", "atomic"))
-        manifest_version = manifest.get("version", version or "0.0.0")
+        manifest_dict = self._read_manifest(dest)
+        manifest = AgentManifest(**manifest_dict) if manifest_dict else None
+        agent_type = manifest.type if manifest else AgentType.ATOMIC
+        manifest_version = manifest.version if manifest else (version or "0.0.0")
 
         # 7. Create venv if needed
         venv_path = await self._create_venv(agent_name, dest)
@@ -161,7 +162,7 @@ class GitInstaller:
             agent_type=agent_type,
             installed_at=datetime.now(),
             venv_path=str(venv_path) if venv_path else "",
-            dependencies=manifest.get("pip_dependencies", []),
+            dependencies=manifest.pip_dependencies if manifest else [],
         )
         self._lockfile.add_entry_by_name(agent_name, entry)
 

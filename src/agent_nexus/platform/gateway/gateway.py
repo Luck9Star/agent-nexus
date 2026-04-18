@@ -51,6 +51,7 @@ class MCPGateway:
     ) -> None:
         self._pm = process_manager
         self._router = router
+        self._registered_agents: set[str] = set()
         self._registry = DeferredAgentRegistry(process_manager)
         self._mcp = FastMCP("agent-nexus-gateway")
         self._setup_core_tools()
@@ -221,6 +222,10 @@ class MCPGateway:
         Creates a closure for each tool that captures the agent handle
         and delegates execution via the McpToolAdapter.
         """
+        if agent_name in self._registered_agents:
+            logger.debug("Agent '%s' tools already registered, skipping", agent_name)
+            return
+
         info = self._registry.get_agent_info(agent_name)
         if info is None or info.tool_schemas is None:
             return
@@ -242,6 +247,8 @@ class MCPGateway:
                     adapter.full_name,
                     exc,
                 )
+
+        self._registered_agents.add(agent_name)
 
     def _make_tool_func(self, adapter: McpToolAdapter) -> Any:
         """Create an async callable that the FastMCP server can invoke.

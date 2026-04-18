@@ -306,6 +306,32 @@ class TestCheckPathSensitive:
         d = checker.check_path("file_read", "document.txt")
         assert d.allowed
 
+    def test_path_traversal_bypass_blocked(self) -> None:
+        """Path traversal with '..' cannot bypass sensitive path protection.
+
+        Constructs traversal paths relative to CWD so they actually
+        resolve to sensitive locations regardless of test environment.
+        """
+        import os
+
+        from pathlib import Path
+
+        checker = _checker(mode=PermissionMode.FULL_AUTO)
+
+        # Build real traversal from CWD to each sensitive target
+        targets = [
+            Path.home() / ".ssh" / "id_rsa",
+            Path.home() / ".aws" / "credentials",
+            Path.home() / ".config" / "gcloud" / "credentials.db",
+        ]
+        for target in targets:
+            traversal = os.path.relpath(target)
+            d = checker.check_path("file_read", traversal)
+            assert not d.allowed, (
+                f"Traversal '{traversal}' (→ {target}) should be blocked"
+            )
+            assert "sensitive" in d.reason.lower()
+
 
 # ======================================================================
 # check_command

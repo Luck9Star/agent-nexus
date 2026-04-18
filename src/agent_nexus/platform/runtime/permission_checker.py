@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import fnmatch
 import logging
+import os
 from pathlib import Path
 
 from agent_nexus.models.permission import (
@@ -67,8 +68,12 @@ _DANGEROUS_COMMAND_PATTERNS: tuple[str, ...] = (
 
 
 def _expand_user(path: str) -> str:
-    """Expand ~ to the user's home directory."""
-    return str(Path(path).expanduser())
+    """Expand ~ and resolve to absolute canonical path.
+
+    Resolves ``..`` components to prevent path traversal attacks that
+    could bypass sensitive path protection (e.g. ``../../.ssh/id_rsa``).
+    """
+    return os.path.abspath(os.path.expanduser(path))
 
 
 def _matches_any_pattern(value: str, patterns: list[str] | tuple[str, ...]) -> bool:

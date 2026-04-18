@@ -234,6 +234,9 @@ class IPCProtocol:
             progress_callback: ``async def callback(msg) -> None``
         """
         deadline = asyncio.get_running_loop().time() + timeout
+        # Minimum per-receive timeout to avoid stream corruption from
+        # prematurely interrupting a partial readline.
+        _MIN_RECEIVE_TIMEOUT: float = 1.0
 
         while True:
             remaining = deadline - asyncio.get_running_loop().time()
@@ -242,7 +245,7 @@ class IPCProtocol:
                     f"Timed out after {timeout:.1f}s waiting for final result"
                 )
 
-            msg = await self._stream.receive(timeout=remaining)
+            msg = await self._stream.receive(timeout=max(remaining, _MIN_RECEIVE_TIMEOUT))
 
             # Optional task-id filter
             if task_id is not None and msg.task_id != task_id:
