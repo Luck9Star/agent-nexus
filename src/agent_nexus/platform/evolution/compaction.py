@@ -185,10 +185,10 @@ class CompactionGuard:
         """Number of consecutive compaction events."""
         return self._consecutive_compactions
 
-    def should_alert(self) -> bool:
+    def should_alert(self, budget: ContextBudget | None = None) -> bool:
         """Check if consecutive compactions exceed alert threshold."""
-        budget = ContextBudget()
-        return self._consecutive_compactions >= budget.consecutive_compaction_alert
+        b = budget or ContextBudget()
+        return self._consecutive_compactions >= b.consecutive_compaction_alert
 
     # ------------------------------------------------------------------
     # Internal helpers

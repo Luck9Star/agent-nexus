@@ -106,16 +106,16 @@ class TestFunctionRule:
         assert EVAL_CODE in violations[0].message
 
     def test_forbidden_method(self):
-        """obj.eval() is NOT flagged by FunctionRule (ast.Attribute skipped).
+        """obj.eval() IS flagged by FunctionRule (ast.Attribute now included).
 
-        Method calls like obj.eval() are handled by AttributeRule instead,
-        to avoid false positives on calls like re.compile() where
-        'compile' is a forbidden bare name but safe as a method call.
+        Method calls like obj.eval() are caught alongside bare eval() calls.
         """
         rule = FunctionRule(forbidden=[EVAL_CODE])
         code = "obj." + EVAL_CODE + "()"
         violations = _check_code(rule, code)
-        assert len(violations) == 0
+        assert len(violations) == 1
+        assert violations[0].rule_type == "function"
+        assert EVAL_CODE in violations[0].message
 
     def test_allowed_call(self):
         rule = FunctionRule(forbidden=[EVAL_CODE])

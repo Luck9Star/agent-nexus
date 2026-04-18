@@ -253,11 +253,12 @@ class IPCProtocol:
             # Optional task-id filter
             if task_id is not None and msg.task_id != task_id:
                 logger.warning(
-                    "Ignoring message for task %s (expected %s): type=%s",
+                    "Buffering message for task %s (expected %s): type=%s",
                     msg.task_id,
                     task_id,
                     msg.type,
                 )
+                self._peek_buffer.append(msg)
                 continue
 
             if msg.type == AgentToPlatformType.PROGRESS:

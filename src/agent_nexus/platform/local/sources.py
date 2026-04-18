@@ -10,6 +10,7 @@ Sources are searched by priority (official first, then by order in the file).
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -161,14 +162,18 @@ class SourceManager:
 
         self._sources = entries if entries else [_OFFICIAL_SOURCE]
 
+    def _get_cache_path(self, source: SourceEntry) -> Path:
+        """Compute cache path matching GitInstaller._get_cache_path."""
+        digest = hashlib.sha256(source.url.encode()).hexdigest()[:12]
+        return self._path.parent / "cache" / "repos" / digest
+
     def _load_source_index(self, source: SourceEntry) -> list[IndexEntry] | None:
         """Load the ``index.yaml`` for *source* from its local cache.
 
         Returns ``None`` if the cache does not exist or cannot be parsed.
-        The cache directory is ``<config_dir>/cache/repos/<source_name>/``.
+        The cache directory is ``<config_dir>/cache/repos/<url_hash>/``.
         """
-        # Build expected cache path: same parent as sources.yaml -> cache/repos/<name>
-        cache_dir = self._path.parent / "cache" / "repos" / source.name
+        cache_dir = self._get_cache_path(source)
         index_path = cache_dir / "index.yaml"
 
         if not index_path.exists():

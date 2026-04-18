@@ -362,11 +362,15 @@ class TestSourceManager:
 
     def test_resolve_agent_source_found(self, tmp_path: Path) -> None:
         """resolve_agent_source() finds agent in source index."""
+        import hashlib
+
         path = tmp_path / "sources.yaml"
         mgr = SourceManager(path)
 
-        # Create index cache for official source
-        cache_dir = tmp_path / "cache" / "repos" / "official"
+        # Create index cache for official source (hash-based path)
+        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
+        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
+        cache_dir = tmp_path / "cache" / "repos" / url_hash
         cache_dir.mkdir(parents=True, exist_ok=True)
         index_data = {
             "agents": [
@@ -390,9 +394,13 @@ class TestSourceManager:
 
     def test_resolve_agent_source_index_missing_agents_key(self, tmp_path: Path) -> None:
         """resolve_agent_source() returns None when index has no 'agents' key."""
+        import hashlib
+
         path = tmp_path / "sources.yaml"
         mgr = SourceManager(path)
-        cache_dir = tmp_path / "cache" / "repos" / "official"
+        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
+        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
+        cache_dir = tmp_path / "cache" / "repos" / url_hash
         cache_dir.mkdir(parents=True, exist_ok=True)
         _write_yaml(cache_dir / "index.yaml", {"other": []})
         assert mgr.resolve_agent_source("any-agent") is None

@@ -375,10 +375,9 @@ class GitInstaller:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await proc.wait()
+            _, stderr = await proc.communicate()
 
             if proc.returncode != 0:
-                stderr = await proc.stderr.read() if proc.stderr else b""
                 logger.warning("uv venv failed for %s: %s", agent_name, stderr.decode())
                 return None
 
@@ -389,10 +388,9 @@ class GitInstaller:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await proc.wait()
+            _, stderr = await proc.communicate()
 
             if proc.returncode != 0:
-                stderr = await proc.stderr.read() if proc.stderr else b""
                 logger.warning("uv pip install failed for %s: %s", agent_name, stderr.decode())
 
             logger.info("Venv created: %s", venv_path)

@@ -110,7 +110,7 @@ class FunctionRule(SecurityRule):
             # ``re.compile()`` should NOT be flagged here -- the
             # AttributeRule already covers dangerous attribute access
             # such as ``__builtins__``.
-            if func_name in self.forbidden and isinstance(node.func, ast.Name):
+            if func_name in self.forbidden and isinstance(node.func, (ast.Name, ast.Attribute)):
                 violations.append(
                     SecurityViolation(
                         rule_type="function",
