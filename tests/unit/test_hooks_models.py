@@ -308,3 +308,59 @@ class TestAggregatedHookResult:
         assert parsed["event"] == "on_evolution"
         ahr2 = AggregatedHookResult.model_validate_json(json_str)
         assert ahr2 == ahr
+
+
+# ---------------------------------------------------------------------------
+# Validation constraint tests (iter22)
+# ---------------------------------------------------------------------------
+
+
+class TestHookDefinitionValidation:
+    """Field constraint tests for HookDefinition."""
+
+    def test_timeout_seconds_rejects_zero(self):
+        with pytest.raises(ValidationError, match="greater than 0"):
+            HookDefinition(
+                type=HookType.COMMAND,
+                event=HookEvent.PRE_EXECUTION,
+                timeout_seconds=0,
+            )
+
+    def test_timeout_seconds_rejects_negative(self):
+        with pytest.raises(ValidationError, match="greater than 0"):
+            HookDefinition(
+                type=HookType.COMMAND,
+                event=HookEvent.PRE_EXECUTION,
+                timeout_seconds=-1.5,
+            )
+
+    def test_timeout_seconds_accepts_positive(self):
+        hd = HookDefinition(
+            type=HookType.COMMAND,
+            event=HookEvent.PRE_EXECUTION,
+            timeout_seconds=0.001,
+        )
+        assert hd.timeout_seconds == 0.001
+
+    def test_timeout_seconds_default_valid(self):
+        hd = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        assert hd.timeout_seconds == 10.0
+
+
+class TestHookExecutionValidation:
+    """Field constraint tests for HookExecution.duration_ms."""
+
+    def test_duration_ms_rejects_negative(self):
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        with pytest.raises(ValidationError, match="greater than or equal to 0"):
+            HookExecution(hook=hook, passed=True, duration_ms=-0.1)
+
+    def test_duration_ms_accepts_zero(self):
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        he = HookExecution(hook=hook, passed=True, duration_ms=0.0)
+        assert he.duration_ms == 0.0
+
+    def test_duration_ms_accepts_positive(self):
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        he = HookExecution(hook=hook, passed=True, duration_ms=150.7)
+        assert he.duration_ms == 150.7

@@ -449,3 +449,79 @@ class TestHookDefEnumTypes:
         data = h.model_dump()
         h2 = HookDef(**data)
         assert h2 == h
+
+
+# ---------------------------------------------------------------------------
+# Validation constraint tests (iter22)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentManifestMaxTurnsValidation:
+    """Field constraint tests for AgentManifest.max_turns."""
+
+    def test_max_turns_rejects_zero(self):
+        with pytest.raises(ValidationError, match="greater than 0"):
+            AgentManifest(
+                name="test",
+                version="1.0.0",
+                type=AgentType.ATOMIC,
+                description="test",
+                max_turns=0,
+            )
+
+    def test_max_turns_rejects_negative(self):
+        with pytest.raises(ValidationError, match="greater than 0"):
+            AgentManifest(
+                name="test",
+                version="1.0.0",
+                type=AgentType.ATOMIC,
+                description="test",
+                max_turns=-5,
+            )
+
+    def test_max_turns_accepts_positive(self):
+        m = AgentManifest(
+            name="test",
+            version="1.0.0",
+            type=AgentType.ATOMIC,
+            description="test",
+            max_turns=50,
+        )
+        assert m.max_turns == 50
+
+    def test_max_turns_accepts_none(self):
+        m = AgentManifest(
+            name="test",
+            version="1.0.0",
+            type=AgentType.ATOMIC,
+            description="test",
+        )
+        assert m.max_turns is None
+
+
+class TestHookDefTimeoutValidation:
+    """Field constraint tests for agent.models.HookDef.timeout_seconds."""
+
+    def test_timeout_rejects_zero(self):
+        with pytest.raises(ValidationError, match="greater than 0"):
+            HookDef(
+                type=HookType.COMMAND,
+                event=HookEvent.PRE_EXECUTION,
+                timeout_seconds=0,
+            )
+
+    def test_timeout_rejects_negative(self):
+        with pytest.raises(ValidationError, match="greater than 0"):
+            HookDef(
+                type=HookType.COMMAND,
+                event=HookEvent.PRE_EXECUTION,
+                timeout_seconds=-10,
+            )
+
+    def test_timeout_accepts_positive(self):
+        h = HookDef(
+            type=HookType.COMMAND,
+            event=HookEvent.PRE_EXECUTION,
+            timeout_seconds=5.0,
+        )
+        assert h.timeout_seconds == 5.0

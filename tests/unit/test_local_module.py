@@ -1059,7 +1059,7 @@ class TestCLI:
     @patch("agent_nexus.platform.local.cli._install", new_callable=AsyncMock)
     def test_install_agent_success(self, mock_install) -> None:
         """install command invokes _install with the agent name."""
-        result = runner.invoke(app, ["install", "doc-filler"])
+        result = runner.invoke(app, ["install", "install", "doc-filler"])
         assert mock_install.called
         call_args = mock_install.call_args[0]
         assert call_args[0] == "doc-filler"

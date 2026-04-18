@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _utc_now = lambda: datetime.now(timezone.utc)
 
@@ -44,6 +44,13 @@ class TaskItem(BaseModel):
     result: Any | None = None
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
+
+    @model_validator(mode='after')
+    def _no_self_reference(self) -> 'TaskItem':
+        """Prevent a task from blocking itself (guaranteed deadlock)."""
+        if self.blocked_by and self.id in self.blocked_by:
+            raise ValueError(f"Task '{self.id}' cannot block itself")
+        return self
 
 
 class TaskGraphSnapshot(BaseModel):

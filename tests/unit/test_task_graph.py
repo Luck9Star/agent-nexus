@@ -75,8 +75,8 @@ class TestAddTask:
             task_graph.add_task(_make_task("B", blocked_by=["nonexistent"]))
 
     def test_add_self_loop_raises(self, task_graph: TaskGraph) -> None:
-        """Task blocked_by itself raises ValueError (cycle)."""
-        with pytest.raises(ValueError, match="cycle"):
+        """Task blocked_by itself raises error (model-level self-reference check)."""
+        with pytest.raises(Exception, match="cannot block itself"):
             task_graph.add_task(_make_task("A", blocked_by=["A"]))
 
     def test_add_multiple_deps(self, task_graph: TaskGraph) -> None:

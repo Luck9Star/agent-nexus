@@ -230,7 +230,7 @@ class TestEvolutionStoreCounters:
         assert got.total_selections == 5
 
     def test_increment_fallback(self, tmp_path: Path) -> None:
-        r = _make_record("s1", "x", fallbacks=2)
+        r = _make_record("s1", "x", selections=3, fallbacks=2)
         store = _store_with_records(tmp_path, r)
         store.increment_counters("s1", fell_back=True)
         assert store.get_skill_record("s1").total_fallbacks == 3
@@ -872,7 +872,7 @@ class TestSkillEvolverDiagnose:
 
     def test_moderate_effective_suggests_derived(self) -> None:
         # effective_rate = 40/100 = 0.4 < 0.55, applied_rate = 30/100 = 0.3 > 0.25
-        r = _make_record("s1", "x", selections=100, applied=30, completions=40)
+        r = _make_record("s1", "x", selections=100, applied=40, completions=30)
         suggestion = SkillEvolver._diagnose_skill_health(r)
         assert suggestion is not None
         assert suggestion.evolution_type == EvolutionType.DERIVED
@@ -1072,7 +1072,7 @@ class TestPromotionCandidate:
         # effective_rate = 90/100 = 0.9 > 0.8, selections=100 > 50
         r = _make_record(
             "s1", "great-skill",
-            selections=100, completions=90,
+            selections=100, applied=90, completions=90,
             directory="skills/great",
         )
         store = _store_with_records(tmp_path, r)
@@ -1088,7 +1088,7 @@ class TestPromotionCandidate:
         # effective_rate = 40/100 = 0.4 < 0.8
         r = _make_record(
             "s1", "mediocre",
-            selections=100, completions=40,
+            selections=100, applied=40, completions=40,
             directory="skills/med",
         )
         store = _store_with_records(tmp_path, r)
@@ -1098,7 +1098,7 @@ class TestPromotionCandidate:
     def test_find_candidates_too_few_selections(self, tmp_path: Path) -> None:
         r = _make_record(
             "s1", "promising",
-            selections=30, completions=28,
+            selections=30, applied=28, completions=28,
             directory="skills/prom",
         )
         store = _store_with_records(tmp_path, r)
@@ -1108,7 +1108,7 @@ class TestPromotionCandidate:
     def test_find_candidates_no_directory(self, tmp_path: Path) -> None:
         r = _make_record(
             "s1", "naked-skill",
-            selections=100, completions=90,
+            selections=100, applied=90, completions=90,
             directory="",
         )
         store = _store_with_records(tmp_path, r)
@@ -1120,7 +1120,7 @@ class TestPromotionPromote:
     def test_promote_creates_files(self, tmp_path: Path) -> None:
         r = _make_record(
             "s1", "great-skill",
-            selections=100, completions=90,
+            selections=100, applied=90, completions=90,
             directory="skills/great",
         )
         store = _store_with_records(tmp_path, r)
@@ -1200,6 +1200,69 @@ class TestPromotionPromote:
         assert "promoted" in content
 
 
+class TestPromotionPreservesExisting:
+    """promote() must NOT delete a pre-existing directory on write failure."""
+
+    def test_pre_existing_dir_not_deleted_on_failure(self, tmp_path: Path) -> None:
+        """If agent_dir already exists and promotion fails, dir is preserved."""
+        from unittest.mock import patch
+
+        store = _store_with_records(tmp_path)
+        agents_dir = tmp_path / "agents"
+        # Create a pre-existing directory with a file inside
+        agent_dir = agents_dir / "existing-skill"
+        agent_dir.mkdir(parents=True)
+        important_file = agent_dir / "important.txt"
+        important_file.write_text("do not delete me", encoding="utf-8")
+
+        promoter = AgentPromoter(store, agents_root=agents_dir)
+        candidate = PromotionCandidate(
+            skill_id="s1",
+            skill_name="existing-skill",
+            effective_rate=0.9,
+            total_selections=100,
+            directory="skills/existing",
+            reason="test",
+        )
+
+        # Force a write failure after directory creation
+        with patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
+            result = promoter.promote(candidate)
+
+        assert not result.success
+        assert "disk full" in result.error
+        # The pre-existing directory and its file must survive
+        assert agent_dir.exists()
+        assert important_file.exists()
+        assert important_file.read_text() == "do not delete me"
+
+    def test_newly_created_dir_cleaned_up_on_failure(self, tmp_path: Path) -> None:
+        """If agent_dir was newly created and promotion fails, it IS cleaned up."""
+        from unittest.mock import patch
+
+        store = _store_with_records(tmp_path)
+        agents_dir = tmp_path / "agents"
+        promoter = AgentPromoter(store, agents_root=agents_dir)
+        candidate = PromotionCandidate(
+            skill_id="s1",
+            skill_name="new-skill",
+            effective_rate=0.9,
+            total_selections=100,
+            directory="skills/new",
+            reason="test",
+        )
+
+        # The directory does not exist yet
+        assert not (agents_dir / "new-skill").exists()
+
+        with patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
+            result = promoter.promote(candidate)
+
+        assert not result.success
+        # Newly created directory should be cleaned up
+        assert not (agents_dir / "new-skill").exists()
+
+
 # ============================================================================
 # 6. HealthChecker
 # ============================================================================
@@ -1245,7 +1308,7 @@ class TestHealthCheckerCheckHealth:
 
     def test_moderate_effective_triggers_derived(self) -> None:
         # effective_rate = 40/100 = 0.4 < 0.55, applied_rate = 30/100 = 0.3 > 0.25
-        r = _make_record("s1", "x", selections=100, applied=30, completions=40)
+        r = _make_record("s1", "x", selections=100, applied=40, completions=30)
         from unittest.mock import MagicMock
 
         checker = HealthChecker(MagicMock())
@@ -1314,7 +1377,7 @@ class TestHealthCheckerGetSummary:
     def test_summary_counts(self, tmp_path: Path) -> None:
         r1 = _make_record("s1", "healthy", selections=100, applied=80, completions=70, fallbacks=5)
         r2 = _make_record("s2", "bad", selections=100, fallbacks=60)
-        r3 = _make_record("s3", "moderate", selections=100, applied=30, completions=40)
+        r3 = _make_record("s3", "moderate", selections=100, applied=40, completions=30)
         store = _store_with_records(tmp_path, r1, r2, r3)
         checker = HealthChecker(store)
 

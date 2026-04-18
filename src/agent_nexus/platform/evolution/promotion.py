@@ -130,6 +130,7 @@ class AgentPromoter:
         agent_name = candidate.skill_name
         agent_dir = self._agents_root / agent_name
 
+        created = not agent_dir.exists()
         try:
             agent_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -154,8 +155,10 @@ class AgentPromoter:
             skill_path = agent_dir / "SKILL.md"
             skill_path.write_text(skill_content, encoding="utf-8")
         except OSError as e:
-            # Clean up partial files on any write failure
-            shutil.rmtree(agent_dir, ignore_errors=True)
+            # Only clean up if we created the directory — never delete
+            # a pre-existing directory that we didn't create.
+            if created and agent_dir.exists():
+                shutil.rmtree(agent_dir, ignore_errors=True)
             return PromotionResult(
                 success=False,
                 error=f"Failed to write agent files: {e}",

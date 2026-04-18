@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _utc_now = lambda: datetime.now(timezone.utc)
 
@@ -48,7 +48,7 @@ class SkillLineage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     origin: SkillOrigin = SkillOrigin.IMPORTED
-    generation: int = 0
+    generation: int = Field(default=0, ge=0)
     parent_skill_ids: list[str] = Field(default_factory=list)
     content_diff: str | None = None
     content_snapshot: dict[str, str] | None = None
@@ -79,6 +79,16 @@ class SkillRecord(BaseModel):
     total_fallbacks: int = Field(default=0, ge=0)
     first_seen: datetime = Field(default_factory=_utc_now)
     last_updated: datetime = Field(default_factory=_utc_now)
+
+    @model_validator(mode='after')
+    def _validate_counters(self) -> 'SkillRecord':
+        if self.total_applied > self.total_selections:
+            raise ValueError("total_applied cannot exceed total_selections")
+        if self.total_completions > self.total_applied:
+            raise ValueError("total_completions cannot exceed total_applied")
+        if self.total_fallbacks > self.total_selections:
+            raise ValueError("total_fallbacks cannot exceed total_selections")
+        return self
 
 
 class EvolutionMetrics(BaseModel):

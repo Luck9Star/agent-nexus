@@ -160,6 +160,41 @@ class TestTaskItem:
 # TaskGraphSnapshot
 # ---------------------------------------------------------------------------
 
+class TestTaskItemSelfReference:
+    """TaskItem must reject self-referencing blocked_by (guaranteed deadlock)."""
+
+    def test_self_reference_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="cannot block itself"):
+            TaskItem(
+                id="t1",
+                description="Do work",
+                agent="worker-1",
+                blocked_by=["t1"],
+            )
+
+    def test_self_reference_among_others_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="cannot block itself"):
+            TaskItem(
+                id="t1",
+                description="Do work",
+                agent="worker-1",
+                blocked_by=["t0", "t1", "t2"],
+            )
+
+    def test_other_references_allowed(self) -> None:
+        t = TaskItem(
+            id="t1",
+            description="Do work",
+            agent="worker-1",
+            blocked_by=["t0", "t2"],
+        )
+        assert t.blocked_by == ["t0", "t2"]
+
+    def test_empty_blocked_by_still_allowed(self) -> None:
+        t = TaskItem(id="t1", description="Do work", agent="worker-1")
+        assert t.blocked_by == []
+
+
 class TestTaskGraphSnapshot:
     def test_default_construction(self):
         snap = TaskGraphSnapshot()

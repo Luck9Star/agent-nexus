@@ -287,3 +287,89 @@ class TestEvolutionContext:
         data = ec.model_dump()
         ec2 = EvolutionContext(**data)
         assert ec2 == ec
+
+
+# ---------------------------------------------------------------------------
+# Validation constraint tests (iter22)
+# ---------------------------------------------------------------------------
+
+
+class TestSkillLineageGenerationValidation:
+    """Field constraint tests for SkillLineage.generation."""
+
+    def test_generation_rejects_negative(self):
+        with pytest.raises(ValidationError, match="greater than or equal to 0"):
+            SkillLineage(generation=-1)
+
+    def test_generation_accepts_zero(self):
+        lin = SkillLineage(generation=0)
+        assert lin.generation == 0
+
+    def test_generation_accepts_positive(self):
+        lin = SkillLineage(generation=42)
+        assert lin.generation == 42
+
+
+class TestSkillRecordCounterValidation:
+    """Cross-field validation tests for SkillRecord counters."""
+
+    def test_applied_exceeds_selections_rejected(self):
+        with pytest.raises(ValidationError, match="total_applied cannot exceed total_selections"):
+            SkillRecord(
+                id="s1",
+                name="test",
+                total_selections=5,
+                total_applied=10,
+            )
+
+    def test_completions_exceeds_applied_rejected(self):
+        with pytest.raises(ValidationError, match="total_completions cannot exceed total_applied"):
+            SkillRecord(
+                id="s1",
+                name="test",
+                total_selections=10,
+                total_applied=5,
+                total_completions=8,
+            )
+
+    def test_fallbacks_exceeds_selections_rejected(self):
+        with pytest.raises(ValidationError, match="total_fallbacks cannot exceed total_selections"):
+            SkillRecord(
+                id="s1",
+                name="test",
+                total_selections=3,
+                total_fallbacks=5,
+            )
+
+    def test_valid_counters_accepted(self):
+        sr = SkillRecord(
+            id="s1",
+            name="test",
+            total_selections=100,
+            total_applied=80,
+            total_completions=70,
+            total_fallbacks=10,
+        )
+        assert sr.total_selections == 100
+        assert sr.total_applied == 80
+        assert sr.total_completions == 70
+        assert sr.total_fallbacks == 10
+
+    def test_all_zero_counters_valid(self):
+        sr = SkillRecord(id="s1", name="test")
+        assert sr.total_selections == 0
+        assert sr.total_applied == 0
+        assert sr.total_completions == 0
+        assert sr.total_fallbacks == 0
+
+    def test_all_equal_counters_valid(self):
+        """Edge case: all counters equal is valid."""
+        sr = SkillRecord(
+            id="s1",
+            name="test",
+            total_selections=10,
+            total_applied=10,
+            total_completions=10,
+            total_fallbacks=10,
+        )
+        assert sr.total_selections == 10

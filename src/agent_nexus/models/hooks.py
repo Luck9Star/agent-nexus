@@ -71,7 +71,7 @@ class HookDefinition(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
     block_on_failure: bool = False
-    timeout_seconds: float = 10.0
+    timeout_seconds: float = Field(default=10.0, gt=0)
     matcher: str | None = None  # fnmatch glob for tool name matching
 
     # Hook-type-specific fields
@@ -95,7 +95,7 @@ class HookExecution(BaseModel):
     blocked: bool = False
     output: str | None = None
     error: str | None = None
-    duration_ms: float = 0.0
+    duration_ms: float = Field(default=0.0, ge=0)
     executed_at: datetime = Field(default_factory=_utc_now)
 
 

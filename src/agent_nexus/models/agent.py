@@ -101,7 +101,7 @@ class AgentManifest(BaseModel):
     mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
     pip_dependencies: list[str] = Field(default_factory=list)
     effort: str | None = None
-    max_turns: int | None = None
+    max_turns: int | None = Field(default=None, gt=0)
     memory_scope: str | None = None
     isolation: str | None = None
     color: str | None = None
@@ -162,7 +162,7 @@ class HookDef(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
     block_on_failure: bool = False
-    timeout_seconds: float = 10.0
+    timeout_seconds: float = Field(default=10.0, gt=0)
     matcher: str | None = None  # fnmatch glob for tool name matching
 
     # Hook-type-specific fields

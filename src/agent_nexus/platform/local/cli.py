@@ -25,7 +25,7 @@ app = typer.Typer(
 # Sub-command groups
 install_app = typer.Typer(help="Agent installation and management")
 run_app = typer.Typer(help="Run agents and workflows")
-app.add_typer(install_app, name="install", invoke_without_command=True)
+app.add_typer(install_app, name="install")
 app.add_typer(run_app, name="run", invoke_without_command=True)
 
 
@@ -34,7 +34,7 @@ app.add_typer(run_app, name="run", invoke_without_command=True)
 # =====================================================================
 
 
-@install_app.callback()
+@install_app.command("install")
 def install_agent(
     name: str = typer.Argument(help="Agent name to install"),
     version: Optional[str] = typer.Option(
@@ -523,11 +523,8 @@ async def _run(name: str, mode: str, transport: str) -> None:
 
 async def _wait_forever() -> None:
     """Block indefinitely until cancelled."""
-    try:
-        while True:
-            await asyncio.sleep(3600)
-    except asyncio.CancelledError:
-        pass
+    while True:
+        await asyncio.sleep(3600)
 
 
 # =====================================================================

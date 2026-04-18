@@ -346,12 +346,13 @@ async def test_cycle_detection_via_task_graph(task_graph: TaskGraph) -> None:
     assert len(cycles) == 0
 
     # Test that adding a self-referencing task is caught
-    with pytest.raises(ValueError, match="cycle"):
-        task_graph.add_task(TaskItem(
+    # Model-level validator catches self-reference at TaskItem creation time
+    with pytest.raises(Exception, match="cannot block itself"):
+        TaskItem(
             id="D", description="Self-loop", agent="agent-1",
             blocked_by=["D"], state=TaskState.PENDING,
             created_at=now, updated_at=now,
-        ))
+        )
 
     # Test that adding a task that closes a back-edge is caught.
     # Current graph: A <- B <- C.  Try to make A depend on C.
