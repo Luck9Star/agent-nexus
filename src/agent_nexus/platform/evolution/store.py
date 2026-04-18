@@ -592,7 +592,7 @@ class EvolutionStore:
             # Insert lineage parents
             for pid in parent_skill_ids:
                 conn.execute(
-                    "INSERT OR IGNORE INTO skill_lineage_parents "
+                    "INSERT INTO skill_lineage_parents "
                     "(skill_id, parent_id) VALUES (?, ?)",
                     (new_record.id, pid),
                 )

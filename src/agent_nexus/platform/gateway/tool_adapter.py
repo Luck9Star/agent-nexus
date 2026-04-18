@@ -77,6 +77,7 @@ class McpToolAdapter:
             Dict with ``output`` and ``success`` keys.
         """
         import json
+        import uuid
 
         if not handle.is_alive:
             return {
@@ -90,7 +91,7 @@ class McpToolAdapter:
         )
 
         try:
-            await handle.ipc.send_chat(payload, conversation_id="__gateway_tool__")
+            await handle.ipc.send_chat(payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__")
             response = await handle.ipc.receive_until_result(timeout=300.0)
         except Exception as exc:
             logger.error(

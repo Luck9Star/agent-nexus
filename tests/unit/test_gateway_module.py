@@ -309,7 +309,8 @@ class TestMcpToolAdapterExecute:
         payload = json.loads(call_args[0][0])
         assert payload["tool"] == "my_tool"
         assert payload["arguments"] == {"key": "val"}
-        assert call_args[1]["conversation_id"] == "__gateway_tool__"
+        conv_id = call_args[1]["conversation_id"]
+        assert conv_id.startswith("__tool_") and conv_id.endswith("__")
 
     @pytest.mark.asyncio
     async def test_execute_failed_status(self) -> None:

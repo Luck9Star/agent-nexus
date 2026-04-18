@@ -229,9 +229,8 @@ class PlatformRouter:
 
         # Serialize send+receive per agent to prevent concurrent IPC
         # calls from interleaving responses on the same handle.
-        if atomic_name not in self._route_locks:
-            self._route_locks[atomic_name] = asyncio.Lock()
-        async with self._route_locks[atomic_name]:
+        lock = self._route_locks.setdefault(atomic_name, asyncio.Lock())
+        async with lock:
             # Send chat message via IPC
             try:
                 await handle.ipc.send_chat(

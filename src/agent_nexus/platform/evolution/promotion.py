@@ -17,6 +17,8 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 from agent_nexus.platform.evolution.store import EvolutionStore
 
 
@@ -68,7 +70,7 @@ class AgentPromoter:
         agents_root: Path | None = None,
     ) -> None:
         self._store = store
-        self._agents_root = agents_root or Path("agents/atomic")
+        self._agents_root = (agents_root or Path("agents/atomic")).resolve()
 
     def find_candidates(self) -> list[PromotionCandidate]:
         """Scan active skills and find promotion candidates.
@@ -176,19 +178,23 @@ class AgentPromoter:
         self, candidate: PromotionCandidate
     ) -> str:
         """Generate an agent-manifest.yaml for the promoted agent."""
-        return (
-            f'agent:\n'
-            f'  name: "{candidate.skill_name}"\n'
-            f'  type: "atomic"\n'
-            f'  description: "Auto-promoted from skill {candidate.skill_id}"\n'
-            f'  version: "0.1.0"\n'
-            f'  model:\n'
-            f'    tier: "standard"\n'
-            f'  promotion:\n'
-            f'    from_skill: "{candidate.skill_id}"\n'
-            f'    effective_rate: {candidate.effective_rate:.2f}\n'
-            f'    total_selections: {candidate.total_selections}\n'
-        )
+        manifest_data = {
+            "agent": {
+                "name": candidate.skill_name,
+                "type": "atomic",
+                "description": f"Auto-promoted from skill {candidate.skill_id}",
+                "version": "0.1.0",
+                "model": {
+                    "tier": "standard",
+                },
+                "promotion": {
+                    "from_skill": candidate.skill_id,
+                    "effective_rate": round(candidate.effective_rate, 2),
+                    "total_selections": candidate.total_selections,
+                },
+            },
+        }
+        return yaml.safe_dump(manifest_data, default_flow_style=False, sort_keys=False)
 
     def _generate_entry_point(
         self, candidate: PromotionCandidate

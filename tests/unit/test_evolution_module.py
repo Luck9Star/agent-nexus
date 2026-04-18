@@ -1244,8 +1244,8 @@ class TestPromotionPromote:
         # Verify manifest filename is agent-manifest.yaml (not .toml)
         assert result.manifest_path.endswith("agent-manifest.yaml")
         manifest = Path(result.manifest_path).read_text()
-        assert 'name: "test-skill"' in manifest
-        assert 'type: "atomic"' in manifest
+        assert "name: test-skill" in manifest
+        assert "type: atomic" in manifest
         assert "from_skill" in manifest
 
     def test_promote_entry_point_content(self, tmp_path: Path) -> None:
