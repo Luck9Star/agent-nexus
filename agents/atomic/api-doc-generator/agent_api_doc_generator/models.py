@@ -34,18 +34,12 @@ class EndpointInfo(BaseModel):
 
 
 class SchemaInfo(BaseModel):
-    """Inferred JSON Schema from type annotations.
+    """Inferred JSON Schema from type annotations."""
 
-    Attributes:
-        name: Schema name (typically the class/type name).
-        schema: JSON Schema definition as a dict.
-        required_fields: List of required field names.
-    """
-
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, protected_namespaces=(), populate_by_name=True)
 
     name: str
-    schema: dict = Field(default_factory=dict)
+    json_schema: dict = Field(default_factory=dict, alias="schema")
     required_fields: list[str] = Field(default_factory=list)
 
 

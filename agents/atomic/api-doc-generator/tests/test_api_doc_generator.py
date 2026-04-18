@@ -177,16 +177,16 @@ class TestSchemaInfo:
     def test_basic_construction(self) -> None:
         s = SchemaInfo(name="User")
         assert s.name == "User"
-        assert s.schema == {}
+        assert s.json_schema == {}
         assert s.required_fields == []
 
     def test_with_schema(self) -> None:
         s = SchemaInfo(
             name="User",
-            schema={"type": "object", "properties": {"name": {"type": "string"}}},
+            json_schema={"type": "object", "properties": {"name": {"type": "string"}}},
             required_fields=["name"],
         )
-        assert s.schema["type"] == "object"
+        assert s.json_schema["type"] == "object"
         assert "name" in s.required_fields
 
     def test_frozen(self) -> None:
@@ -341,7 +341,7 @@ class TestInferSchema:
     def test_python_class(self) -> None:
         result = infer_schema(PYTHON_TYPES)
         assert result.name == "User"
-        props = result.schema.get("properties", {})
+        props = result.json_schema.get("properties", {})
         assert "name" in props
         assert props["name"]["type"] == "string"
         assert props["age"]["type"] == "integer"
@@ -355,13 +355,13 @@ class TestInferSchema:
 
     def test_python_optional_nullable(self) -> None:
         result = infer_schema(PYTHON_TYPES)
-        props = result.schema.get("properties", {})
+        props = result.json_schema.get("properties", {})
         assert props["email"].get("nullable") is True
 
     def test_typescript_interface(self) -> None:
         result = infer_schema(TYPESCRIPT_TYPES)
         assert result.name == "Product"
-        props = result.schema.get("properties", {})
+        props = result.json_schema.get("properties", {})
         assert props["name"]["type"] == "string"
         assert props["price"]["type"] == "number"
 
@@ -373,7 +373,7 @@ class TestInferSchema:
 
     def test_simple_type(self) -> None:
         result = infer_schema("str")
-        assert result.schema["type"] == "string"
+        assert result.json_schema["type"] == "string"
 
     def test_unknown_class(self) -> None:
         code = "class Foo:\n    x: custom_type"
@@ -422,7 +422,7 @@ class TestGenerateOpenAPI:
         schemas = [
             SchemaInfo(
                 name="User",
-                schema={"type": "object", "properties": {"name": {"type": "string"}}},
+                json_schema={"type": "object", "properties": {"name": {"type": "string"}}},
             )
         ]
         spec = generate_openapi([], schemas=schemas)

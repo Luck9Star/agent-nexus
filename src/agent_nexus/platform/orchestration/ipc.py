@@ -123,8 +123,8 @@ class IPCStream:
         if not self._stdin.is_closing():
             self._stdin.close()
             try:
-                await self._stdin.wait_closed()
-            except Exception:
+                await asyncio.wait_for(self._stdin.wait_closed(), timeout=2.0)
+            except (asyncio.TimeoutError, Exception):
                 pass
         # Drain any remaining stdout to avoid BrokenPipeError on the
         # agent side.
@@ -233,10 +233,10 @@ class IPCProtocol:
             timeout: Total timeout for the entire wait.
             progress_callback: ``async def callback(msg) -> None``
         """
-        deadline = asyncio.get_event_loop().time() + timeout
+        deadline = asyncio.get_running_loop().time() + timeout
 
         while True:
-            remaining = deadline - asyncio.get_event_loop().time()
+            remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 raise IPCTimeoutError(
                     f"Timed out after {timeout:.1f}s waiting for final result"

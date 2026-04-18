@@ -217,7 +217,6 @@ async def _update(name: str | None, all_agents: bool) -> None:
     else:
         typer.echo("Specify an agent name or use --all.")
         raise typer.Exit(code=1)
-        return  # unreachable, helps type checker
 
     updated_count = 0
     for agent_name in agents_to_update:
@@ -310,7 +309,6 @@ async def _info(name: str) -> None:
     if entry is None:
         typer.echo(f"Agent '{name}' is not installed.", err=True)
         raise typer.Exit(code=1)
-        return  # unreachable, helps type checker
 
     # Display lockfile info
     typer.echo(f"Agent: {name}")
@@ -444,7 +442,9 @@ async def _run(name: str, mode: str, transport: str) -> None:
             typer.echo(f"Failed to start agent '{name}'.", err=True)
             raise typer.Exit(code=1)
 
-        typer.echo(f"Agent '{name}' started (pid: {pm.get_agent(name).pid}).")
+        handle = pm.get_agent(name)
+        pid_str = str(handle.pid) if handle else "unknown"
+        typer.echo(f"Agent '{name}' started (pid: {pid_str}).")
         typer.echo("Press Ctrl+C to stop.")
 
         try:

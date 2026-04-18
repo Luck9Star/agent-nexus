@@ -88,7 +88,7 @@ def _infer_python_schema(type_info: str) -> SchemaInfo:
 
     return SchemaInfo(
         name=name,
-        schema=schema,
+        json_schema=schema,
         required_fields=required,
     )
 
@@ -121,7 +121,7 @@ def _infer_typescript_schema(type_info: str) -> SchemaInfo:
 
     return SchemaInfo(
         name=name,
-        schema=schema,
+        json_schema=schema,
         required_fields=required,
     )
 
@@ -133,13 +133,13 @@ def _infer_simple_type(type_info: str) -> SchemaInfo:
     if stripped in PYTHON_TYPE_MAP:
         return SchemaInfo(
             name=stripped,
-            schema=PYTHON_TYPE_MAP[stripped],
+            json_schema=PYTHON_TYPE_MAP[stripped],
         )
 
     # Default fallback
     return SchemaInfo(
         name="Unknown",
-        schema={"type": "string"},
+        json_schema={"type": "string"},
     )
 
 
@@ -156,7 +156,7 @@ def infer_schema(type_info: str) -> SchemaInfo:
         SchemaInfo with the inferred JSON Schema and required fields.
     """
     if not type_info or not type_info.strip():
-        return SchemaInfo(name="Empty", schema={"type": "object"})
+        return SchemaInfo(name="Empty", json_schema={"type": "object"})
 
     # Check TypeScript first -- interface keyword is unambiguous
     if _is_typescript_type_info(type_info):

@@ -10,15 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class TestUnit(BaseModel):  # noqa: N801 — domain name, not a pytest class
-    """A testable unit identified in source code.
-
-    Attributes:
-        name: Name of the function/method/class.
-        type: Type of the unit (function/method/class).
-        inputs: List of input parameter descriptions.
-        expected: Description of expected output.
-        edge_cases: List of edge case descriptions.
-    """
+    """A testable unit identified in source code."""
+    __test__ = False  # prevent pytest collection
 
     model_config = ConfigDict(frozen=True)
 
@@ -30,13 +23,8 @@ class TestUnit(BaseModel):  # noqa: N801 — domain name, not a pytest class
 
 
 class TestAnalysis(BaseModel):  # noqa: N801
-    """Result of analyzing source code for testable units.
-
-    Attributes:
-        units: All identified testable units.
-        framework: Recommended test framework.
-        coverage_targets: Coverage targets by category.
-    """
+    """Result of analyzing source code for testable units."""
+    __test__ = False  # prevent pytest collection
 
     model_config = ConfigDict(frozen=True)
 
@@ -45,16 +33,9 @@ class TestAnalysis(BaseModel):  # noqa: N801
     coverage_targets: dict[str, float] = Field(default_factory=dict)
 
 
-class TestCase(BaseModel):
-    """A single test case.
-
-    Attributes:
-        name: Test case name (should start with test_).
-        setup: Setup/arrange step description.
-        actions: Action/act step descriptions.
-        assertions: Assert descriptions.
-        tags: Classification tags (unit, integration, e2e, edge_case).
-    """
+class TestCase(BaseModel):  # noqa: N801
+    """A single test case."""
+    __test__ = False  # prevent pytest collection
 
     model_config = ConfigDict(frozen=True)
 
@@ -66,14 +47,8 @@ class TestCase(BaseModel):
 
 
 class TestSuite(BaseModel):  # noqa: N801
-    """Assembled test suite ready for code generation.
-
-    Attributes:
-        framework: Test framework to use.
-        cases: All test cases in the suite.
-        imports: Required import statements.
-        fixtures: Fixture definitions (name -> setup code).
-    """
+    """Assembled test suite ready for code generation."""
+    __test__ = False  # prevent pytest collection
 
     model_config = ConfigDict(frozen=True)
 

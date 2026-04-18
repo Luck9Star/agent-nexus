@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any
 
 from agent_nexus.models.agent import AgentManifest
 from agent_nexus.platform.orchestration.process_manager import (
@@ -289,7 +292,7 @@ class DeferredAgentRegistry:
                 pass
 
         # Activated deferred agents
-        for name, adapters in self._tool_adapters.items():
+        for _name, adapters in self._tool_adapters.items():
             tools.extend(a.get_tool_definition() for a in adapters)
 
         return tools
@@ -308,6 +311,17 @@ class DeferredAgentRegistry:
                 if adapter.full_name == full_name:
                     return adapter
         return None
+
+    def get_tool_adapters(self, agent_name: str) -> list[McpToolAdapter]:
+        """Return all tool adapters registered for a given agent.
+
+        Args:
+            agent_name: Name of the agent whose adapters to retrieve.
+
+        Returns:
+            List of McpToolAdapter instances (empty if agent has none).
+        """
+        return self._tool_adapters.get(agent_name, [])
 
     def get_agent_info(self, name: str) -> AgentInfo | None:
         """Look up agent info by name across all tiers."""

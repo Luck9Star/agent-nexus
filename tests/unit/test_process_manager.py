@@ -140,6 +140,7 @@ class TestStartAgent:
 # ============================================================================
 
 
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
 class TestStopAgent:
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
     async def test_stop_clean_exit(
@@ -182,7 +183,10 @@ class TestStopAgent:
 
         await pm.start_agent(name="dead", command=["echo"])
         # Process already has returncode set (dead)
-        await pm.stop_agent("dead")
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            await pm.stop_agent("dead")
 
         assert pm.get_agent("dead") is None
 

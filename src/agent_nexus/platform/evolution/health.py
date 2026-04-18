@@ -11,6 +11,7 @@ Rule-engine pre-filter, LLM does final confirmation (in SkillEvolver).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from agent_nexus.models.evolution import (
     EvolutionType,

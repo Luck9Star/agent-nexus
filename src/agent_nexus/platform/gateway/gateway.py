@@ -15,16 +15,12 @@ Reference: docs/06-mcp-communication.md Section 8.2, 8.8
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
 
 from agent_nexus.models.agent import AgentManifest
-from agent_nexus.platform.gateway.deferred_registry import (
-    AgentInfo,
-    DeferredAgentRegistry,
-)
+from agent_nexus.platform.gateway.deferred_registry import DeferredAgentRegistry
 from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
 from agent_nexus.platform.router.router import PlatformRouter
@@ -229,7 +225,7 @@ class MCPGateway:
         if info is None or info.tool_schemas is None:
             return
 
-        adapters = self._registry._tool_adapters.get(agent_name, [])
+        adapters = self._registry.get_tool_adapters(agent_name)
 
         for adapter in adapters:
             # Avoid duplicate registration

@@ -64,8 +64,8 @@ def _build_components(schemas: list[SchemaInfo]) -> dict:
     components: dict = {"schemas": {}}
 
     for schema in schemas:
-        if schema.name and schema.schema:
-            components["schemas"][schema.name] = schema.schema
+        if schema.name and schema.json_schema:
+            components["schemas"][schema.name] = schema.json_schema
 
     return components
 
