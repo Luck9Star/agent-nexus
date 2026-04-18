@@ -6,6 +6,7 @@ Public API:
     SecurityChecker     — AST-level code safety analysis
     PermissionChecker   — Runtime permission evaluator for agent tool calls
     TieredRuntimeDescriber — L0-L3 context generation for LLM injection
+    TokenTracker        — Session-scoped token usage monitor with tiered alerts
 
 Security rules:
     ImportRule          — Block forbidden module imports
@@ -35,6 +36,7 @@ from .security_rules import (
     RegexRule,
     SecurityRule,
 )
+from .token_tracker import TokenAlert, TokenTracker
 
 __all__ = [
     # High-level API
@@ -43,6 +45,8 @@ __all__ = [
     "SecurityChecker",
     "PermissionChecker",
     "TieredRuntimeDescriber",
+    "TokenTracker",
+    "TokenAlert",
     # Security rules
     "SecurityRule",
     "ImportRule",

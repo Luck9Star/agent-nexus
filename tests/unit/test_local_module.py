@@ -643,6 +643,25 @@ class TestGitInstaller:
         with pytest.raises(AgentNotFoundError, match="not found in any configured source"):
             await installer.install("nonexistent-agent")
 
+    def test_installer_uses_timezone_aware_datetime(self) -> None:
+        """GitInstaller source imports timezone and uses datetime.now(timezone.utc)."""
+        import inspect
+        import ast
+
+        source = inspect.getsource(GitInstaller)
+        tree = ast.parse(source)
+        # Check that 'timezone' appears in the source as datetime.now(timezone.utc)
+        # by searching for the call pattern directly in the source text
+        assert "datetime.now(timezone.utc)" in source, (
+            "Expected 'datetime.now(timezone.utc)' in GitInstaller source"
+        )
+        # Also verify the import at module level
+        import agent_nexus.platform.local.installer as installer_mod
+        # The module should have 'timezone' in its namespace (imported from datetime)
+        assert hasattr(installer_mod, "timezone") or "timezone" in dir(installer_mod), (
+            "installer module should import timezone from datetime"
+        )
+
     def test_get_cache_path_deterministic(self, tmp_path: Path) -> None:
         """_get_cache_path returns the same path for the same URL."""
         installer = GitInstaller(

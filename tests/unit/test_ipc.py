@@ -297,3 +297,48 @@ class TestIPCProtocolHeartbeat:
 
         result = await protocol.send_heartbeat()
         assert result is False
+
+
+# ============================================================================
+# IPCProtocol — peek buffer
+# ============================================================================
+
+
+class TestIPCProtocolPeekBuffer:
+    async def test_receive_returns_peeked_message_first(
+        self, protocol: IPCProtocol, mock_stdout: MagicMock
+    ) -> None:
+        """receive_result() returns buffered message without reading stream."""
+        # Manually put a message into the peek buffer
+        buffered_msg = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="buffered output",
+            task_id="t-buf",
+        )
+        protocol._peek_buffer.append(buffered_msg)
+
+        result = await protocol.receive_result()
+        assert result.content == "buffered output"
+        assert result.task_id == "t-buf"
+        # Stream should NOT have been read
+        mock_stdout.readline.assert_not_called()
+
+    async def test_send_heartbeat_preserves_non_pong_messages(
+        self, protocol: IPCProtocol, mock_stdout: MagicMock
+    ) -> None:
+        """send_heartbeat() pushes non-progress messages to _peek_buffer."""
+        # First read returns a result message (not progress), second returns pong.
+        result_data = {"type": "result", "content": "some output", "task_id": "t1"}
+        pong_data = {"type": "progress", "content": "pong"}
+        mock_stdout.readline.side_effect = [
+            (json.dumps(result_data) + "\n").encode("utf-8"),
+            (json.dumps(pong_data) + "\n").encode("utf-8"),
+        ]
+
+        result = await protocol.send_heartbeat()
+        assert result is True
+        # The non-pong result message should be in the peek buffer
+        assert len(protocol._peek_buffer) == 1
+        assert protocol._peek_buffer[0].content == "some output"
+        assert protocol._peek_buffer[0].type == AgentToPlatformType.RESULT
+        assert protocol._peek_buffer[0].task_id == "t1"

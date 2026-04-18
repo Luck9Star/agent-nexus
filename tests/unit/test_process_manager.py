@@ -168,6 +168,28 @@ class TestStopAgent:
         # Agent should be removed from registry
         assert pm.get_agent("graceful") is None
 
+    @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
+    async def test_stop_agent_cancels_drain_task(
+        self, mock_spawn: AsyncMock, pm: ProcessManager
+    ) -> None:
+        """stop_agent() cancels the stderr drain_task on the handle."""
+        mock_proc = _make_mock_process(returncode=None)
+        mock_spawn.return_value = mock_proc
+
+        handle = await pm.start_agent(name="drain-test", command=["echo"])
+        assert handle.drain_task is not None
+
+        # Make process already dead so stop is quick
+        handle.process.returncode = 0
+
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            await pm.stop_agent("drain-test")
+
+        # The drain task should have been cancelled
+        assert handle.drain_task.cancelled() or handle.drain_task.done()
+
     async def test_stop_not_found_raises(self, pm: ProcessManager) -> None:
         """Stopping unknown agent raises KeyError."""
         with pytest.raises(KeyError, match="not found"):

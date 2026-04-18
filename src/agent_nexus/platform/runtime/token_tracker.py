@@ -1,0 +1,162 @@
+"""TokenTracker: session-scoped token usage monitor.
+
+Wraps ContextBudget and TokenUsage models with runtime tracking.
+Emits tiered alerts when token consumption crosses thresholds.
+
+Reference: docs/06 Section 8.5
+"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+
+from agent_nexus.models.context import (
+    ContextBudget,
+    ContextBudgetLogEntry,
+    TokenUsage,
+)
+
+# Default maximum context window in tokens.
+MAX_TOKENS: int = 200_000
+
+# Alert levels returned by TokenTracker.
+_ALERT_OK = "ok"
+_ALERT_COMPACT = "compact"
+_ALERT_TRUNCATE = "truncate"
+_ALERT_CEILING = "ceiling"
+
+
+@dataclass(frozen=True)
+class TokenAlert:
+    """Alert emitted when token usage crosses a budget threshold."""
+
+    level: str  # "ok" | "compact" | "truncate" | "ceiling"
+    message: str
+    usage_pct: float
+
+
+def _alert_from_budget(
+    usage_pct: float,
+    budget: ContextBudget,
+) -> TokenAlert:
+    """Map a usage percentage to a tiered TokenAlert."""
+    if usage_pct > budget.session_hard_ceiling * 100:
+        return TokenAlert(
+            level=_ALERT_CEILING,
+            message="Hard ceiling reached — session must be truncated",
+            usage_pct=usage_pct,
+        )
+    if usage_pct > budget.forced_truncate_threshold * 100:
+        return TokenAlert(
+            level=_ALERT_TRUNCATE,
+            message="Forced truncate threshold reached — earliest messages will be dropped",
+            usage_pct=usage_pct,
+        )
+    if usage_pct > budget.compaction_trigger * 100:
+        return TokenAlert(
+            level=_ALERT_COMPACT,
+            message="Compaction threshold reached — context will be compacted",
+            usage_pct=usage_pct,
+        )
+    return TokenAlert(
+        level=_ALERT_OK,
+        message="Within budget",
+        usage_pct=usage_pct,
+    )
+
+
+class TokenTracker:
+    """Track token usage across a session with tiered alerts.
+
+    Usage::
+
+        tracker = TokenTracker()
+        alert = tracker.record_usage(1500, agent_name="code-reviewer")
+        if alert.level != "ok":
+            print(f"Budget warning: {alert.message}")
+    """
+
+    def __init__(
+        self,
+        budget: ContextBudget | None = None,
+        *,
+        max_tokens: int = MAX_TOKENS,
+        session_id: str = "",
+    ) -> None:
+        """Initialize with optional budget (defaults to ``ContextBudget()``).
+
+        Args:
+            budget: ContextBudget with threshold constants.
+            max_tokens: Maximum token budget for the session.
+            session_id: Optional session identifier for log entries.
+        """
+        self._budget = budget if budget is not None else ContextBudget()
+        self._max_tokens = max_tokens
+        self._session_id = session_id or uuid.uuid4().hex[:12]
+        self._total: int = 0
+        self._turn: int = 0
+        self._log: list[ContextBudgetLogEntry] = []
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def record_usage(
+        self,
+        tokens_used: int,
+        agent_name: str = "",
+    ) -> TokenAlert:
+        """Record token consumption for this turn.
+
+        Args:
+            tokens_used: Number of tokens consumed in this turn.
+            agent_name: Optional agent name for attribution.
+
+        Returns:
+            TokenAlert indicating current threshold level.
+        """
+        self._turn += 1
+        self._total += tokens_used
+
+        # Build a log entry for observability.
+        entry = ContextBudgetLogEntry(
+            log_id=uuid.uuid4().hex,
+            agent_id=agent_name,
+            session_id=self._session_id,
+            turn_number=self._turn,
+            total_tokens=self._total,
+        )
+        self._log.append(entry)
+
+        # Check thresholds and return alert.
+        pct = self.usage_pct
+        return _alert_from_budget(pct, self._budget)
+
+    @property
+    def total_tokens(self) -> int:
+        """Total tokens consumed this session."""
+        return self._total
+
+    @property
+    def remaining_budget(self) -> int:
+        """Remaining tokens before hard ceiling."""
+        remaining = self._max_tokens - self._total
+        return max(0, remaining)
+
+    @property
+    def usage_pct(self) -> float:
+        """Current usage as percentage of max tokens."""
+        if self._max_tokens <= 0:
+            return 0.0
+        return (self._total / self._max_tokens) * 100
+
+    def get_log(self) -> list[ContextBudgetLogEntry]:
+        """Get all recorded log entries."""
+        return list(self._log)
+
+    def reset(self) -> None:
+        """Reset for a new session."""
+        self._total = 0
+        self._turn = 0
+        self._log.clear()

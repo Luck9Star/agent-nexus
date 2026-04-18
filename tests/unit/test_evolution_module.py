@@ -790,6 +790,21 @@ class TestSkillEvolverToolDegradation:
         assert len(results) == 2
         assert all(r.success for r in results)
 
+    def test_process_tool_degradation_filters_by_affected_skills(self, tmp_path: Path) -> None:
+        """Only skills in affected_skill_ids are evolved."""
+        s1 = _make_record("skill-1", "a")
+        s2 = _make_record("skill-2", "b")
+        s3 = _make_record("skill-3", "c")
+        store = _store_with_records(tmp_path, s1, s2, s3)
+        evolver = SkillEvolver(store)
+
+        results = evolver.process_tool_degradation(
+            "tool-x", "broken", affected_skill_ids={"skill-1"}
+        )
+        assert len(results) == 1
+        assert results[0].success
+        assert "skill-1" in results[0].new_record.lineage.parent_skill_ids
+
     def test_anti_loop_skips_already_addressed(self, tmp_path: Path) -> None:
         s1 = _make_record("s1", "a")
         store = _store_with_records(tmp_path, s1)

@@ -261,6 +261,28 @@ class TestParseFrontmatter:
         assert data == {"name": "test"}
         assert remaining == "body"
 
+    def test_frontmatter_with_code_block_containing_dashes(self):
+        """Dashes inside a fenced code block must not end the frontmatter."""
+        content = (
+            "---\n"
+            "name: doc-filler\n"
+            "agent_type: atomic\n"
+            "---\n"
+            "\n"
+            "# Role\n"
+            "Example:\n"
+            "```\n"
+            "some --- dashes\n"
+            "---\n"
+            "more content\n"
+            "```\n"
+        )
+        data, remaining = SkillLoader._parse_frontmatter(content)
+        assert data is not None
+        assert data == {"name": "doc-filler", "agent_type": "atomic"}
+        assert "# Role" in remaining
+        assert "some --- dashes" in remaining
+
 
 # ---------------------------------------------------------------------------
 # SkillLoader — _split_body_resources
