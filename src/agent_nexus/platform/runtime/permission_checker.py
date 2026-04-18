@@ -13,6 +13,7 @@ from __future__ import annotations
 import fnmatch
 import logging
 import os
+import re
 from pathlib import Path
 
 from agent_nexus.models.permission import (
@@ -287,9 +288,17 @@ class PermissionChecker:
 
     @staticmethod
     def _is_dangerous_command(command: str) -> bool:
-        """Heuristic check for dangerous shell commands."""
+        """Heuristic check for dangerous shell commands.
+
+        Matches patterns at the start of the command or after shell
+        operators (&&, |, ;, ||) to avoid false positives like
+        ``"perform_rm_analysis"`` or ``"info --curl-option"``.
+        """
         stripped = command.strip().lower()
         for pattern in _DANGEROUS_COMMAND_PATTERNS:
-            if pattern.lower() in stripped:
+            escaped = re.escape(pattern.strip())
+            # Match at command start or after shell operators
+            cmd_re = rf'(?:^|[|&;])\s*{escaped}\b'
+            if re.search(cmd_re, stripped):
                 return True
         return False

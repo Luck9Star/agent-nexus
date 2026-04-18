@@ -123,3 +123,4 @@ class IndexEntry(BaseModel):
     description: str = ""
     tags: list[str] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
+    path: str = ""  # Override for non-standard repo layouts (e.g. "agents/doc-filler")

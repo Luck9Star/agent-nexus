@@ -1014,6 +1014,26 @@ class TestCompactionGuardReinject:
         # l1_max is 3000, so l1 should be truncated
         assert len(result) < len("id\n" + long_l1)
 
+    def test_reinject_logs_token_estimate_not_chars(self, tmp_path: Path) -> None:
+        """tokens_after should be a token estimate (chars//4), not raw char count."""
+        import json as _json
+
+        store = _store_with_records(tmp_path)
+        guard = CompactionGuard(store, "agent-a")
+        ctx = _make_agent_context(
+            total_tokens=100_000, l0_content="hello world test data"
+        )
+        guard.reinject_after_compaction(ctx)
+        log = store.get_budget_log("agent-a")
+        assert len(log) == 1
+        tokens_after = log[0]["tokens_after"]
+        # details is stored as JSON string in SQLite
+        details = _json.loads(log[0].get("details", "{}"))
+        result_chars = details.get("result_chars", 0)
+        if result_chars > 0:
+            # Token estimate should be roughly chars//4, not chars
+            assert tokens_after < result_chars
+
 
 class TestCompactionGuardCheckAndLog:
     def test_returns_alert_level(self, tmp_path: Path) -> None:

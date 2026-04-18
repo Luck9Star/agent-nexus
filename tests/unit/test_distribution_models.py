@@ -277,3 +277,17 @@ class TestIndexEntry:
         data = ie.model_dump()
         ie2 = IndexEntry(**data)
         assert ie2 == ie
+
+    def test_path_override(self):
+        """IndexEntry.path allows non-standard repo layouts."""
+        ie = IndexEntry(
+            name="custom-agent",
+            version="1.0.0",
+            type=AgentType.ATOMIC,
+            path="agents/custom-agent",
+        )
+        assert ie.path == "agents/custom-agent"
+
+    def test_path_default_empty(self):
+        ie = IndexEntry(name="test", version="1.0.0", type=AgentType.ATOMIC)
+        assert ie.path == ""

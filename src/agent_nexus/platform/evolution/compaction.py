@@ -135,16 +135,19 @@ class CompactionGuard:
 
         # Log the compaction event
         result_chars = len(result)
+        # Rough token estimate: ~4 chars per token (no tokenizer available)
+        estimated_tokens = result_chars // 4
         self._store.log_budget_event(
             agent_name=self._agent_id,
             event_type="compaction",
             tokens_before=ctx.token_usage.total_tokens,
-            tokens_after=result_chars,  # char count; actual tokens depend on tokenizer
+            tokens_after=estimated_tokens,
             details={
                 "consecutive_compactions": self._consecutive_compactions,
                 "l0_chars": len(l0),
                 "l1_chars": len(l1),
                 "result_chars": result_chars,
+                "estimated_tokens_note": "chars//4 approximation",
             },
         )
 

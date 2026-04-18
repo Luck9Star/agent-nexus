@@ -112,8 +112,9 @@ class SourceManager:
 
             for entry in index:
                 if entry.name == agent_name:
-                    # Standard path: packages/<agent-name>
-                    return source, f"packages/{agent_name}"
+                    # Use explicit path override if set, else standard convention
+                    relative_path = entry.path or f"packages/{agent_name}"
+                    return source, relative_path
 
         return None
 
@@ -201,6 +202,7 @@ class SourceManager:
                     description=item.get("description", ""),
                     tags=item.get("tags", []),
                     dependencies=item.get("dependencies", []),
+                    path=item.get("path", ""),
                 ))
             except Exception as exc:
                 logger.warning("Skipping invalid index entry %s: %s", item, exc)

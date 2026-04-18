@@ -417,6 +417,58 @@ class TestSourceManager:
         other = SourceEntry(name="private", type="git", url="http://x.com")
         assert SourceManager._source_priority(other) == 1
 
+    def test_resolve_agent_source_uses_path_override(self, tmp_path: Path) -> None:
+        """resolve_agent_source uses IndexEntry.path override when set."""
+        import hashlib
+
+        path = tmp_path / "sources.yaml"
+        mgr = SourceManager(path)
+
+        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
+        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
+        cache_dir = tmp_path / "cache" / "repos" / url_hash
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        index_data = {
+            "agents": [
+                {
+                    "name": "custom-agent",
+                    "version": "1.0.0",
+                    "type": "atomic",
+                    "description": "Custom layout",
+                    "path": "agents/custom-agent",
+                },
+            ]
+        }
+        _write_yaml(cache_dir / "index.yaml", index_data)
+
+        result = mgr.resolve_agent_source("custom-agent")
+        assert result is not None
+        _source_entry, relative_path = result
+        assert relative_path == "agents/custom-agent"
+
+    def test_resolve_agent_source_defaults_to_packages(self, tmp_path: Path) -> None:
+        """resolve_agent_source defaults to packages/<name> when no path override."""
+        import hashlib
+
+        path = tmp_path / "sources.yaml"
+        mgr = SourceManager(path)
+
+        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
+        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
+        cache_dir = tmp_path / "cache" / "repos" / url_hash
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        index_data = {
+            "agents": [
+                {"name": "standard-agent", "version": "1.0.0", "type": "atomic"},
+            ]
+        }
+        _write_yaml(cache_dir / "index.yaml", index_data)
+
+        result = mgr.resolve_agent_source("standard-agent")
+        assert result is not None
+        _source_entry, relative_path = result
+        assert relative_path == "packages/standard-agent"
+
 
 # ============================================================================
 # GitInstaller Tests

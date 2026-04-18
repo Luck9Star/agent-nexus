@@ -401,6 +401,27 @@ class TestCheckCommand:
         assert d.allowed
         assert d.requires_confirmation
 
+    def test_rm_no_false_positive_on_substring(self) -> None:
+        """Word-boundary matching: 'perform_rm_analysis' should NOT match 'rm'."""
+        checker = _checker(mode=PermissionMode.DEFAULT)
+        d = checker.check_command("perform_rm_analysis --data input.csv")
+        assert d.allowed
+        assert not d.requires_confirmation
+
+    def test_curl_no_false_positive_on_substring(self) -> None:
+        """Word-boundary matching: 'info --curl-option' should NOT match 'curl'."""
+        checker = _checker(mode=PermissionMode.DEFAULT)
+        d = checker.check_command("info --curl-option value")
+        assert d.allowed
+        assert not d.requires_confirmation
+
+    def test_actual_dangerous_command_still_caught(self) -> None:
+        """Word-boundary matching still catches real dangerous commands."""
+        checker = _checker(mode=PermissionMode.DEFAULT)
+        d = checker.check_command("rm -rf /tmp/old")
+        assert d.allowed
+        assert d.requires_confirmation
+
 
 # ======================================================================
 # Edge cases
