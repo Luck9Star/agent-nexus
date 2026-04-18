@@ -172,17 +172,31 @@ class SkillLoader:
     def _split_body_resources(content: str) -> tuple[str | None, str | None]:
         """Split content at the first top-level ``# Resources`` heading.
 
+        Skips ``# Resources`` matches that occur inside fenced code blocks.
+
         Returns:
             (body_content, resources_content). Either may be None.
         """
-        match = _RESOURCES_SPLIT_RE.search(content)
-        if match is None:
-            # No Resources section — everything is body.
+        resources_start: int | None = None
+        in_fence = False
+        for line in content.splitlines():
+            if in_fence:
+                if line.lstrip().startswith("```"):
+                    in_fence = False
+            else:
+                if line.lstrip().startswith("```"):
+                    in_fence = True
+                elif _RESOURCES_SPLIT_RE.match(line):
+                    resources_start = content.index(line)
+                    break
+
+        if resources_start is None:
+            # No Resources section -- everything is body.
             body = content.strip()
             return (body if body else None), None
 
-        body = content[: match.start()].strip()
-        resources = content[match.start() :].strip()
+        body = content[:resources_start].strip()
+        resources = content[resources_start:].strip()
 
         return (body if body else None), (resources if resources else None)
 

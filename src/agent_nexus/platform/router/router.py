@@ -366,6 +366,15 @@ class PlatformRouter:
         Each agent gets a unique conversation_id to prevent IPC response
         interleaving when agents share the same process handle.
         """
+        # Deduplicate: same agent name => same IPC handle => must not
+        # run concurrently or responses interleave.
+        seen: set[str] = set()
+        unique_names: list[str] = []
+        for n in agent_names:
+            if n not in seen:
+                seen.add(n)
+                unique_names.append(n)
+
         async def _run_agent(name: str) -> str:
             cid = f"{conversation_id}__{name}__{uuid.uuid4().hex[:8]}"
             return await self._subtask.run_with_retry(
@@ -375,7 +384,7 @@ class PlatformRouter:
                 timeout=300.0,
             )
 
-        coros = [_run_agent(name) for name in agent_names]
+        coros = [_run_agent(name) for name in unique_names]
         return await self._subtask.run_parallel(coros)
 
     async def _execute_single_agent(

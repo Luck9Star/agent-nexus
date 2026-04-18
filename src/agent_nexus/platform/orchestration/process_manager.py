@@ -91,6 +91,7 @@ class ProcessManager:
     def __init__(self) -> None:
         self._agents: dict[str, AgentHandle] = {}
         self._lock = asyncio.Lock()
+        self._stopping: set[str] = set()
 
     # ------------------------------------------------------------------
     # Start
@@ -205,7 +206,7 @@ class ProcessManager:
 
         Shutdown sequence (defence-in-depth):
 
-        1. Close IPC stdin — signals EOF so the agent can shut down cleanly.
+        1. Close IPC stdin -- signals EOF so the agent can shut down cleanly.
         2. Wait up to *timeout* seconds for the process to exit.
         3. Send ``SIGTERM`` and wait another *timeout* seconds.
         4. Send ``SIGKILL`` if still alive.
@@ -218,79 +219,85 @@ class ProcessManager:
             KeyError: Agent *name* not found.
         """
         async with self._lock:
+            if name in self._stopping:
+                return
             handle = self._agents.get(name)
             if handle is None:
                 raise KeyError(f"Agent '{name}' not found")
+            self._stopping.add(name)
             process = handle.process
             drain_task = handle.drain_task
 
-        # Cancel the stderr drain task to prevent it from reading a closed pipe.
-        if drain_task is not None and not drain_task.done():
-            drain_task.cancel()
-            try:
-                await drain_task
-            except (asyncio.CancelledError, Exception):
-                pass
+        try:
+            # Cancel the stderr drain task to prevent it from reading a closed pipe.
+            if drain_task is not None and not drain_task.done():
+                drain_task.cancel()
+                try:
+                    await drain_task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
-        if not handle.is_alive:
-            # Already dead — close IPC and clean up.
+            if not handle.is_alive:
+                # Already dead -- close IPC and clean up.
+                try:
+                    await handle.ipc.stream.close()
+                except Exception:
+                    pass
+                async with self._lock:
+                    self._agents.pop(name, None)
+                logger.info("Agent '%s' already exited (rc=%s)", name, process.returncode)
+                return
+
+            # Stage 1: Close IPC stdin (signal EOF).
             try:
                 await handle.ipc.stream.close()
             except Exception:
                 pass
+
+            try:
+                await asyncio.wait_for(process.wait(), timeout=timeout)
+                async with self._lock:
+                    self._agents.pop(name, None)
+                logger.info("Agent '%s' exited cleanly after IPC close", name)
+                return
+            except asyncio.TimeoutError:
+                pass
+
+            # Stage 2: SIGTERM.
+            logger.warning("Agent '%s' did not exit, sending SIGTERM", name)
+            try:
+                process.send_signal(signal.SIGTERM)
+            except ProcessLookupError:
+                async with self._lock:
+                    self._agents.pop(name, None)
+                return
+
+            try:
+                await asyncio.wait_for(process.wait(), timeout=timeout)
+                async with self._lock:
+                    self._agents.pop(name, None)
+                logger.info("Agent '%s' terminated after SIGTERM", name)
+                return
+            except asyncio.TimeoutError:
+                pass
+
+            # Stage 3: SIGKILL.
+            logger.error("Agent '%s' did not exit after SIGTERM, sending SIGKILL", name)
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+
+            try:
+                await process.wait()
+            except Exception:
+                pass
+
             async with self._lock:
                 self._agents.pop(name, None)
-            logger.info("Agent '%s' already exited (rc=%s)", name, process.returncode)
-            return
-
-        # Stage 1: Close IPC stdin (signal EOF).
-        try:
-            await handle.ipc.stream.close()
-        except Exception:
-            pass
-
-        try:
-            await asyncio.wait_for(process.wait(), timeout=timeout)
-            async with self._lock:
-                self._agents.pop(name, None)
-            logger.info("Agent '%s' exited cleanly after IPC close", name)
-            return
-        except asyncio.TimeoutError:
-            pass
-
-        # Stage 2: SIGTERM.
-        logger.warning("Agent '%s' did not exit, sending SIGTERM", name)
-        try:
-            process.send_signal(signal.SIGTERM)
-        except ProcessLookupError:
-            async with self._lock:
-                self._agents.pop(name, None)
-            return
-
-        try:
-            await asyncio.wait_for(process.wait(), timeout=timeout)
-            async with self._lock:
-                self._agents.pop(name, None)
-            logger.info("Agent '%s' terminated after SIGTERM", name)
-            return
-        except asyncio.TimeoutError:
-            pass
-
-        # Stage 3: SIGKILL.
-        logger.error("Agent '%s' did not exit after SIGTERM, sending SIGKILL", name)
-        try:
-            process.kill()
-        except ProcessLookupError:
-            pass
-
-        try:
-            await process.wait()
-        except Exception:
-            pass
-
-        async with self._lock:
-            self._agents.pop(name, None)
-        logger.info("Agent '%s' killed", name)
+            logger.info("Agent '%s' killed", name)
+        finally:
+            self._stopping.discard(name)
 
     # ------------------------------------------------------------------
     # Restart

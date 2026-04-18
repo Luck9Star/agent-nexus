@@ -163,7 +163,13 @@ class HookDef(BaseModel):
     enabled: bool = True
     block_on_failure: bool = False
     timeout_seconds: float = 10.0
-    matcher: str | None = None
+    matcher: str | None = None  # fnmatch glob for tool name matching
+
+    # Hook-type-specific fields
+    command: str | None = None  # COMMAND type: shell command to run
+    url: str | None = None  # HTTP type: URL to POST to
+    prompt: str | None = None  # PROMPT/AGENT type: LLM prompt text
+    model: str | None = None  # PROMPT/AGENT type: model to use (e.g. "haiku", "sonnet")
 
 
 class AgentPackage(BaseModel):
