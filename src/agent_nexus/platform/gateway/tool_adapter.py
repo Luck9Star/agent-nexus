@@ -49,6 +49,7 @@ class McpToolAdapter:
     """
 
     def __init__(self, server_name: str, tool_schema: dict) -> None:
+        self.agent_name = server_name  # original unsanitized name for lookups
         self.server_name = _sanitize(server_name)
         self.tool_name = _sanitize(tool_schema["name"])
         self.full_name = f"mcp__{self.server_name}__{self.tool_name}"

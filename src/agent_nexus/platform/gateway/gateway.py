@@ -121,7 +121,8 @@ class MCPGateway:
             desc = info.manifest.description.split("\n")[0][:60]
             mtype = info.manifest.type.value
 
-            if info in self._registry.list_core_agents():
+            core_names = {ci.name for ci in self._registry.list_core_agents()}
+            if info.name in core_names:
                 tier = "core"
             elif info.is_activated:
                 tier = "activated"
@@ -217,6 +218,10 @@ class MCPGateway:
             start_env=start_env,
         )
 
+        if not deferred:
+            # Core agents: register tool schemas immediately (if available)
+            self._register_agent_tools(manifest.name)
+
     def _register_agent_tools(self, agent_name: str) -> None:
         """Register discovered agent tools with the FastMCP server.
 
@@ -259,9 +264,9 @@ class MCPGateway:
         """
 
         async def _invoke(**kwargs: Any) -> str:
-            info = self._registry.get_agent_info(adapter.server_name)
+            info = self._registry.get_agent_info(adapter.agent_name)
             if info is None or info.handle is None:
-                return f"Error: agent '{adapter.server_name}' not available"
+                return f"Error: agent '{adapter.agent_name}' not available"
 
             result = await adapter.execute(info.handle, kwargs)
             if result["success"]:
