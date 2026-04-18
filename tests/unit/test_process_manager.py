@@ -978,3 +978,80 @@ class TestHealthCheckCleanup:
 
         # Confirm it was removed
         assert pm.get_agent("will-be-cleaned") is None
+
+
+# ============================================================================
+# Fix 3 regression: start_agent rejects when agent is being stopped
+# ============================================================================
+
+
+class TestStartAgentStoppingGuard:
+    """start_agent must reject if the agent name is in _stopping.
+
+    During a concurrent restart, stop_agent adds the name to _stopping.
+    A concurrent start_agent for the same name must fail rather than
+    succeed while the old process is still being torn down.
+    """
+
+    @pytest.mark.asyncio
+    async def test_start_while_stopping_raises(self):
+        """start_agent raises ValueError when name is in _stopping set."""
+        pm = ProcessManager()
+
+        # Simulate a stop in progress
+        pm._stopping.add("stopping-agent")
+
+        with pytest.raises(ValueError, match="being stopped"):
+            await pm.start_agent(
+                name="stopping-agent",
+                command=["echo", "hello"],
+            )
+
+    @pytest.mark.asyncio
+    async def test_start_after_stopping_completes_succeeds(self):
+        """start_agent succeeds once _stopping is cleared."""
+        pm = ProcessManager()
+
+        # Simulate stop completed
+        pm._stopping.add("transient-agent")
+        pm._stopping.discard("transient-agent")
+
+        mock_proc = _iter17_make_mock_process(pid=70001)
+        with patch(_SUBPROCESS_PATCH, return_value=mock_proc):
+            handle = await pm.start_agent(
+                name="transient-agent",
+                command=["echo", "hello"],
+            )
+
+        assert isinstance(handle, AgentHandle)
+        assert pm.get_agent("transient-agent") is handle
+
+    @pytest.mark.asyncio
+    async def test_start_stopping_takes_priority_over_alive_check(self):
+        """The _stopping check runs before the is_alive check."""
+        pm = ProcessManager()
+
+        # Both: in _stopping AND in _agents with a dead handle
+        dead_proc = _iter17_make_mock_process(pid=80001, returncode=1)
+        stream = MagicMock(spec=IPCStream)
+        stream.close = AsyncMock()
+        ipc = MagicMock(spec=IPCProtocol)
+        ipc.stream = stream
+        old_handle = AgentHandle(
+            name="priority-agent",
+            process=dead_proc,
+            ipc=ipc,
+            drain_task=None,
+            start_command=["old"],
+            start_cwd="/tmp",
+            start_env={},
+        )
+        pm._agents["priority-agent"] = old_handle
+        pm._stopping.add("priority-agent")
+
+        # Should raise about stopping, NOT about already running
+        with pytest.raises(ValueError, match="being stopped"):
+            await pm.start_agent(
+                name="priority-agent",
+                command=["echo", "hello"],
+            )

@@ -371,15 +371,20 @@ class DeferredAgentRegistry:
     def get_agent_info(self, name: str) -> AgentInfo | None:
         """Look up agent info by name across all tiers.
 
-        Prefers the deferred entry when it has been activated (has
-        tool_schemas / handle), since an activated deferred entry
-        carries more runtime state than a bare core entry with the
-        same name.
+        When an agent exists in both core and deferred dicts, returns
+        the activated entry (the one with runtime state).  A dormant
+        deferred entry without tool_schemas/handle is not preferred
+        over a functional core entry.
         """
         deferred = self._deferred_agents.get(name)
+        core = self._core_agents.get(name)
+        if deferred is not None and core is not None:
+            if deferred.is_activated:
+                return deferred
+            return core
         if deferred is not None:
             return deferred
-        return self._core_agents.get(name)
+        return core
 
     def list_all_agents(self) -> list[AgentInfo]:
         """Return info for all registered agents (core + deferred)."""

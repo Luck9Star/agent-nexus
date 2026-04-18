@@ -194,10 +194,11 @@ class ConfigLoader:
                 api_type = ProviderApiType(api_str)
             except ValueError:
                 valid = [e.value for e in ProviderApiType]
-                raise ValueError(
-                    f"Invalid api type '{api_str}' in provider '{name}'. "
-                    f"Valid types: {valid}"
-                ) from None
+                logger.warning(
+                    "Invalid api type '%s' in provider '%s'. Valid: %s. Skipping.",
+                    api_str, name, valid,
+                )
+                continue
 
             if existing:
                 # Override only fields that the user explicitly provides

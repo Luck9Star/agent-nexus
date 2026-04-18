@@ -251,6 +251,13 @@ class GitInstaller:
         Uses ``git sparse-checkout`` to avoid cloning the entire repo.
         Returns the path to the cloned agent directory inside the cache.
         """
+        # Validate relative_path to prevent path traversal
+        rel = Path(relative_path)
+        if rel.is_absolute() or ".." in rel.parts:
+            raise InstallationError(
+                f"Relative path '{relative_path}' contains path traversal or is absolute"
+            )
+
         cache_path = self._get_cache_path(source_url)
 
         git_dir = cache_path / ".git"

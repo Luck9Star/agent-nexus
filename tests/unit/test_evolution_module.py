@@ -229,9 +229,15 @@ class TestEvolutionStoreCounters:
         assert got.total_completions == 4
 
     def test_increment_no_flags_is_noop(self, tmp_path: Path) -> None:
+        """Calling increment_counters with all flags False does not open a connection."""
         r = _make_record("s1", "x", selections=5)
         store = _store_with_records(tmp_path, r)
-        store.increment_counters("s1")
+
+        # Patch _conn to fail if called -- proves the no-op returns before opening it
+        from unittest.mock import patch as _patch
+        with _patch.object(store, "_conn", side_effect=AssertionError("_conn should not be called")):
+            store.increment_counters("s1")  # should not raise
+
         got = store.get_skill_record("s1")
         assert got is not None
         assert got.total_selections == 5

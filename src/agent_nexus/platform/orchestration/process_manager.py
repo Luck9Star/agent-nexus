@@ -140,6 +140,8 @@ class ProcessManager:
             RuntimeError: The subprocess failed to start.
         """
         async with self._lock:
+            if name in self._stopping:
+                raise ValueError(f"Agent '{name}' is being stopped, cannot start")
             if name in self._agents and self._agents[name].is_alive:
                 raise ValueError(f"Agent '{name}' is already running")
 

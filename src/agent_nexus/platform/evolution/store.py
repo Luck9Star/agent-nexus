@@ -280,21 +280,21 @@ class EvolutionStore:
 
         Called within the same transaction as judgment insert.
         """
+        sets: list[str] = []
+        params: list[str] = []
+        if selected:
+            sets.append("total_selections = total_selections + 1")
+        if applied:
+            sets.append("total_applied = total_applied + 1")
+        if completed:
+            sets.append("total_completions = total_completions + 1")
+        if fell_back:
+            sets.append("total_fallbacks = total_fallbacks + 1")
+
+        if not sets:
+            return
+
         with self._conn() as conn:
-            sets: list[str] = []
-            params: list[str] = []
-            if selected:
-                sets.append("total_selections = total_selections + 1")
-            if applied:
-                sets.append("total_applied = total_applied + 1")
-            if completed:
-                sets.append("total_completions = total_completions + 1")
-            if fell_back:
-                sets.append("total_fallbacks = total_fallbacks + 1")
-
-            if not sets:
-                return
-
             sets.append("updated_at = ?")
             params.append(_now_iso())
             params.append(skill_id)

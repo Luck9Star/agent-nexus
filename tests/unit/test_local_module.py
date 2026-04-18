@@ -96,6 +96,24 @@ class TestLockfileManager:
         lf = mgr.load()
         assert lf.agents == {}
 
+    def test_load_propagates_os_error(self, tmp_path: Path) -> None:
+        """When lockfile is unreadable (PermissionError), load() propagates the error."""
+        bad = tmp_path / "lockfile.json"
+        bad.write_text('{"version": 1, "agents": {}}', encoding="utf-8")
+        mgr = LockfileManager(bad)
+        with patch.object(Path, "read_text", side_effect=PermissionError("no access")):
+            with pytest.raises(PermissionError, match="no access"):
+                mgr.load()
+
+    def test_load_invalid_schema_returns_empty(self, tmp_path: Path) -> None:
+        """When lockfile has valid JSON but invalid schema, load() returns empty Lockfile."""
+        bad = tmp_path / "lockfile.json"
+        # version should be int, not a string
+        bad.write_text('{"version": "bad", "agents": {}}', encoding="utf-8")
+        mgr = LockfileManager(bad)
+        lf = mgr.load()
+        assert lf.agents == {}
+
     def test_load_valid_file(self, tmp_path: Path) -> None:
         """load() parses a valid lockfile with agents."""
         path = tmp_path / "lockfile.json"

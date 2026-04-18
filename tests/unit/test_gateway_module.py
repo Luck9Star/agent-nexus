@@ -1720,3 +1720,110 @@ class TestDeferredRegistryActivationGuard:
         assert len(schemas) >= 1
         # Placeholder schema should have the agent name in the tool name
         assert "static-agent" in schemas[0].get("name", "")
+
+
+# ============================================================================
+# Fix 1 regression: _invoke does NOT re-acquire lock (deadlock prevention)
+# ============================================================================
+
+
+class TestInvokeNoLockReacquire:
+    """_invoke must not acquire the registration lock.
+
+    Regression: _invoke used ``async with self._get_lock()`` to call
+    ``set.discard``, which deadlocked if the lock was already held by
+    ``_register_agent_tools`` (asyncio.Lock is non-reentrant).  The
+    discard on a set is atomic and does not need the lock.
+    """
+
+    @pytest.mark.asyncio
+    async def test_invoke_dead_agent_no_deadlock(self) -> None:
+        """Invoking a tool on a dead agent does not deadlock even when
+        the registration lock is held by another coroutine."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest("deadlock-agent")
+        await gw.register_agent(manifest, deferred=False)
+
+        info = gw.registry.get_agent_info("deadlock-agent")
+        assert info is not None
+        dead_handle = _mock_agent_handle("deadlock-agent", alive=False)
+        info.handle = dead_handle
+        info.tool_schemas = [{"name": "work", "description": "Work"}]
+
+        schema = _make_tool_schema("work", "Work")
+        adapter = McpToolAdapter(server_name="deadlock-agent", tool_schema=schema)
+        gw.registry._tool_adapters["deadlock-agent"] = [adapter]
+
+        await gw._register_agent_tools("deadlock-agent")
+        assert "deadlock-agent" in gw._registered_agents
+
+        func = gw._make_tool_func(adapter)
+
+        # Hold the lock externally to simulate the scenario where
+        # _register_agent_tools still has it.  _invoke must NOT block.
+        lock = gw._get_lock()
+        async with lock:
+            result = await asyncio.wait_for(func(x=1), timeout=1.0)
+
+        assert "Error" in result
+        assert "process has died" in result
+
+
+# ============================================================================
+# Fix 2 regression: get_agent_info prefers activated over dormant
+# ============================================================================
+
+
+class TestGetAgentInfoPriority:
+    """get_agent_info returns the activated entry when agent is in both tiers.
+
+    When an agent name appears in both core and deferred dicts, the
+    dormant deferred entry (no tool_schemas, no handle) must NOT be
+    returned over the functional core entry.
+    """
+
+    def test_prefers_activated_deferred_over_core(self) -> None:
+        """When both dicts have the same name, activated deferred wins."""
+        pm = MagicMock()
+        registry = DeferredAgentRegistry(pm)
+
+        # Directly insert into both dicts to simulate the dual-entry scenario.
+        core_manifest = _make_manifest("shared-agent", description="Core version")
+        registry._core_agents["shared-agent"] = AgentInfo(
+            name="shared-agent",
+            manifest=core_manifest,
+        )
+
+        deferred_manifest = _make_manifest("shared-agent", description="Deferred version")
+        registry._deferred_agents["shared-agent"] = AgentInfo(
+            name="shared-agent",
+            manifest=deferred_manifest,
+            tool_schemas=[{"name": "tool1"}],  # activated
+        )
+
+        result = registry.get_agent_info("shared-agent")
+        assert result is not None
+        # The activated deferred entry should be returned
+        assert result.is_activated is True
+
+    def test_prefers_core_over_dormant_deferred(self) -> None:
+        pm = MagicMock()
+        registry = DeferredAgentRegistry(pm)
+
+        core_manifest = _make_manifest("dual-agent", description="Core version")
+        registry.register_agent(core_manifest, deferred=False)
+
+        # Force both entries to exist: core is functional, deferred is dormant
+        registry._deferred_agents["dual-agent"] = AgentInfo(
+            name="dual-agent",
+            manifest=_make_manifest("dual-agent", description="Deferred version"),
+            # No tool_schemas — dormant
+        )
+
+        result = registry.get_agent_info("dual-agent")
+        assert result is not None
+        # Core entry should be returned because deferred is not activated
+        assert result.manifest.description == "Core version"

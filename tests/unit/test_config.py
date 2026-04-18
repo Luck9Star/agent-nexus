@@ -419,8 +419,8 @@ class TestDefaults:
 
 
 class TestConfigLoaderProviderApiTypeValidation:
-    def test_invalid_api_type_raises_clear_error(self, tmp_path: Path) -> None:
-        """An invalid api type string in config.toml should raise ValueError."""
+    def test_invalid_api_type_skips_provider(self, tmp_path: Path) -> None:
+        """An invalid api type string in config.toml should be skipped with a warning."""
         config_dir = tmp_path / "config"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text(
@@ -429,8 +429,9 @@ class TestConfigLoaderProviderApiTypeValidation:
             'base_url = "http://localhost"\n'
         )
         loader = ConfigLoader(config_dir=config_dir)
-        with pytest.raises(ValueError, match="Invalid api type 'invalid_type'"):
-            loader.load_config()
+        config = loader.load_config()
+        # Invalid provider should be skipped, not crash the platform
+        assert "bad" not in config.models.providers
 
     def test_valid_api_types_accepted(self, tmp_path: Path) -> None:
         """All valid ProviderApiType values should be accepted."""

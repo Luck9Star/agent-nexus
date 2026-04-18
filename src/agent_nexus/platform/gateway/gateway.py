@@ -284,8 +284,10 @@ class MCPGateway:
 
             # Health check: clean up stale registration if process died
             if info.handle is not None and not info.handle.is_alive:
-                async with self._get_lock():
-                    self._registered_agents.discard(adapter.agent_name)
+                # No lock needed: set.discard is atomic, and
+                # re-acquiring the lock here would deadlock if
+                # _register_agent_tools still holds it.
+                self._registered_agents.discard(adapter.agent_name)
                 return f"Error: agent '{adapter.agent_name}' process has died"
 
             result = await adapter.execute(info.handle, kwargs)

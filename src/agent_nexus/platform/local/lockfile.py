@@ -49,7 +49,7 @@ class LockfileManager:
             lockfile = Lockfile.model_validate(raw)
             logger.debug("Loaded lockfile with %d agent(s)", len(lockfile.agents))
             return lockfile
-        except Exception as exc:
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as exc:
             logger.warning("Failed to parse lockfile %s: %s", self._path, exc)
             return Lockfile()
 
