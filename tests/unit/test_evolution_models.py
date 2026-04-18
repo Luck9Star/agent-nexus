@@ -87,10 +87,10 @@ class TestSkillLineage:
         lin = SkillLineage(
             origin=SkillOrigin.CAPTURED,
             generation=1,
-            content_snapshot="skill content here",
+            content_snapshot={"skill.md": "skill content here"},
         )
         assert lin.parent_skill_ids == []
-        assert lin.content_snapshot == "skill content here"
+        assert lin.content_snapshot == {"skill.md": "skill content here"}
 
     def test_frozen(self):
         lin = SkillLineage()

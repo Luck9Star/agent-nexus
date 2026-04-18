@@ -10,6 +10,7 @@ Tables:
     execution_analyses     -- Post-task analysis (one per task per agent)
     skill_judgments        -- Per-skill assessment within an analysis
     context_budget_log     -- Token usage / compaction observability
+    agent_records          -- Composite Agent evolution tracking (Layer 2)
 """
 
 from __future__ import annotations
@@ -23,14 +24,12 @@ from pathlib import Path
 from typing import Any, Generator
 
 from agent_nexus.models.evolution import (
-    EvolutionContext,
     EvolutionMetrics,
-    EvolutionType,
     SkillLineage,
     SkillOrigin,
     SkillRecord,
 )
-from agent_nexus.models.context import ContextBudgetLogEntry
+
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS skill_records (
@@ -96,6 +95,22 @@ CREATE TABLE IF NOT EXISTS context_budget_log (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cbl_agent ON context_budget_log(agent_name);
+
+CREATE TABLE IF NOT EXISTS agent_records (
+    agent_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'atomic',
+    skill_ids TEXT DEFAULT '[]',
+    orchestration_toml TEXT,
+    effective_rate REAL DEFAULT 0.0,
+    avg_steps REAL,
+    avg_duration_ms REAL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ar_active ON agent_records(is_active);
+CREATE INDEX IF NOT EXISTS idx_ar_name ON agent_records(name);
 """
 
 
@@ -253,7 +268,7 @@ class EvolutionStore:
         """
         with self._conn() as conn:
             sets: list[str] = []
-            params: list[int] = []
+            params: list[str] = []
             if selected:
                 sets.append("total_selections = total_selections + 1")
             if applied:
@@ -622,6 +637,127 @@ class EvolutionStore:
             )
 
     # ------------------------------------------------------------------
+    # Agent Records (Composite Agent evolution, Layer 2)
+    # ------------------------------------------------------------------
+
+    def save_agent_record(
+        self,
+        agent_id: str,
+        name: str,
+        type: str,
+        skill_ids: list[str],
+        orchestration_toml: str | None = None,
+    ) -> None:
+        """Insert or replace an agent record."""
+        skill_ids_json = json.dumps(skill_ids, ensure_ascii=False)
+        now = _now_iso()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO agent_records (
+                    agent_id, name, type, skill_ids, orchestration_toml,
+                    effective_rate, avg_steps, avg_duration_ms,
+                    is_active, created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?,
+                    COALESCE(
+                        (SELECT effective_rate FROM agent_records WHERE agent_id = ?),
+                        0.0
+                    ),
+                    (SELECT avg_steps FROM agent_records WHERE agent_id = ?),
+                    (SELECT avg_duration_ms FROM agent_records WHERE agent_id = ?),
+                    COALESCE(
+                        (SELECT is_active FROM agent_records WHERE agent_id = ?),
+                        1
+                    ),
+                    COALESCE(
+                        (SELECT created_at FROM agent_records WHERE agent_id = ?),
+                        ?
+                    ),
+                    ?
+                )
+                """,
+                (
+                    agent_id, name, type, skill_ids_json, orchestration_toml,
+                    agent_id, agent_id, agent_id, agent_id, agent_id,
+                    now, now,
+                ),
+            )
+
+    def get_agent_record(self, agent_id: str) -> dict[str, Any] | None:
+        """Load an agent record by ID."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM agent_records WHERE agent_id = ?",
+                (agent_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return {
+                "agent_id": row[0],
+                "name": row[1],
+                "type": row[2],
+                "skill_ids": json.loads(row[3]) if row[3] else [],
+                "orchestration_toml": row[4],
+                "effective_rate": row[5],
+                "avg_steps": row[6],
+                "avg_duration_ms": row[7],
+                "is_active": bool(row[8]),
+                "created_at": row[9],
+                "updated_at": row[10],
+            }
+
+    def get_active_agents(self) -> list[dict[str, Any]]:
+        """Load all active agent records."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM agent_records WHERE is_active = 1"
+            ).fetchall()
+            return [
+                {
+                    "agent_id": r[0],
+                    "name": r[1],
+                    "type": r[2],
+                    "skill_ids": json.loads(r[3]) if r[3] else [],
+                    "orchestration_toml": r[4],
+                    "effective_rate": r[5],
+                    "avg_steps": r[6],
+                    "avg_duration_ms": r[7],
+                    "is_active": bool(r[8]),
+                    "created_at": r[9],
+                    "updated_at": r[10],
+                }
+                for r in rows
+            ]
+
+    def update_agent_metrics(
+        self,
+        agent_id: str,
+        effective_rate: float,
+        avg_steps: float,
+        avg_duration_ms: float,
+    ) -> bool:
+        """Update computed metrics for an agent record."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE agent_records SET effective_rate = ?, "
+                "avg_steps = ?, avg_duration_ms = ?, updated_at = ? "
+                "WHERE agent_id = ?",
+                (effective_rate, avg_steps, avg_duration_ms, _now_iso(), agent_id),
+            )
+            return cur.rowcount > 0
+
+    def deactivate_agent(self, agent_id: str) -> bool:
+        """Set is_active = False for an agent record."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE agent_records SET is_active = 0, updated_at = ? "
+                "WHERE agent_id = ?",
+                (_now_iso(), agent_id),
+            )
+            return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
     # Maintenance
     # ------------------------------------------------------------------
 
@@ -632,6 +768,7 @@ class EvolutionStore:
             conn.execute("DELETE FROM execution_analyses")
             conn.execute("DELETE FROM skill_lineage_parents")
             conn.execute("DELETE FROM context_budget_log")
+            conn.execute("DELETE FROM agent_records")
             conn.execute("DELETE FROM skill_records")
 
     # ------------------------------------------------------------------

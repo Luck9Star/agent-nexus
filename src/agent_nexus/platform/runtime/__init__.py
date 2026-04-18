@@ -4,6 +4,7 @@ Public API:
     PythonRuntime       — High-level runtime with Variable/Function/Type management
     IPythonExecutor     — Low-level IPython shell executor
     SecurityChecker     — AST-level code safety analysis
+    PermissionChecker   — Runtime permission evaluator for agent tool calls
     TieredRuntimeDescriber — L0-L3 context generation for LLM injection
 
 Security rules:
@@ -24,6 +25,7 @@ from agent_nexus.models.runtime import (
 
 from .describer import TieredRuntimeDescriber
 from .executor import IPythonExecutor
+from .permission_checker import PermissionChecker
 from .runtime import PythonRuntime
 from .security_checker import SecurityChecker
 from .security_rules import (
@@ -39,6 +41,7 @@ __all__ = [
     "PythonRuntime",
     "IPythonExecutor",
     "SecurityChecker",
+    "PermissionChecker",
     "TieredRuntimeDescriber",
     # Security rules
     "SecurityRule",

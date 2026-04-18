@@ -49,7 +49,7 @@ class SkillLineage(BaseModel):
     generation: int = 0
     parent_skill_ids: list[str] = Field(default_factory=list)
     content_diff: str | None = None
-    content_snapshot: str | None = None
+    content_snapshot: dict[str, str] | None = None
 
 
 class SkillRecord(BaseModel):

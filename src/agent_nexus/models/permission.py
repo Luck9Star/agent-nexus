@@ -1,4 +1,4 @@
-"""Permission models: PermissionMode, PermissionConfig, PathRule, ToolPermission."""
+"""Permission models: PermissionMode, PermissionConfig, PathRule, PermissionDecision."""
 
 from __future__ import annotations
 
@@ -80,3 +80,20 @@ class PermissionConfig(BaseModel):
     denied_tools: list[str] = Field(default_factory=list)
     path_rules: list[PathRule] = Field(default_factory=list)
     denied_commands: list[str] = Field(default_factory=list)
+
+
+class PermissionDecision(BaseModel):
+    """Result of a permission check.
+
+    Attributes:
+        allowed: Whether the action is permitted.
+        reason: Human-readable explanation (especially for denials).
+        requires_confirmation: True when the action is allowed but needs user
+            confirmation first (DEFAULT mode for write operations).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    allowed: bool
+    reason: str = ""
+    requires_confirmation: bool = False

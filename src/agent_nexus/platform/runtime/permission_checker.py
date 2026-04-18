@@ -1,0 +1,280 @@
+"""PermissionChecker: runtime permission evaluator for agent tool calls and file access.
+
+Evaluation order (each step can override previous):
+    1. denied_tools (blacklist) — immediate deny
+    2. allowed_tools (whitelist) — immediate allow (unless denied)
+    3. path_rules (glob pattern matching) — for file-related tools
+    4. mode baseline (DEFAULT/PLAN/FULL_AUTO)
+    5. Read-only tools are always allowed (unless explicitly denied)
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import logging
+from pathlib import Path
+
+from agent_nexus.models.permission import (
+    PathAccess,
+    PermissionConfig,
+    PermissionDecision,
+    PermissionMode,
+)
+
+logger = logging.getLogger(__name__)
+
+# Tools that are inherently read-only and safe to allow without confirmation.
+READONLY_TOOLS: frozenset[str] = frozenset(
+    {
+        "file_read",
+        "grep",
+        "glob",
+        "list",
+        "search",
+        "info",
+        "agent_info",
+        "list_agents",
+        "search_and_activate",
+    }
+)
+
+# Built-in sensitive paths that are ALWAYS denied regardless of user config.
+# These cannot be overridden by path_rules.
+SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
+    "~/.ssh/**",
+    "~/.aws/**",
+    "~/.config/gcloud/**",
+    "*.env",
+    "*.pem",
+    "*.key",
+)
+
+# Shell commands considered dangerous in DEFAULT mode.
+_DANGEROUS_COMMAND_PATTERNS: tuple[str, ...] = (
+    "rm ",
+    "rm -",
+    "sudo ",
+    "chmod ",
+    "chown ",
+    "mkfs.",
+    "dd ",
+    "> /dev/",
+    "curl ",
+    "wget ",
+    "ssh ",
+    "scp ",
+)
+
+
+def _expand_user(path: str) -> str:
+    """Expand ~ to the user's home directory."""
+    return str(Path(path).expanduser())
+
+
+def _matches_any_pattern(value: str, patterns: list[str] | tuple[str, ...]) -> bool:
+    """Check whether *value* matches any of the given fnmatch patterns."""
+    for pattern in patterns:
+        if fnmatch.fnmatch(value, pattern):
+            return True
+    return False
+
+
+def _is_sensitive_path(path: str) -> bool:
+    """Return True if *path* matches a built-in sensitive path pattern."""
+    expanded = _expand_user(path)
+    for pattern in SENSITIVE_PATH_PATTERNS:
+        expanded_pattern = _expand_user(pattern)
+        if fnmatch.fnmatch(expanded, expanded_pattern):
+            return True
+    # Also check the basename for patterns like *.env, *.pem, *.key
+    basename = Path(expanded).name
+    for pattern in SENSITIVE_PATH_PATTERNS:
+        if "/" not in pattern and fnmatch.fnmatch(basename, pattern):
+            return True
+    return False
+
+
+def _is_write_tool(tool_name: str) -> bool:
+    """Heuristic: a tool is considered a 'write' tool if it is not read-only."""
+    return tool_name not in READONLY_TOOLS
+
+
+class PermissionChecker:
+    """Runtime permission evaluator for agent tool calls and file access.
+
+    Usage::
+
+        from agent_nexus.models.permission import PermissionConfig, PermissionMode
+
+        config = PermissionConfig(mode=PermissionMode.DEFAULT)
+        checker = PermissionChecker(config)
+
+        decision = checker.check_tool("file_read")
+        assert decision.allowed
+
+        decision = checker.check_tool("file_write")
+        assert decision.allowed and decision.requires_confirmation
+    """
+
+    def __init__(self, config: PermissionConfig) -> None:
+        self._config = config
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def check_tool(self, tool_name: str) -> PermissionDecision:
+        """Check whether *tool_name* is permitted.
+
+        Evaluation order:
+            1. denied_tools (blacklist, with glob support)
+            2. allowed_tools whitelist (if non-empty, with glob support)
+            3. Read-only tool exemption
+            4. Mode baseline (PLAN / FULL_AUTO / DEFAULT)
+        """
+        # 1. denied_tools — immediate deny
+        if _matches_any_pattern(tool_name, self._config.denied_tools):
+            return PermissionDecision(
+                allowed=False,
+                reason=f"Tool '{tool_name}' is in denied_tools list",
+            )
+
+        # 2. allowed_tools whitelist — if configured, tool must match
+        if self._config.allowed_tools:
+            if not _matches_any_pattern(tool_name, self._config.allowed_tools):
+                return PermissionDecision(
+                    allowed=False,
+                    reason=f"Tool '{tool_name}' not in allowed_tools",
+                )
+            # Tool matched the whitelist — allow immediately
+            return PermissionDecision(allowed=True, reason="Allowed by allowed_tools")
+
+        # 3. Read-only tools always allowed (unless already denied above)
+        if tool_name in READONLY_TOOLS:
+            return PermissionDecision(allowed=True, reason="Read-only tool")
+
+        # 4. Mode baseline
+        return self._check_mode_baseline(tool_name)
+
+    def check_path(self, tool_name: str, path: str) -> PermissionDecision:
+        """Check whether *tool_name* may access *path*.
+
+        Runs ``check_tool`` first. If denied, returns that decision.
+        Then checks built-in sensitive paths (always denied), followed by
+        user-configured ``path_rules`` (first matching rule wins).
+        """
+        # 1. Tool-level check first
+        tool_decision = self.check_tool(tool_name)
+        if not tool_decision.allowed:
+            return tool_decision
+
+        # 2. Built-in sensitive paths — always denied, cannot be overridden
+        if _is_sensitive_path(path):
+            return PermissionDecision(
+                allowed=False,
+                reason=f"Path '{path}' is a sensitive system path and is always denied",
+            )
+
+        # 3. User-configured path_rules — first matching rule wins
+        expanded = _expand_user(path)
+        for rule in self._config.path_rules:
+            expanded_pattern = _expand_user(rule.pattern)
+            if fnmatch.fnmatch(expanded, expanded_pattern):
+                return self._apply_path_access(rule.access, tool_name, path)
+
+        # 4. No matching rule — default allow (sensitive paths already handled above)
+        return tool_decision
+
+    def check_command(self, command: str) -> PermissionDecision:
+        """Check whether a shell *command* is permitted.
+
+        Checks ``denied_commands`` first, then applies mode-based rules.
+        """
+        # 1. denied_commands — substring match
+        for denied in self._config.denied_commands:
+            if denied in command:
+                return PermissionDecision(
+                    allowed=False,
+                    reason=f"Command matches denied pattern '{denied}'",
+                )
+
+        # 2. PLAN mode — all commands denied
+        if self._config.mode == PermissionMode.PLAN:
+            return PermissionDecision(
+                allowed=False,
+                reason="Commands are not allowed in PLAN mode",
+            )
+
+        # 3. FULL_AUTO mode — allow everything not explicitly denied
+        if self._config.mode == PermissionMode.FULL_AUTO:
+            return PermissionDecision(allowed=True, reason="FULL_AUTO mode")
+
+        # 4. DEFAULT mode — dangerous commands require confirmation
+        if self._is_dangerous_command(command):
+            return PermissionDecision(
+                allowed=True,
+                reason="Dangerous command requires user confirmation",
+                requires_confirmation=True,
+            )
+
+        return PermissionDecision(allowed=True, reason="Command allowed")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _check_mode_baseline(self, tool_name: str) -> PermissionDecision:
+        """Apply mode-based permission rules for write tools."""
+        if self._config.mode == PermissionMode.PLAN:
+            return PermissionDecision(
+                allowed=False,
+                reason=f"Tool '{tool_name}' is not allowed in PLAN mode (read-only)",
+            )
+
+        if self._config.mode == PermissionMode.FULL_AUTO:
+            return PermissionDecision(allowed=True, reason="FULL_AUTO mode")
+
+        # DEFAULT mode — allow but require confirmation for write tools
+        return PermissionDecision(
+            allowed=True,
+            reason=f"Tool '{tool_name}' requires user confirmation in DEFAULT mode",
+            requires_confirmation=True,
+        )
+
+    def _apply_path_access(
+        self, access: PathAccess, tool_name: str, path: str
+    ) -> PermissionDecision:
+        """Translate a PathAccess level into a PermissionDecision."""
+        if access == PathAccess.DENY:
+            return PermissionDecision(
+                allowed=False, reason=f"Path '{path}' access denied by path rule"
+            )
+
+        if access == PathAccess.READ:
+            if _is_write_tool(tool_name):
+                return PermissionDecision(
+                    allowed=False,
+                    reason=f"Path '{path}' is READ-only, write tool '{tool_name}' denied",
+                )
+            return PermissionDecision(
+                allowed=True, reason=f"Path '{path}' READ access for read-only tool"
+            )
+
+        if access in (PathAccess.WRITE, PathAccess.READ_WRITE):
+            return PermissionDecision(
+                allowed=True, reason=f"Path '{path}' access allowed ({access.value})"
+            )
+
+        # Fallback — should not happen with valid PathAccess values
+        return PermissionDecision(
+            allowed=False, reason=f"Unknown path access level: {access}"
+        )
+
+    @staticmethod
+    def _is_dangerous_command(command: str) -> bool:
+        """Heuristic check for dangerous shell commands."""
+        stripped = command.strip().lower()
+        for pattern in _DANGEROUS_COMMAND_PATTERNS:
+            if pattern.lower() in stripped:
+                return True
+        return False

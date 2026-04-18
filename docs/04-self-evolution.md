@@ -157,72 +157,94 @@ class EvolutionEngine:
 
 ### 6.7 SQLite Schema
 
-> **参考模块**: OpenSpace `openspace/skill_engine/store.py` — 完整 SQLite Schema 定义, 包含 `skill_records`, `skill_lineage_parents`, `execution_analyses`, `skill_judgments` 表
+> **实现模块**: `src/agent_nexus/platform/evolution/store.py` — EvolutionStore，WAL 模式，connection-per-operation，包含 `skill_records`, `skill_lineage_parents`, `execution_analyses`, `skill_judgments`, `context_budget_log`, `agent_records` 六张表
 
 ```sql
--- Skill 记录（含进化 DAG）
+-- Skill 记录（含进化 DAG + 质量计数器）
 CREATE TABLE skill_records (
-    skill_id TEXT PRIMARY KEY,
-    name TEXT, description TEXT, path TEXT,
-    category TEXT DEFAULT 'workflow',
-    is_active INTEGER DEFAULT 1,
-    lineage_origin TEXT DEFAULT 'imported',
-    lineage_generation INTEGER DEFAULT 0,
-    total_selections INTEGER DEFAULT 0,
-    total_applied INTEGER DEFAULT 0,
-    total_completions INTEGER DEFAULT 0,
-    total_fallbacks INTEGER DEFAULT 0,
-    first_seen TEXT, last_updated TEXT
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL DEFAULT '1.0.0',
+    lineage_origin TEXT NOT NULL DEFAULT 'imported',
+    lineage_generation INTEGER NOT NULL DEFAULT 0,
+    lineage_content_diff TEXT,
+    lineage_content_snapshot TEXT,
+    directory TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    total_selections INTEGER NOT NULL DEFAULT 0,
+    total_applied INTEGER NOT NULL DEFAULT 0,
+    total_completions INTEGER NOT NULL DEFAULT 0,
+    total_fallbacks INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
+CREATE INDEX idx_sr_active ON skill_records(is_active);
+CREATE INDEX idx_sr_name ON skill_records(name);
+CREATE INDEX idx_sr_updated ON skill_records(updated_at);
 
 -- DAG 边（多对多）
 CREATE TABLE skill_lineage_parents (
-    skill_id TEXT, parent_skill_id TEXT,
-    PRIMARY KEY (skill_id, parent_skill_id)
+    skill_id TEXT NOT NULL,
+    parent_id TEXT NOT NULL,
+    PRIMARY KEY (skill_id, parent_id),
+    FOREIGN KEY (skill_id) REFERENCES skill_records(id),
+    FOREIGN KEY (parent_id) REFERENCES skill_records(id)
 );
+CREATE INDEX idx_lp_parent ON skill_lineage_parents(parent_id);
 
--- Agent 级别记录（扩展）
-CREATE TABLE agent_records (
-    agent_id TEXT PRIMARY KEY,
-    name TEXT, type TEXT,  -- atomic | composite
-    skill_ids TEXT,  -- JSON array
-    orchestration_toml TEXT,
-    effective_rate REAL DEFAULT 0,
-    avg_steps REAL, avg_duration_ms REAL,
-    is_active INTEGER DEFAULT 1
-);
-
--- 任务分析（每任务一条）
+-- 任务分析（每任务每 Agent 一条，独立 UUID 主键）
 CREATE TABLE execution_analyses (
-    task_id TEXT UNIQUE,
-    agent_id TEXT,
-    task_completed INTEGER DEFAULT 0,
-    candidate_for_evolution INTEGER DEFAULT 0,
-    evolution_suggestions TEXT  -- JSON array
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    agent_name TEXT NOT NULL,
+    analysis TEXT NOT NULL,
+    evolution_suggestions TEXT,  -- JSON array
+    created_at TEXT NOT NULL
 );
+CREATE INDEX idx_ea_task ON execution_analyses(task_id);
 
--- Skill 评估（每任务每 Skill 一条）
+-- Skill 评估（每分析每 Skill 一条，独立 UUID 主键）
 CREATE TABLE skill_judgments (
-    analysis_id TEXT, skill_id TEXT,
-    skill_applied INTEGER,
-    note TEXT,
-    PRIMARY KEY (analysis_id, skill_id)
+    id TEXT PRIMARY KEY,
+    analysis_id TEXT NOT NULL,
+    skill_id TEXT NOT NULL,
+    selected INTEGER NOT NULL DEFAULT 0,
+    applied INTEGER NOT NULL DEFAULT 0,
+    completed INTEGER NOT NULL DEFAULT 0,
+    fell_back INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (analysis_id) REFERENCES execution_analyses(id)
 );
+CREATE INDEX idx_sj_skill ON skill_judgments(skill_id);
+CREATE INDEX idx_sj_analysis ON skill_judgments(analysis_id);
 
 -- Context Budget 日志（Token 优化追踪）
 CREATE TABLE context_budget_log (
-    log_id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    turn_number INTEGER,
-    prompt_tokens INTEGER,
-    completion_tokens INTEGER,
-    layer0_tokens INTEGER,
-    layer1_tokens INTEGER,
-    total_tokens INTEGER NOT NULL,
-    compaction_triggered INTEGER DEFAULT 0,
-    timestamp TEXT NOT NULL
+    id TEXT PRIMARY KEY,
+    agent_name TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    tokens_before INTEGER,
+    tokens_after INTEGER,
+    details TEXT,  -- JSON
+    created_at TEXT NOT NULL
 );
+CREATE INDEX idx_cbl_agent ON context_budget_log(agent_name);
+
+-- Agent 级别记录（Composite Agent 进化追踪，Layer 2）
+CREATE TABLE agent_records (
+    agent_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'atomic',  -- atomic | composite
+    skill_ids TEXT DEFAULT '[]',  -- JSON array
+    orchestration_toml TEXT,
+    effective_rate REAL DEFAULT 0.0,
+    avg_steps REAL,
+    avg_duration_ms REAL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_ar_active ON agent_records(is_active);
+CREATE INDEX idx_ar_name ON agent_records(name);
 ```
 
 ### 6.8 进化数据分层注入

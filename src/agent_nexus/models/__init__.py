@@ -84,6 +84,7 @@ from agent_nexus.models.permission import (
     PathAccess,
     PathRule,
     PermissionConfig,
+    PermissionDecision,
     PermissionMode,
 )
 
@@ -160,6 +161,7 @@ __all__ = [
     "PathAccess",
     "PathRule",
     "PermissionConfig",
+    "PermissionDecision",
     "PermissionMode",
     # context.py
     "ContextBudget",
