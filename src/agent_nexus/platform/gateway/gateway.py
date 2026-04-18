@@ -295,9 +295,10 @@ class MCPGateway:
 
             # Health check: clean up stale registration if process died
             if info.handle is not None and not info.handle.is_alive:
-                # No lock needed: set.discard is atomic, and
-                # re-acquiring the lock here would deadlock if
-                # _register_agent_tools still holds it.
+                # No lock: set.discard is atomic under GIL, and
+                # reacquiring _reg_lock here would deadlock if
+                # _register_agent_tools still holds it (asyncio.Lock
+                # is non-reentrant).
                 self._registered_agents.discard(adapter.agent_name)
                 return f"Error: agent '{adapter.agent_name}' process has died"
 

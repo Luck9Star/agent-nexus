@@ -2456,3 +2456,124 @@ class TestEvolutionEngineFacadeDelegation:
         """check_health raises ValueError for unknown skill_id."""
         with pytest.raises(ValueError, match="Skill not found"):
             engine.check_health("nonexistent-skill")
+
+
+# ============================================================================
+# 9. Regression: evolve_skill IntegrityError + get_metrics precise LIKE
+# ============================================================================
+
+
+class TestEvolveSkillIntegrityError:
+    """evolve_skill catches sqlite3.IntegrityError on duplicate skill ID
+    and returns EvolveResult(success=False) with 'collision' in the error.
+    """
+
+    def test_duplicate_id_returns_failure(self, tmp_path: Path) -> None:
+        """Inserting the same skill ID twice via evolve_skill returns a
+        failure result instead of raising an exception."""
+        store = EvolutionStore(tmp_path / "test.db")
+
+        record = _make_record(
+            "s1",
+            "my-skill",
+            origin=SkillOrigin.DERIVED,
+            generation=1,
+            parent_ids=[],
+        )
+        # First insert succeeds
+        result1 = store.evolve_skill(record, [])
+        assert result1.success
+
+        # Second insert with the same ID triggers IntegrityError
+        result2 = store.evolve_skill(record, [])
+        assert result2.success is False
+        assert result2.error is not None
+        assert "collision" in result2.error.lower()
+        assert result2.new_record is None
+
+    def test_duplicate_id_does_not_raise(self, tmp_path: Path) -> None:
+        """Ensure no sqlite3.IntegrityError escapes evolve_skill."""
+        import sqlite3
+
+        store = EvolutionStore(tmp_path / "test.db")
+        record = _make_record("dup-id", "skill")
+        store.evolve_skill(record, [])
+
+        # This must NOT raise sqlite3.IntegrityError
+        try:
+            result = store.evolve_skill(record, [])
+        except sqlite3.IntegrityError:
+            pytest.fail("evolve_skill should catch IntegrityError, not propagate it")
+
+        assert result.success is False
+
+
+class TestGetMetricsPreciseLikeMatching:
+    """get_metrics uses precise directory LIKE matching so that querying
+    agent_name='code' does not accidentally match 'encoder-decoder' (which
+    contains 'code' as a substring).
+    """
+
+    def test_precise_agent_name_filtering(self, tmp_path: Path) -> None:
+        """get_metrics(agent_name='code') only matches agents/code/... and
+        agents/code exactly, not agents/encoder-decoder/... which contains
+        'code' as a substring in the agent directory name.
+        """
+        store = EvolutionStore(tmp_path / "test.db")
+
+        # Skill under agents/code/... (matches agent_name='code')
+        r1 = _make_record(
+            "s1",
+            "review",
+            selections=10,
+            directory="agents/code/review",
+        )
+        # Skill under agents/encoder-decoder/... (contains 'code' as substring)
+        r2 = _make_record(
+            "s2",
+            "encode",
+            selections=20,
+            directory="agents/encoder-decoder/encode",
+        )
+        store.save_skill_record(r1)
+        store.save_skill_record(r2)
+
+        metrics = store.get_metrics(agent_name="code")
+        # Should ONLY count the 'code' agent's selections (10),
+        # not encoder-decoder's (20) -- old substring %code% would match both
+        assert metrics.total_selections == 10
+
+    def test_precise_agent_name_no_false_positives(self, tmp_path: Path) -> None:
+        """get_metrics(agent_name='code') returns zero metrics when only
+        encoder-decoder exists (no exact 'code' agent).
+        """
+        store = EvolutionStore(tmp_path / "test.db")
+
+        r = _make_record(
+            "s1",
+            "encode",
+            selections=50,
+            directory="agents/encoder-decoder/encode",
+        )
+        store.save_skill_record(r)
+
+        metrics = store.get_metrics(agent_name="code")
+        # encoder-decoder does NOT match 'code' with the precise pattern
+        assert metrics.total_selections == 0
+
+    def test_exact_directory_match(self, tmp_path: Path) -> None:
+        """get_metrics(agent_name='code') also matches directory='agents/code'
+        exactly (no trailing slash).
+        """
+        store = EvolutionStore(tmp_path / "test.db")
+
+        r = _make_record(
+            "s1",
+            "skill",
+            selections=15,
+            directory="agents/code",
+        )
+        store.save_skill_record(r)
+
+        metrics = store.get_metrics(agent_name="code")
+        assert metrics.total_selections == 15

@@ -2023,6 +2023,218 @@ class TestInstallerReadManifestLogs:
         assert "Failed to read manifest" in caplog.text
 
 
+class TestResolveAgentDirValidation:
+    """Regression: _resolve_agent_dir raises ValueError for unsafe agent names.
+
+    This prevents path traversal attacks where a crafted agent_name like
+    '../etc' could resolve to a directory outside config_dir/agents/.
+    """
+
+    def _make_supervisor(self, tmp_path: Path) -> AgentSupervisor:
+        pm = _make_mock_pm()
+        lockfile = _make_mock_lockfile_mgr()
+        config = _make_mock_config_loader()
+        return AgentSupervisor(pm, lockfile, config, config_dir=tmp_path)
+
+    def test_rejects_path_traversal(self, tmp_path: Path) -> None:
+        """agent_name='../etc' must raise ValueError."""
+        sup = self._make_supervisor(tmp_path)
+        with pytest.raises(ValueError, match="unsafe"):
+            sup._resolve_agent_dir("../etc")
+
+    def test_rejects_slash_in_name(self, tmp_path: Path) -> None:
+        """agent_name='foo/bar' must raise ValueError."""
+        sup = self._make_supervisor(tmp_path)
+        with pytest.raises(ValueError, match="unsafe"):
+            sup._resolve_agent_dir("foo/bar")
+
+    def test_rejects_dot_dot(self, tmp_path: Path) -> None:
+        """agent_name='..' must raise ValueError."""
+        sup = self._make_supervisor(tmp_path)
+        with pytest.raises(ValueError, match="unsafe"):
+            sup._resolve_agent_dir("..")
+
+    def test_accepts_valid_hyphenated_name(self, tmp_path: Path) -> None:
+        """agent_name='code-reviewer' returns config_dir/agents/code-reviewer."""
+        sup = self._make_supervisor(tmp_path)
+        result = sup._resolve_agent_dir("code-reviewer")
+        assert result == tmp_path / "agents" / "code-reviewer"
+
+    def test_accepts_alphanumeric(self, tmp_path: Path) -> None:
+        """agent_name='agent123' returns config_dir/agents/agent123."""
+        sup = self._make_supervisor(tmp_path)
+        result = sup._resolve_agent_dir("agent123")
+        assert result == tmp_path / "agents" / "agent123"
+
+    def test_accepts_dot_in_name(self, tmp_path: Path) -> None:
+        """agent_name='my.agent' is allowed by _SAFE_NAME_RE."""
+        sup = self._make_supervisor(tmp_path)
+        result = sup._resolve_agent_dir("my.agent")
+        assert result == tmp_path / "agents" / "my.agent"
+
+    def test_rejects_empty_string(self, tmp_path: Path) -> None:
+        """Empty agent_name must raise ValueError."""
+        sup = self._make_supervisor(tmp_path)
+        with pytest.raises(ValueError, match="unsafe"):
+            sup._resolve_agent_dir("")
+
+    def test_rejects_leading_hyphen(self, tmp_path: Path) -> None:
+        """agent_name='-evil' must raise ValueError (flag injection)."""
+        sup = self._make_supervisor(tmp_path)
+        with pytest.raises(ValueError, match="unsafe"):
+            sup._resolve_agent_dir("-evil")
+
+    def test_rejects_null_byte(self, tmp_path: Path) -> None:
+        """agent_name='agent\\x00evil' must raise ValueError."""
+        sup = self._make_supervisor(tmp_path)
+        with pytest.raises(ValueError, match="unsafe"):
+            sup._resolve_agent_dir("agent\x00evil")
+
+
+class TestInstallerVenvPathIsRelativeTo:
+    """Regression: uninstall() uses is_relative_to to validate venv_path.
+
+    Prevents directory traversal where a crafted venv_path in the lockfile
+    could point to an arbitrary directory on the system.  Only venvs under
+    config_dir/venvs/ should be removed during uninstallation.
+    """
+
+    @pytest.mark.asyncio
+    async def test_rejects_venv_path_outside_venvs_dir(self, tmp_path: Path) -> None:
+        """A venv_path like /tmp/evil should NOT be deleted during uninstall."""
+        sources_yaml = tmp_path / "sources.yaml"
+        sources_yaml.write_text("sources: []\n", encoding="utf-8")
+        lockfile_json = tmp_path / "lockfile.json"
+        lockfile_json.write_text('{"version": 1, "agents": {}}', encoding="utf-8")
+
+        sm = SourceManager(sources_yaml)
+        lm = LockfileManager(lockfile_json)
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        agents_dir = config_dir / "agents"
+        venvs_dir = config_dir / "venvs"
+        agents_dir.mkdir()
+        venvs_dir.mkdir()
+
+        # Create a "malicious" directory that should NOT be deleted
+        evil_dir = tmp_path / "evil-target"
+        evil_dir.mkdir()
+        (evil_dir / "important.txt").write_text("do not delete", encoding="utf-8")
+
+        # Simulate an installed agent whose venv_path points outside venvs_dir
+        agent_dir = agents_dir / "evil-agent"
+        agent_dir.mkdir()
+        entry = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="a" * 40,
+            agent_type=AgentType.ATOMIC,
+            venv_path=str(evil_dir),
+            installed_at=datetime(2026, 1, 15, 12, 0, 0),
+        )
+        lm.add_entry_by_name("evil-agent", entry)
+
+        installer = GitInstaller(sm, lm, config_dir)
+        result = await installer.uninstall("evil-agent")
+
+        assert result is True
+        # The evil directory must NOT be deleted
+        assert evil_dir.exists()
+        assert (evil_dir / "important.txt").exists()
+        # But the agent dir should be gone
+        assert not agent_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_accepts_venv_path_inside_venvs_dir(self, tmp_path: Path) -> None:
+        """A venv_path under venvs_dir should be deleted during uninstall."""
+        sources_yaml = tmp_path / "sources.yaml"
+        sources_yaml.write_text("sources: []\n", encoding="utf-8")
+        lockfile_json = tmp_path / "lockfile.json"
+        lockfile_json.write_text('{"version": 1, "agents": {}}', encoding="utf-8")
+
+        sm = SourceManager(sources_yaml)
+        lm = LockfileManager(lockfile_json)
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        agents_dir = config_dir / "agents"
+        venvs_dir = config_dir / "venvs"
+        agents_dir.mkdir()
+        venvs_dir.mkdir()
+
+        # Create agent dir and valid venv
+        agent_dir = agents_dir / "good-agent"
+        agent_dir.mkdir()
+        venv_path = venvs_dir / "good-agent"
+        venv_path.mkdir()
+        (venv_path / "pyvenv.cfg").write_text("home = /usr/bin", encoding="utf-8")
+
+        entry = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="a" * 40,
+            agent_type=AgentType.ATOMIC,
+            venv_path=str(venv_path),
+            installed_at=datetime(2026, 1, 15, 12, 0, 0),
+        )
+        lm.add_entry_by_name("good-agent", entry)
+
+        installer = GitInstaller(sm, lm, config_dir)
+        result = await installer.uninstall("good-agent")
+
+        assert result is True
+        # Both agent dir and venv should be removed
+        assert not agent_dir.exists()
+        assert not venv_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_rejects_traversal_via_dotdot(self, tmp_path: Path) -> None:
+        """A venv_path like '../../tmp/evil' must not be deleted."""
+        sources_yaml = tmp_path / "sources.yaml"
+        sources_yaml.write_text("sources: []\n", encoding="utf-8")
+        lockfile_json = tmp_path / "lockfile.json"
+        lockfile_json.write_text('{"version": 1, "agents": {}}', encoding="utf-8")
+
+        sm = SourceManager(sources_yaml)
+        lm = LockfileManager(lockfile_json)
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        agents_dir = config_dir / "agents"
+        venvs_dir = config_dir / "venvs"
+        agents_dir.mkdir()
+        venvs_dir.mkdir()
+
+        # Create a target directory outside venvs_dir
+        target_dir = tmp_path / "outside-target"
+        target_dir.mkdir()
+        (target_dir / "secret.txt").write_text("secret", encoding="utf-8")
+
+        agent_dir = agents_dir / "traversal-agent"
+        agent_dir.mkdir()
+
+        # venv_path uses ../.. to escape venvs_dir
+        traversal_path = str(venvs_dir / ".." / ".." / "outside-target")
+        entry = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="a" * 40,
+            agent_type=AgentType.ATOMIC,
+            venv_path=traversal_path,
+            installed_at=datetime(2026, 1, 15, 12, 0, 0),
+        )
+        lm.add_entry_by_name("traversal-agent", entry)
+
+        installer = GitInstaller(sm, lm, config_dir)
+        result = await installer.uninstall("traversal-agent")
+
+        assert result is True
+        # Traversal target must NOT be deleted
+        assert target_dir.exists()
+        assert (target_dir / "secret.txt").exists()
+
+
 class TestSupervisorSafeNameRegex:
     """Regression: _SAFE_NAME_RE is consistent with installer pattern."""
 

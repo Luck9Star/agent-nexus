@@ -1765,6 +1765,141 @@ class TestInvokeNoLockReacquire:
 # ============================================================================
 
 
+# ============================================================================
+# Regression: McpToolAdapter IPC per-agent lock (from security audit)
+# ============================================================================
+
+
+class TestMcpToolAdapterIPCLock:
+    """McpToolAdapter.execute() acquires a per-agent asyncio.Lock for IPC.
+
+    The lock prevents interleaving of send_chat/receive_until_result calls
+    when the same agent is invoked concurrently (e.g. two tool calls to
+    the same agent from parallel coroutines).
+    """
+
+    @pytest.mark.asyncio
+    async def test_ipc_lock_created_on_execute(self) -> None:
+        """After execute(), a per-agent lock exists in _ipc_locks."""
+        schema = _make_tool_schema("tool")
+        adapter = McpToolAdapter(server_name="lock-test-agent", tool_schema=schema)
+
+        # Before any execute, no lock for this agent's sanitized name
+        assert "lock_test_agent" not in McpToolAdapter._ipc_locks
+
+        handle = _mock_agent_handle("lock-test-agent", alive=True)
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="ok",
+            status="completed",
+        )
+        handle.ipc.receive_until_result.return_value = response
+
+        # Clean _ipc_locks to isolate this test
+        McpToolAdapter._ipc_locks.clear()
+        try:
+            await adapter.execute(handle, {})
+            assert "lock_test_agent" in McpToolAdapter._ipc_locks
+        finally:
+            McpToolAdapter._ipc_locks.clear()
+
+    @pytest.mark.asyncio
+    async def test_ipc_lock_prevents_concurrent_interleave(self) -> None:
+        """Two concurrent execute calls to the same agent do not interleave.
+
+        The second call should only start IPC after the first completes
+        receive_until_result.
+        """
+        schema = _make_tool_schema("tool")
+        adapter = McpToolAdapter(server_name="conc-agent", tool_schema=schema)
+
+        call_order: list[str] = []
+
+        async def slow_receive(timeout: float = 300.0):
+            call_order.append("receive_start")
+            await asyncio.sleep(0.05)
+            call_order.append("receive_end")
+            return AgentToPlatform(
+                type=AgentToPlatformType.RESULT,
+                content="done",
+                status="completed",
+            )
+
+        async def fast_receive(timeout: float = 300.0):
+            call_order.append("receive_start_2")
+            call_order.append("receive_end_2")
+            return AgentToPlatform(
+                type=AgentToPlatformType.RESULT,
+                content="done2",
+                status="completed",
+            )
+
+        handle1 = _mock_agent_handle("conc-agent", alive=True)
+        handle1.ipc.send_chat = AsyncMock()
+        handle1.ipc.receive_until_result = slow_receive
+
+        handle2 = _mock_agent_handle("conc-agent", alive=True)
+        handle2.ipc.send_chat = AsyncMock()
+        handle2.ipc.receive_until_result = fast_receive
+
+        McpToolAdapter._ipc_locks.clear()
+        try:
+            # Launch both concurrently
+            results = await asyncio.gather(
+                adapter.execute(handle1, {}),
+                adapter.execute(handle2, {}),
+            )
+
+            # Both should succeed
+            assert results[0]["success"] is True
+            assert results[1]["success"] is True
+
+            # The first receive must complete before the second starts.
+            # Without the lock, the second send_chat could happen before
+            # the first receive_until_result completes.
+            assert call_order.index("receive_end") < call_order.index(
+                "receive_start_2"
+            ), f"Concurrent calls interleaved: {call_order}"
+        finally:
+            McpToolAdapter._ipc_locks.clear()
+
+    @pytest.mark.asyncio
+    async def test_different_agents_use_different_locks(self) -> None:
+        """Two different agents can execute concurrently (separate locks)."""
+        schema_a = _make_tool_schema("tool_a")
+        schema_b = _make_tool_schema("tool_b")
+        adapter_a = McpToolAdapter(server_name="agent-a", tool_schema=schema_a)
+        adapter_b = McpToolAdapter(server_name="agent-b", tool_schema=schema_b)
+
+        handle_a = _mock_agent_handle("agent-a", alive=True)
+        handle_a.ipc.receive_until_result.return_value = AgentToPlatform(
+            type=AgentToPlatformType.RESULT, content="a", status="completed",
+        )
+
+        handle_b = _mock_agent_handle("agent-b", alive=True)
+        handle_b.ipc.receive_until_result.return_value = AgentToPlatform(
+            type=AgentToPlatformType.RESULT, content="b", status="completed",
+        )
+
+        McpToolAdapter._ipc_locks.clear()
+        try:
+            results = await asyncio.gather(
+                adapter_a.execute(handle_a, {}),
+                adapter_b.execute(handle_b, {}),
+            )
+            assert results[0]["output"] == "a"
+            assert results[1]["output"] == "b"
+            assert "agent_a" in McpToolAdapter._ipc_locks
+            assert "agent_b" in McpToolAdapter._ipc_locks
+        finally:
+            McpToolAdapter._ipc_locks.clear()
+
+
+# ============================================================================
+# Fix 2 regression: get_agent_info prefers activated over dormant
+# ============================================================================
+
+
 class TestGetAgentInfoPriority:
     """get_agent_info returns the activated entry when agent is in both tiers.
 
