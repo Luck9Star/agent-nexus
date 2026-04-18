@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class MessageDirection(StrEnum):
@@ -76,9 +76,28 @@ class IPCMessage(BaseModel):
 
     This is the union type used for deserialization of raw JSON-lines
     read from stdin/stdout pipes.
+
+    Uses a ``model_validator`` to discriminate between PlatformToAgent
+    and AgentToPlatform based on the ``direction`` field.  Without this,
+    Pydantic would try PlatformToAgent first (left-to-right union) and
+    might accept AgentToPlatform data with wrong default values.
     """
 
     model_config = ConfigDict(frozen=True)
 
     direction: MessageDirection
     payload: PlatformToAgent | AgentToPlatform
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_payload(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        direction = values.get("direction")
+        payload = values.get("payload")
+        if isinstance(payload, dict) and isinstance(direction, str):
+            if direction == MessageDirection.PLATFORM_TO_AGENT.value:
+                values["payload"] = PlatformToAgent.model_validate(payload)
+            elif direction == MessageDirection.AGENT_TO_PLATFORM.value:
+                values["payload"] = AgentToPlatform.model_validate(payload)
+        return values

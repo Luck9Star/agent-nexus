@@ -121,9 +121,26 @@ class DeferredAgentRegistry:
         )
 
         if deferred:
+            # Guard: if name exists in the opposite tier, warn and remove
+            # the stale entry to prevent get_agent_info returning the
+            # wrong one.
+            if manifest.name in self._core_agents:
+                logger.warning(
+                    "Agent '%s' already registered as core, "
+                    "re-registering as deferred",
+                    manifest.name,
+                )
+                del self._core_agents[manifest.name]
             self._deferred_agents[manifest.name] = info
             logger.info("Registered deferred agent: %s", manifest.name)
         else:
+            if manifest.name in self._deferred_agents:
+                logger.warning(
+                    "Agent '%s' already registered as deferred, "
+                    "re-registering as core",
+                    manifest.name,
+                )
+                del self._deferred_agents[manifest.name]
             self._core_agents[manifest.name] = info
             logger.info("Registered core agent: %s", manifest.name)
 
@@ -341,10 +358,17 @@ class DeferredAgentRegistry:
         return self._tool_adapters.get(agent_name, [])
 
     def get_agent_info(self, name: str) -> AgentInfo | None:
-        """Look up agent info by name across all tiers."""
-        if name in self._core_agents:
-            return self._core_agents[name]
-        return self._deferred_agents.get(name)
+        """Look up agent info by name across all tiers.
+
+        Prefers the deferred entry when it has been activated (has
+        tool_schemas / handle), since an activated deferred entry
+        carries more runtime state than a bare core entry with the
+        same name.
+        """
+        deferred = self._deferred_agents.get(name)
+        if deferred is not None:
+            return deferred
+        return self._core_agents.get(name)
 
     def list_all_agents(self) -> list[AgentInfo]:
         """Return info for all registered agents (core + deferred)."""

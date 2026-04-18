@@ -462,14 +462,22 @@ class TestDeferredRegistryGetAgent:
     def test_get_unknown_agent(self, registry: DeferredAgentRegistry) -> None:
         assert registry.get_agent_info("nonexistent") is None
 
-    def test_core_takes_priority(self, registry: DeferredAgentRegistry) -> None:
-        """If an agent name appears in both core and deferred, core is returned."""
+    def test_reregister_same_name_replaces_tier(
+        self, registry: DeferredAgentRegistry
+    ) -> None:
+        """Re-registering the same name as a different tier replaces the old entry."""
         registry.register_agent(_make_manifest("x"), deferred=False)
+        # x is in core
+        assert registry.get_agent_info("x") in registry.list_core_agents()
+
+        # Re-register same name as deferred — removes from core
         registry.register_agent(_make_manifest("x"), deferred=True)
+        # x is now in deferred only (old core entry removed)
+        assert len(registry.list_core_agents()) == 0
+        assert len(registry.list_deferred_agents()) == 1
         info = registry.get_agent_info("x")
         assert info is not None
-        # Core is checked first
-        assert info in registry.list_core_agents()
+        assert info in registry.list_deferred_agents()
 
 
 # ============================================================================
@@ -1354,3 +1362,46 @@ class TestMcpToolAdapterExecuteStatusCompleted:
 
         result = await adapter.execute(handle, {})
         assert result["success"] is True
+
+
+# ---------------------------------------------------------------------------
+# Iteration 24 fixes: gateway activation message, registry priority
+# ---------------------------------------------------------------------------
+
+
+class TestSearchAndActivateMessage:
+    """_search_and_activate returns 'tools now available' (not 'in next call')."""
+
+    @pytest.mark.asyncio
+    async def test_activation_message_says_now_available(self) -> None:
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest("test-agent")
+        # Register directly with the registry (non-async) to avoid
+        # needing await in the test setup
+        gw._registry.register_agent(manifest, deferred=True)
+
+        # Mock activate to return tool schemas
+        with patch.object(
+            gw._registry,
+            "activate_agent",
+            new_callable=AsyncMock,
+            return_value=[{"name": "tool1", "description": "d", "inputSchema": {}}],
+        ):
+            with patch.object(
+                gw._registry,
+                "search_agents",
+                return_value=[manifest],
+            ):
+                with patch.object(
+                    gw,
+                    "_register_agent_tools",
+                    new_callable=AsyncMock,
+                ):
+                    result = await gw._search_and_activate("test")
+
+        assert "tools now available" in result
+        assert "in next call" not in result

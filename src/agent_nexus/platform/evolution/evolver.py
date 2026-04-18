@@ -176,8 +176,10 @@ class SkillEvolver:
                 suggestion,
                 trigger=EvolutionTrigger.TOOL_DEGRADATION,
             )
-            # Mark as addressed regardless of success
-            self._addressed.setdefault(tool_key, set()).add(skill.id)
+            # Only mark as addressed when evolution succeeds — failed
+            # attempts should be eligible for retry on next degradation.
+            if result.success:
+                self._addressed.setdefault(tool_key, set()).add(skill.id)
             results.append(result)
 
         return results

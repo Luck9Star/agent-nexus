@@ -237,3 +237,75 @@ class TestSerializationRoundTrip:
         assert parsed["direction"] == "agent_to_platform"
         msg2 = IPCMessage.model_validate_json(json_str)
         assert msg2 == msg
+
+
+# ---------------------------------------------------------------------------
+# Iteration 24 fix: discriminated union via model_validator
+# ---------------------------------------------------------------------------
+
+
+class TestIPCMessageDiscriminatedUnion:
+    """model_validator resolves payload type from direction field.
+
+    Without the validator, Pydantic's left-to-right union matching could
+    deserialize an AgentToPlatform payload dict as PlatformToAgent (which
+    accepts extra fields silently via defaults).
+    """
+
+    def test_platform_to_agent_payload_resolved(self) -> None:
+        """Payload dict with direction=platform_to_agent -> PlatformToAgent."""
+        data = {
+            "direction": "platform_to_agent",
+            "payload": {
+                "type": "chat",
+                "content": "hello",
+                "conversation_id": "c-1",
+            },
+        }
+        msg = IPCMessage(**data)
+        assert isinstance(msg.payload, PlatformToAgent)
+        assert msg.payload.content == "hello"
+
+    def test_agent_to_platform_payload_resolved(self) -> None:
+        """Payload dict with direction=agent_to_platform -> AgentToPlatform."""
+        data = {
+            "direction": "agent_to_platform",
+            "payload": {
+                "type": "result",
+                "task_id": "t-1",
+                "output": {"key": "value"},
+                "status": "completed",
+            },
+        }
+        msg = IPCMessage(**data)
+        assert isinstance(msg.payload, AgentToPlatform)
+        assert msg.payload.output == {"key": "value"}
+
+    def test_wrong_direction_does_not_misdeserialize(self) -> None:
+        """AgentToPlatform fields should NOT deserialize as PlatformToAgent."""
+        data = {
+            "direction": "agent_to_platform",
+            "payload": {
+                "type": "error",
+                "error": "boom",
+            },
+        }
+        msg = IPCMessage(**data)
+        # Must be AgentToPlatform, not PlatformToAgent
+        assert isinstance(msg.payload, AgentToPlatform)
+        assert msg.payload.error == "boom"
+
+    def test_json_round_trip_preserves_payload_type(self) -> None:
+        """JSON serialization then deserialization keeps correct type."""
+        msg = IPCMessage(
+            direction=MessageDirection.AGENT_TO_PLATFORM,
+            payload=AgentToPlatform(
+                type=AgentToPlatformType.PROGRESS,
+                task_id="t-1",
+                progress_pct=42.0,
+            ),
+        )
+        json_str = msg.model_dump_json()
+        restored = IPCMessage.model_validate_json(json_str)
+        assert isinstance(restored.payload, AgentToPlatform)
+        assert restored.payload.progress_pct == 42.0

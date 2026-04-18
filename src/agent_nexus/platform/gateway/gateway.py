@@ -107,7 +107,7 @@ class MCPGateway:
                 )
 
         header = "Found and activated the following agents "
-        header += "(tools available in next call):\n"
+        header += "(tools now available):\n"
         return header + "\n".join(activated)
 
     async def _list_agents(self) -> str:

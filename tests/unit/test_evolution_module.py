@@ -1490,3 +1490,190 @@ class TestHealthReportFormatting:
         assert "12.00%" in lines
         assert "total_selections: 42" in lines
         assert "total_completions: 38" in lines
+
+
+# ---------------------------------------------------------------------------
+# Iteration 24 fixes: fuzzy ID prefix scoping, suggestion dedup,
+# addressed-on-success
+# ---------------------------------------------------------------------------
+
+
+class TestCorrectSkillIdsPrefixScoping:
+    """_correct_skill_ids skips fuzzy matching when raw_id has no __ prefix."""
+
+    def test_no_prefix_separator_returns_raw_id_unchanged(self) -> None:
+        """When raw_id has no __, it can't be scoped so it passes through."""
+        known = {"reviewer__fix_a1b2c3d4", "reviewer__drv_e5f6g7h8"}
+        # "reviewer" has no __ -> skip fuzzy matching entirely
+        result = _correct_skill_ids(["reviewer"], known)
+        assert result == ["reviewer"]
+
+    def test_prefix_separator_scopes_candidates(self) -> None:
+        """When raw_id has __, only candidates with matching prefix compete."""
+        known = {
+            "reviewer__fix_a1b2c3d4",
+            "reviewer__drv_e5f6g7h8",
+            "writer__fix_11111111",
+        }
+        # Typo in the suffix after reviewer__ should match reviewer candidates only
+        result = _correct_skill_ids(["reviewer__fix_a1b2c3XX"], known)
+        assert result == ["reviewer__fix_a1b2c3d4"]
+
+    def test_no_prefix_does_not_cross_match(self) -> None:
+        """Without __, a raw_id should never fuzzy-match to a known ID."""
+        known = {"reviewer__fix_a1b2c3d4"}
+        result = _correct_skill_ids(["reviewr"], known)
+        # "reviewr" has no __, so it stays unchanged (not fuzzy-matched)
+        assert result == ["reviewr"]
+
+
+class TestSuggestionDeduplication:
+    """_generate_suggestions deduplicates by (evolution_type, skill_id).
+
+    A skill that triggers both high fallback AND low completion should
+    produce only one FIX suggestion (keeping the higher confidence).
+    """
+
+    def _make_skill(
+        self,
+        selections: int,
+        fallbacks: int,
+        applied: int,
+        completions: int,
+    ) -> SkillRecord:
+        return SkillRecord(
+            id="skill-1",
+            name="test-skill",
+            version="1.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED,
+                generation=1,
+                parent_skill_ids=[],
+            ),
+            directory="skills/test",
+            is_active=True,
+            total_selections=selections,
+            total_applied=applied,
+            total_completions=completions,
+            total_fallbacks=fallbacks,
+        )
+
+    def test_duplicate_fix_suggestions_deduplicated(self, tmp_path: Path) -> None:
+        """Skill with high fallback AND low completion produces one FIX."""
+        store = EvolutionStore(tmp_path / "test.db")
+        analyzer = ExecutionAnalyzer(store)
+
+        # fallback_rate = 6/10 = 0.6 > 0.4 threshold (FIX)
+        # applied_rate = 5/10 = 0.5 > 0.4, completion_rate = 1/5 = 0.2 < 0.35 (FIX again)
+        skill = self._make_skill(
+            selections=10,
+            fallbacks=6,
+            applied=5,
+            completions=1,
+        )
+        store.save_skill_record(skill)
+
+        ctx = EvolutionContext(
+            agent_id="a",
+            task_id="t-1",
+            skill_ids_used=["skill-1"],
+            skills_applied=["skill-1"],
+            skills_fell_back=["skill-1"],
+        )
+        result = analyzer.analyze_execution(ctx)
+
+        fix_suggestions = [
+            s for s in result.suggestions
+            if s.evolution_type == EvolutionType.FIX
+        ]
+        assert len(fix_suggestions) == 1, (
+            f"Expected 1 deduplicated FIX, got {len(fix_suggestions)}"
+        )
+
+    def test_different_evolution_types_not_deduplicated(self, tmp_path: Path) -> None:
+        """FIX and DERIVED for the same skill are both kept."""
+        store = EvolutionStore(tmp_path / "test.db")
+        analyzer = ExecutionAnalyzer(store)
+
+        # fallback_rate = 6/10 = 0.6 > 0.4 (FIX)
+        # effective_rate = 3/10 = 0.3 < 0.55, applied_rate = 5/10 = 0.5 > 0.25 (DERIVED)
+        skill = self._make_skill(
+            selections=10,
+            fallbacks=6,
+            applied=5,
+            completions=3,
+        )
+        store.save_skill_record(skill)
+
+        ctx = EvolutionContext(
+            agent_id="a",
+            task_id="t-1",
+            skill_ids_used=["skill-1"],
+            skills_applied=["skill-1"],
+            skills_fell_back=["skill-1"],
+        )
+        result = analyzer.analyze_execution(ctx)
+
+        types = {s.evolution_type for s in result.suggestions}
+        assert EvolutionType.FIX in types
+        assert EvolutionType.DERIVED in types
+
+
+class TestAddressedOnSuccessOnly:
+    """process_tool_degradation only marks _addressed when evolve succeeds."""
+
+    def _make_skill(self, sid: str = "skill-1") -> SkillRecord:
+        return SkillRecord(
+            id=sid,
+            name="test-skill",
+            version="1.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED,
+                generation=1,
+                parent_skill_ids=[],
+            ),
+            directory="skills/test",
+            is_active=True,
+        )
+
+    def test_failed_evolve_not_marked_addressed(self, tmp_path: Path) -> None:
+        """When evolution fails, skill is NOT added to _addressed."""
+        from unittest.mock import patch
+
+        store = EvolutionStore(tmp_path / "test.db")
+        skill = self._make_skill()
+        store.save_skill_record(skill)
+
+        evolver = SkillEvolver(store)
+        fail_result = EvolveResult(success=False, error="simulated failure")
+        with patch.object(evolver, "evolve", return_value=fail_result):
+            results = evolver.process_tool_degradation(
+                tool_key="tool-a",
+                problem_description="broken",
+                affected_skill_ids={skill.id},
+            )
+
+        assert len(results) == 1
+        assert results[0].success is False
+        assert skill.id not in evolver._addressed.get("tool-a", set())
+
+    def test_successful_evolve_marked_addressed(self, tmp_path: Path) -> None:
+        """When evolution succeeds, skill IS added to _addressed."""
+        from unittest.mock import patch
+
+        store = EvolutionStore(tmp_path / "test.db")
+        skill = self._make_skill()
+        store.save_skill_record(skill)
+
+        evolver = SkillEvolver(store)
+        ok_result = EvolveResult(success=True, new_record=skill)
+        with patch.object(evolver, "evolve", return_value=ok_result):
+            results = evolver.process_tool_degradation(
+                tool_key="tool-x",
+                problem_description="degraded",
+                affected_skill_ids={skill.id},
+            )
+
+        assert len(results) == 1
+        assert results[0].success is True
+        assert skill.id in evolver._addressed.get("tool-x", set())

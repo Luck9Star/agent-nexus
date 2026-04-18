@@ -89,13 +89,13 @@ def _correct_skill_ids(
             corrected.append(raw_id)
             continue
 
-        prefix = raw_id.split("__")[0] if "__" in raw_id else ""
+        if "__" not in raw_id:
+            # No prefix separator — can't narrow candidates safely, skip
+            corrected.append(raw_id)
+            continue
 
-        candidates = (
-            [k for k in known_ids if k.split("__")[0] == prefix]
-            if prefix
-            else list(known_ids)
-        )
+        prefix = raw_id.split("__")[0]
+        candidates = [k for k in known_ids if k.split("__")[0] == prefix]
 
         max_dist = 2 if len(candidates) > 20 else 4
         best: str | None = None
@@ -280,7 +280,14 @@ class ExecutionAnalyzer:
                 confidence=0.6,
             ))
 
-        return suggestions
+        # Deduplicate: same (evolution_type, skill_id) can trigger from
+        # multiple thresholds — keep the one with highest confidence.
+        seen: dict[tuple[EvolutionType, str], EvolutionSuggestion] = {}
+        for s in suggestions:
+            key = (s.evolution_type, s.target_skill_ids[0] if s.target_skill_ids else "")
+            if key not in seen or s.confidence > seen[key].confidence:
+                seen[key] = s
+        return list(seen.values())
 
     def _build_analysis_text(
         self,
