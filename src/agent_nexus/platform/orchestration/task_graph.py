@@ -337,12 +337,22 @@ class TaskGraph:
         if not task_ids:
             return []
 
+        task_id_set = set(task_ids)
         dep_map: dict[str, set[str]] = {tid: set() for tid in task_ids}
         dep_rows = conn.execute(
             "SELECT task_id, blocked_by_id FROM task_dependencies"
         ).fetchall()
         for task_id, blocked_by_id in dep_rows:
-            dep_map[task_id].add(blocked_by_id)
+            # Only track dependencies to tasks that exist in the graph.
+            # Unknown deps are logged but don't block grouping.
+            if blocked_by_id in task_id_set:
+                dep_map[task_id].add(blocked_by_id)
+            else:
+                logger.warning(
+                    "Task '%s' depends on non-existent task '%s', ignoring dep",
+                    task_id,
+                    blocked_by_id,
+                )
 
         # BFS-based topological grouping
         groups: list[list[TaskItem]] = []
@@ -356,7 +366,13 @@ class TaskGraph:
                 and dep_map[tid].issubset(assigned)
             ]
             if not group_ids:
-                # Remaining tasks have unresolvable deps (cycle or missing)
+                # Remaining tasks have unresolvable deps (cycle)
+                unassigned = task_id_set - assigned
+                logger.warning(
+                    "Cannot schedule %d task(s) — likely cyclic dependency: %s",
+                    len(unassigned),
+                    unassigned,
+                )
                 break
             group_tasks = []
             for tid in group_ids:
