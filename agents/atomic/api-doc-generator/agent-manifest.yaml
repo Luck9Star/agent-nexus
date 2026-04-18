@@ -1,0 +1,14 @@
+name: api-doc-generator
+version: 1.0.0
+type: atomic
+description: API 文档生成专家，支持 OpenAPI 3.1 标准
+
+model_config:
+  recommended: "standard"
+  fallback: "lightweight"
+  max_turns: 10
+
+permissions:
+  mode: default
+  allowed_tools: [file_read, file_write, grep, glob]
+  denied_tools: [bash]

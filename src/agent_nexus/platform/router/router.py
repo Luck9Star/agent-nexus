@@ -1,0 +1,418 @@
+"""PlatformRouter -- 4-Phase composite agent workflow orchestration.
+
+Phases:
+1. Research:    parallel workers gather information
+2. Synthesis:   coordinator alone analyzes and plans
+3. Implementation: parallel workers execute the plan
+4. Verification:   fresh worker verifies results
+
+Uses:
+- TaskGraph for dependency tracking per workflow
+- ProcessManager for agent subprocess lifecycle
+- SubtaskController for individual task execution (timeout/retry/parallel)
+- OrchestrationDSL definitions for task structure
+
+Reference: docs/06-mcp-communication.md Section 8.4
+"""
+
+from __future__ import annotations
+
+import logging
+import uuid
+from pathlib import Path
+from typing import Any
+
+from agent_nexus.models.ipc import AgentToPlatformType
+from agent_nexus.platform.orchestration.dsl import OrchestrationDefinition
+from agent_nexus.platform.orchestration.process_manager import ProcessManager
+from agent_nexus.platform.orchestration.task_graph import TaskGraph
+
+from .subtask import SubtaskController, SubtaskConfig
+from .workflow import WorkflowContext, WorkflowPhase, WorkflowResult
+
+logger = logging.getLogger(__name__)
+
+# Default phases in execution order
+_PHASE_ORDER: list[WorkflowPhase] = [
+    WorkflowPhase.research,
+    WorkflowPhase.synthesis,
+    WorkflowPhase.implementation,
+    WorkflowPhase.verification,
+]
+
+
+class PlatformRouter:
+    """Orchestrate composite agent workflows using 4-Phase pattern.
+
+    For composite agents: runs the full 4-phase workflow.
+    For atomic agents: delegates directly via IPC.
+    """
+
+    def __init__(
+        self,
+        process_manager: ProcessManager,
+        subtask_controller: SubtaskController | None = None,
+    ) -> None:
+        self._pm = process_manager
+        self._subtask = subtask_controller or SubtaskController()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def route_chat(
+        self,
+        agent_name: str,
+        message: str,
+        conversation_id: str | None = None,
+    ) -> dict:
+        """Route a chat message to an agent.
+
+        For composite agents: delegates to route_composite.
+        For atomic agents: delegates to route_to_atomic.
+
+        Args:
+            agent_name: Name of the target agent.
+            message: User message content.
+            conversation_id: Optional conversation ID (generated if absent).
+
+        Returns:
+            Dict with ``output`` and ``success`` keys.
+        """
+        conv_id = conversation_id or str(uuid.uuid4())
+        return await self.route_to_atomic(agent_name, message, conv_id)
+
+    async def route_composite(
+        self,
+        definition: OrchestrationDefinition,
+        message: str,
+        conversation_id: str,
+    ) -> WorkflowResult:
+        """Execute a composite agent workflow using 4-phase pattern.
+
+        Steps:
+        1. Create WorkflowContext with a fresh in-memory TaskGraph.
+        2. Populate TaskGraph from the OrchestrationDefinition's tasks.
+        3. Execute each phase in order, collecting results.
+        4. Return WorkflowResult with aggregated outputs.
+
+        Args:
+            definition: Parsed TOML orchestration definition.
+            message: User message / goal for the workflow.
+            conversation_id: Conversation identifier.
+
+        Returns:
+            WorkflowResult summarizing the workflow outcome.
+        """
+        # 1. Create fresh context per workflow -- no cross-workflow state leakage
+        ctx = WorkflowContext(
+            conversation_id=conversation_id,
+            message=message,
+            agent_name=definition.agent_name,
+        )
+
+        # 2. Create in-memory TaskGraph and populate from definition
+        db_path = Path(f":memory:")
+        ctx.task_graph = TaskGraph(db_path)
+        for dsl_task in definition.tasks:
+            ctx.task_graph.add_task(dsl_task.to_task_item())
+
+        # 3. Execute phases
+        phase_results: dict[WorkflowPhase, str] = {}
+        completed = 0
+        total = len(_PHASE_ORDER)
+        last_error: str | None = None
+
+        for phase in _PHASE_ORDER:
+            ctx.current_phase = phase
+            try:
+                result = await self._execute_phase(ctx, phase, definition, message)
+                phase_results[phase] = result
+                completed += 1
+
+                # Feed previous phase output into next phase's message
+                message = self._build_phase_message(phase, result, phase_results)
+
+            except Exception as exc:
+                last_error = f"Phase {phase.value} failed: {exc}"
+                logger.error(last_error, exc_info=exc)
+                break
+
+        # 4. Build final result
+        success = completed == total
+        final_output = phase_results.get(WorkflowPhase.verification, "")
+        if not success and WorkflowPhase.synthesis in phase_results:
+            # Use synthesis output as partial result if available
+            final_output = phase_results.get(WorkflowPhase.synthesis, "")
+
+        return WorkflowResult(
+            success=success,
+            final_output=final_output,
+            phase_results=phase_results,
+            total_phases=total,
+            completed_phases=completed,
+            error=last_error,
+        )
+
+    async def route_to_atomic(
+        self,
+        atomic_name: str,
+        message: str,
+        conversation_id: str,
+    ) -> dict:
+        """Send message directly to an atomic agent subprocess via IPC.
+
+        Args:
+            atomic_name: Name of the atomic agent.
+            message: Chat message content.
+            conversation_id: Conversation identifier.
+
+        Returns:
+            Dict with ``output``, ``success``, and optionally ``error`` keys.
+
+        Raises:
+            KeyError: Agent not found in ProcessManager.
+        """
+        handle = self._pm.get_agent(atomic_name)
+        if handle is None:
+            raise KeyError(f"Agent '{atomic_name}' not found")
+
+        if not handle.is_alive:
+            return {
+                "output": "",
+                "success": False,
+                "error": f"Agent '{atomic_name}' process is not alive",
+            }
+
+        # Send chat message via IPC
+        await handle.ipc.send_chat(message, conversation_id=conversation_id)
+
+        # Wait for final result (progress messages are silently consumed)
+        try:
+            response = await handle.ipc.receive_until_result(timeout=300.0)
+        except Exception as exc:
+            return {
+                "output": "",
+                "success": False,
+                "error": f"IPC error: {exc}",
+            }
+
+        # Parse response
+        if response.type == AgentToPlatformType.ERROR:
+            return {
+                "output": "",
+                "success": False,
+                "error": response.error or "Agent returned an error",
+            }
+
+        return {
+            "output": response.content or "",
+            "success": response.status != "failed",
+        }
+
+    async def get_tools(self) -> list[dict]:
+        """Get aggregated tool schemas from all running agents.
+
+        Queries each alive agent via IPC to request its tool schemas.
+        Returns a flat list of tool definitions.
+        """
+        tools: list[dict] = []
+        for name in self._pm.list_running():
+            handle = self._pm.get_agent(name)
+            if handle is None or not handle.is_alive:
+                continue
+            try:
+                await handle.ipc.send_chat(
+                    "__list_tools__", conversation_id="__internal__"
+                )
+                response = await handle.ipc.receive_until_result(timeout=10.0)
+                if response.output and isinstance(response.output, list):
+                    tools.extend(response.output)
+            except Exception as exc:
+                logger.warning("Failed to get tools from agent '%s': %s", name, exc)
+
+        return tools
+
+    async def stop_all(self) -> None:
+        """Stop all agents managed by this router."""
+        await self._pm.stop_all()
+
+    # ------------------------------------------------------------------
+    # Phase execution
+    # ------------------------------------------------------------------
+
+    async def _execute_phase(
+        self,
+        ctx: WorkflowContext,
+        phase: WorkflowPhase,
+        definition: OrchestrationDefinition,
+        message: str,
+    ) -> str:
+        """Execute a single workflow phase.
+
+        Maps DSL agent roles to phases:
+        - research: agents with role='explore'
+        - synthesis: agents with role='plan'
+        - implementation: agents with role='worker'
+        - verification: agents with role='verification'
+
+        For research and implementation: run assigned agents in parallel.
+        For synthesis and verification: run single agent.
+        """
+        tg = ctx.task_graph
+        if tg is None:
+            raise RuntimeError("TaskGraph not initialized in context")
+
+        role = self._phase_to_role(phase)
+        phase_agents = [
+            name
+            for name, agent_def in definition.agents.items()
+            if agent_def.role == role
+        ]
+
+        if not phase_agents:
+            # Fallback: if no agents have the matching role, use root tasks
+            # for research and first available agent for other phases
+            if phase == WorkflowPhase.research:
+                root_tasks = definition.get_root_tasks()
+                phase_agents = list({t.agent for t in root_tasks})
+            elif definition.agents:
+                phase_agents = [next(iter(definition.agents.keys()))]
+
+        if not phase_agents:
+            return f"No agents available for {phase.value} phase"
+
+        # Build message for this phase
+        phase_message = message
+
+        if phase in (WorkflowPhase.research, WorkflowPhase.implementation):
+            # Parallel execution
+            results = await self._execute_parallel_agents(
+                phase_agents, phase_message, ctx.conversation_id
+            )
+            return self._aggregate_results(results, phase)
+
+        else:
+            # Single agent execution (synthesis, verification)
+            agent_name = phase_agents[0]
+            return await self._execute_single_agent(
+                agent_name, phase_message, ctx.conversation_id
+            )
+
+    async def _execute_parallel_agents(
+        self,
+        agent_names: list[str],
+        message: str,
+        conversation_id: str,
+    ) -> list[Any]:
+        """Execute multiple agents in parallel via SubtaskController."""
+        async def _run_agent(name: str) -> str:
+            return await self._subtask.run_with_retry(
+                coro_factory=lambda n=name: self._execute_single_agent(
+                    n, message, conversation_id
+                )
+            )
+
+        coros = [_run_agent(name) for name in agent_names]
+        return await self._subtask.run_parallel(coros)
+
+    async def _execute_single_agent(
+        self,
+        agent_name: str,
+        message: str,
+        conversation_id: str,
+    ) -> str:
+        """Execute a single agent interaction via IPC.
+
+        Sends the message, waits for a final result, returns the content.
+        """
+        handle = self._pm.get_agent(agent_name)
+        if handle is None or not handle.is_alive:
+            raise RuntimeError(
+                f"Agent '{agent_name}' not found or not alive"
+            )
+
+        await handle.ipc.send_chat(message, conversation_id=conversation_id)
+
+        response = await self._subtask.run_with_timeout(
+            handle.ipc.receive_until_result(timeout=300.0)
+        )
+
+        if response.type == AgentToPlatformType.ERROR:
+            raise RuntimeError(
+                f"Agent '{agent_name}' error: {response.error or 'unknown'}"
+            )
+
+        return response.content or ""
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _phase_to_role(phase: WorkflowPhase) -> str:
+        """Map WorkflowPhase to DSL agent role."""
+        mapping = {
+            WorkflowPhase.research: "explore",
+            WorkflowPhase.synthesis: "plan",
+            WorkflowPhase.implementation: "worker",
+            WorkflowPhase.verification: "verification",
+        }
+        return mapping[phase]
+
+    @staticmethod
+    def _build_phase_message(
+        phase: WorkflowPhase,
+        phase_result: str,
+        all_results: dict[WorkflowPhase, str],
+    ) -> str:
+        """Build the message for the next phase based on completed results.
+
+        Synthesis gets all research results.
+        Implementation gets the synthesis plan.
+        Verification gets implementation results.
+        """
+        if phase == WorkflowPhase.research:
+            # Next is synthesis -- pass research findings
+            return (
+                "## Research Results\n\n"
+                + phase_result
+                + "\n\nBased on the above research, create an implementation plan."
+            )
+        elif phase == WorkflowPhase.synthesis:
+            # Next is implementation -- pass the plan
+            return (
+                "## Implementation Plan\n\n"
+                + phase_result
+                + "\n\nExecute the above plan."
+            )
+        elif phase == WorkflowPhase.implementation:
+            # Next is verification -- pass implementation output
+            return (
+                "## Implementation Output\n\n"
+                + phase_result
+                + "\n\nVerify the above implementation is correct and complete."
+            )
+        return phase_result
+
+    @staticmethod
+    def _aggregate_results(results: list[Any], phase: WorkflowPhase) -> str:
+        """Aggregate parallel results into a single string.
+
+        Failed tasks (exceptions) are reported but don't prevent
+        successful results from being included.
+        """
+        parts: list[str] = []
+        errors: list[str] = []
+
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                errors.append(f"Worker {i + 1} failed: {result}")
+            elif result:
+                parts.append(str(result))
+
+        output = "\n\n---\n\n".join(parts)
+        if errors:
+            output += "\n\n## Warnings\n" + "\n".join(f"- {e}" for e in errors)
+
+        return output if output else f"No results from {phase.value} phase"

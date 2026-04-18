@@ -1,0 +1,23 @@
+[composition]
+name = "document-compliance-gateway"
+description = "跨维度文档合规检测，集成法律、无障碍、本地化分析"
+
+[tasks.task1]
+name = "contract-analysis"
+agent = "contract-analyzer"
+blocked_by = []
+
+[tasks.task2]
+name = "accessibility-audit"
+agent = "accessibility-auditor"
+blocked_by = []
+
+[tasks.task3]
+name = "localization-analysis"
+agent = "localization-specialist"
+blocked_by = []
+
+[tasks.task4]
+name = "conflict-detection"
+agent = "conflict-detector"
+blocked_by = ["task1", "task2", "task3"]

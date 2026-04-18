@@ -1,0 +1,123 @@
+"""Git-based distribution models: PackageSource, SourceEntry, LockfileEntry, InstallationStatus."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from agent_nexus.models.agent import AgentType
+
+
+class SourceType(StrEnum):
+    """Type of package source."""
+
+    OFFICIAL = "official"
+    PRIVATE = "private"
+    DIRECT = "direct"
+
+
+class InstallationStatus(StrEnum):
+    """Installation state of an Agent Package."""
+
+    INSTALLED = "installed"
+    OUTDATED = "outdated"
+    NOT_INSTALLED = "not_installed"
+    INSTALLING = "installing"
+    FAILED = "failed"
+
+
+class SourceEntry(BaseModel):
+    """A package source entry from sources.yaml.
+
+    Example sources.yaml:
+        sources:
+          - name: official
+            type: git
+            url: https://github.com/user/agent-nexus-packages.git
+            branch: main
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    type: str = "git"
+    url: str = ""
+    branch: str = "main"
+
+
+class LockfileEntry(BaseModel):
+    """A single Agent entry in lockfile.json.
+
+    Records the installed version, source, commit SHA for reproducibility.
+
+    Example lockfile.json:
+        {
+          "version": 1,
+          "agents": {
+            "doc-filler": {
+              "version": "1.2.0",
+              "source": "official",
+              "commit_sha": "abc123def456...",
+              "agent_type": "atomic",
+              "installed_at": "2026-04-18T12:00:00Z",
+              "venv_path": "~/.agent-nexus/venvs/doc-filler"
+            }
+          }
+        }
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    version: str
+    source: str
+    commit_sha: str
+    agent_type: AgentType
+    installed_at: datetime = Field(default_factory=datetime.now)
+    venv_path: str = ""
+    dependencies: list[str] = Field(default_factory=list)
+
+
+class Lockfile(BaseModel):
+    """The complete lockfile.json structure.
+
+    Tracks all installed Agent Packages with their exact versions
+    and source commit SHAs for reproducible installations.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    version: int = 1
+    agents: dict[str, LockfileEntry] = Field(default_factory=dict)
+
+
+class PackageSource(BaseModel):
+    """Git package source with local cache path.
+
+    Extends SourceEntry with runtime state (local cache directory).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    type: str = "git"
+    url: str = ""
+    branch: str = "main"
+    local_cache: str = ""
+
+
+class IndexEntry(BaseModel):
+    """A single Agent entry from a source's index.yaml.
+
+    Used for search and discovery across all configured sources.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    version: str
+    type: AgentType
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)

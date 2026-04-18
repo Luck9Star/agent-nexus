@@ -1,0 +1,14 @@
+name: product-documentation-suite
+version: 1.0.0
+type: composite
+description: 产品文档套件 — API文档 + 代码审查并行后本地化
+
+model_config:
+  recommended: "standard"
+  fallback: "lightweight"
+
+dependencies:
+  atomic_agents:
+    - api-doc-generator
+    - code-reviewer
+    - localization-specialist

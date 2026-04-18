@@ -1,0 +1,14 @@
+name: requirements-analyzer
+version: 1.0.0
+type: atomic
+description: 多轮对话分析模糊需求，输出结构化需求说明书
+
+model_config:
+  recommended: "powerful"
+  fallback: "standard"
+  max_turns: 12
+
+permissions:
+  mode: default
+  allowed_tools: [file_read, file_write, grep, glob]
+  denied_tools: [bash]

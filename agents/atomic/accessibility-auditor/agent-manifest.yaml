@@ -1,0 +1,13 @@
+name: accessibility-auditor
+version: 1.0.0
+type: atomic
+description: 无障碍访问审计专家，覆盖 WCAG 2.2 AA 标准
+
+model_config:
+  recommended: "lightweight"
+  fallback: "standard"
+
+permissions:
+  mode: default
+  allowed_tools: [file_read, file_write, grep, glob]
+  denied_tools: [bash]
