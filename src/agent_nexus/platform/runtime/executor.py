@@ -1,7 +1,7 @@
 """IPythonExecutor: in-process code execution via IPython InteractiveShell.
 
-Singleton shell per executor instance with disabled history, automagic, and colors.
-Runs SecurityChecker before execution for fail-fast security.
+Lazy-initialized shell per executor instance with disabled history, automagic,
+and colors.  Runs SecurityChecker before execution for fail-fast security.
 
 Reference: cave-agent/src/cave_agent/runtime/executor.py
 """
@@ -11,10 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
-
-from IPython.core.interactiveshell import InteractiveShell
-from IPython.utils.capture import capture_output
-from traitlets.config import Config
 
 from agent_nexus.models.runtime import ExecutionResult
 
@@ -29,33 +25,12 @@ _IPYTHON_INTERNALS = frozenset({
 })
 
 
-def _create_ipython_config() -> Config:
-    """Create a clean IPython config optimized for agent code execution.
-
-    Disables history, automagic, colors, and other interactive features
-    that are unnecessary for programmatic execution.
-    """
-    config = Config()
-    config.InteractiveShell.cache_size = 0
-    config.InteractiveShell.history_length = 0
-    config.InteractiveShell.automagic = False
-    config.InteractiveShell.separate_in = ""
-    config.InteractiveShell.separate_out = ""
-    config.InteractiveShell.separate_out2 = ""
-    config.InteractiveShell.autocall = 0
-    config.InteractiveShell.colors = "nocolor"
-    config.InteractiveShell.xmode = "Plain"
-    config.InteractiveShell.quiet = True
-    config.InteractiveShell.autoindent = False
-    return config
-
-
 class IPythonExecutor:
     """Execute Python code in an IPython InteractiveShell.
 
-    Each instance holds a singleton InteractiveShell configured for
-    non-interactive agent code execution. Security checks run before
-    any code is executed.
+    The shell is **lazily created** on first code execution to avoid
+    the heavy cost of ``InteractiveShell.__init__()`` when only metadata
+    operations (inject_variable, describe_*) are needed.
 
     Usage::
 
@@ -63,22 +38,92 @@ class IPythonExecutor:
         result = await executor.execute("x = 1 + 2")
         print(result.success)  # True
         print(executor.get("x"))  # 3
+
+    Important:
+        Call ``close()`` when done to release the InteractiveShell.
+        Each shell is ~50-200 MB due to IPython's internal state
+        (traitlets observers, display hooks, history managers).
     """
 
     def __init__(self, security_checker: SecurityChecker | None = None) -> None:
-        self._config = _create_ipython_config()
-        # Direct instantiation (not .instance()) to avoid global singleton.
-        # Each IPythonExecutor gets its own isolated shell namespace.
-        self._shell = InteractiveShell(config=self._config, user_ns={})
         self._security = security_checker or SecurityChecker()
         self._pre_keys: set[str] = set()
+        # Lazy: shell created only when execute() / inject() / get() is called.
+        self._shell: Any | None = None
+        # Pending injections that happened before shell creation.
+        self._pending_injects: dict[str, Any] = {}
+
+    def _require_shell(self) -> Any:
+        """Return the shell, creating it lazily if needed."""
+        if self._shell is None:
+            from IPython.core.interactiveshell import InteractiveShell
+            from traitlets.config import Config
+
+            config = Config()
+            config.InteractiveShell.cache_size = 0
+            config.InteractiveShell.history_length = 0
+            config.InteractiveShell.automagic = False
+            config.InteractiveShell.separate_in = ""
+            config.InteractiveShell.separate_out = ""
+            config.InteractiveShell.separate_out2 = ""
+            config.InteractiveShell.autocall = 0
+            config.InteractiveShell.colors = "nocolor"
+            config.InteractiveShell.xmode = "Plain"
+            config.InteractiveShell.quiet = True
+            config.InteractiveShell.autoindent = False
+
+            self._shell = InteractiveShell(config=config, user_ns={})
+
+            # Apply any pending injections
+            if self._pending_injects:
+                self._shell.user_ns.update(self._pending_injects)
+                self._pending_injects.clear()
+
+        return self._shell
+
+    def close(self) -> None:
+        """Release the InteractiveShell and its resources."""
+        if self._shell is not None:
+            try:
+                self._shell.user_ns.clear()
+            except Exception:  # noqa: BLE001
+                pass
+            self._shell = None
+        self._pending_injects.clear()
+
+    def reset(self) -> None:
+        """Clear namespace for reuse without destroying the shell.
+
+        Resets the executor to a clean state: clears user namespace,
+        pending injections, and variable tracking.  The heavy
+        ``InteractiveShell`` is kept alive for reuse, avoiding the
+        50-200 MB cost of re-creating it.
+        """
+        if self._shell is not None:
+            # Preserve IPython internals, clear everything else
+            internals = set(self._shell.user_ns.keys()) & _IPYTHON_INTERNALS
+            self._shell.user_ns.clear()
+            # Re-add minimal internals
+            for key in internals:
+                self._shell.user_ns[key] = self._shell.user_ns.get(key, None)
+        self._pending_injects.clear()
+        self._pre_keys.clear()
+
+    def __del__(self) -> None:
+        # Safety net: release shell if close() was never called.
+        if hasattr(self, "_shell") and self._shell is not None:
+            try:
+                self._shell.user_ns.clear()
+            except Exception:  # noqa: BLE001
+                pass
+            self._shell = None
 
     async def execute(self, code: str, timeout: float = 30.0) -> ExecutionResult:
         """Execute code with security check and timeout.
 
         1. Run SecurityChecker.check_code() -- fail fast on violations.
         2. transform_cell() for IPython magic handling.
-        3. run_cell_async() with asyncio.wait_for timeout.
+        3. run_cell() via asyncio.to_thread with timeout.
         4. Parse result into ExecutionResult.
 
         Args:
@@ -88,7 +133,7 @@ class IPythonExecutor:
         Returns:
             ExecutionResult with success status, output, and error info.
         """
-        # Step 1: Security check
+        # Step 1: Security check (no shell needed)
         violations = self._security.check_code(code)
         if violations:
             details = "\n".join(f"  - [{v.rule_type}] {v.message}" for v in violations)
@@ -97,18 +142,17 @@ class IPythonExecutor:
                 error=f"Code blocked: {len(violations)} security violation(s):\n{details}",
             )
 
-        # Step 2: Execute
+        # Step 2: Execute (shell created lazily here)
+        shell = self._require_shell()
+
         try:
+            from IPython.utils.capture import capture_output
+
             # Snapshot namespace before execution to detect new variables
             self._pre_keys = set(self.namespace_keys())
 
             with capture_output() as captured:
-                transformed = self._shell.transform_cell(code)
-                # Run in a thread so asyncio.wait_for can enforce the
-                # timeout.  run_cell_async runs synchronous Python which
-                # never yields to the event loop; wrapping in to_thread
-                # gives the loop control so CancelledError is delivered
-                # promptly on timeout.
+                transformed = shell.transform_cell(code)
                 result = await asyncio.wait_for(
                     asyncio.to_thread(
                         self._run_cell_sync, transformed,
@@ -154,51 +198,43 @@ class IPythonExecutor:
             )
 
     def _run_cell_sync(self, transformed: str) -> Any:
-        """Synchronous cell execution for use with asyncio.to_thread.
-
-        Uses run_cell (synchronous API) so the event loop retains
-        control and can enforce timeouts via wait_for.
-        """
-        return self._shell.run_cell(transformed, store_history=False)
+        """Synchronous cell execution for use with asyncio.to_thread."""
+        return self._require_shell().run_cell(transformed, store_history=False)
 
     def inject(self, name: str, value: Any) -> None:
-        """Inject a variable into the IPython namespace.
+        """Inject a variable into the namespace.
 
-        Args:
-            name: Variable name.
-            value: Python object to bind.
+        If the shell hasn't been created yet, the injection is queued
+        and applied when the shell is first materialized.
         """
-        self._shell.user_ns[name] = value
+        if self._shell is not None:
+            self._shell.user_ns[name] = value
+        else:
+            self._pending_injects[name] = value
 
     def get(self, name: str) -> Any:
         """Retrieve a variable from the namespace.
 
-        Args:
-            name: Variable name to look up.
-
         Returns:
             The Python object, or None if not found.
         """
-        return self._shell.user_ns.get(name)
+        if self._shell is not None:
+            return self._shell.user_ns.get(name)
+        return self._pending_injects.get(name)
 
     def namespace_keys(self) -> list[str]:
         """List all user-defined variables in the namespace.
 
         Excludes IPython internal names (In, Out, exit, quit, etc.).
-
-        Returns:
-            Sorted list of user-defined variable names.
         """
+        ns = self._shell.user_ns if self._shell is not None else self._pending_injects
         return sorted(
-            k for k in self._shell.user_ns
+            k for k in ns
             if k not in _IPYTHON_INTERNALS
             and not k.startswith("_")
         )
 
     def _detect_new_variables(self) -> list[str]:
-        """Detect variables created since the last execution.
-
-        Diffs current namespace against keys snapshotted before execution.
-        """
+        """Detect variables created since the last execution."""
         current = set(self.namespace_keys())
         return sorted(current - self._pre_keys)

@@ -15,12 +15,23 @@ from agent_nexus.platform.orchestration.process_manager import (
 
 
 def _make_mock_process(pid: int = 12345, returncode=None) -> MagicMock:
-    """Create a mock process with proper stderr that returns empty bytes."""
+    """Create a mock process with proper EOF-behavior for stream methods."""
     proc = MagicMock()
     proc.pid = pid
     proc.returncode = returncode
+
+    # stdin: is_closing() returns False so close() path is exercised
     proc.stdin = AsyncMock()
+    proc.stdin.is_closing = MagicMock(return_value=False)
+    proc.stdin.close = MagicMock()
+    proc.stdin.wait_closed = AsyncMock()
+
+    # stdout: read() returns b"" so IPCStream.close() drain loop terminates
     proc.stdout = AsyncMock()
+    proc.stdout.read = AsyncMock(return_value=b"")
+    proc.stdout.readline = AsyncMock(return_value=b"")
+
+    # stderr: readline() returns b"" so drain tasks terminate
     mock_stderr = AsyncMock()
     mock_stderr.readline = AsyncMock(return_value=b"")
     proc.stderr = mock_stderr

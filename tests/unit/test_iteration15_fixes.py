@@ -272,37 +272,28 @@ class TestExecutorUsesToThread:
     """IPythonExecutor should use asyncio.to_thread for timeout enforcement."""
 
     @pytest.mark.asyncio
-    async def test_execute_uses_to_thread(self) -> None:
+    async def test_execute_uses_to_thread(self, shared_executor) -> None:
         """Verify execute delegates to asyncio.to_thread."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
-
-        executor = IPythonExecutor()
         with patch("asyncio.to_thread", wraps=asyncio.to_thread) as mock_thread:
-            result = await executor.execute("x = 1 + 2", timeout=10)
+            result = await shared_executor.execute("x = 1 + 2", timeout=10)
             mock_thread.assert_called_once()
             assert result.success is True
-        assert executor.get("x") == 3
+        assert shared_executor.get("x") == 3
 
     @pytest.mark.asyncio
-    async def test_run_cell_sync_returns_execution_result(self) -> None:
+    async def test_run_cell_sync_returns_execution_result(self, shared_executor) -> None:
         """_run_cell_sync should return an IPython ExecutionResult."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
-
-        executor = IPythonExecutor()
-        result = executor._run_cell_sync("x = 42")
+        result = shared_executor._run_cell_sync("x = 42")
         # Should be an IPython ExecutionResult-like object
         assert result is not None
-        assert executor.get("x") == 42
+        assert shared_executor.get("x") == 42
 
     @pytest.mark.asyncio
-    async def test_timeout_fires_for_long_running_code(self) -> None:
+    async def test_timeout_fires_for_long_running_code(self, shared_executor) -> None:
         """Timeout should fire even for synchronous CPU-bound code."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
-
-        executor = IPythonExecutor()
         # time.sleep is synchronous and blocks — to_thread lets the event
         # loop cancel the wrapper on timeout
-        result = await executor.execute(
+        result = await shared_executor.execute(
             "import time; time.sleep(10)", timeout=0.3
         )
         assert result.success is False

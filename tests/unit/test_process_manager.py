@@ -28,13 +28,23 @@ from agent_nexus.platform.orchestration.process_manager import (
 def _make_mock_process(
     returncode: int | None = None, pid: int = 12345
 ) -> MagicMock:
-    """Create a mock asyncio.subprocess.Process."""
+    """Create a mock asyncio.subprocess.Process.
+
+    Stream read/readline methods return b"" (falsy) so that:
+    - _drain_stderr loop terminates (stderr.readline → b"")
+    - IPCStream.close() drain loop terminates (stdout.read → b"")
+    """
     proc = MagicMock(spec=asyncio.subprocess.Process)
     proc.returncode = returncode
     proc.pid = pid
     proc.stdin = MagicMock(spec=asyncio.StreamWriter)
+    # stdout: read/readline return b"" so drain loops terminate
     proc.stdout = MagicMock(spec=asyncio.StreamReader)
+    proc.stdout.read = AsyncMock(return_value=b"")
+    proc.stdout.readline = AsyncMock(return_value=b"")
+    # stderr: readline returns b"" so _drain_stderr terminates
     proc.stderr = MagicMock(spec=asyncio.StreamReader)
+    proc.stderr.readline = AsyncMock(return_value=b"")
     proc.wait = AsyncMock()
     proc.send_signal = MagicMock()
     proc.kill = MagicMock()
@@ -218,9 +228,10 @@ class TestStopAgent:
     ) -> None:
         """Stop: stage 1 timeout, then SIGTERM (stage 2) succeeds.
 
-        Note: IPCStream.close() also calls asyncio.wait_for internally,
-        so call_count=1 is from close(), call_count=2 is stage 1 (process.wait),
-        and call_count=3 is stage 2 (process.wait after SIGTERM).
+        Note: stop_agent calls IPCStream.close() TWICE (line 236 always +
+        line 249 in stage 1), each making a wait_for call for the stdout drain.
+        So: call_count=1 first close() drain, call_count=2 second close() drain,
+        call_count=3 stage 1 process.wait timeout, call_count=4 stage 2 after SIGTERM.
         """
         mock_proc = _make_mock_process(returncode=None)
         mock_spawn.return_value = mock_proc
@@ -233,11 +244,12 @@ class TestStopAgent:
             nonlocal call_count
             call_count += 1
             coro.close()
-            if call_count <= 2:
-                # call 1: IPCStream.close() drain (tolerated)
-                # call 2: stage 1 process.wait timeout
+            if call_count <= 3:
+                # call 1: first IPCStream.close() drain (tolerated)
+                # call 2: second IPCStream.close() drain (stage 1 close)
+                # call 3: stage 1 process.wait timeout
                 raise asyncio.TimeoutError()
-            # call 3: stage 2 process.wait succeeds after SIGTERM
+            # call 4: stage 2 process.wait succeeds after SIGTERM
             mock_proc.returncode = -signal.SIGTERM
 
         with patch(

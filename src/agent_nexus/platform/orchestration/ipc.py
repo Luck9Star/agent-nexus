@@ -76,7 +76,7 @@ class IPCStream:
         payload = message.model_dump_json(exclude_none=True)
         line = payload + "\n"
         self._stdin.write(line.encode("utf-8"))
-        await self._stdin.drain()
+        await asyncio.wait_for(self._stdin.drain(), timeout=5.0)
         logger.debug("IPC send: %s", payload)
 
     # -- receive ------------------------------------------------------------

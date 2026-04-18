@@ -1082,7 +1082,7 @@ class TestMCPGatewayRun:
         with patch.object(gateway._mcp, "run") as mock_run:
             await gateway.run_sse()
             mock_run.assert_called_once_with(
-                transport="sse", host="0.0.0.0", port=8080
+                transport="sse", host="127.0.0.1", port=8080
             )
 
     @pytest.mark.asyncio

@@ -49,6 +49,21 @@ class PythonRuntime:
         self._functions: dict[str, Function] = {}
         self._types: dict[str, RuntimeType] = {}
 
+    def close(self) -> None:
+        """Release the underlying IPythonExecutor and its resources."""
+        self._executor.close()
+
+    def reset(self) -> None:
+        """Reset runtime to clean state, reusing the underlying shell.
+
+        Clears all injected variables, functions, types and the
+        IPython namespace without destroying the heavy InteractiveShell.
+        """
+        self._variables.clear()
+        self._functions.clear()
+        self._types.clear()
+        self._executor.reset()
+
     # ── Injection ──────────────────────────────────────────────────────
 
     def inject_variable(self, variable: Variable) -> None:

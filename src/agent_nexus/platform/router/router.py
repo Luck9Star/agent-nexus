@@ -240,6 +240,7 @@ class PlatformRouter:
         Returns a flat list of tool definitions.
         """
         tools: list[dict] = []
+        seen_names: set[str] = set()
         for name in self._pm.list_running():
             handle = self._pm.get_agent(name)
             if handle is None or not handle.is_alive:
@@ -255,11 +256,31 @@ class PlatformRouter:
                         try:
                             parsed = json.loads(content)
                             if isinstance(parsed, list):
-                                tools.extend(parsed)
+                                for tool in parsed:
+                                    tool_name = tool.get("name", "")
+                                    if tool_name in seen_names:
+                                        logger.warning(
+                                            "Tool name collision: '%s' from agent '%s' "
+                                            "already registered, skipping",
+                                            tool_name, name,
+                                        )
+                                        continue
+                                    seen_names.add(tool_name)
+                                    tools.append(tool)
                         except (json.JSONDecodeError, ValueError):
                             pass
                     elif isinstance(content, list):
-                        tools.extend(content)
+                        for tool in content:
+                            tool_name = tool.get("name", "")
+                            if tool_name in seen_names:
+                                logger.warning(
+                                    "Tool name collision: '%s' from agent '%s' "
+                                    "already registered, skipping",
+                                    tool_name, name,
+                                )
+                                continue
+                            seen_names.add(tool_name)
+                            tools.append(tool)
             except Exception as exc:
                 logger.warning("Failed to get tools from agent '%s': %s", name, exc)
 
@@ -337,11 +358,16 @@ class PlatformRouter:
         message: str,
         conversation_id: str,
     ) -> list[Any]:
-        """Execute multiple agents in parallel via SubtaskController."""
+        """Execute multiple agents in parallel via SubtaskController.
+
+        Each agent gets a unique conversation_id to prevent IPC response
+        interleaving when agents share the same process handle.
+        """
         async def _run_agent(name: str) -> str:
+            cid = f"{conversation_id}__{name}__{uuid.uuid4().hex[:8]}"
             return await self._subtask.run_with_retry(
-                coro_factory=lambda n=name: self._execute_single_agent(
-                    n, message, conversation_id
+                coro_factory=lambda n=name, c=cid: self._execute_single_agent(
+                    n, message, c
                 ),
                 timeout=300.0,
             )
@@ -367,7 +393,12 @@ class PlatformRouter:
 
         await handle.ipc.send_chat(message, conversation_id=conversation_id)
 
-        response = await handle.ipc.receive_until_result(timeout=300.0)
+        try:
+            response = await handle.ipc.receive_until_result(timeout=300.0)
+        except Exception as exc:
+            raise RuntimeError(
+                f"IPC error communicating with agent '{agent_name}': {exc}"
+            ) from exc
 
         if response.type == AgentToPlatformType.ERROR:
             raise RuntimeError(
@@ -438,8 +469,10 @@ class PlatformRouter:
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 errors.append(f"Worker {i + 1} failed: {result}")
-            elif result:
+            elif result is not None and result != "":
                 parts.append(str(result))
+            elif isinstance(result, str):
+                parts.append(f"Worker {i + 1}: (no output)")
 
         output = "\n\n---\n\n".join(parts)
         if errors:
