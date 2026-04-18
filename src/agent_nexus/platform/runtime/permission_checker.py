@@ -135,8 +135,6 @@ def _fnmatch_recursive(value: str, pattern: str) -> bool:
     # (e.g. /tmp/**/bar/**) are handled correctly.
     return _fnmatch_recursive(tail, remainder)
 
-    return False
-
 
 def _matches_any_pattern(value: str, patterns: list[str] | tuple[str, ...]) -> bool:
     """Check whether *value* matches any of the given fnmatch patterns."""

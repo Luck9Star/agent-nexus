@@ -281,8 +281,9 @@ class SkillEvolver:
             total_fallbacks=0,
         )
 
-        self._store.evolve_skill(new_record, [parent.id])
-
+        result = self._store.evolve_skill(new_record, [parent.id])
+        if not result.success:
+            return result
         return EvolveResult(success=True, new_record=new_record)
 
     def _evolve_derived(
@@ -339,10 +340,11 @@ class SkillEvolver:
             total_fallbacks=0,
         )
 
-        self._store.evolve_skill(
+        result = self._store.evolve_skill(
             new_record, [p.id for p in parents]
         )
-
+        if not result.success:
+            return result
         return EvolveResult(success=True, new_record=new_record)
 
     def _evolve_captured(
@@ -392,8 +394,9 @@ class SkillEvolver:
             total_fallbacks=0,
         )
 
-        self._store.evolve_skill(new_record, [])
-
+        result = self._store.evolve_skill(new_record, [])
+        if not result.success:
+            return result
         return EvolveResult(success=True, new_record=new_record)
 
     # ------------------------------------------------------------------
@@ -411,6 +414,9 @@ class SkillEvolver:
           - fallback_rate > 0.4 -> FIX
           - applied_rate > 0.4 AND completion_rate < 0.35 -> FIX
           - effective_rate < 0.55 AND applied_rate > 0.25 -> DERIVED
+
+        FIX rules are deduplicated: only the highest-confidence FIX is kept
+        (matching HealthChecker.check_health logic).
         """
         sel = record.total_selections
         if sel == 0:
@@ -425,34 +431,60 @@ class SkillEvolver:
         )
         effective_rate = record.total_completions / sel
 
+        # Track best FIX suggestion (deduplicate: keep highest confidence)
+        best_fix: EvolutionSuggestion | None = None
+
+        # Rule 1: High fallback rate
         if fallback_rate > _FALLBACK_THRESHOLD:
-            return EvolutionSuggestion(
+            fix1 = EvolutionSuggestion(
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[record.id],
                 direction=(
                     f"High fallback rate ({fallback_rate:.0%}): "
-                    f"skill is frequently selected but not applied"
+                    f"skill is frequently selected but not applied, "
+                    f"suggesting instructions are unclear or outdated"
                 ),
+                confidence=min(fallback_rate, 1.0),
             )
+            best_fix = fix1
 
-        if applied_rate > _HIGH_APPLIED_FOR_FIX and completion_rate < _LOW_COMPLETION_THRESHOLD:
-            return EvolutionSuggestion(
+        # Rule 2: Applied often but rarely completes
+        if (
+            applied_rate > _HIGH_APPLIED_FOR_FIX
+            and completion_rate < _LOW_COMPLETION_THRESHOLD
+        ):
+            fix2 = EvolutionSuggestion(
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[record.id],
                 direction=(
                     f"Low completion rate ({completion_rate:.0%}) "
-                    f"despite high applied rate ({applied_rate:.0%})"
+                    f"despite high applied rate ({applied_rate:.0%}): "
+                    f"skill instructions may be incorrect or incomplete"
                 ),
+                confidence=min(applied_rate * (1 - completion_rate), 1.0),
             )
+            # Keep the FIX with highest confidence
+            if best_fix is None or fix2.confidence > best_fix.confidence:
+                best_fix = fix2
 
-        if effective_rate < _MODERATE_EFFECTIVE_THRESHOLD and applied_rate > _MIN_APPLIED_FOR_DERIVED:
+        if best_fix is not None:
+            return best_fix
+
+        # Rule 3: Moderate effectiveness -- only if no FIX was triggered
+        # (DERIVED is lower priority than FIX for the same skill)
+        if (
+            effective_rate < _MODERATE_EFFECTIVE_THRESHOLD
+            and applied_rate > _MIN_APPLIED_FOR_DERIVED
+        ):
             return EvolutionSuggestion(
                 evolution_type=EvolutionType.DERIVED,
                 target_skill_ids=[record.id],
                 direction=(
                     f"Moderate effectiveness ({effective_rate:.0%}): "
-                    f"could be enhanced"
+                    f"skill works sometimes but could be enhanced with "
+                    f"better error handling or alternative approaches"
                 ),
+                confidence=min(1.0 - effective_rate, 1.0),
             )
 
         return None

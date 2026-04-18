@@ -535,13 +535,14 @@ class EvolutionStore:
         self,
         new_record: SkillRecord,
         parent_skill_ids: list[str],
-    ) -> None:
+    ) -> EvolveResult:
         """Atomic evolution: insert new version, deactivate old for FIX.
 
         For FIX: parent is deactivated (same name, same directory).
         For DERIVED: parent stays active (new name, new directory).
         For CAPTURED: no parents (parent_skill_ids empty).
         """
+        from agent_nexus.platform.evolution.evolver import EvolveResult
         with self._conn() as conn:
             # For FIX: deactivate parent(s)
             if new_record.lineage.origin == SkillOrigin.FIXED:
@@ -558,36 +559,42 @@ class EvolutionStore:
             snapshot_json = json.dumps(
                 lin.content_snapshot or {}, ensure_ascii=False
             )
-            conn.execute(
-                """
-                INSERT INTO skill_records (
-                    id, name, version,
-                    lineage_origin, lineage_generation,
-                    lineage_content_diff, lineage_content_snapshot,
-                    directory, is_active,
-                    total_selections, total_applied,
-                    total_completions, total_fallbacks,
-                    created_at, updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    new_record.id,
-                    new_record.name,
-                    new_record.version,
-                    lin.origin.value,
-                    lin.generation,
-                    lin.content_diff or "",
-                    snapshot_json,
-                    new_record.directory,
-                    int(new_record.is_active),
-                    new_record.total_selections,
-                    new_record.total_applied,
-                    new_record.total_completions,
-                    new_record.total_fallbacks,
-                    new_record.first_seen.isoformat(),
-                    new_record.last_updated.isoformat(),
-                ),
-            )
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO skill_records (
+                        id, name, version,
+                        lineage_origin, lineage_generation,
+                        lineage_content_diff, lineage_content_snapshot,
+                        directory, is_active,
+                        total_selections, total_applied,
+                        total_completions, total_fallbacks,
+                        created_at, updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        new_record.id,
+                        new_record.name,
+                        new_record.version,
+                        lin.origin.value,
+                        lin.generation,
+                        lin.content_diff or "",
+                        snapshot_json,
+                        new_record.directory,
+                        int(new_record.is_active),
+                        new_record.total_selections,
+                        new_record.total_applied,
+                        new_record.total_completions,
+                        new_record.total_fallbacks,
+                        new_record.first_seen.isoformat(),
+                        new_record.last_updated.isoformat(),
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                return EvolveResult(
+                    success=False,
+                    error=f"Skill ID collision: {new_record.id}",
+                )
 
             # Insert lineage parents
             for pid in parent_skill_ids:
@@ -596,6 +603,8 @@ class EvolutionStore:
                     "(skill_id, parent_id) VALUES (?, ?)",
                     (new_record.id, pid),
                 )
+
+            return EvolveResult(success=True, new_record=new_record)
 
     # ------------------------------------------------------------------
     # Lineage queries
@@ -671,8 +680,8 @@ class EvolutionStore:
                     "SELECT total_selections, total_applied, "
                     "total_completions, total_fallbacks "
                     "FROM skill_records WHERE is_active = 1 "
-                    "AND directory LIKE ? ESCAPE '\\'",
-                    (f"%{escaped}%",),
+                    "AND (directory LIKE ? ESCAPE '\\' OR directory = ?)",
+                    (f"agents/{escaped}/%", f"agents/{escaped}"),
                 ).fetchall()
             else:
                 rows = conn.execute(

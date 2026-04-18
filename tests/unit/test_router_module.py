@@ -1180,6 +1180,7 @@ class TestRouterParallelConversationId:
         router._process_manager = mock_pm
         router._task_graph = MagicMock()
         router._subtask = MagicMock()
+        router._route_locks = {}
 
         async def mock_run_with_retry(coro_factory, timeout):
             return await coro_factory()
@@ -1255,6 +1256,7 @@ class TestGetToolsDeduplication:
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
+        router._route_locks = {}
 
         tool_a = {"name": "search", "description": "Agent A search"}
         tool_b = {"name": "search", "description": "Agent B search"}
@@ -1300,6 +1302,7 @@ class TestGetToolsDeduplication:
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
+        router._route_locks = {}
 
         tools_list = [
             {"name": "search", "description": "search tool"},
@@ -1336,6 +1339,7 @@ class TestExecuteSingleAgentErrorWrapping:
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
+        router._route_locks = {}
 
         handle = MagicMock()
         handle.is_alive = True
@@ -1358,6 +1362,7 @@ class TestExecuteSingleAgentErrorWrapping:
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
+        router._route_locks = {}
 
         handle = MagicMock()
         handle.is_alive = True

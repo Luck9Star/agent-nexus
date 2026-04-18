@@ -465,21 +465,27 @@ class PlatformRouter:
                 f"Agent '{agent_name}' not found or not alive"
             )
 
-        await handle.ipc.send_chat(message, conversation_id=conversation_id)
+        # Serialize send+receive per agent to prevent concurrent IPC
+        # calls from interleaving responses on the same handle.
+        # Uses the same lock as route_to_atomic so both code paths
+        # are mutually exclusive for a given agent.
+        lock = self._route_locks.setdefault(agent_name, asyncio.Lock())
+        async with lock:
+            await handle.ipc.send_chat(message, conversation_id=conversation_id)
 
-        try:
-            response = await handle.ipc.receive_until_result(timeout=300.0)
-        except Exception as exc:
-            raise RuntimeError(
-                f"IPC error communicating with agent '{agent_name}': {exc}"
-            ) from exc
+            try:
+                response = await handle.ipc.receive_until_result(timeout=300.0)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"IPC error communicating with agent '{agent_name}': {exc}"
+                ) from exc
 
-        if response.type == AgentToPlatformType.ERROR:
-            raise RuntimeError(
-                f"Agent '{agent_name}' error: {response.error or 'unknown'}"
-            )
+            if response.type == AgentToPlatformType.ERROR:
+                raise RuntimeError(
+                    f"Agent '{agent_name}' error: {response.error or 'unknown'}"
+                )
 
-        return str(response.content) if response.content is not None else ""
+            return str(response.content) if response.content is not None else ""
 
     # ------------------------------------------------------------------
     # Helpers
