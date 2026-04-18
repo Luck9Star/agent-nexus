@@ -105,7 +105,7 @@ class TokenTracker:
     def record_usage(
         self,
         tokens_used: int,
-        agent_name: str = "",
+        agent_name: str = "default",
     ) -> TokenAlert:
         """Record token consumption for this turn.
 

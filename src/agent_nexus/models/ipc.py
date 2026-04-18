@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class MessageDirection(StrEnum):
@@ -65,7 +65,7 @@ class AgentToPlatform(BaseModel):
     content: str = ""
     task_id: str | None = None
     message: str | None = None
-    progress_pct: float | None = None
+    progress_pct: float | None = Field(default=None, ge=0.0, le=100.0)
     error: str | None = None
     status: str | None = None
     output: Any | None = None

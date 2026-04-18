@@ -16,7 +16,7 @@ class Variable(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
+    name: str = Field(min_length=1)
     description: str = ""
     value: Any = None
     type_name: str | None = None
@@ -30,7 +30,7 @@ class Function(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
+    name: str = Field(min_length=1)
     description: str = ""
     signature: str | None = None
     is_async: bool = False
@@ -45,7 +45,7 @@ class RuntimeType(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
+    name: str = Field(min_length=1)
     description: str = ""
     python_type: str | None = None
     json_schema: dict[str, Any] | None = None

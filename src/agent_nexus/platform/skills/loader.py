@@ -179,7 +179,9 @@ class SkillLoader:
         """
         resources_start: int | None = None
         in_fence = False
+        offset = 0
         for line in content.splitlines():
+            line_len = len(line) + 1  # +1 for the newline stripped by splitlines()
             if in_fence:
                 if line.lstrip().startswith("```"):
                     in_fence = False
@@ -187,8 +189,9 @@ class SkillLoader:
                 if line.lstrip().startswith("```"):
                     in_fence = True
                 elif _RESOURCES_SPLIT_RE.match(line):
-                    resources_start = content.index(line)
+                    resources_start = offset
                     break
+            offset += line_len
 
         if resources_start is None:
             # No Resources section -- everything is body.

@@ -279,6 +279,12 @@ class HookExecutor:
 
         except Exception as exc:
             duration_ms = (time.monotonic() - start) * 1000
+            if proc is not None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                await proc.wait()
             return HookExecution(
                 hook=hook,
                 passed=False,

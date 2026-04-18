@@ -38,16 +38,16 @@ class ContextBudget(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    l0_max: int = 800
-    l1_max: int = 3000
-    bootstrap_max: int = 5000  # L0 + L1 combined
-    single_file_max: int = 8000  # max chars for a single bootstrap file
+    l0_max: int = Field(default=800, ge=1)
+    l1_max: int = Field(default=3000, ge=1)
+    bootstrap_max: int = Field(default=5000, ge=1)  # L0 + L1 combined
+    single_file_max: int = Field(default=8000, ge=1)  # max chars for a single bootstrap file
     compaction_trigger: float = 0.8  # 80% context usage triggers compaction
     compaction_target: float = 0.4  # compaction reduces to 40%
     session_hard_ceiling: float = 0.95  # 95% forces truncation
     forced_truncate_threshold: float = 0.9  # 90% truncates earliest messages
-    min_turns_between_compactions: int = 5
-    consecutive_compaction_alert: int = 3
+    min_turns_between_compactions: int = Field(default=5, ge=1)
+    consecutive_compaction_alert: int = Field(default=3, ge=1)
 
     @model_validator(mode="after")
     def _validate_thresholds(self) -> "ContextBudget":
@@ -146,9 +146,9 @@ class ContextBudgetLogEntry(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    log_id: str
-    agent_id: str
-    session_id: str
+    log_id: str = Field(min_length=1)
+    agent_id: str = Field(min_length=1)
+    session_id: str = Field(min_length=1)
     turn_number: int | None = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
