@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +77,12 @@ class SourceManager:
         return sorted(self._sources, key=self._source_priority)
 
     def save(self) -> None:
-        """Persist sources to ``sources.yaml``."""
+        """Persist sources to ``sources.yaml`` atomically.
+
+        Writes to a temporary file first, then uses ``os.replace`` to
+        atomically swap it into place.  This avoids corruption if the
+        process crashes mid-write.
+        """
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
         payload: dict[str, Any] = {
@@ -90,10 +97,27 @@ class SourceManager:
             ],
         }
 
-        self._path.write_text(
-            yaml.dump(payload, default_flow_style=False, allow_unicode=True),
-            encoding="utf-8",
+        content = yaml.dump(payload, default_flow_style=False, allow_unicode=True)
+
+        # Atomic write: tempfile in same directory so os.replace is atomic.
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(self._path.parent),
+            prefix=".sources-",
+            suffix=".yaml.tmp",
         )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, str(self._path))
+        except BaseException:
+            # Clean up the temp file on any failure.
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         logger.debug("Sources saved to %s", self._path)
 
     def resolve_agent_source(self, agent_name: str) -> tuple[SourceEntry, str] | None:

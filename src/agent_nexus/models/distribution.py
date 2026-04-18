@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -82,7 +83,11 @@ class LockfileEntry(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    version: str
+    version: str = Field(
+        min_length=1,
+        pattern=r"^[a-zA-Z0-9._-]+$",
+        description="Version string used in git ref construction; alphanumeric, dots, hyphens, underscores",
+    )
     source: str
     commit_sha: str = Field(
         pattern=r"^[0-9a-f]{40}$|^[0-9a-f]{64}$|^latest$|^head$",
@@ -131,9 +136,29 @@ class IndexEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
-    version: str
+    version: str = Field(
+        min_length=1,
+        pattern=r"^[a-zA-Z0-9._-]+$",
+        description="Version string; alphanumeric, dots, hyphens, underscores",
+    )
     type: AgentType
     description: str = ""
     tags: list[str] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
-    path: str = ""  # Override for non-standard repo layouts (e.g. "agents/doc-filler")
+    path: str = Field(
+        default="",
+        description="Override for non-standard repo layouts (e.g. 'agents/doc-filler')",
+    )
+
+    @model_validator(mode="after")
+    def _reject_path_traversal(self) -> "IndexEntry":
+        """Reject path traversal sequences in the path field.
+
+        Empty string is allowed (means 'use default layout'), but any
+        non-empty value must not contain ``..``.
+        """
+        if self.path and ".." in Path(self.path).parts:
+            raise ValueError(
+                f"IndexEntry.path must not contain '..': got '{self.path}'"
+            )
+        return self

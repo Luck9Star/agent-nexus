@@ -169,6 +169,10 @@ class IPCProtocol:
     - Heartbeat / health-check messages
     """
 
+    # Maximum number of buffered messages.  Prevents unbounded memory growth
+    # when an agent sends many messages that are not consumed promptly.
+    _MAX_PEEK_BUFFER_SIZE: int = 1_048_576  # ~1M messages
+
     def __init__(self, stream: IPCStream) -> None:
         self._stream = stream
         self._peek_buffer: list[AgentToPlatform] = []
@@ -177,6 +181,22 @@ class IPCProtocol:
     def stream(self) -> IPCStream:
         """Low-level stream access (for ProcessManager)."""
         return self._stream
+
+    # -- buffer management --------------------------------------------------
+
+    def _buffer_message(self, msg: AgentToPlatform) -> None:
+        """Append *msg* to the peek buffer, enforcing the size limit.
+
+        If the buffer has reached ``_MAX_PEEK_BUFFER_SIZE``, the oldest
+        message is discarded to make room (FIFO eviction).
+        """
+        if len(self._peek_buffer) >= self._MAX_PEEK_BUFFER_SIZE:
+            logger.warning(
+                "IPC peek buffer reached max size (%d); discarding oldest message",
+                self._MAX_PEEK_BUFFER_SIZE,
+            )
+            self._peek_buffer.pop(0)
+        self._peek_buffer.append(msg)
 
     # -- outbound helpers ---------------------------------------------------
 
@@ -273,7 +293,7 @@ class IPCProtocol:
                     task_id,
                     msg.type,
                 )
-                self._peek_buffer.append(msg)
+                self._buffer_message(msg)
                 continue
 
             if msg.type == AgentToPlatformType.PROGRESS:
@@ -315,9 +335,9 @@ class IPCProtocol:
                     if resp.content and "pong" in resp.content.lower():
                         return True
                     # Not a pong — buffer it for later consumption.
-                    self._peek_buffer.append(resp)
+                    self._buffer_message(resp)
                     continue
                 # Non-progress message — buffer and keep looking for pong.
-                self._peek_buffer.append(resp)
+                self._buffer_message(resp)
         except (IPCError, asyncio.TimeoutError):
             return False

@@ -358,6 +358,10 @@ class ProcessManager:
         Sends a heartbeat ping via IPC and waits for a pong response.
         Updates ``last_heartbeat`` on success.
 
+        The entire check — lookup, liveness test, and heartbeat — runs
+        under ``_lock`` so the handle cannot be removed or replaced
+        between lookup and use (no TOCTOU gap).
+
         Returns:
             ``True`` if the agent responded, ``False`` otherwise.
 
@@ -370,17 +374,17 @@ class ProcessManager:
             if handle is None:
                 raise KeyError(f"Agent '{name}' not found")
 
-        if not handle.is_alive:
-            return False
+            if not handle.is_alive:
+                return False
 
-        try:
-            ok = await handle.ipc.send_heartbeat()
-        except (IPCError, OSError):
-            return False
+            try:
+                ok = await handle.ipc.send_heartbeat()
+            except (IPCError, OSError):
+                return False
 
-        if ok:
-            handle.last_heartbeat = datetime.now(timezone.utc)
-        return ok
+            if ok:
+                handle.last_heartbeat = datetime.now(timezone.utc)
+            return ok
 
     # ------------------------------------------------------------------
     # Query helpers

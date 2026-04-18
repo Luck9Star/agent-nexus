@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re as _re
 from typing import Any
 
 from .runtime import PythonRuntime
@@ -118,8 +119,14 @@ class TieredRuntimeDescriber:
             Formatted string with the variable's current value,
             or empty string if not found.
         """
+        # Sanitize var_name: strip newlines and control characters to prevent
+        # injection of fake context lines into the description output.
+        safe_name = _re.sub(r"[\x00-\x1f\x7f]", "", var_name).strip()
+        if not safe_name:
+            return ""
+
         _MISSING = object()
-        value = self._runtime.retrieve(var_name, default=_MISSING)
+        value = self._runtime.retrieve(safe_name, default=_MISSING)
         if value is _MISSING:
             return ""
 
@@ -129,4 +136,4 @@ class TieredRuntimeDescriber:
         except (TypeError, ValueError):
             formatted = str(value)
 
-        return f"[Variable: {var_name}]\n{formatted}"
+        return f"[Variable: {safe_name}]\n{formatted}"

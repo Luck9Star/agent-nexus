@@ -222,8 +222,28 @@ class RegexRule(SecurityRule):
                 raise ValueError(f"Invalid regex pattern '{pattern}': {e}") from e
 
     def check(self, node: ast.AST) -> list[SecurityViolation]:
-        """No-op: regex rules use check_source() for full-source scanning."""
-        return []
+        """Check a single AST node by unparsing it and running regex patterns.
+
+        This allows RegexRule to participate in the standard per-node
+        ``rule.check(node)`` loop used by callers that don't route to
+        ``check_source()`` explicitly.
+        """
+        source = ast.unparse(node) if hasattr(ast, "unparse") else ""
+        if not source:
+            return []
+        violations: list[SecurityViolation] = []
+        for compiled_pattern in self.patterns:
+            if compiled_pattern.search(source):
+                desc = self.description or compiled_pattern.pattern
+                violations.append(
+                    SecurityViolation(
+                        rule_type="regex",
+                        node_type=type(node).__name__,
+                        code_snippet=source[:200],
+                        message=f"Regex rule violation: '{desc}'",
+                    )
+                )
+        return violations
 
     def check_source(self, source: str) -> list[SecurityViolation]:
         """Check the full source code string against regex patterns.

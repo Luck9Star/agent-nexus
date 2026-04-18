@@ -126,63 +126,83 @@ class GitInstaller:
         # 2. Determine git ref (tag format: agent-name/v1.2.0)
         ref = f"{agent_name}/v{version}" if version else None
 
-        # 3. Sparse clone
+        # Track paths created during installation for rollback on failure.
+        _created_paths: list[Path] = []
+
         try:
-            agent_dir = await self._sparse_clone(
-                source.url, agent_name, relative_path, ref,
+            # 3. Sparse clone
+            try:
+                agent_dir = await self._sparse_clone(
+                    source.url, agent_name, relative_path, ref,
+                )
+            except Exception as exc:
+                raise InstallationError(
+                    f"Failed to clone agent '{agent_name}': {exc}"
+                ) from exc
+
+            # 4. Validate
+            issues = self._validate_agent_package(agent_dir)
+            if issues:
+                raise InstallationError(
+                    f"Agent '{agent_name}' validation failed: {'; '.join(issues)}"
+                )
+
+            # 5. Copy to agents dir
+            dest = self._agents_dir / agent_name
+            if dest.exists():
+                shutil.rmtree(dest)
+            shutil.copytree(agent_dir, dest)
+            _created_paths.append(dest)
+            logger.info("Agent files copied to %s", dest)
+
+            # 6. Read manifest for metadata
+            manifest_dict = self._read_manifest(dest)
+            manifest = AgentManifest(**manifest_dict) if manifest_dict else None
+            agent_type = manifest.type if manifest else AgentType.ATOMIC
+            manifest_version = manifest.version if manifest else (version or "0.0.0")
+
+            # 7. Create venv if needed
+            venv_path = await self._create_venv(agent_name, dest)
+            if venv_path:
+                _created_paths.append(venv_path)
+
+            # 8. Get commit SHA
+            cache_path = self._get_cache_path(source.url)
+            commit_sha = await self._get_commit_sha(cache_path)
+
+            # 9. Update lockfile
+            entry = LockfileEntry(
+                version=manifest_version,
+                source=source.name,
+                commit_sha=commit_sha,
+                agent_type=agent_type,
+                installed_at=datetime.now(timezone.utc),
+                venv_path=str(venv_path) if venv_path else "",
+                dependencies=manifest.pip_dependencies if manifest else [],
             )
-        except Exception as exc:
-            raise InstallationError(
-                f"Failed to clone agent '{agent_name}': {exc}"
-            ) from exc
+            self._lockfile.add_entry_by_name(agent_name, entry)
 
-        # 4. Validate
-        issues = self._validate_agent_package(agent_dir)
-        if issues:
-            raise InstallationError(
-                f"Agent '{agent_name}' validation failed: {'; '.join(issues)}"
+            logger.info(
+                "Agent installed: %s@%s (sha=%s, venv=%s)",
+                agent_name,
+                entry.version,
+                commit_sha[:12],
+                "yes" if venv_path else "no",
             )
+            return entry
 
-        # 5. Copy to agents dir
-        dest = self._agents_dir / agent_name
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(agent_dir, dest)
-        logger.info("Agent files copied to %s", dest)
-
-        # 6. Read manifest for metadata
-        manifest_dict = self._read_manifest(dest)
-        manifest = AgentManifest(**manifest_dict) if manifest_dict else None
-        agent_type = manifest.type if manifest else AgentType.ATOMIC
-        manifest_version = manifest.version if manifest else (version or "0.0.0")
-
-        # 7. Create venv if needed
-        venv_path = await self._create_venv(agent_name, dest)
-
-        # 8. Get commit SHA
-        cache_path = self._get_cache_path(source.url)
-        commit_sha = await self._get_commit_sha(cache_path)
-
-        # 9. Update lockfile
-        entry = LockfileEntry(
-            version=manifest_version,
-            source=source.name,
-            commit_sha=commit_sha,
-            agent_type=agent_type,
-            installed_at=datetime.now(timezone.utc),
-            venv_path=str(venv_path) if venv_path else "",
-            dependencies=manifest.pip_dependencies if manifest else [],
-        )
-        self._lockfile.add_entry_by_name(agent_name, entry)
-
-        logger.info(
-            "Agent installed: %s@%s (sha=%s, venv=%s)",
-            agent_name,
-            entry.version,
-            commit_sha[:12],
-            "yes" if venv_path else "no",
-        )
-        return entry
+        except Exception:
+            # Rollback: remove any directories/files created during this install.
+            for path in reversed(_created_paths):
+                try:
+                    if path.is_dir():
+                        shutil.rmtree(path, ignore_errors=True)
+                    elif path.exists():
+                        path.unlink()
+                except Exception:
+                    logger.debug("Rollback: failed to remove %s", path, exc_info=True)
+            logger.warning("Installation of '%s' failed; partial files cleaned up.", agent_name)
+            raise
 
     async def uninstall(self, agent_name: str) -> bool:
         """Uninstall an agent.
@@ -193,6 +213,11 @@ class GitInstaller:
         existing = self._lockfile.get_entry(agent_name)
         if existing is None:
             return False
+
+        # Remove lockfile entry FIRST — if file removal fails afterwards the
+        # system is still consistent (orphan files are recoverable, but a stale
+        # lockfile entry pointing to deleted files is not).
+        self._lockfile.remove_entry(agent_name)
 
         # Remove agent files
         agent_dir = self._agents_dir / agent_name
@@ -212,8 +237,6 @@ class GitInstaller:
                 shutil.rmtree(default_venv)
                 logger.info("Removed venv: %s", default_venv)
 
-        # Remove lockfile entry
-        self._lockfile.remove_entry(agent_name)
         logger.info("Agent uninstalled: %s", agent_name)
         return True
 

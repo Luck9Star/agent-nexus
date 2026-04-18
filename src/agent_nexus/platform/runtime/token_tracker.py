@@ -66,6 +66,10 @@ def _alert_from_budget(
     )
 
 
+# Maximum number of log entries retained per session.
+_MAX_LOG_SIZE = 1000
+
+
 class TokenTracker:
     """Track token usage across a session with tiered alerts.
 
@@ -136,6 +140,10 @@ class TokenTracker:
             total_tokens=self._total,
         )
         self._log.append(entry)
+
+        # Trim oldest entries to prevent unbounded growth.
+        if len(self._log) > _MAX_LOG_SIZE:
+            self._log = self._log[-_MAX_LOG_SIZE:]
 
         # Check thresholds and return alert.
         pct = self.usage_pct

@@ -344,6 +344,12 @@ class OrchestrationDSL:
                 raise DSLSyntaxError(
                     f"tasks[{idx}] ({task_id}): .blocked_by must be a list"
                 )
+            for dep_idx, dep in enumerate(blocked_by):
+                if not isinstance(dep, str) or not dep:
+                    raise DSLSyntaxError(
+                        f"tasks[{idx}] ({task_id}): .blocked_by[{dep_idx}] must be a "
+                        f"non-empty string, got {dep!r}"
+                    )
             task_vars = raw_task.get("vars", {})
             if not isinstance(task_vars, dict):
                 raise DSLSyntaxError(

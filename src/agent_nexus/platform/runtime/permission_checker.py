@@ -82,22 +82,59 @@ def _expand_user(path: str) -> str:
 
 
 def _fnmatch_recursive(value: str, pattern: str) -> bool:
-    """Match *value* against *pattern*, supporting recursive ** globs.
+    """Match *value* against *pattern*, supporting recursive ``**`` globs.
 
-    fnmatch does not handle ** (match across directory separators).
-    This helper converts ** patterns to a prefix check so that e.g.
-    /tmp/** matches /tmp/a/b/c.
+    ``fnmatch`` does not handle ``**`` (match across directory separators).
+    This helper expands ``**`` so that it matches zero or more intermediate
+    path segments.
+
+    Supported patterns::
+
+        /tmp/**        — /tmp, /tmp/a, /tmp/a/b/c
+        /tmp/**/*.txt  — /tmp/foo.txt, /tmp/a/b/c.txt
+        /tmp/**/bar/*  — /tmp/bar/x, /tmp/a/bar/x, /tmp/a/b/bar/x
     """
-    if "/**" in pattern:
-        # Recursive glob: /tmp/** matches /tmp, /tmp/a, /tmp/a/b/c
-        prefix = pattern[:pattern.index("/**")]
-        if value == prefix or value.startswith(prefix + "/"):
+    if "/**" not in pattern:
+        return fnmatch.fnmatch(value, pattern)
+
+    prefix = pattern[:pattern.index("/**")]
+    remainder = pattern[pattern.index("/**") + 3 :]  # after the /**
+    # remainder examples: "" | "/*.txt" | "/bar/*"
+
+    if not remainder:
+        # Simple /** — prefix matches value or any descendant.
+        return value == prefix or value.startswith(prefix + "/")
+
+    # value must start with the prefix (or be the prefix itself).
+    if value != prefix and not value.startswith(prefix + "/"):
+        return False
+
+    # Tail is everything after the prefix in value (starts with "/").
+    if value == prefix:
+        tail = ""
+    else:
+        tail = value[len(prefix) :]  # e.g. "/a/b/c.txt"
+
+    # ``**`` matches zero or more path segments.
+    # Walk every possible split point in *tail* and check if the
+    # remainder matches the suffix via plain fnmatch.
+    # Split positions: start of each path segment.
+    positions = [0]
+    for i, ch in enumerate(tail):
+        if ch == "/" and i + 1 < len(tail):
+            positions.append(i + 1)
+
+    for pos in positions:
+        suffix = tail[pos:]  # e.g. "c.txt", "b/c.txt"
+        if fnmatch.fnmatch(suffix, remainder.lstrip("/")):
             return True
-        # Also try plain fnmatch for non-recursive remainder after **
-        remainder = pattern[pattern.index("/**") + 3:]
-        if not remainder:
-            return False
-    return fnmatch.fnmatch(value, pattern)
+
+    # Also try matching the entire tail (including leading "/")
+    # for patterns like "/*.txt" where fnmatch may handle the "/".
+    if fnmatch.fnmatch(tail, remainder):
+        return True
+
+    return False
 
 
 def _matches_any_pattern(value: str, patterns: list[str] | tuple[str, ...]) -> bool:

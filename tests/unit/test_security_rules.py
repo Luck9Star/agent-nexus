@@ -378,11 +378,18 @@ class TestRegexRuleCheckSource:
 # ============================================================================
 
 
-class TestRegexRuleCheckNoOp:
-    """RegexRule.check() must return empty list (dead code path removed)."""
+class TestRegexRuleCheck:
+    """RegexRule.check() performs per-node regex matching via ast.unparse."""
 
-    def test_check_returns_empty(self) -> None:
+    def test_check_detects_violation(self) -> None:
         rule = RegexRule(patterns=[r"getattr"])
+        node = ast.parse("getattr(obj, 'x')").body[0]
+        violations = rule.check(node)
+        assert len(violations) >= 1
+        assert violations[0].rule_type == "regex"
+
+    def test_check_no_match(self) -> None:
+        rule = RegexRule(patterns=[r"NEVER_MATCH_THIS_PATTERN"])
         node = ast.parse("getattr(obj, 'x')").body[0]
         violations = rule.check(node)
         assert violations == []
