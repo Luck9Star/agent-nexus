@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from agent_nexus.models.agent import (
+    AgentDependencies,
     AgentDefinition,
     AgentManifest,
     AgentModelConfig,
@@ -58,9 +59,9 @@ class TestRunMode:
         }
 
     def test_values(self):
-        assert RunMode.MCP_STANDALONE == "mcp_standalone"
-        assert RunMode.PLATFORM_ROUTER == "platform_router"
-        assert RunMode.CLI_STANDALONE == "cli_standalone"
+        assert RunMode.MCP_STANDALONE == "mcp"
+        assert RunMode.PLATFORM_ROUTER == "local"
+        assert RunMode.CLI_STANDALONE == "cli"
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +174,7 @@ class TestAgentManifest:
         assert m.type is AgentType.ATOMIC
         assert m.description == "Fill documents"
         assert m.role is None
-        assert m.dependencies == []
+        assert m.dependencies == AgentDependencies()
         assert m.mcp_servers == {}
         assert m.background is False
         assert m.initial_prompt is None
@@ -185,7 +186,7 @@ class TestAgentManifest:
             type=AgentType.COMPOSITE,
             description="Full feature delivery pipeline",
             role=AgentRole.WORKER,
-            dependencies=["doc-filler", "code-reviewer"],
+            dependencies=AgentDependencies(atomic_agents=["doc-filler", "code-reviewer"]),
             mcp_servers={
                 "docx": McpServerConfig(command="uvx", args=["mcp-docx"]),
             },
@@ -199,7 +200,7 @@ class TestAgentManifest:
         )
         assert m.type is AgentType.COMPOSITE
         assert m.role is AgentRole.WORKER
-        assert len(m.dependencies) == 2
+        assert len(m.dependencies.atomic_agents) == 2
         assert "docx" in m.mcp_servers
         assert m.background is True
         assert m.max_turns == 50

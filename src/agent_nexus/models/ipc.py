@@ -46,8 +46,8 @@ class PlatformToAgent(BaseModel):
     content: str = ""
     task_id: str | None = None
     conversation_id: str | None = None
-    data_ref: str | None = None
-    data_summary: str | None = None
+    ref_id: str | None = None
+    summary: str | None = None
 
 
 class AgentToPlatform(BaseModel):
@@ -64,6 +64,7 @@ class AgentToPlatform(BaseModel):
     type: AgentToPlatformType
     content: str = ""
     task_id: str | None = None
+    message: str | None = None
     progress_pct: float | None = None
     error: str | None = None
     status: str | None = None

@@ -36,7 +36,7 @@ class DSLAgent:
     name: str
     description: str
     role: str = "worker"  # explore | plan | worker | verification
-    tool_loading: str = "eager"  # eager | lazy | manifest_only
+    tool_loading: str = "lazy"  # eager | lazy | manifest_only
 
     def __post_init__(self) -> None:
         if self.role not in _VALID_ROLES:
@@ -79,7 +79,7 @@ class DSLTask:
 class DSLToolLoading:
     """Global tool loading strategy."""
 
-    strategy: str = "eager"  # eager | lazy | manifest_only
+    strategy: str = "lazy"  # eager | lazy | manifest_only
     preload_agents: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -291,7 +291,7 @@ class OrchestrationDSL:
                 raise DSLSyntaxError(f"Duplicate agent name: '{name}'")
             description = raw_agent.get("description", "")
             role = raw_agent.get("role", "worker")
-            tool_loading = raw_agent.get("tool_loading", "eager")
+            tool_loading = raw_agent.get("tool_loading", "lazy")
             try:
                 agents[name] = DSLAgent(
                     name=name,
@@ -348,7 +348,7 @@ class OrchestrationDSL:
         raw_tl = raw.get("tool_loading", {})
         if not isinstance(raw_tl, dict):
             raise DSLSyntaxError("[tool_loading] must be a table")
-        tl_strategy = raw_tl.get("strategy", "eager")
+        tl_strategy = raw_tl.get("strategy", "lazy")
         tl_preload = raw_tl.get("preload_agents", [])
         if not isinstance(tl_preload, list):
             raise DSLSyntaxError("[tool_loading].preload_agents must be a list")

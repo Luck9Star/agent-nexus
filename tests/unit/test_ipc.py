@@ -104,11 +104,11 @@ class TestIPCStreamSend:
 
         written = mock_stdin.write.call_args[0][0]
         parsed = json.loads(written.decode("utf-8").strip())
-        # task_id, conversation_id, data_ref, data_summary should be absent
+        # task_id, conversation_id, ref_id, summary should be absent
         assert "task_id" not in parsed
         assert "conversation_id" not in parsed
-        assert "data_ref" not in parsed
-        assert "data_summary" not in parsed
+        assert "ref_id" not in parsed
+        assert "summary" not in parsed
 
 
 # ============================================================================
@@ -229,7 +229,7 @@ class TestIPCProtocolSendDataReference:
     async def test_send_data_reference(
         self, protocol: IPCProtocol, mock_stdin: MagicMock
     ) -> None:
-        """send_data_reference() creates DATA_REFERENCE with ref_id and data_summary."""
+        """send_data_reference() creates DATA_REFERENCE with ref_id and summary."""
         await protocol.send_data_reference(
             ref_id="var://output/123",
             summary="Generated report",
@@ -240,9 +240,9 @@ class TestIPCProtocolSendDataReference:
         written = mock_stdin.write.call_args[0][0]
         parsed = json.loads(written.decode("utf-8").strip())
         assert parsed["type"] == "data_reference"
-        assert parsed["data_ref"] == "var://output/123"
-        assert "doc-writer" in parsed["data_summary"]
-        assert "Generated report" in parsed["data_summary"]
+        assert parsed["ref_id"] == "var://output/123"
+        assert "doc-writer" in parsed["summary"]
+        assert "Generated report" in parsed["summary"]
 
 
 # ============================================================================

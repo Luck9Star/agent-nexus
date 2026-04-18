@@ -161,7 +161,7 @@ class GitInstaller:
             agent_type=agent_type,
             installed_at=datetime.now(),
             venv_path=str(venv_path) if venv_path else "",
-            dependencies=manifest.get("dependencies", []),
+            dependencies=manifest.get("pip_dependencies", []),
         )
         self._lockfile.add_entry_by_name(agent_name, entry)
 

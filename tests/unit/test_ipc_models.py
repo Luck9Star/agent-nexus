@@ -62,7 +62,7 @@ class TestPlatformToAgent:
         assert msg.content == "Hello agent"
         assert msg.conversation_id == "conv-1"
         assert msg.task_id is None
-        assert msg.data_ref is None
+        assert msg.ref_id is None
 
     def test_task_message(self):
         msg = PlatformToAgent(
@@ -76,19 +76,19 @@ class TestPlatformToAgent:
     def test_data_reference_message(self):
         msg = PlatformToAgent(
             type=PlatformToAgentType.DATA_REFERENCE,
-            data_ref="var://input/docx",
-            data_summary="Input document reference",
+            ref_id="var://input/docx",
+            summary="Input document reference",
         )
         assert msg.type is PlatformToAgentType.DATA_REFERENCE
-        assert msg.data_ref == "var://input/docx"
+        assert msg.ref_id == "var://input/docx"
 
     def test_defaults(self):
         msg = PlatformToAgent(type=PlatformToAgentType.CHAT)
         assert msg.content == ""
         assert msg.task_id is None
         assert msg.conversation_id is None
-        assert msg.data_ref is None
-        assert msg.data_summary is None
+        assert msg.ref_id is None
+        assert msg.summary is None
 
     def test_frozen(self):
         msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")

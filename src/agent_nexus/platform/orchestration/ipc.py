@@ -202,8 +202,8 @@ class IPCProtocol:
         msg = PlatformToAgent(
             type=PlatformToAgentType.DATA_REFERENCE,
             content=summary,
-            data_ref=ref_id,
-            data_summary=f"[{agent_source}] {summary} {size_hint}".strip(),
+            ref_id=ref_id,
+            summary=f"[{agent_source}] {summary} {size_hint}".strip(),
         )
         await self._stream.send(msg)
 

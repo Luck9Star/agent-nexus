@@ -31,7 +31,7 @@ class TestDSLAgent:
         agent = DSLAgent(name="reviewer", description="Code reviewer", role="verification")
         assert agent.name == "reviewer"
         assert agent.role == "verification"
-        assert agent.tool_loading == "eager"
+        assert agent.tool_loading == "lazy"
 
     def test_invalid_role_raises(self) -> None:
         """Invalid role raises ValueError."""
@@ -44,10 +44,10 @@ class TestDSLAgent:
             DSLAgent(name="bad", description="", tool_loading="aggressive")
 
     def test_default_values(self) -> None:
-        """Default role=worker, tool_loading=eager."""
+        """Default role=worker, tool_loading=lazy."""
         agent = DSLAgent(name="default", description="desc")
         assert agent.role == "worker"
-        assert agent.tool_loading == "eager"
+        assert agent.tool_loading == "lazy"
 
 
 # ============================================================================
@@ -116,9 +116,9 @@ class TestDSLToolLoading:
             DSLToolLoading(strategy="preload_everything")
 
     def test_default_values(self) -> None:
-        """Default strategy=eager, preload_agents=[]."""
+        """Default strategy=lazy, preload_agents=[]."""
         tl = DSLToolLoading()
-        assert tl.strategy == "eager"
+        assert tl.strategy == "lazy"
         assert tl.preload_agents == []
 
 

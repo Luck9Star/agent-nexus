@@ -160,8 +160,8 @@ class MCPGateway:
 
         if m.role:
             lines.append(f"- **Role**: {m.role.value}")
-        if m.dependencies:
-            lines.append(f"- **Dependencies**: {', '.join(m.dependencies)}")
+        if m.dependencies.atomic_agents:
+            lines.append(f"- **Dependencies**: {', '.join(m.dependencies.atomic_agents)}")
 
         # Status
         if info.is_running:

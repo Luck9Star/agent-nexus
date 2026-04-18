@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_nexus.models.permission import PermissionConfig, PermissionMode
+
 
 class AgentType(StrEnum):
     """Agent type classification."""
@@ -18,9 +20,9 @@ class AgentType(StrEnum):
 class RunMode(StrEnum):
     """How an Agent is executed."""
 
-    MCP_STANDALONE = "mcp_standalone"
-    PLATFORM_ROUTER = "platform_router"
-    CLI_STANDALONE = "cli_standalone"
+    MCP_STANDALONE = "mcp"
+    PLATFORM_ROUTER = "local"
+    CLI_STANDALONE = "cli"
 
 
 class AgentRole(StrEnum):
@@ -65,6 +67,14 @@ class McpServerConfig(BaseModel):
     url: str | None = None
 
 
+class AgentDependencies(BaseModel):
+    """Agent dependency specification for composite agents."""
+
+    model_config = ConfigDict(frozen=True)
+
+    atomic_agents: list[str] = Field(default_factory=list)
+
+
 class AgentManifest(BaseModel):
     """Agent metadata parsed from agent-manifest.yaml.
 
@@ -80,7 +90,13 @@ class AgentManifest(BaseModel):
     description: str
     model_config_field: AgentModelConfig | None = Field(default=None, alias="model_config")
     role: AgentRole | None = None
-    dependencies: list[str] = Field(default_factory=list)
+    dependencies: AgentDependencies = Field(default_factory=AgentDependencies)
+    permissions: PermissionConfig | None = None
+    tools: list[str] = Field(default_factory=list)
+    denied_tools: list[str] = Field(default_factory=list)
+    permission_mode: PermissionMode | None = None
+    skills: list[str] = Field(default_factory=list)
+    hooks: dict[str, list[HookDef]] = Field(default_factory=dict)
     mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
     effort: str | None = None
     max_turns: int | None = None
