@@ -1472,3 +1472,272 @@ class TestWorkflowContextClose:
         assert ctx.task_graph is not None
         ctx.close()
         assert ctx.task_graph is None
+
+
+# ============================================================================
+# Regression tests for audit fixes
+# ============================================================================
+
+
+class TestRouteCompositeTaskGraphSetupFailure:
+    """route_composite must handle TaskGraph.add_task() failures gracefully.
+
+    Regression: if add_task() raised during TaskGraph population (e.g. duplicate
+    task ID, database error), phase_results/completed/total/last_error were
+    referenced before assignment causing NameError.  Variables are now
+    initialized before TaskGraph setup.
+    """
+
+    @pytest.mark.asyncio
+    async def test_add_task_failure_returns_graceful_result(self) -> None:
+        """TaskGraph.add_task raising does not crash -- returns failed WorkflowResult."""
+        definition = _make_definition()
+        pm = _make_process_manager()
+        router = PlatformRouter(process_manager=pm)
+
+        mock_tg = MagicMock()
+        mock_tg.add_task.side_effect = RuntimeError("DB locked")
+
+        with patch(
+            "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg
+        ):
+            result = await router.route_composite(definition, "test", "conv-1")
+
+        assert result.success is False
+        assert result.completed_phases == 0
+        assert result.total_phases == 4
+        assert result.error is not None
+        assert "TaskGraph setup failed" in result.error
+        assert "DB locked" in result.error
+
+    @pytest.mark.asyncio
+    async def test_add_task_failure_empty_phase_results(self) -> None:
+        """TaskGraph failure produces empty phase_results."""
+        definition = _make_definition()
+        pm = _make_process_manager()
+        router = PlatformRouter(process_manager=pm)
+
+        mock_tg = MagicMock()
+        mock_tg.add_task.side_effect = ValueError("bad task")
+
+        with patch(
+            "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg
+        ):
+            result = await router.route_composite(definition, "test", "conv-1")
+
+        assert result.phase_results == {}
+        assert result.final_output == ""
+
+
+class TestRouteToAtomicSendChatError:
+    """route_to_atomic must handle send_chat exceptions.
+
+    Regression: send_chat IPC call was unprotected.  If it raised (broken pipe,
+    process died), the exception propagated unhandled instead of being returned
+    as an error dict like receive_until_result errors.
+    """
+
+    @pytest.mark.asyncio
+    async def test_send_chat_exception_returns_error_dict(self) -> None:
+        """send_chat raising returns error dict, not unhandled exception."""
+        handle = _make_agent_handle()
+        handle.ipc.send_chat = AsyncMock(side_effect=ConnectionError("pipe broke"))
+
+        pm = _make_process_manager(agents={"agent-a": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        result = await router.route_to_atomic("agent-a", "hello", "conv-1")
+        assert result["success"] is False
+        assert "IPC send error" in result["error"]
+        assert "pipe broke" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_send_chat_timeout_returns_error_dict(self) -> None:
+        """send_chat timeout returns error dict."""
+        handle = _make_agent_handle()
+        handle.ipc.send_chat = AsyncMock(side_effect=asyncio.TimeoutError("send timeout"))
+
+        pm = _make_process_manager(agents={"agent-a": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        result = await router.route_to_atomic("agent-a", "hello", "conv-1")
+        assert result["success"] is False
+        assert "IPC send error" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_send_chat_success_receive_still_protected(self) -> None:
+        """send_chat succeeding but receive failing still returns error dict."""
+        handle = _make_agent_handle()
+        handle.ipc.send_chat = AsyncMock()  # succeeds
+        handle.ipc.receive_until_result = AsyncMock(
+            side_effect=RuntimeError("recv fail")
+        )
+
+        pm = _make_process_manager(agents={"agent-a": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        result = await router.route_to_atomic("agent-a", "hello", "conv-1")
+        assert result["success"] is False
+        assert "IPC error" in result["error"]
+        assert "recv fail" in result["error"]
+
+
+class TestGetToolsSkipsNamelessTools:
+    """get_tools must skip tools without a valid 'name' key.
+
+    Regression: tools without a 'name' key were added with tool_name="".
+    This polluted the tool list and blocked future unnamed tools since "" was
+    added to seen_names.
+    """
+
+    @pytest.mark.asyncio
+    async def test_nameless_tool_skipped_json_path(self) -> None:
+        """Tool dict without 'name' key is skipped (JSON string path)."""
+        import json
+
+        tools_list = [{"description": "no name tool"}, {"name": "valid-tool"}]
+        h = _make_agent_handle(name="a1")
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = json.dumps(tools_list)
+        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
+        router = PlatformRouter(process_manager=pm)
+
+        tools = await router.get_tools()
+        assert len(tools) == 1
+        assert tools[0]["name"] == "valid-tool"
+
+    @pytest.mark.asyncio
+    async def test_nameless_tool_skipped_list_path(self) -> None:
+        """Tool dict without 'name' key is skipped (list path)."""
+        tools_list = [{"description": "no name"}, {"name": "ok-tool"}]
+        h = _make_agent_handle(name="a1")
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = tools_list
+        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
+        router = PlatformRouter(process_manager=pm)
+
+        tools = await router.get_tools()
+        assert len(tools) == 1
+        assert tools[0]["name"] == "ok-tool"
+
+    @pytest.mark.asyncio
+    async def test_empty_name_tool_skipped(self) -> None:
+        """Tool with name='' is skipped."""
+        tools_list = [{"name": ""}, {"name": "real-tool"}]
+        h = _make_agent_handle(name="a1")
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = tools_list
+        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
+        router = PlatformRouter(process_manager=pm)
+
+        tools = await router.get_tools()
+        assert len(tools) == 1
+        assert tools[0]["name"] == "real-tool"
+
+    @pytest.mark.asyncio
+    async def test_all_nameless_tools_returns_empty(self) -> None:
+        """If all tools lack names, result is empty list."""
+        import json
+
+        tools_list = [{"description": "a"}, {"description": "b"}]
+        h = _make_agent_handle(name="a1")
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = json.dumps(tools_list)
+        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
+        router = PlatformRouter(process_manager=pm)
+
+        tools = await router.get_tools()
+        assert tools == []
+
+
+class TestExecuteSingleAgentReturnTypeSafety:
+    """_execute_single_agent must always return str, not arbitrary types.
+
+    Regression: response.content could be a non-string truthy value (list, dict).
+    `response.content or ""` would return the list/dict directly, violating the
+    str return type.  Now uses explicit str() conversion.
+    """
+
+    @pytest.mark.asyncio
+    async def test_none_content_returns_empty_string(self) -> None:
+        """response.content=None returns '', not None."""
+        handle = _make_agent_handle()
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = None
+        mock_resp.error = None
+        mock_resp.status = "completed"
+        handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        result = await router._execute_single_agent("a1", "hi", "c1")
+        assert isinstance(result, str)
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_list_content_returns_string_repr(self) -> None:
+        """response.content as list returns str(list), not the list itself."""
+        handle = _make_agent_handle()
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = ["item1", "item2"]
+        mock_resp.error = None
+        mock_resp.status = "completed"
+        handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        result = await router._execute_single_agent("a1", "hi", "c1")
+        assert isinstance(result, str)
+        assert "item1" in result
+
+    @pytest.mark.asyncio
+    async def test_dict_content_returns_string_repr(self) -> None:
+        """response.content as dict returns str(dict), not the dict itself."""
+        handle = _make_agent_handle()
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = {"key": "value"}
+        mock_resp.error = None
+        mock_resp.status = "completed"
+        handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        result = await router._execute_single_agent("a1", "hi", "c1")
+        assert isinstance(result, str)
+        assert "key" in result
+
+    @pytest.mark.asyncio
+    async def test_int_content_returns_string(self) -> None:
+        """response.content as int returns str(int), not int."""
+        handle = _make_agent_handle()
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = 42
+        mock_resp.error = None
+        mock_resp.status = "completed"
+        handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        result = await router._execute_single_agent("a1", "hi", "c1")
+        assert isinstance(result, str)
+        assert result == "42"

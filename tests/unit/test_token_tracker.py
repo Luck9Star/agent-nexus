@@ -277,3 +277,46 @@ class TestTokenTracker:
         tracker95 = TokenTracker(max_tokens=100_000)
         alert95 = tracker95.record_usage(95_100)
         assert alert95.level == "ceiling"
+
+
+# ---------------------------------------------------------------------------
+# Regression: Negative tokens_used rejection
+# ---------------------------------------------------------------------------
+
+
+class TestTokenTrackerNegativeRejection:
+    """record_usage must reject negative tokens_used."""
+
+    def test_negative_tokens_raises(self) -> None:
+        """Negative tokens_used raises ValueError."""
+        tracker = TokenTracker(max_tokens=100_000)
+        with pytest.raises(ValueError, match="tokens_used must be non-negative"):
+            tracker.record_usage(-1)
+
+    def test_negative_large_raises(self) -> None:
+        """Large negative tokens_used raises ValueError."""
+        tracker = TokenTracker(max_tokens=100_000)
+        with pytest.raises(ValueError, match="tokens_used must be non-negative"):
+            tracker.record_usage(-999_999)
+
+    def test_zero_tokens_accepted(self) -> None:
+        """Zero tokens_used is valid (no-op turn)."""
+        tracker = TokenTracker(max_tokens=100_000)
+        alert = tracker.record_usage(0)
+        assert alert.level == "ok"
+        assert tracker.total_tokens == 0
+        assert tracker._turn == 1
+
+    def test_negative_does_not_corrupt_total(self) -> None:
+        """Negative tokens_used does not change internal state."""
+        tracker = TokenTracker(max_tokens=100_000)
+        tracker.record_usage(50_000)
+        assert tracker.total_tokens == 50_000
+
+        with pytest.raises(ValueError):
+            tracker.record_usage(-10_000)
+
+        # Total should be unchanged after rejected call
+        assert tracker.total_tokens == 50_000
+        # Turn should be unchanged too (increment happens after validation)
+        assert tracker._turn == 1

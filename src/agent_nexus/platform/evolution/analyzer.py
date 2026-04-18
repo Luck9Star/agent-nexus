@@ -78,7 +78,8 @@ def _correct_skill_ids(
     """Best-effort correction of LLM-hallucinated skill IDs.
 
     For each ID not in known_ids, find the closest known ID sharing the
-    same name prefix (before ``__``) and within edit distance <= 3.
+    same name prefix (before ``__``) and within a scaled edit distance
+    threshold based on suffix length (1-3).
     """
     if not known_ids:
         return ids
@@ -97,7 +98,18 @@ def _correct_skill_ids(
         prefix = raw_id.split("__")[0]
         candidates = [k for k in known_ids if k.split("__")[0] == prefix]
 
-        max_dist = 2 if len(candidates) > 20 else 4
+        # Scale max_dist with suffix length to avoid loose matches on short IDs
+        # e.g. "x__ab" matching "x__wxyz" at distance 4 is clearly wrong.
+        _suffix = raw_id.split("__", 1)[1] if "__" in raw_id else raw_id
+        _suffix_len = len(_suffix)
+        if len(candidates) > 20:
+            max_dist = 2
+        elif _suffix_len <= 4:
+            max_dist = 1
+        elif _suffix_len <= 8:
+            max_dist = 2
+        else:
+            max_dist = 3
         best: str | None = None
         best_dist = max_dist
         ambiguous = False

@@ -620,3 +620,42 @@ class TestIPCCloseDrainBound:
 
         # Should stop at 64 chunks, not loop forever
         assert call_count == 64
+
+
+# ============================================================================
+# Regression: TestIPCReceiveNonUTF8
+# ============================================================================
+
+
+class TestIPCReceiveNonUTF8:
+    """receive() must raise IPCError (not UnicodeDecodeError) on non-UTF-8 data."""
+
+    @pytest.mark.asyncio
+    async def test_receive_non_utf8_raises_ipc_error(self) -> None:
+        """Non-UTF-8 bytes from agent stdout are wrapped as IPCError."""
+        mock_stdin = MagicMock()
+        mock_stdout = MagicMock(spec=asyncio.StreamReader)
+        # Invalid UTF-8 sequence: 0xFF is never valid in UTF-8
+        mock_stdout.readline = AsyncMock(return_value=b"\xff\xfe bad data\n")
+        mock_stdout.read = AsyncMock(return_value=b"")
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+
+        with pytest.raises(IPCError, match="non-UTF-8"):
+            await stream.receive()
+
+    @pytest.mark.asyncio
+    async def test_receive_valid_utf8_still_works(self) -> None:
+        """Valid UTF-8 with multibyte characters works correctly."""
+        mock_stdin = MagicMock()
+        mock_stdout = MagicMock(spec=asyncio.StreamReader)
+        msg = {"type": "result", "content": "Chinese: 你好世界", "task_id": "t1"}
+        encoded = (json.dumps(msg, ensure_ascii=False) + "\n").encode("utf-8")
+        mock_stdout.readline = AsyncMock(return_value=encoded)
+        mock_stdout.read = AsyncMock(return_value=b"")
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        result = await stream.receive()
+
+        assert result.content == "Chinese: 你好世界"
+        assert result.task_id == "t1"

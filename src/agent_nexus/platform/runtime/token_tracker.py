@@ -111,11 +111,19 @@ class TokenTracker:
 
         Args:
             tokens_used: Number of tokens consumed in this turn.
+                Must be non-negative.
             agent_name: Optional agent name for attribution.
 
         Returns:
             TokenAlert indicating current threshold level.
+
+        Raises:
+            ValueError: If tokens_used is negative.
         """
+        if tokens_used < 0:
+            raise ValueError(
+                f"tokens_used must be non-negative, got {tokens_used}"
+            )
         self._turn += 1
         self._total += tokens_used
 

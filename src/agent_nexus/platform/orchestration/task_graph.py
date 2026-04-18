@@ -463,7 +463,13 @@ class TaskGraph:
         conn: sqlite3.Connection,
         row: tuple[Any, ...],
     ) -> TaskItem | None:
-        """Convert DB row to TaskItem."""
+        """Convert DB row to TaskItem.
+
+        Returns None only for rows that are genuinely missing (should not
+        happen in normal operation).  Data-corruption errors (bad JSON,
+        invalid state enum) are logged and re-raised so callers do not
+        silently lose data.
+        """
         try:
             task_id, description, agent, state_str, vars_json, created_at_str, updated_at_str = row
             blocked_by = self._get_blocked_by_conn(conn, task_id)
@@ -477,9 +483,13 @@ class TaskGraph:
                 created_at=datetime.fromisoformat(created_at_str),
                 updated_at=datetime.fromisoformat(updated_at_str),
             )
-        except Exception:
-            logger.error("Failed to parse task row: %s", exc_info=True)
-            return None
+        except (ValueError, KeyError, json.JSONDecodeError, TypeError) as exc:
+            # Data corruption — log loudly and re-raise so the caller
+            # knows a row is damaged rather than merely absent.
+            logger.error(
+                "Corrupt task row (id=%s): %s", row[0] if row else "?", exc
+            )
+            raise
 
     def _get_blocked_by_conn(
         self, conn: sqlite3.Connection, task_id: str

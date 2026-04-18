@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+import re
 from enum import StrEnum
 from typing import Any
 
@@ -359,12 +360,11 @@ class SkillEvolver:
             )
 
         # Generate a name from the direction
-        name_base = suggestion.direction.split(".")[0].strip()
+        name_base = suggestion.direction.split(". ")[0].strip()
         if len(name_base) > 50:
             name_base = name_base[:50]
         name_base = name_base.lower().replace(" ", "-")
         # Clean up for use as name
-        import re
         name_base = re.sub(r"[^a-z0-9\-]", "-", name_base)
         name_base = re.sub(r"-{2,}", "-", name_base).strip("-")
         if not name_base:

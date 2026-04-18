@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import inspect
 
 import pytest
 
@@ -1848,3 +1849,211 @@ class TestAnalyzerCapturedDedup:
         ]
         assert len(captured) == 1
         assert captured[0].target_skill_ids == []
+
+
+# ============================================================================
+# Iteration 25 fixes: import re at module level, health dedup/DERIVED
+# suppression, edit distance scaling, sentence-split for captured names
+# ============================================================================
+
+
+class TestEvolverModuleLevelReImport:
+    """Verify 'import re' is at module level, not inline in methods."""
+
+    def test_re_is_module_level_import(self) -> None:
+        import ast
+        import agent_nexus.platform.evolution.evolver as evolver_mod
+
+        source = inspect.getsource(evolver_mod)
+        tree = ast.parse(source)
+        # Check that 're' is in top-level imports
+        top_imports = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        assert "re" in top_imports, "'import re' should be at module level"
+
+    def test_no_inline_import_re_in_methods(self) -> None:
+        """No method body should contain 'import re'."""
+        import ast
+        import agent_nexus.platform.evolution.evolver as evolver_mod
+
+        source = inspect.getsource(evolver_mod)
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for child in ast.walk(node):
+                    if isinstance(child, ast.Import):
+                        for alias in child.names:
+                            assert alias.name != "re", (
+                                f"'import re' found inside method "
+                                f"'{node.name}', should be module-level"
+                            )
+
+
+class TestHealthCheckerDedupFix:
+    """check_health must deduplicate FIX suggestions (keep highest confidence)
+    and suppress DERIVED when FIX is triggered for the same skill.
+    """
+
+    def test_dual_fix_triggers_only_one_fix(self) -> None:
+        """Skill with high fallback AND low completion produces only one FIX.
+
+        Before fix: both Rule 1 and Rule 2 appended separate FIX suggestions,
+        producing 2 FIX suggestions for the same skill.
+        After fix: only one FIX is returned (highest confidence).
+        """
+        from unittest.mock import MagicMock
+
+        # fallback_rate = 60/100 = 0.6 > 0.4 (Rule 1: FIX)
+        # applied_rate = 50/100 = 0.5 > 0.4, completion_rate = 10/50 = 0.2 < 0.35 (Rule 2: FIX)
+        r = _make_record("s1", "x", selections=100, applied=50, completions=10, fallbacks=60)
+        checker = HealthChecker(MagicMock())
+        suggestions = checker.check_health(r)
+
+        fix_suggestions = [s for s in suggestions if s.evolution_type == EvolutionType.FIX]
+        assert len(fix_suggestions) == 1, (
+            f"Expected exactly 1 deduplicated FIX, got {len(fix_suggestions)}"
+        )
+
+    def test_fix_suppresses_derived(self) -> None:
+        """When FIX is triggered, DERIVED should not be returned.
+
+        This skill triggers both:
+          - fallback_rate = 60/100 = 0.6 > 0.4 (FIX)
+          - effective_rate = 10/100 = 0.1 < 0.55, applied_rate = 50/100 = 0.5 > 0.25 (DERIVED)
+        After fix: only FIX, no DERIVED.
+        """
+        from unittest.mock import MagicMock
+
+        r = _make_record("s1", "x", selections=100, applied=50, completions=10, fallbacks=60)
+        checker = HealthChecker(MagicMock())
+        suggestions = checker.check_health(r)
+
+        types = {s.evolution_type for s in suggestions}
+        assert EvolutionType.FIX in types
+        assert EvolutionType.DERIVED not in types, (
+            "DERIVED should be suppressed when FIX is triggered for the same skill"
+        )
+
+    def test_derived_returned_when_no_fix(self) -> None:
+        """When no FIX triggers, DERIVED should still be returned."""
+        from unittest.mock import MagicMock
+
+        # effective_rate = 30/100 = 0.3 < 0.55, applied_rate = 40/100 = 0.4 > 0.25
+        # fallback_rate = 10/100 = 0.1 <= 0.4 (no FIX)
+        # completion_rate = 30/40 = 0.75 >= 0.35 (no FIX)
+        r = _make_record("s1", "x", selections=100, applied=40, completions=30, fallbacks=10)
+        checker = HealthChecker(MagicMock())
+        suggestions = checker.check_health(r)
+
+        derived = [s for s in suggestions if s.evolution_type == EvolutionType.DERIVED]
+        assert len(derived) == 1
+
+    def test_best_fix_keeps_higher_confidence(self) -> None:
+        """When both FIX rules trigger, the FIX with higher confidence wins."""
+        from unittest.mock import MagicMock
+
+        # fallback_rate = 60/100 = 0.6 -> confidence = 0.6
+        # applied_rate = 50/100 = 0.5, completion_rate = 10/50 = 0.2
+        #   -> confidence = min(0.5 * 0.8, 1.0) = 0.4
+        # fallback FIX has higher confidence (0.6 > 0.4)
+        r = _make_record("s1", "x", selections=100, applied=50, completions=10, fallbacks=60)
+        checker = HealthChecker(MagicMock())
+        suggestions = checker.check_health(r)
+
+        fix_suggestions = [s for s in suggestions if s.evolution_type == EvolutionType.FIX]
+        assert len(fix_suggestions) == 1
+        assert fix_suggestions[0].confidence == pytest.approx(0.6, abs=0.01)
+
+    def test_low_completion_fix_wins_when_higher_confidence(self) -> None:
+        """When the completion-rate FIX has higher confidence, it wins."""
+        from unittest.mock import MagicMock
+
+        # fallback_rate = 45/100 = 0.45 -> confidence = 0.45
+        # applied_rate = 90/100 = 0.9, completion_rate = 30/90 = 0.333 < 0.35
+        #   -> confidence = min(0.9 * 0.667, 1.0) = 0.6
+        # completion FIX has higher confidence (0.6 > 0.45)
+        r = _make_record("s1", "x", selections=100, applied=90, completions=30, fallbacks=45)
+        checker = HealthChecker(MagicMock())
+        suggestions = checker.check_health(r)
+
+        fix_suggestions = [s for s in suggestions if s.evolution_type == EvolutionType.FIX]
+        assert len(fix_suggestions) == 1
+        assert "completion" in fix_suggestions[0].direction.lower()
+
+
+class TestEditDistanceScaling:
+    """_correct_skill_ids scales max_dist by suffix length to avoid loose
+    matches on short IDs.
+    """
+
+    def test_short_suffix_tight_threshold(self) -> None:
+        """Suffix <= 4 chars should only match at distance 1."""
+        known = {"x__abcd"}
+        # Distance 2 -> too far for suffix length 4
+        result = _correct_skill_ids(["x__abef"], known)
+        assert result == ["x__abef"]  # not corrected
+
+    def test_medium_suffix_moderate_threshold(self) -> None:
+        """Suffix 5-8 chars: max_dist=2, matches at distance < 2 (i.e. 0 or 1)."""
+        known = {"x__abcdefgh"}
+        # Distance 2 -> NOT matched (needs strict < max_dist)
+        result = _correct_skill_ids(["x__abcdefXY"], known)
+        assert result == ["x__abcdefXY"]
+        # Distance 1 -> matched
+        result2 = _correct_skill_ids(["x__abcdefXh"], known)
+        assert result2 == ["x__abcdefgh"]
+
+    def test_long_suffix_relaxed_threshold(self) -> None:
+        """Suffix > 8 chars should match at distance <= 3."""
+        known = {"agent-a__review_code_v2"}
+        result = _correct_skill_ids(["agent-a__review_code_vX"], known)
+        assert result == ["agent-a__review_code_v2"]  # distance 1
+
+    def test_no_false_match_on_short_ids(self) -> None:
+        """Regression: short suffixes should not false-match with old loose threshold."""
+        known = {"x__ab"}
+        # Distance from "x__ab" to "x__cd" is 2, old threshold was 4 -> would match
+        result = _correct_skill_ids(["x__cd"], known)
+        assert result == ["x__cd"]  # NOT corrected: short suffix, distance too high
+
+
+class TestCapturedSentenceSplit:
+    """_evolve_captured should split direction on '. ' (sentence boundary),
+    not bare '.' to avoid breaking version numbers like 'v2.0'.
+    """
+
+    def test_version_number_preserved_in_name(self, tmp_path: Path) -> None:
+        """Direction with version number 'v2.0' should not be split at the dot."""
+        store = _store_with_records(tmp_path)
+        evolver = SkillEvolver(store)
+
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.CAPTURED,
+            direction="v2.0 upgrade handler",
+        )
+        result = evolver.evolve(suggestion)
+        assert result.success
+        assert result.new_record is not None
+        # Name should include "v2-0" not just "v2"
+        assert "v2-0" in result.new_record.name, (
+            f"Expected 'v2-0' in name, got '{result.new_record.name}'"
+        )
+
+    def test_sentence_split_still_works(self, tmp_path: Path) -> None:
+        """Direction with sentence-ending period should still be trimmed."""
+        store = _store_with_records(tmp_path)
+        evolver = SkillEvolver(store)
+
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.CAPTURED,
+            direction="Handle special cases. Also do more things.",
+        )
+        result = evolver.evolve(suggestion)
+        assert result.success
+        assert result.new_record is not None
+        # Should only use first sentence
+        assert result.new_record.name == "handle-special-cases"

@@ -134,19 +134,34 @@ class PlatformRouter:
             agent_name=definition.agent_name,
         )
 
+        # Initialize result variables before TaskGraph setup so they are
+        # always defined even if add_task() raises during population.
+        phase_results: dict[WorkflowPhase, str] = {}
+        completed = 0
+        total = len(_PHASE_ORDER)
+        last_error: str | None = None
+
         # 2. Create in-memory TaskGraph and populate from definition
         db_path = Path(f":memory:")
         ctx.task_graph = TaskGraph(db_path)
-        for dsl_task in definition.tasks:
-            ctx.task_graph.add_task(dsl_task.to_task_item())
+        try:
+            for dsl_task in definition.tasks:
+                ctx.task_graph.add_task(dsl_task.to_task_item())
+        except Exception as exc:
+            last_error = f"TaskGraph setup failed: {exc}"
+            logger.error(last_error, exc_info=exc)
+            ctx.close()
+            return WorkflowResult(
+                success=False,
+                final_output="",
+                phase_results=phase_results,
+                total_phases=total,
+                completed_phases=completed,
+                error=last_error,
+            )
 
         # 3. Execute phases
         try:
-            phase_results: dict[WorkflowPhase, str] = {}
-            completed = 0
-            total = len(_PHASE_ORDER)
-            last_error: str | None = None
-
             for phase in _PHASE_ORDER:
                 ctx.current_phase = phase
                 try:
@@ -211,7 +226,14 @@ class PlatformRouter:
             }
 
         # Send chat message via IPC
-        await handle.ipc.send_chat(message, conversation_id=conversation_id)
+        try:
+            await handle.ipc.send_chat(message, conversation_id=conversation_id)
+        except Exception as exc:
+            return {
+                "output": "",
+                "success": False,
+                "error": f"IPC send error: {exc}",
+            }
 
         # Wait for final result (progress messages are silently consumed)
         try:
@@ -261,6 +283,13 @@ class PlatformRouter:
                             if isinstance(parsed, list):
                                 for tool in parsed:
                                     tool_name = tool.get("name", "")
+                                    if not tool_name:
+                                        logger.warning(
+                                            "Tool from agent '%s' has no "
+                                            "'name' key, skipping",
+                                            name,
+                                        )
+                                        continue
                                     if tool_name in seen_names:
                                         logger.warning(
                                             "Tool name collision: '%s' from agent '%s' "
@@ -275,6 +304,13 @@ class PlatformRouter:
                     elif isinstance(content, list):
                         for tool in content:
                             tool_name = tool.get("name", "")
+                            if not tool_name:
+                                logger.warning(
+                                    "Tool from agent '%s' has no "
+                                    "'name' key, skipping",
+                                    name,
+                                )
+                                continue
                             if tool_name in seen_names:
                                 logger.warning(
                                     "Tool name collision: '%s' from agent '%s' "
@@ -417,7 +453,7 @@ class PlatformRouter:
                 f"Agent '{agent_name}' error: {response.error or 'unknown'}"
             )
 
-        return response.content or ""
+        return str(response.content) if response.content is not None else ""
 
     # ------------------------------------------------------------------
     # Helpers

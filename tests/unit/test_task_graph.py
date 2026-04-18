@@ -387,3 +387,64 @@ class TestTaskGraphImmediate:
         tg.start_task("t1")
         result = tg.fail_task("t1")
         assert result.state == TaskState.FAILED
+
+
+# ============================================================================
+# Regression: Corrupt row handling in _task_from_row
+# ============================================================================
+
+
+class TestTaskGraphCorruptRow:
+    """_task_from_row must raise on data corruption, not silently return None."""
+
+    def test_invalid_state_in_db_raises(self, tmp_path: Path) -> None:
+        """A row with an invalid state value causes an error, not silent drop."""
+        import json
+        import sqlite3
+
+        db_path = tmp_path / "corrupt.db"
+        tg = TaskGraph(db_path)
+
+        # Insert a task normally
+        task = _make_task("T1")
+        tg.add_task(task)
+
+        # Corrupt the state field directly in SQLite
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("UPDATE tasks SET state = 'bogus_state' WHERE id = 'T1'")
+        conn.commit()
+        conn.close()
+
+        # get_task should raise ValueError (bad state enum) instead of
+        # silently returning None
+        with pytest.raises(ValueError, match="bogus_state"):
+            tg.get_task("T1")
+
+    def test_invalid_json_vars_in_db_raises(self, tmp_path: Path) -> None:
+        """A row with corrupt JSON in vars column causes an error."""
+        import sqlite3
+
+        db_path = tmp_path / "corrupt_json.db"
+        tg = TaskGraph(db_path)
+
+        task = _make_task("T1")
+        tg.add_task(task)
+
+        # Corrupt the vars field with invalid JSON
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("UPDATE tasks SET vars = '{not valid json' WHERE id = 'T1'")
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(Exception):
+            tg.get_task("T1")
+
+    def test_valid_row_still_works(self, task_graph: TaskGraph) -> None:
+        """Normal rows are unaffected by the tighter error handling."""
+        task_graph.add_task(_make_task("A"))
+        task_graph.add_task(_make_task("B", blocked_by=["A"]))
+
+        result = task_graph.get_task("B")
+        assert result is not None
+        assert result.blocked_by == ["A"]
+        assert result.state == TaskState.PENDING

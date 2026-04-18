@@ -108,7 +108,12 @@ class IPCStream:
         if not raw:
             raise IPCConnectionError("Agent stdout closed (EOF)")
 
-        line = raw.decode("utf-8").strip()
+        try:
+            line = raw.decode("utf-8").strip()
+        except UnicodeDecodeError as exc:
+            raise IPCError(
+                f"Agent sent non-UTF-8 data ({len(raw)} bytes): {exc}"
+            ) from exc
         if not line:
             raise IPCConnectionError("Agent sent empty line (possible EOF)")
 

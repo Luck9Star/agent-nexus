@@ -102,9 +102,12 @@ class HealthChecker:
         )
         effective_rate = skill_record.total_completions / sel
 
+        # Track best FIX suggestion (deduplicate: keep highest confidence)
+        best_fix: EvolutionSuggestion | None = None
+
         # Rule 1: High fallback rate
         if fallback_rate > _FALLBACK_THRESHOLD:
-            suggestions.append(EvolutionSuggestion(
+            fix1 = EvolutionSuggestion(
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[skill_record.id],
                 direction=(
@@ -113,14 +116,15 @@ class HealthChecker:
                     f"suggesting instructions are unclear or outdated"
                 ),
                 confidence=min(fallback_rate, 1.0),
-            ))
+            )
+            best_fix = fix1
 
         # Rule 2: Applied often but rarely completes
         if (
             applied_rate > _HIGH_APPLIED_FOR_FIX
             and completion_rate < _LOW_COMPLETION_THRESHOLD
         ):
-            suggestions.append(EvolutionSuggestion(
+            fix2 = EvolutionSuggestion(
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[skill_record.id],
                 direction=(
@@ -131,11 +135,19 @@ class HealthChecker:
                 confidence=min(
                     applied_rate * (1 - completion_rate), 1.0
                 ),
-            ))
+            )
+            # Keep the FIX with highest confidence
+            if best_fix is None or fix2.confidence > best_fix.confidence:
+                best_fix = fix2
 
-        # Rule 3: Moderate effectiveness
+        if best_fix is not None:
+            suggestions.append(best_fix)
+
+        # Rule 3: Moderate effectiveness -- only if no FIX was triggered
+        # (DERIVED is lower priority than FIX for the same skill)
         if (
-            effective_rate < _MODERATE_EFFECTIVE_THRESHOLD
+            best_fix is None
+            and effective_rate < _MODERATE_EFFECTIVE_THRESHOLD
             and applied_rate > _MIN_APPLIED_FOR_DERIVED
         ):
             suggestions.append(EvolutionSuggestion(
