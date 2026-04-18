@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest  # noqa: F401 — needed for tmp_path fixture
 
+from agent_nexus.models.evolution import SkillLineage, SkillOrigin, SkillRecord
 from agent_nexus.platform.evolution.store import EvolutionStore
 
 
@@ -217,3 +219,253 @@ class TestClearAgentRecords:
         assert store.get_agent_record("a1") is None
         assert store.get_agent_record("a2") is None
         assert store.get_active_agents() == []
+
+
+# ============================================================================
+# save_skill_record preserves counters on overwrite (from iter13)
+# ============================================================================
+
+
+class TestEvolutionStoreCounterPreservation:
+    """Verify save_skill_record preserves counters on overwrite."""
+
+    def _make_record(
+        self,
+        skill_id: str = "s1",
+        name: str = "test-skill",
+        total_selections: int = 0,
+        total_applied: int = 0,
+        total_completions: int = 0,
+        total_fallbacks: int = 0,
+    ) -> SkillRecord:
+        return SkillRecord(
+            id=skill_id,
+            name=name,
+            version="1.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.IMPORTED,
+                generation=0,
+            ),
+            directory="skills/test",
+            is_active=True,
+            total_selections=total_selections,
+            total_applied=total_applied,
+            total_completions=total_completions,
+            total_fallbacks=total_fallbacks,
+            first_seen=datetime.now(timezone.utc),
+            last_updated=datetime.now(timezone.utc),
+        )
+
+    def test_save_preserves_counters_when_zero(self, tmp_path: Path) -> None:
+        """Saving a record with zero counters preserves existing counter values."""
+        db_path = tmp_path / "test.db"
+        store = EvolutionStore(db_path)
+
+        record_v1 = self._make_record(
+            skill_id="s1",
+            total_selections=10,
+            total_applied=8,
+            total_completions=7,
+            total_fallbacks=1,
+        )
+        store.save_skill_record(record_v1)
+
+        record_v2 = self._make_record(
+            skill_id="s1",
+            total_selections=0,
+            total_applied=0,
+            total_completions=0,
+            total_fallbacks=0,
+        )
+        store.save_skill_record(record_v2)
+
+        loaded = store.get_skill_record("s1")
+        assert loaded is not None
+        assert loaded.total_selections == 10
+        assert loaded.total_applied == 8
+        assert loaded.total_completions == 7
+        assert loaded.total_fallbacks == 1
+
+    def test_save_updates_counters_when_nonzero(self, tmp_path: Path) -> None:
+        """Saving a record with nonzero counters updates the counters."""
+        db_path = tmp_path / "test.db"
+        store = EvolutionStore(db_path)
+
+        record_v1 = self._make_record(
+            skill_id="s1",
+            total_selections=10,
+            total_applied=8,
+        )
+        store.save_skill_record(record_v1)
+
+        record_v2 = self._make_record(
+            skill_id="s1",
+            total_selections=20,
+            total_applied=15,
+        )
+        store.save_skill_record(record_v2)
+
+        loaded = store.get_skill_record("s1")
+        assert loaded is not None
+        assert loaded.total_selections == 20
+        assert loaded.total_applied == 15
+
+    def test_save_new_record_inserts_normally(self, tmp_path: Path) -> None:
+        """New records insert without any counter issues."""
+        db_path = tmp_path / "test.db"
+        store = EvolutionStore(db_path)
+
+        record = self._make_record(skill_id="s-new")
+        store.save_skill_record(record)
+
+        loaded = store.get_skill_record("s-new")
+        assert loaded is not None
+        assert loaded.total_selections == 0
+        assert loaded.total_applied == 0
+
+    def test_evolve_skill_uses_upsert(self, tmp_path: Path) -> None:
+        """evolve_skill uses the same upsert pattern (counter-safe)."""
+        db_path = tmp_path / "test.db"
+        store = EvolutionStore(db_path)
+
+        parent = self._make_record(
+            skill_id="parent-1",
+            name="parent-skill",
+            total_selections=100,
+        )
+        store.save_skill_record(parent)
+
+        evolved = SkillRecord(
+            id="evolved-1",
+            name="parent-skill",
+            version="1.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED,
+                generation=1,
+                parent_skill_ids=["parent-1"],
+            ),
+            directory="skills/test",
+            is_active=True,
+            total_selections=0,
+            first_seen=datetime.now(timezone.utc),
+            last_updated=datetime.now(timezone.utc),
+        )
+
+        store.evolve_skill(evolved, parent_skill_ids=["parent-1"])
+
+        loaded_parent = store.get_skill_record("parent-1")
+        assert loaded_parent is not None
+        assert loaded_parent.is_active is False
+
+        loaded_evolved = store.get_skill_record("evolved-1")
+        assert loaded_evolved is not None
+        assert loaded_evolved.is_active is True
+
+    def test_partial_counter_update(self, tmp_path: Path) -> None:
+        """Only nonzero counters are updated; zero counters keep existing values."""
+        db_path = tmp_path / "test.db"
+        store = EvolutionStore(db_path)
+
+        record_v1 = self._make_record(
+            skill_id="s1",
+            total_selections=10,
+            total_applied=8,
+            total_completions=5,
+            total_fallbacks=3,
+        )
+        store.save_skill_record(record_v1)
+
+        record_v2 = self._make_record(
+            skill_id="s1",
+            total_selections=20,
+            total_applied=0,
+            total_completions=0,
+            total_fallbacks=0,
+        )
+        store.save_skill_record(record_v2)
+
+        loaded = store.get_skill_record("s1")
+        assert loaded is not None
+        assert loaded.total_selections == 20  # updated
+        assert loaded.total_applied == 8  # preserved
+        assert loaded.total_completions == 5  # preserved
+        assert loaded.total_fallbacks == 3  # preserved
+
+
+# ============================================================================
+# _row_to_record handles malformed content_snapshot JSON (from iter14)
+# ============================================================================
+
+
+class TestMalformedSnapshot:
+    """EvolutionStore._row_to_record must not crash on malformed snapshots."""
+
+    def _make_store(self, tmp_path: Path) -> EvolutionStore:
+        return EvolutionStore(tmp_path / "evo.db")
+
+    def _save_raw(self, store: EvolutionStore, snapshot_json: str) -> str:
+        """Insert a record with raw snapshot JSON for testing."""
+        import json
+        import uuid
+
+        sid = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        with store._conn() as conn:
+            conn.execute(
+                "INSERT INTO skill_records "
+                "(id, name, version, lineage_origin, lineage_generation, "
+                "lineage_content_diff, lineage_content_snapshot, directory, "
+                "is_active, total_selections, total_applied, "
+                "total_completions, total_fallbacks, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    sid, "test-skill", "1.0.0", "imported", 0,
+                    "", snapshot_json, "/tmp", 1,
+                    0, 0, 0, 0, now, now,
+                ),
+            )
+        return sid
+
+    def test_null_snapshot(self, tmp_path: Path) -> None:
+        store = self._make_store(tmp_path)
+        sid = self._save_raw(store, "null")
+        record = store.get_skill_record(sid)
+        assert record is not None
+        assert record.lineage.content_snapshot is None
+
+    def test_list_snapshot(self, tmp_path: Path) -> None:
+        store = self._make_store(tmp_path)
+        sid = self._save_raw(store, '[1, 2, 3]')
+        record = store.get_skill_record(sid)
+        assert record is not None
+        assert record.lineage.content_snapshot is None
+
+    def test_string_snapshot(self, tmp_path: Path) -> None:
+        store = self._make_store(tmp_path)
+        sid = self._save_raw(store, '"just a string"')
+        record = store.get_skill_record(sid)
+        assert record is not None
+        assert record.lineage.content_snapshot is None
+
+    def test_valid_dict_snapshot(self, tmp_path: Path) -> None:
+        store = self._make_store(tmp_path)
+        sid = self._save_raw(store, '{"key": "value"}')
+        record = store.get_skill_record(sid)
+        assert record is not None
+        assert record.lineage.content_snapshot == {"key": "value"}
+
+    def test_invalid_json_snapshot(self, tmp_path: Path) -> None:
+        store = self._make_store(tmp_path)
+        sid = self._save_raw(store, "not json at all {{{")
+        record = store.get_skill_record(sid)
+        assert record is not None
+        assert record.lineage.content_snapshot is None
+
+    def test_get_active_skills_with_malformed(self, tmp_path: Path) -> None:
+        """All active skills should load even if one has a malformed snapshot."""
+        store = self._make_store(tmp_path)
+        self._save_raw(store, "null")
+        self._save_raw(store, '{"ok": true}')
+        self._save_raw(store, "[1,2]")
+        skills = store.get_active_skills()
+        assert len(skills) == 3

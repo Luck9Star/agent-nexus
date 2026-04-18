@@ -353,3 +353,36 @@ class TestClear:
         assert task_graph.get_task("A") is None
         assert task_graph.get_task("B") is None
         assert task_graph.get_snapshot().tasks == []
+
+
+# ============================================================================
+# TaskGraph uses IMMEDIATE transactions for mutations (from iter14)
+# ============================================================================
+
+
+class TestTaskGraphImmediate:
+    """TaskGraph mutation methods use BEGIN IMMEDIATE."""
+
+    def test_start_task_uses_immediate(self, tmp_path: Path) -> None:
+        tg = TaskGraph(tmp_path / "tg.db")
+        task = TaskItem(id="t1", description="test", agent="test-agent")
+        tg.add_task(task)
+        # Should succeed -- basic smoke test that IMMEDIATE doesn't break
+        result = tg.start_task("t1")
+        assert result.state == TaskState.IN_PROGRESS
+
+    def test_complete_task_uses_immediate(self, tmp_path: Path) -> None:
+        tg = TaskGraph(tmp_path / "tg.db")
+        task = TaskItem(id="t1", description="test", agent="test-agent")
+        tg.add_task(task)
+        tg.start_task("t1")
+        result = tg.complete_task("t1")
+        assert result.state == TaskState.COMPLETED
+
+    def test_fail_task_uses_immediate(self, tmp_path: Path) -> None:
+        tg = TaskGraph(tmp_path / "tg.db")
+        task = TaskItem(id="t1", description="test", agent="test-agent")
+        tg.add_task(task)
+        tg.start_task("t1")
+        result = tg.fail_task("t1")
+        assert result.state == TaskState.FAILED

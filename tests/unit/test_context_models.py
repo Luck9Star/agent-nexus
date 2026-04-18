@@ -244,3 +244,81 @@ class TestContextBudgetLogEntry:
         data = entry.model_dump()
         entry2 = ContextBudgetLogEntry(**data)
         assert entry2 == entry
+
+
+# ============================================================================
+# ContextBudget validates threshold range (0.0 - 1.0) (from iter16)
+# ============================================================================
+
+
+class TestContextBudgetValidation:
+    """ContextBudget must reject thresholds > 1.0."""
+
+    def test_valid_default_thresholds(self) -> None:
+        budget = ContextBudget()
+        assert budget.session_hard_ceiling == 0.95
+        assert budget.compaction_trigger == 0.8
+
+    def test_valid_custom_fractional_thresholds(self) -> None:
+        budget = ContextBudget(
+            session_hard_ceiling=0.99,
+            forced_truncate_threshold=0.85,
+            compaction_trigger=0.7,
+            compaction_target=0.3,
+        )
+        assert budget.session_hard_ceiling == 0.99
+
+    def test_rejects_session_hard_ceiling_above_one(self) -> None:
+        with pytest.raises(ValueError, match="fraction"):
+            ContextBudget(session_hard_ceiling=95.0)
+
+    def test_rejects_forced_truncate_threshold_above_one(self) -> None:
+        with pytest.raises(ValueError, match="fraction"):
+            ContextBudget(forced_truncate_threshold=90.0)
+
+    def test_rejects_compaction_trigger_above_one(self) -> None:
+        with pytest.raises(ValueError, match="fraction"):
+            ContextBudget(compaction_trigger=80.0)
+
+    def test_rejects_compaction_target_above_one(self) -> None:
+        with pytest.raises(ValueError, match="fraction"):
+            ContextBudget(compaction_target=1.5)
+
+    def test_boundary_value_one_is_accepted(self) -> None:
+        budget = ContextBudget(session_hard_ceiling=1.0)
+        assert budget.session_hard_ceiling == 1.0
+
+    def test_zero_value_is_accepted(self) -> None:
+        budget = ContextBudget(compaction_trigger=0.0)
+        assert budget.compaction_trigger == 0.0
+
+
+# ============================================================================
+# ContextBudget rejects negative thresholds (from iter21)
+# ============================================================================
+
+
+class TestContextBudgetNegativeThresholds:
+    def test_negative_compaction_trigger_rejected(self) -> None:
+        with pytest.raises(Exception, match="out of range"):
+            ContextBudget(compaction_trigger=-0.1)
+
+    def test_negative_session_hard_ceiling_rejected(self) -> None:
+        with pytest.raises(Exception, match="out of range"):
+            ContextBudget(session_hard_ceiling=-1.0)
+
+    def test_negative_forced_truncate_rejected(self) -> None:
+        with pytest.raises(Exception, match="out of range"):
+            ContextBudget(forced_truncate_threshold=-0.5)
+
+    def test_negative_compaction_target_rejected(self) -> None:
+        with pytest.raises(Exception, match="out of range"):
+            ContextBudget(compaction_target=-0.1)
+
+    def test_zero_is_accepted(self) -> None:
+        cfg = ContextBudget(compaction_trigger=0.0)
+        assert cfg.compaction_trigger == 0.0
+
+    def test_one_is_accepted(self) -> None:
+        cfg = ContextBudget(session_hard_ceiling=1.0)
+        assert cfg.session_hard_ceiling == 1.0

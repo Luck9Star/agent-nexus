@@ -411,3 +411,50 @@ class TestDefaults:
         assert ENV_VAR_OVERRIDES["AGENT_MODEL"] == "models.default"
         assert ENV_VAR_OVERRIDES["DEFAULT_MODEL"] == "models.default"
         assert ENV_VAR_OVERRIDES["AGENT_NEXUS_HOME"] == "config_dir"
+
+
+# ============================================================================
+# ConfigLoader ProviderApiType validation (from iter20)
+# ============================================================================
+
+
+class TestConfigLoaderProviderApiTypeValidation:
+    def test_invalid_api_type_raises_clear_error(self, tmp_path: Path) -> None:
+        """An invalid api type string in config.toml should raise ValueError."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "config.toml").write_text(
+            '[models.providers.bad]\n'
+            'api = "invalid_type"\n'
+            'base_url = "http://localhost"\n'
+        )
+        loader = ConfigLoader(config_dir=config_dir)
+        with pytest.raises(ValueError, match="Invalid api type 'invalid_type'"):
+            loader.load_config()
+
+    def test_valid_api_types_accepted(self, tmp_path: Path) -> None:
+        """All valid ProviderApiType values should be accepted."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        # Write a config with each valid api type
+        lines = []
+        for i, pt in enumerate(ProviderApiType):
+            lines.append(f'[models.providers.p{i}]')
+            lines.append(f'api = "{pt.value}"')
+            lines.append(f'base_url = "http://localhost/{i}"')
+        (config_dir / "config.toml").write_text("\n".join(lines) + "\n")
+
+        loader = ConfigLoader(config_dir=config_dir)
+        config = loader.load_config()
+        # The test providers should all be present (merged with built-in defaults)
+        for i, pt in enumerate(ProviderApiType):
+            assert f"p{i}" in config.models.providers
+            assert config.models.providers[f"p{i}"].api is pt
+
+    def test_missing_config_file_still_works(self, tmp_path: Path) -> None:
+        """No config file at all should not raise -- just use defaults."""
+        config_dir = tmp_path / "empty_config"
+        config_dir.mkdir()
+        loader = ConfigLoader(config_dir=config_dir)
+        config = loader.load_config()
+        assert config.models.default is not None

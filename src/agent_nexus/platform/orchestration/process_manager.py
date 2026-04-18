@@ -231,9 +231,16 @@ class ProcessManager:
             except (asyncio.CancelledError, Exception):
                 pass
 
+        # Always close the IPC stream to release resources, even if dead.
+        try:
+            await handle.ipc.stream.close()
+        except Exception:
+            pass
+
         if not handle.is_alive:
             # Already dead — just clean up.
-            self._agents.pop(name, None)
+            async with self._lock:
+                self._agents.pop(name, None)
             logger.info("Agent '%s' already exited (rc=%s)", name, process.returncode)
             return
 
@@ -245,7 +252,8 @@ class ProcessManager:
 
         try:
             await asyncio.wait_for(process.wait(), timeout=timeout)
-            self._agents.pop(name, None)
+            async with self._lock:
+                self._agents.pop(name, None)
             logger.info("Agent '%s' exited cleanly after IPC close", name)
             return
         except asyncio.TimeoutError:
@@ -256,12 +264,14 @@ class ProcessManager:
         try:
             process.send_signal(signal.SIGTERM)
         except ProcessLookupError:
-            self._agents.pop(name, None)
+            async with self._lock:
+                self._agents.pop(name, None)
             return
 
         try:
             await asyncio.wait_for(process.wait(), timeout=timeout)
-            self._agents.pop(name, None)
+            async with self._lock:
+                self._agents.pop(name, None)
             logger.info("Agent '%s' terminated after SIGTERM", name)
             return
         except asyncio.TimeoutError:
@@ -279,7 +289,8 @@ class ProcessManager:
         except Exception:
             pass
 
-        self._agents.pop(name, None)
+        async with self._lock:
+            self._agents.pop(name, None)
         logger.info("Agent '%s' killed", name)
 
     # ------------------------------------------------------------------

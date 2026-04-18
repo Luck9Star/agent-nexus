@@ -1365,3 +1365,128 @@ class TestHealthReportSummary:
         assert "[UNHEALTHY]" in text
         assert "bad-skill" in text
         assert "fix" in text.lower()
+
+
+# ============================================================================
+# CompactionGuard.should_alert respects custom budget (from iter13)
+# ============================================================================
+
+
+class TestCompactionGuardCustomBudget:
+    """Verify should_alert accepts and uses a custom ContextBudget."""
+
+    def _make_store(self, tmp_path: Path) -> EvolutionStore:
+        return EvolutionStore(tmp_path / "test.db")
+
+    def _make_context(self) -> AgentContext:
+        return AgentContext(
+            agent_id="agent-a",
+            session_id="session-1",
+            l0_content="l0",
+            l1_content="l1",
+        )
+
+    def test_default_budget_threshold(self, tmp_path: Path) -> None:
+        """Without custom budget, uses default consecutive_compaction_alert=3."""
+        store = self._make_store(tmp_path)
+        guard = CompactionGuard(store, "agent-a")
+        ctx = self._make_context()
+
+        guard.reinject_after_compaction(ctx)
+        guard.reinject_after_compaction(ctx)
+        assert not guard.should_alert()
+
+        guard.reinject_after_compaction(ctx)
+        assert guard.should_alert()
+
+    def test_custom_budget_threshold(self, tmp_path: Path) -> None:
+        """Custom budget with lower threshold triggers alert earlier."""
+        store = self._make_store(tmp_path)
+        guard = CompactionGuard(store, "agent-a")
+        ctx = self._make_context()
+
+        custom_budget = ContextBudget(consecutive_compaction_alert=2)
+
+        guard.reinject_after_compaction(ctx)
+        assert not guard.should_alert(budget=custom_budget)
+
+        guard.reinject_after_compaction(ctx)
+        assert guard.should_alert(budget=custom_budget)
+
+    def test_higher_threshold_custom_budget(self, tmp_path: Path) -> None:
+        """Custom budget with higher threshold requires more compactions."""
+        store = self._make_store(tmp_path)
+        guard = CompactionGuard(store, "agent-a")
+        ctx = self._make_context()
+
+        custom_budget = ContextBudget(consecutive_compaction_alert=5)
+
+        for _ in range(4):
+            guard.reinject_after_compaction(ctx)
+        assert not guard.should_alert(budget=custom_budget)
+
+        guard.reinject_after_compaction(ctx)
+        assert guard.should_alert(budget=custom_budget)
+
+    def test_none_budget_uses_default(self, tmp_path: Path) -> None:
+        """Passing None explicitly uses default budget."""
+        store = self._make_store(tmp_path)
+        guard = CompactionGuard(store, "agent-a")
+        ctx = self._make_context()
+
+        for _ in range(3):
+            guard.reinject_after_compaction(ctx)
+
+        assert guard.should_alert(budget=None)
+
+
+# ============================================================================
+# HealthReport.summary uses key-based formatting (from iter15)
+# ============================================================================
+
+
+class TestHealthReportFormatting:
+    """HealthReport.summary should format rates as %, counts as numbers."""
+
+    def test_rate_formatted_as_percentage(self) -> None:
+        report = HealthReport(
+            skill_id="s1",
+            skill_name="test",
+            is_healthy=True,
+            suggestions=[],
+            metrics={"effective_rate": 0.75},
+        )
+        lines = report.summary()
+        assert "75.00%" in lines
+
+    def test_count_formatted_as_number(self) -> None:
+        report = HealthReport(
+            skill_id="s1",
+            skill_name="test",
+            is_healthy=True,
+            suggestions=[],
+            metrics={"total_selections": 5},
+        )
+        lines = report.summary()
+        assert "total_selections: 5" in lines
+        # Should NOT be formatted as percentage
+        assert "500.00%" not in lines
+
+    def test_mixed_metrics(self) -> None:
+        report = HealthReport(
+            skill_id="s1",
+            skill_name="test",
+            is_healthy=True,
+            suggestions=[],
+            metrics={
+                "effective_rate": 0.87,
+                "total_selections": 42,
+                "fallback_rate": 0.12,
+                "total_completions": 38,
+            },
+        )
+        lines = report.summary()
+        assert "87.00%" in lines
+        assert "12.00%" in lines
+        assert "total_selections: 42" in lines
+        assert "total_completions: 38" in lines

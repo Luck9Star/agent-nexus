@@ -117,11 +117,12 @@ class MCPGateway:
         """
         lines: list[str] = ["## Registered Agents\n"]
 
+        core_names = {ci.name for ci in self._registry.list_core_agents()}
+
         for info in self._registry.list_all_agents():
             desc = info.manifest.description.split("\n")[0][:60]
             mtype = info.manifest.type.value
 
-            core_names = {ci.name for ci in self._registry.list_core_agents()}
             if info.name in core_names:
                 tier = "core"
             elif info.is_activated:
@@ -294,7 +295,7 @@ class MCPGateway:
 
     async def run_sse(
         self,
-        host: str = "0.0.0.0",
+        host: str = "127.0.0.1",
         port: int = 8080,
     ) -> None:
         """Run the gateway in SSE (Server-Sent Events) mode.

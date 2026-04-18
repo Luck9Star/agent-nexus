@@ -125,3 +125,26 @@ class TestSecurityCheckerCheckCode:
         violations = checker.check_code(code)
         assert len(violations) == 1
         assert violations[0].code_snippet == code
+
+
+# ============================================================================
+# __class__ NOT blocked by default security checker (from iter14)
+# ============================================================================
+
+
+class TestClassAllowed:
+    """Accessing __class__ should NOT be a violation by default."""
+
+    def test_class_attribute_allowed(self) -> None:
+        checker = SecurityChecker()
+        violations = checker.check_code("x = obj.__class__.__name__\n")
+        # __class__ should NOT be in violations (removed from default list)
+        attr_violations = [v for v in violations if v.rule_type == "attribute"]
+        assert len(attr_violations) == 0
+
+    def test_dangerous_attributes_still_blocked(self) -> None:
+        checker = SecurityChecker()
+        violations = checker.check_code("x = obj.__subclasses__()\n")
+        attr_violations = [v for v in violations if v.rule_type == "attribute"]
+        assert len(attr_violations) == 1
+        assert "__subclasses__" in attr_violations[0].message

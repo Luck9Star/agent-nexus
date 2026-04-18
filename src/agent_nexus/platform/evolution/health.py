@@ -19,14 +19,13 @@ from agent_nexus.models.evolution import (
 )
 from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.analyzer import EvolutionSuggestion
-
-
-# Health thresholds (from docs/04)
-_FALLBACK_THRESHOLD = 0.4
-_HIGH_APPLIED_FOR_FIX = 0.4
-_LOW_COMPLETION_THRESHOLD = 0.35
-_MODERATE_EFFECTIVE_THRESHOLD = 0.55
-_MIN_APPLIED_FOR_DERIVED = 0.25
+from agent_nexus.platform.evolution.thresholds import (
+    _FALLBACK_THRESHOLD,
+    _HIGH_APPLIED_FOR_FIX,
+    _LOW_COMPLETION_THRESHOLD,
+    _MODERATE_EFFECTIVE_THRESHOLD,
+    _MIN_APPLIED_FOR_DERIVED,
+)
 
 
 @dataclass

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import patch
+
 import pytest
 
 from agent_nexus.models.runtime import ExecutionResult
@@ -129,3 +132,40 @@ class TestIPythonExecutorState:
         result = await shared_executor.execute("c = a + b")
         assert result.success is True
         assert shared_executor.get("c") == 30
+
+
+# ============================================================================
+# IPython executor uses asyncio.to_thread for timeout enforcement (from iter15)
+# ============================================================================
+
+
+class TestExecutorUsesToThread:
+    """IPythonExecutor should use asyncio.to_thread for timeout enforcement."""
+
+    @pytest.mark.asyncio
+    async def test_execute_uses_to_thread(self, shared_executor) -> None:
+        """Verify execute delegates to asyncio.to_thread."""
+        with patch("asyncio.to_thread", wraps=asyncio.to_thread) as mock_thread:
+            result = await shared_executor.execute("x = 1 + 2", timeout=10)
+            mock_thread.assert_called_once()
+            assert result.success is True
+        assert shared_executor.get("x") == 3
+
+    @pytest.mark.asyncio
+    async def test_run_cell_sync_returns_execution_result(self, shared_executor) -> None:
+        """_run_cell_sync should return an IPython ExecutionResult."""
+        result = shared_executor._run_cell_sync("x = 42")
+        # Should be an IPython ExecutionResult-like object
+        assert result is not None
+        assert shared_executor.get("x") == 42
+
+    @pytest.mark.asyncio
+    async def test_timeout_fires_for_long_running_code(self, shared_executor) -> None:
+        """Timeout should fire even for synchronous CPU-bound code."""
+        # time.sleep is synchronous and blocks -- to_thread lets the event
+        # loop cancel the wrapper on timeout
+        result = await shared_executor.execute(
+            "import time; time.sleep(10)", timeout=0.3
+        )
+        assert result.success is False
+        assert "timed out" in (result.error or "").lower()

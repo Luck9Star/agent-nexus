@@ -1099,3 +1099,250 @@ class TestMCPGatewayRun:
     ) -> None:
         await gateway.stop()
         process_manager.stop_all.assert_awaited_once()
+
+
+# ============================================================================
+# Merged from iteration 16: DeferredRegistry deduplication
+# ============================================================================
+
+
+class TestDeferredRegistryDeduplication:
+    """get_tools_for_llm must not return duplicate tool names."""
+
+    def test_no_duplication_when_core_and_adapters_overlap(self) -> None:
+        """Core agent schemas that are also in _tool_adapters should not duplicate."""
+        pm = MagicMock()
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = MagicMock()
+        manifest.name = "test-agent"
+        manifest.description = "Test"
+        manifest.type = MagicMock(value="atomic")
+        manifest.role = None
+        manifest.dependencies = MagicMock(atomic_agents=[])
+
+        registry.register_agent(manifest, deferred=False)
+
+        # Simulate tool schemas in core agents
+        info = registry.get_agent_info("test-agent")
+        assert info is not None
+        info.tool_schemas = [
+            {"name": "tool_a", "description": "Tool A"},
+            {"name": "tool_b", "description": "Tool B"},
+        ]
+
+        # Simulate same tools also in _tool_adapters (what happens when
+        # gateway's _register_agent_tools is called for a core agent)
+        adapter_a = MagicMock(spec=McpToolAdapter)
+        adapter_a.full_name = "tool_a"
+        adapter_a.get_tool_definition.return_value = {"name": "tool_a", "description": "Tool A"}
+
+        adapter_b = MagicMock(spec=McpToolAdapter)
+        adapter_b.full_name = "tool_b"
+        adapter_b.get_tool_definition.return_value = {"name": "tool_b", "description": "Tool B"}
+
+        registry._tool_adapters["test-agent"] = [adapter_a, adapter_b]
+
+        tools = registry.get_tools_for_llm()
+        names = [t["name"] for t in tools]
+        assert len(names) == len(set(names)), f"Duplicates found: {names}"
+        assert "tool_a" in names
+        assert "tool_b" in names
+
+
+# ============================================================================
+# Merged from iteration 18: ToolAdapter original name, core tool registration,
+# identity check
+# ============================================================================
+
+
+class TestToolAdapterOriginalName:
+    """McpToolAdapter must preserve original unsanitized agent name."""
+
+    def test_hyphenated_name_preserved(self) -> None:
+        schema = {"name": "analyze", "description": "Analyze"}
+        adapter = McpToolAdapter("my-agent", schema)
+        assert adapter.agent_name == "my-agent"
+        assert adapter.server_name == "my_agent"
+        assert "my_agent" in adapter.full_name
+
+    def test_clean_name_no_change(self) -> None:
+        schema = {"name": "chat", "description": "Chat"}
+        adapter = McpToolAdapter("simple", schema)
+        assert adapter.agent_name == "simple"
+        assert adapter.server_name == "simple"
+
+    def test_sanitize_helper(self) -> None:
+        assert _sanitize("my-agent") == "my_agent"
+        assert _sanitize("my.agent") == "my_agent"
+        assert _sanitize("my agent") == "my_agent"
+        assert _sanitize("myAgent") == "myAgent"
+
+
+class TestCoreAgentToolRegistration:
+    """register_agent(deferred=False) must immediately call _register_agent_tools."""
+
+    def test_core_agent_tools_registered(self) -> None:
+        pm = MagicMock()
+        router = MagicMock()
+        gateway = MCPGateway(process_manager=pm, router=router)
+
+        registered_agents = []
+        original_register = gateway._register_agent_tools
+
+        def tracking_register(name: str) -> None:
+            registered_agents.append(name)
+            original_register(name)
+
+        gateway._register_agent_tools = tracking_register
+
+        manifest = _make_manifest("core-agent")
+        gateway.register_agent(manifest, deferred=False)
+
+        assert "core-agent" in registered_agents
+
+    def test_deferred_agent_tools_not_registered(self) -> None:
+        pm = MagicMock()
+        router = MagicMock()
+        gateway = MCPGateway(process_manager=pm, router=router)
+
+        registered_agents = []
+        original_register = gateway._register_agent_tools
+
+        def tracking_register(name: str) -> None:
+            registered_agents.append(name)
+            original_register(name)
+
+        gateway._register_agent_tools = tracking_register
+
+        manifest = _make_manifest("lazy-agent")
+        gateway.register_agent(manifest, deferred=True)
+
+        assert "lazy-agent" not in registered_agents
+
+
+class TestListAgentsNameComparison:
+    """_list_agents must compare by name, not by object identity."""
+
+    @pytest.mark.asyncio
+    async def test_list_agents_core_tier_by_name(self) -> None:
+        pm = MagicMock()
+        router = MagicMock()
+        gateway = MCPGateway(process_manager=pm, router=router)
+
+        manifest = _make_manifest("test-core")
+        gateway.register_agent(manifest, deferred=False)
+
+        result = await gateway._list_agents()
+        assert "test-core" in result
+        assert "core" in result
+
+
+# ============================================================================
+# Merged from iteration 21: Gateway _list_agents optimization
+# ============================================================================
+
+
+class TestGatewayListAgentsOptimization:
+    """_list_agents hoists core_names set outside loop (perf fix)."""
+
+    @pytest.mark.asyncio
+    async def test_core_names_computed_once(self) -> None:
+        gw = MCPGateway.__new__(MCPGateway)
+        gw._registry = MagicMock()
+        gw._registered_agents = set()
+
+        call_count = 0
+
+        class FakeCoreInfo:
+            name = "core-agent"
+
+        class FakeInfo:
+            def __init__(self, name):
+                self.name = name
+                self.manifest = MagicMock()
+                self.tool_schemas = []
+                self.is_activated = False
+                self.is_running = False
+
+        def counting_list_core():
+            nonlocal call_count
+            call_count += 1
+            return [FakeCoreInfo()]
+
+        gw._registry.list_core_agents = counting_list_core
+        gw._registry.list_all_agents = lambda: [
+            FakeInfo("core-agent"),
+            FakeInfo("agent-2"),
+            FakeInfo("agent-3"),
+        ]
+
+        await gw._list_agents()
+
+        # Should call list_core_agents exactly once, not once per agent
+        assert call_count == 1
+
+
+# ============================================================================
+# Merged from iteration 24: McpToolAdapter execute status edge cases
+# ============================================================================
+
+
+def _make_bare_adapter() -> McpToolAdapter:
+    """Create a bare McpToolAdapter without calling __init__."""
+    adapter = McpToolAdapter.__new__(McpToolAdapter)
+    adapter.agent_name = "test-agent"
+    adapter.server_name = "test_agent"
+    adapter.tool_name = "my_tool"
+    adapter.full_name = "mcp__test_agent__my_tool"
+    adapter.description = "test tool"
+    adapter._input_schema = {}
+    return adapter
+
+
+def _make_mock_handle_for_status(is_alive: bool = True) -> MagicMock:
+    """Create a mock AgentHandle for status tests."""
+    handle = MagicMock(spec=AgentHandle)
+    handle.is_alive = is_alive
+    handle.ipc = MagicMock()
+    handle.ipc.send_chat = AsyncMock()
+    handle.ipc.receive_until_result = AsyncMock()
+    return handle
+
+
+class TestMcpToolAdapterExecuteStatusNone:
+    """execute returns success=False when response.status is None."""
+
+    @pytest.mark.asyncio
+    async def test_status_none_returns_success_false(self) -> None:
+        adapter = _make_bare_adapter()
+        handle = _make_mock_handle_for_status()
+
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            status=None,
+            content="test",
+        )
+        handle.ipc.receive_until_result = AsyncMock(return_value=response)
+
+        result = await adapter.execute(handle, {})
+        assert result["success"] is False
+
+
+class TestMcpToolAdapterExecuteStatusCompleted:
+    """execute returns success=True when response.status is 'completed'."""
+
+    @pytest.mark.asyncio
+    async def test_status_completed_returns_success_true(self) -> None:
+        adapter = _make_bare_adapter()
+        handle = _make_mock_handle_for_status()
+
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            status="completed",
+            content="done",
+        )
+        handle.ipc.receive_until_result = AsyncMock(return_value=response)
+
+        result = await adapter.execute(handle, {})
+        assert result["success"] is True

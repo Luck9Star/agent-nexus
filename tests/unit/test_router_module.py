@@ -1126,3 +1126,250 @@ class TestPhaseOrder:
 
     def test_phase_order_length(self) -> None:
         assert len(_PHASE_ORDER) == 4
+
+
+# ============================================================================
+# Merged from iteration 16: Router empty phase failure
+# ============================================================================
+
+
+class TestRouterEmptyPhaseFails:
+    """Router._execute_phase must raise when no agents available."""
+
+    @pytest.mark.asyncio
+    async def test_execute_phase_raises_on_no_agents(self) -> None:
+        pm = MagicMock()
+        router = PlatformRouter(process_manager=pm)
+        definition = OrchestrationDefinition(
+            goal="test",
+            agent_name="test-agent",
+            agents={},
+            tasks=[],
+            tool_loading=DSLToolLoading(),
+        )
+        mock_tg = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.task_graph = mock_tg
+
+        with pytest.raises(RuntimeError, match="No agents available"):
+            await router._execute_phase(
+                mock_ctx, WorkflowPhase.research, definition, "test"
+            )
+
+
+# ============================================================================
+# Merged from iteration 21: Router parallel conversation_id, aggregate empty
+# ============================================================================
+
+
+class TestRouterParallelConversationId:
+    """Parallel execution must use unique conversation_id per agent."""
+
+    def test_parallel_agent_unique_cids(self) -> None:
+        """Verify that _execute_parallel_agents generates unique conversation IDs."""
+        captured_cids: list[str] = []
+
+        async def mock_execute(agent_name, message, conversation_id):
+            captured_cids.append(conversation_id)
+            return f"result from {agent_name}"
+
+        mock_pm = MagicMock()
+        mock_pm.get_agent = MagicMock(return_value=None)
+
+        router = PlatformRouter.__new__(PlatformRouter)
+        router._process_manager = mock_pm
+        router._task_graph = MagicMock()
+        router._subtask = MagicMock()
+
+        async def mock_run_with_retry(coro_factory, timeout):
+            return await coro_factory()
+
+        async def mock_run_parallel(coros):
+            results = []
+            for c in coros:
+                results.append(await c)
+            return results
+
+        router._subtask.run_with_retry = mock_run_with_retry
+        router._subtask.run_parallel = mock_run_parallel
+        router._execute_single_agent = mock_execute
+
+        result = asyncio.run(
+            router._execute_parallel_agents(
+                ["agent-a", "agent-b", "agent-c"],
+                "test message",
+                "conv-123",
+            )
+        )
+
+        assert len(captured_cids) == 3
+        # All CIDs should be unique
+        assert len(set(captured_cids)) == 3
+        # All CIDs should start with the original conversation_id
+        for cid in captured_cids:
+            assert cid.startswith("conv-123__")
+
+
+class TestAggregateResultsEmptyString:
+    """_aggregate_results must preserve empty-string results."""
+
+    def test_empty_string_result_preserved(self) -> None:
+        result = PlatformRouter._aggregate_results(
+            ["hello", "", "world"],
+            WorkflowPhase.research,
+        )
+        # Empty string should not silently disappear
+        assert "(no output)" in result
+        assert "hello" in result
+        assert "world" in result
+
+    def test_exception_still_reported(self) -> None:
+        result = PlatformRouter._aggregate_results(
+            [RuntimeError("boom")],
+            WorkflowPhase.research,
+        )
+        assert "boom" in result
+
+    def test_all_empty_shows_no_output(self) -> None:
+        result = PlatformRouter._aggregate_results(
+            ["", ""],
+            WorkflowPhase.research,
+        )
+        # Should show "(no output)" for each worker
+        assert "(no output)" in result
+
+
+# ============================================================================
+# Merged from iteration 22: get_tools deduplication, execute_single error wrap
+# ============================================================================
+
+
+class TestGetToolsDeduplication:
+    """get_tools() must not silently overwrite tools with the same name."""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_tools_deduplicated(self) -> None:
+        """Two agents with same tool name: second is skipped."""
+        import json
+
+        mock_pm = MagicMock()
+        router = PlatformRouter.__new__(PlatformRouter)
+        router._pm = mock_pm
+
+        tool_a = {"name": "search", "description": "Agent A search"}
+        tool_b = {"name": "search", "description": "Agent B search"}
+
+        agent_a_handle = MagicMock()
+        agent_a_handle.is_alive = True
+        agent_a_handle.ipc = MagicMock()
+        agent_a_handle.ipc.send_chat = AsyncMock()
+        agent_a_handle.ipc.receive_until_result = AsyncMock(
+            return_value=AgentToPlatform(
+                type=AgentToPlatformType.RESULT,
+                content=json.dumps([tool_a]),
+            )
+        )
+
+        agent_b_handle = MagicMock()
+        agent_b_handle.is_alive = True
+        agent_b_handle.ipc = MagicMock()
+        agent_b_handle.ipc.send_chat = AsyncMock()
+        agent_b_handle.ipc.receive_until_result = AsyncMock(
+            return_value=AgentToPlatform(
+                type=AgentToPlatformType.RESULT,
+                content=json.dumps([tool_b]),
+            )
+        )
+
+        mock_pm.list_running.return_value = ["agent-a", "agent-b"]
+        mock_pm.get_agent.side_effect = lambda n: {
+            "agent-a": agent_a_handle,
+            "agent-b": agent_b_handle,
+        }.get(n)
+
+        tools = await router.get_tools()
+
+        assert len(tools) == 1
+        assert tools[0]["description"] == "Agent A search"
+
+    @pytest.mark.asyncio
+    async def test_unique_tools_all_returned(self) -> None:
+        """Different tool names are all returned."""
+        import json
+
+        mock_pm = MagicMock()
+        router = PlatformRouter.__new__(PlatformRouter)
+        router._pm = mock_pm
+
+        tools_list = [
+            {"name": "search", "description": "search tool"},
+            {"name": "analyze", "description": "analyze tool"},
+        ]
+
+        handle = MagicMock()
+        handle.is_alive = True
+        handle.ipc = MagicMock()
+        handle.ipc.send_chat = AsyncMock()
+        handle.ipc.receive_until_result = AsyncMock(
+            return_value=AgentToPlatform(
+                type=AgentToPlatformType.RESULT,
+                content=json.dumps(tools_list),
+            )
+        )
+
+        mock_pm.list_running.return_value = ["agent-x"]
+        mock_pm.get_agent.return_value = handle
+
+        result = await router.get_tools()
+
+        assert len(result) == 2
+        assert result[0]["name"] == "search"
+        assert result[1]["name"] == "analyze"
+
+
+class TestExecuteSingleAgentErrorWrapping:
+    """_execute_single_agent must wrap IPC errors in RuntimeError."""
+
+    @pytest.mark.asyncio
+    async def test_ipc_timeout_wrapped_as_runtime_error(self) -> None:
+        """IPC timeout in _execute_single_agent raises RuntimeError."""
+        mock_pm = MagicMock()
+        router = PlatformRouter.__new__(PlatformRouter)
+        router._pm = mock_pm
+
+        handle = MagicMock()
+        handle.is_alive = True
+        handle.ipc = MagicMock()
+        handle.ipc.send_chat = AsyncMock()
+        handle.ipc.receive_until_result = AsyncMock(
+            side_effect=asyncio.TimeoutError("IPC timeout")
+        )
+
+        mock_pm.get_agent.return_value = handle
+
+        with pytest.raises(RuntimeError, match="IPC error"):
+            await router._execute_single_agent(
+                "test-agent", "hello", conversation_id="c1"
+            )
+
+    @pytest.mark.asyncio
+    async def test_ipc_connection_error_wrapped(self) -> None:
+        """IPC connection error in _execute_single_agent raises RuntimeError."""
+        mock_pm = MagicMock()
+        router = PlatformRouter.__new__(PlatformRouter)
+        router._pm = mock_pm
+
+        handle = MagicMock()
+        handle.is_alive = True
+        handle.ipc = MagicMock()
+        handle.ipc.send_chat = AsyncMock()
+        handle.ipc.receive_until_result = AsyncMock(
+            side_effect=ConnectionError("Broken pipe")
+        )
+
+        mock_pm.get_agent.return_value = handle
+
+        with pytest.raises(RuntimeError, match="IPC error"):
+            await router._execute_single_agent(
+                "test-agent", "hello", conversation_id="c1"
+            )

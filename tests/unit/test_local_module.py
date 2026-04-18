@@ -8,9 +8,11 @@ CliRunner.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
-from datetime import datetime
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,7 +21,7 @@ import yaml
 from typer.testing import CliRunner
 
 from agent_nexus.models.agent import AgentType
-from agent_nexus.models.config import ModelConfig, PlatformConfig
+from agent_nexus.models.config import ModelConfig, PlatformConfig, ProviderConfig
 from agent_nexus.models.distribution import IndexEntry, Lockfile, LockfileEntry, SourceEntry
 
 from agent_nexus.platform.local.cli import app
@@ -1303,3 +1305,478 @@ class TestCLI:
             result = runner.invoke(app, ["run", "ghost"])
             assert "not installed" in result.output
             assert result.exit_code == 1
+
+
+# ============================================================================
+# Iteration 13 merges: TestCachePathAlignment, TestPipeSafetyCreateVenv
+# ============================================================================
+
+
+class TestCachePathAlignment:
+    """Verify SourceManager._get_cache_path matches GitInstaller._get_cache_path."""
+
+    def test_cache_path_uses_sha256_hash(self, tmp_path: Path) -> None:
+        """SourceManager._get_cache_path uses SHA-256 hash, not source.name."""
+        sources_yaml = tmp_path / "sources.yaml"
+        sources_yaml.write_text("sources: []\n", encoding="utf-8")
+        sm = SourceManager(sources_yaml)
+
+        source = SourceEntry(
+            name="official",
+            type="git",
+            url="https://github.com/example/packages.git",
+            branch="main",
+        )
+
+        cache_path = sm._get_cache_path(source)
+
+        expected_hash = hashlib.sha256(source.url.encode()).hexdigest()[:12]
+        expected_path = tmp_path / "cache" / "repos" / expected_hash
+
+        assert cache_path == expected_path
+        assert cache_path.name != "official"
+        assert cache_path.name == expected_hash
+
+    def test_cache_path_differs_from_name_based_path(self, tmp_path: Path) -> None:
+        """Old name-based path and new hash-based path are different."""
+        sources_yaml = tmp_path / "sources.yaml"
+        sources_yaml.write_text("sources: []\n", encoding="utf-8")
+        sm = SourceManager(sources_yaml)
+
+        source = SourceEntry(
+            name="my-source",
+            type="git",
+            url="https://github.com/example/packages.git",
+            branch="main",
+        )
+
+        hash_path = sm._get_cache_path(source)
+        old_name_path = tmp_path / "cache" / "repos" / source.name
+
+        assert hash_path != old_name_path
+
+    def test_load_source_index_uses_hash_path(self, tmp_path: Path) -> None:
+        """_load_source_index reads from hash-based cache directory."""
+        sources_yaml = tmp_path / "sources.yaml"
+        sources_yaml.write_text("sources: []\n", encoding="utf-8")
+        sm = SourceManager(sources_yaml)
+
+        source = SourceEntry(
+            name="official",
+            type="git",
+            url="https://github.com/example/packages.git",
+            branch="main",
+        )
+
+        cache_dir = sm._get_cache_path(source)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        index_content = {
+            "agents": [
+                {
+                    "name": "doc-filler",
+                    "version": "1.0.0",
+                    "type": "atomic",
+                    "description": "Test agent",
+                }
+            ]
+        }
+        (cache_dir / "index.yaml").write_text(
+            yaml.dump(index_content),
+            encoding="utf-8",
+        )
+
+        result = sm._load_source_index(source)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].name == "doc-filler"
+
+    def test_consistent_hash_across_calls(self, tmp_path: Path) -> None:
+        """Same URL always produces the same cache path."""
+        sources_yaml = tmp_path / "sources.yaml"
+        sources_yaml.write_text("sources: []\n", encoding="utf-8")
+        sm = SourceManager(sources_yaml)
+
+        source = SourceEntry(
+            name="test",
+            type="git",
+            url="https://github.com/example/repo.git",
+        )
+        path1 = sm._get_cache_path(source)
+        path2 = sm._get_cache_path(source)
+        assert path1 == path2
+
+
+class TestPipeSafetyCreateVenv:
+    """Verify _create_venv uses communicate() instead of wait()+stderr.read()."""
+
+    async def test_create_venv_uses_communicate(self, tmp_path: Path) -> None:
+        """_create_venv should call proc.communicate(), not proc.wait()."""
+        sources_yaml = tmp_path / "sources.yaml"
+        sources_yaml.write_text("sources: []\n", encoding="utf-8")
+        lockfile_json = tmp_path / "lockfile.json"
+        lockfile_json.write_text('{"version": 1, "agents": {}}', encoding="utf-8")
+
+        sm = SourceManager(sources_yaml)
+        lm = LockfileManager(lockfile_json)
+        installer = GitInstaller(sm, lm, tmp_path)
+
+        agent_dir = tmp_path / "test-agent"
+        agent_dir.mkdir()
+        (agent_dir / "pyproject.toml").write_text("[project]\nname='test'\n")
+
+        mock_proc_venv = MagicMock()
+        mock_proc_venv.communicate = AsyncMock(return_value=(b"", b""))
+        mock_proc_venv.returncode = 0
+
+        mock_proc_install = MagicMock()
+        mock_proc_install.communicate = AsyncMock(return_value=(b"", b""))
+        mock_proc_install.returncode = 0
+
+        with patch(
+            "agent_nexus.platform.local.installer.asyncio.create_subprocess_exec",
+            side_effect=[mock_proc_venv, mock_proc_install],
+        ):
+            result = await installer._create_venv("test-agent", agent_dir)
+
+        mock_proc_venv.communicate.assert_awaited_once()
+        mock_proc_install.communicate.assert_awaited_once()
+        mock_proc_venv.wait.assert_not_called()
+        mock_proc_install.wait.assert_not_called()
+
+    async def test_create_venv_handles_failure(self, tmp_path: Path) -> None:
+        """_create_venv returns None on uv failure, using communicate()."""
+        sources_yaml = tmp_path / "sources.yaml"
+        sources_yaml.write_text("sources: []\n", encoding="utf-8")
+        lockfile_json = tmp_path / "lockfile.json"
+        lockfile_json.write_text('{"version": 1, "agents": {}}', encoding="utf-8")
+
+        sm = SourceManager(sources_yaml)
+        lm = LockfileManager(lockfile_json)
+        installer = GitInstaller(sm, lm, tmp_path)
+
+        agent_dir = tmp_path / "test-agent"
+        agent_dir.mkdir()
+        (agent_dir / "pyproject.toml").write_text("[project]\nname='test'\n")
+
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b"error details"))
+        mock_proc.returncode = 1
+
+        with patch(
+            "agent_nexus.platform.local.installer.asyncio.create_subprocess_exec",
+            return_value=mock_proc,
+        ):
+            result = await installer._create_venv("test-agent", agent_dir)
+
+        assert result is None
+        mock_proc.communicate.assert_awaited_once()
+        mock_proc.wait.assert_not_called()
+
+
+# ============================================================================
+# Iteration 15 merge: TestRunGitUsesCommunicate
+# ============================================================================
+
+
+class TestRunGitUsesCommunicate:
+    """GitInstaller._run_git should use communicate() to avoid pipe deadlock."""
+
+    @pytest.mark.asyncio
+    async def test_run_git_uses_communicate(self) -> None:
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+        mock_proc.returncode = 0
+
+        with patch(
+            "asyncio.create_subprocess_exec", return_value=mock_proc
+        ) as mock_create:
+            await GitInstaller._run_git(["status"], Path("/tmp"))
+            mock_create.assert_called_once()
+            mock_proc.communicate.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_git_includes_stderr_on_failure(self) -> None:
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(
+            return_value=(b"", b"error: pathspec 'x' did not match")
+        )
+        mock_proc.returncode = 128
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            with pytest.raises(InstallationError) as exc_info:
+                await GitInstaller._run_git(["checkout", "x"], Path("/tmp"))
+            assert "pathspec" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_run_git_capture_includes_stderr_on_failure(self) -> None:
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(
+            return_value=(b"", b"remote: Repository not found")
+        )
+        mock_proc.returncode = 128
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            with pytest.raises(InstallationError) as exc_info:
+                await GitInstaller._run_git_capture(["ls-remote", "url"], Path("/tmp"))
+            assert "Repository not found" in str(exc_info.value)
+
+
+# ============================================================================
+# Iteration 19 merge: TestSupervisorEnvForwarding
+# ============================================================================
+
+
+class TestSupervisorEnvForwarding:
+    """_build_env must forward API keys from configured providers."""
+
+    def test_forwards_api_keys(self, monkeypatch) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-123")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-key-456")
+
+        pm = MagicMock()
+        lockfile = MagicMock()
+        config_loader = MagicMock()
+
+        model_config = ModelConfig(
+            default="openai:gpt-4o",
+            providers={
+                "openai": ProviderConfig(
+                    base_url="https://api.openai.com/v1",
+                    api_key_env="OPENAI_API_KEY",
+                ),
+                "anthropic": ProviderConfig(
+                    base_url="https://api.anthropic.com",
+                    api_key_env="ANTHROPIC_API_KEY",
+                ),
+            },
+        )
+        config_loader.load_config.return_value = MagicMock(models=model_config)
+
+        supervisor = AgentSupervisor(
+            process_manager=pm,
+            lockfile_manager=lockfile,
+            config_loader=config_loader,
+            config_dir=Path("/tmp/test"),
+        )
+
+        env = supervisor._build_env("test-agent", LockfileEntry(
+            source="git+https://example.com/test-agent",
+            version="1.0.0",
+            commit_sha="abc123",
+            agent_type="atomic",
+        ))
+
+        assert env["AGENT_MODEL"] == "openai:gpt-4o"
+        assert env["OPENAI_API_KEY"] == "sk-test-123"
+        assert env["ANTHROPIC_API_KEY"] == "ant-key-456"
+
+    def test_skips_empty_keys(self, monkeypatch) -> None:
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        pm = MagicMock()
+        lockfile = MagicMock()
+        config_loader = MagicMock()
+
+        model_config = ModelConfig(
+            default="openai:gpt-4o",
+            providers={
+                "openai": ProviderConfig(
+                    base_url="https://api.openai.com/v1",
+                    api_key_env="OPENAI_API_KEY",
+                ),
+            },
+        )
+        config_loader.load_config.return_value = MagicMock(models=model_config)
+
+        supervisor = AgentSupervisor(
+            process_manager=pm,
+            lockfile_manager=lockfile,
+            config_loader=config_loader,
+            config_dir=Path("/tmp/test"),
+        )
+
+        env = supervisor._build_env("test-agent", LockfileEntry(
+            source="git+https://example.com/test-agent",
+            version="1.0.0",
+            commit_sha="abc123",
+            agent_type="atomic",
+        ))
+
+        assert "OPENAI_API_KEY" not in env
+        assert env["AGENT_MODEL"] == "openai:gpt-4o"
+
+    def test_config_load_failure_does_not_crash(self) -> None:
+        pm = MagicMock()
+        lockfile = MagicMock()
+        config_loader = MagicMock()
+        config_loader.load_config.side_effect = RuntimeError("config missing")
+
+        supervisor = AgentSupervisor(
+            process_manager=pm,
+            lockfile_manager=lockfile,
+            config_loader=config_loader,
+            config_dir=Path("/tmp/test"),
+        )
+
+        env = supervisor._build_env("test-agent", LockfileEntry(
+            source="git+https://example.com/test-agent",
+            version="1.0.0",
+            commit_sha="abc123",
+            agent_type="atomic",
+        ))
+        assert env == {}
+
+    def test_provider_without_api_key_env(self) -> None:
+        """Provider with empty api_key_env should not forward anything."""
+        pm = MagicMock()
+        lockfile = MagicMock()
+        config_loader = MagicMock()
+
+        model_config = ModelConfig(
+            default="ollama:llama3",
+            providers={
+                "ollama": ProviderConfig(
+                    base_url="http://localhost:11434",
+                    api_key_env="",
+                ),
+            },
+        )
+        config_loader.load_config.return_value = MagicMock(models=model_config)
+
+        supervisor = AgentSupervisor(
+            process_manager=pm,
+            lockfile_manager=lockfile,
+            config_loader=config_loader,
+            config_dir=Path("/tmp/test"),
+        )
+
+        env = supervisor._build_env("test-agent", LockfileEntry(
+            source="git+https://example.com/test-agent",
+            version="1.0.0",
+            commit_sha="abc123",
+            agent_type="atomic",
+        ))
+        assert env["AGENT_MODEL"] == "ollama:llama3"
+        assert len(env) == 1
+
+
+# ============================================================================
+# Iteration 24 merges: TestReadManifestNonDictYaml, TestSparseCloneParentDir,
+#                       TestBuildCommandUnsafeName
+# ============================================================================
+
+
+class TestReadManifestNonDictYaml:
+    """GitInstaller._read_manifest returns {} for non-dict YAML content."""
+
+    def _make_installer(self):
+        """Create a GitInstaller with mocked dependencies."""
+        sources = MagicMock()
+        lockfile = MagicMock()
+        config_dir = Path(tempfile.mkdtemp())
+        return GitInstaller(sources, lockfile, config_dir)
+
+    def test_string_manifest_returns_empty_dict(self):
+        installer = self._make_installer()
+        with tempfile.TemporaryDirectory() as tmp:
+            agent_dir = Path(tmp)
+            manifest_path = agent_dir / "agent-manifest.yaml"
+            manifest_path.write_text("hello", encoding="utf-8")
+            result = installer._read_manifest(agent_dir)
+            assert result == {}
+
+    def test_empty_file_returns_empty_dict(self):
+        installer = self._make_installer()
+        with tempfile.TemporaryDirectory() as tmp:
+            agent_dir = Path(tmp)
+            manifest_path = agent_dir / "agent-manifest.yaml"
+            manifest_path.write_text("", encoding="utf-8")
+            result = installer._read_manifest(agent_dir)
+            assert result == {}
+
+    def test_list_manifest_returns_empty_dict(self):
+        installer = self._make_installer()
+        with tempfile.TemporaryDirectory() as tmp:
+            agent_dir = Path(tmp)
+            manifest_path = agent_dir / "agent-manifest.yaml"
+            manifest_path.write_text("- item1\n- item2\n", encoding="utf-8")
+            result = installer._read_manifest(agent_dir)
+            assert result == {}
+
+
+class TestSparseCloneParentDir:
+    """Verify _sparse_clone uses cache_path.parent.mkdir, not cache_path.mkdir."""
+
+    def test_uses_parent_mkdir_not_target_mkdir(self):
+        installer_path = (
+            Path(__file__).resolve().parents[2]
+            / "src"
+            / "agent_nexus"
+            / "platform"
+            / "local"
+            / "installer.py"
+        )
+        source = installer_path.read_text(encoding="utf-8")
+        assert "cache_path.parent.mkdir" in source, (
+            "Expected cache_path.parent.mkdir(parents=True, exist_ok=True) "
+            "but did not find cache_path.parent.mkdir in installer.py"
+        )
+        lines = source.splitlines()
+        for i, line in enumerate(lines):
+            if "cache_path.mkdir" in line and "cache_path.parent" not in line:
+                pytest.fail(
+                    f"Line {i+1} contains cache_path.mkdir without .parent — "
+                    f"this is the bug pattern: {line.strip()}"
+                )
+
+
+class TestBuildCommandUnsafeName:
+    """_build_command rejects agent names with unsafe characters."""
+
+    def _make_supervisor(self):
+        """Create a bare AgentSupervisor with mocked internals."""
+        sup = AgentSupervisor.__new__(AgentSupervisor)
+        sup._lockfile = MagicMock()
+        sup._config = MagicMock()
+        sup._config_dir = Path("/tmp/.agent-nexus")
+        sup._pm = MagicMock()
+        sup._max_restarts = 3
+        sup._restart_trackers = {}
+        sup._started_agents = set()
+        return sup
+
+    def _make_entry(self) -> LockfileEntry:
+        return LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="abc123",
+            agent_type=AgentType.ATOMIC,
+            venv_path="",
+        )
+
+    def test_dot_in_name_returns_none(self):
+        sup = self._make_supervisor()
+        entry = self._make_entry()
+        result = sup._build_command("agent.evil", entry)
+        assert result is None
+
+    def test_slash_in_name_returns_none(self):
+        sup = self._make_supervisor()
+        entry = self._make_entry()
+        result = sup._build_command("agent/evil", entry)
+        assert result is None
+
+    def test_shell_injection_name_returns_none(self):
+        sup = self._make_supervisor()
+        entry = self._make_entry()
+        result = sup._build_command("agent; rm -rf /", entry)
+        assert result is None
+
+    def test_normal_name_returns_command(self):
+        sup = self._make_supervisor()
+        entry = self._make_entry()
+        result = sup._build_command("normal-agent", entry)
+        assert result is not None
+        assert isinstance(result, list)
+        assert len(result) > 0

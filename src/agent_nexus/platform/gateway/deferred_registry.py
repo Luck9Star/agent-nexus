@@ -15,6 +15,7 @@ Reference: docs/06-mcp-communication.md Section 8.8
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -83,6 +84,7 @@ class DeferredAgentRegistry:
         self._core_agents: dict[str, AgentInfo] = {}
         self._deferred_agents: dict[str, AgentInfo] = {}
         self._tool_adapters: dict[str, list[McpToolAdapter]] = {}
+        self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Registration
@@ -138,6 +140,11 @@ class DeferredAgentRegistry:
         3. Send ``__list_tools__`` via IPC to discover available tools.
         4. Cache the tool schemas and create McpToolAdapter instances.
 
+        The entire activation sequence is guarded by an asyncio lock to
+        prevent a race where two concurrent ``search_and_activate`` calls
+        for the same agent both pass the ``is_activated`` check and
+        attempt to start the subprocess twice (leaking one handle).
+
         Args:
             name: Agent name to activate.
 
@@ -148,71 +155,72 @@ class DeferredAgentRegistry:
             KeyError: Agent not registered.
             RuntimeError: Agent subprocess failed to start.
         """
-        # Check if already activated (could be core or previously activated)
-        if name in self._core_agents:
-            info = self._core_agents[name]
-            if info.tool_schemas is not None:
-                return info.tool_schemas
+        async with self._lock:
+            # Check if already activated (could be core or previously activated)
+            if name in self._core_agents:
+                info = self._core_agents[name]
+                if info.tool_schemas is not None:
+                    return info.tool_schemas
 
-        if name in self._deferred_agents:
-            info = self._deferred_agents[name]
-        elif name in self._core_agents:
-            info = self._core_agents[name]
-        else:
-            raise KeyError(f"Agent '{name}' not registered")
+            if name in self._deferred_agents:
+                info = self._deferred_agents[name]
+            elif name in self._core_agents:
+                info = self._core_agents[name]
+            else:
+                raise KeyError(f"Agent '{name}' not registered")
 
-        # Already activated?
-        if info.is_activated:
-            return info.tool_schemas  # type: ignore[return-value]
+            # Already activated?
+            if info.is_activated:
+                return info.tool_schemas  # type: ignore[return-value]
 
-        # 1. Start subprocess if not running
-        if not info.is_running and info.start_command:
-            from pathlib import Path
+            # 1. Start subprocess if not running
+            if not info.is_running and info.start_command:
+                from pathlib import Path
 
-            cwd = Path(info.start_cwd) if info.start_cwd else None
-            handle = await self._pm.start_agent(
-                name=name,
-                command=info.start_command,
-                cwd=cwd,
-                env=info.start_env or None,
-            )
-            info.handle = handle
-            logger.info("Started subprocess for agent '%s'", name)
+                cwd = Path(info.start_cwd) if info.start_cwd else None
+                handle = await self._pm.start_agent(
+                    name=name,
+                    command=info.start_command,
+                    cwd=cwd,
+                    env=info.start_env or None,
+                )
+                info.handle = handle
+                logger.info("Started subprocess for agent '%s'", name)
 
-        # 2. Discover tools via IPC
-        if info.handle is not None and info.handle.is_alive:
-            tool_schemas = await self._fetch_agent_tools(info)
-        else:
-            # No running subprocess -> provide manifest-level placeholder
-            tool_schemas = [
-                {
-                    "name": f"{name}__chat",
-                    "description": info.manifest.description,
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "message": {
-                                "type": "string",
-                                "description": "Message to send to the agent",
-                            }
+            # 2. Discover tools via IPC
+            if info.handle is not None and info.handle.is_alive:
+                tool_schemas = await self._fetch_agent_tools(info)
+            else:
+                # No running subprocess -> provide manifest-level placeholder
+                tool_schemas = [
+                    {
+                        "name": f"{name}__chat",
+                        "description": info.manifest.description,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string",
+                                    "description": "Message to send to the agent",
+                                }
+                            },
+                            "required": ["message"],
                         },
-                        "required": ["message"],
-                    },
-                }
+                    }
+                ]
+
+            # 3. Cache
+            info.tool_schemas = tool_schemas
+            adapters = [
+                McpToolAdapter(server_name=name, tool_schema=s)
+                for s in tool_schemas
             ]
+            self._tool_adapters[name] = adapters
 
-        # 3. Cache
-        info.tool_schemas = tool_schemas
-        adapters = [
-            McpToolAdapter(server_name=name, tool_schema=s)
-            for s in tool_schemas
-        ]
-        self._tool_adapters[name] = adapters
-
-        logger.info(
-            "Activated agent '%s' with %d tools", name, len(tool_schemas)
-        )
-        return tool_schemas
+            logger.info(
+                "Activated agent '%s' with %d tools", name, len(tool_schemas)
+            )
+            return tool_schemas
 
     async def _fetch_agent_tools(self, info: AgentInfo) -> list[dict]:
         """Fetch tool schemas from a running agent via IPC.

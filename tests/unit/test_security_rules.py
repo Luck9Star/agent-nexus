@@ -267,3 +267,124 @@ class TestCombinedRules:
             for rule in rules:
                 violations.extend(rule.check(node))
         assert len(violations) == 0
+
+
+# ============================================================================
+# FunctionRule catches obj.eval() patterns (from iter13)
+# ============================================================================
+
+
+class TestFunctionRuleAttributeCalls:
+    """Verify FunctionRule catches method-call patterns like obj.eval()."""
+
+    def test_attribute_call_blocked(self) -> None:
+        """obj.eval() is now caught by FunctionRule."""
+        rule = FunctionRule(forbidden=["eval"])
+        code = "obj.eval('1+1')"
+        tree = ast.parse(code)
+
+        violations = []
+        for node in ast.walk(tree):
+            violations.extend(rule.check(node))
+
+        assert len(violations) == 1
+        assert violations[0].rule_type == "function"
+        assert "eval" in violations[0].message
+
+    def test_bare_call_still_blocked(self) -> None:
+        """Bare eval('...') is still caught."""
+        rule = FunctionRule(forbidden=["eval"])
+        code = "eval('1+1')"
+        tree = ast.parse(code)
+
+        violations = []
+        for node in ast.walk(tree):
+            violations.extend(rule.check(node))
+
+        assert len(violations) == 1
+
+    def test_chained_attribute_call_blocked(self) -> None:
+        """obj.attr.eval() is also caught."""
+        rule = FunctionRule(forbidden=["eval"])
+        code = "obj.attr.eval('code')"
+        tree = ast.parse(code)
+
+        violations = []
+        for node in ast.walk(tree):
+            violations.extend(rule.check(node))
+
+        assert len(violations) == 1
+        assert "eval" in violations[0].message
+
+    def test_safe_method_call_not_blocked(self) -> None:
+        """obj.safe_method() is not blocked when method is not forbidden."""
+        rule = FunctionRule(forbidden=["eval"])
+        code = "obj.safe_method('arg')"
+        tree = ast.parse(code)
+
+        violations = []
+        for node in ast.walk(tree):
+            violations.extend(rule.check(node))
+
+        assert len(violations) == 0
+
+    def test_exec_via_attribute_blocked(self) -> None:
+        """obj.exec() is caught."""
+        rule = FunctionRule(forbidden=["exec"])
+        code = "obj.exec('code')"
+        tree = ast.parse(code)
+
+        violations = []
+        for node in ast.walk(tree):
+            violations.extend(rule.check(node))
+
+        assert len(violations) == 1
+        assert "exec" in violations[0].message
+
+
+# ============================================================================
+# RegexRule.check_source operates on full source string (from iter14)
+# ============================================================================
+
+
+class TestRegexRuleCheckSource:
+    """RegexRule.check_source operates on full source string."""
+
+    def test_check_source_matches(self) -> None:
+        rule = RegexRule(
+            patterns=r"getattr\s*\(\s*\w+\s*,\s*['\"]eval['\"]",
+            description="test pattern",
+        )
+        violations = rule.check_source(
+            "x = getattr(obj, 'eval')\n"
+        )
+        assert len(violations) == 1
+        assert violations[0].rule_type == "regex"
+
+    def test_check_source_no_match(self) -> None:
+        rule = RegexRule(
+            patterns=r"getattr\s*\(\s*\w+\s*,\s*['\"]eval['\"]",
+            description="test pattern",
+        )
+        violations = rule.check_source("x = 1 + 2\n")
+        assert len(violations) == 0
+
+
+# ============================================================================
+# RegexRule.check() returns empty list -- no-op (from iter16)
+# ============================================================================
+
+
+class TestRegexRuleCheckNoOp:
+    """RegexRule.check() must return empty list (dead code path removed)."""
+
+    def test_check_returns_empty(self) -> None:
+        rule = RegexRule(patterns=[r"getattr"])
+        node = ast.parse("getattr(obj, 'x')").body[0]
+        violations = rule.check(node)
+        assert violations == []
+
+    def test_check_source_still_works(self) -> None:
+        rule = RegexRule(patterns=[r"getattr"])
+        violations = rule.check_source("getattr(obj, 'x')")
+        assert len(violations) >= 1

@@ -409,3 +409,43 @@ class TestAgentPackage:
         data = pkg.model_dump()
         pkg2 = AgentPackage(**data)
         assert pkg2 == pkg
+
+
+# ============================================================================
+# HookDef typed enums -- was str, now HookType / HookEvent (from iter20)
+# ============================================================================
+
+
+class TestHookDefEnumTypes:
+    def test_type_must_be_hook_type_enum(self) -> None:
+        h = HookDef(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        assert isinstance(h.type, HookType)
+        assert h.type == HookType.COMMAND
+
+    def test_event_must_be_hook_event_enum(self) -> None:
+        h = HookDef(type=HookType.HTTP, event=HookEvent.POST_EXECUTION)
+        assert isinstance(h.event, HookEvent)
+
+    def test_all_hook_type_values(self) -> None:
+        for ht in HookType:
+            h = HookDef(type=ht, event=HookEvent.PRE_EXECUTION)
+            assert h.type is ht
+
+    def test_all_hook_event_values(self) -> None:
+        for he in HookEvent:
+            h = HookDef(type=HookType.COMMAND, event=he)
+            assert h.event is he
+
+    def test_string_coerced_to_enum(self) -> None:
+        """String literals are auto-coerced by Pydantic's StrEnum handling."""
+        h = HookDef(type="command", event="pre_execution")
+        assert isinstance(h.type, HookType)
+        assert isinstance(h.event, HookEvent)
+        assert h.type is HookType.COMMAND
+        assert h.event is HookEvent.PRE_EXECUTION
+
+    def test_serialization_round_trip(self) -> None:
+        h = HookDef(type=HookType.AGENT, event=HookEvent.ON_ERROR)
+        data = h.model_dump()
+        h2 = HookDef(**data)
+        assert h2 == h

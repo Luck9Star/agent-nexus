@@ -342,3 +342,203 @@ class TestIPCProtocolPeekBuffer:
         assert protocol._peek_buffer[0].content == "some output"
         assert protocol._peek_buffer[0].type == AgentToPlatformType.RESULT
         assert protocol._peek_buffer[0].task_id == "t1"
+
+
+# ============================================================================
+# Iteration 13 merge: TestIPCPeekBufferPreservation
+# ============================================================================
+
+
+class TestIPCPeekBufferPreservation:
+    """Verify receive_until_result buffers mismatched task_id messages."""
+
+    async def test_mismatched_task_id_buffered(self) -> None:
+        """Messages with wrong task_id are buffered, not discarded."""
+        mock_stdin = MagicMock()
+        mock_stdout = MagicMock(spec=asyncio.StreamReader)
+
+        stream = IPCStream(mock_stdin, mock_stdout)
+        protocol = IPCProtocol(stream)
+
+        msg_a = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="result for A",
+            task_id="task-A",
+        )
+
+        msg_b = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="result for B",
+            task_id="task-B",
+        )
+
+        call_count = 0
+
+        async def fake_receive(timeout=30.0):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return msg_a
+            return msg_b
+
+        with patch.object(protocol, "receive_result", side_effect=fake_receive):
+            result = await protocol.receive_until_result(task_id="task-B", timeout=5.0)
+
+        assert result.task_id == "task-B"
+        assert result.content == "result for B"
+
+        assert len(protocol._peek_buffer) == 1
+        assert protocol._peek_buffer[0].task_id == "task-A"
+        assert protocol._peek_buffer[0].content == "result for A"
+
+    async def test_mismatched_progress_still_continues(self) -> None:
+        """Progress messages for wrong task_id are buffered too."""
+        mock_stdin = MagicMock()
+        mock_stdout = MagicMock(spec=asyncio.StreamReader)
+
+        stream = IPCStream(mock_stdin, mock_stdout)
+        protocol = IPCProtocol(stream)
+
+        progress_wrong = AgentToPlatform(
+            type=AgentToPlatformType.PROGRESS,
+            content="progress for A",
+            task_id="task-A",
+        )
+        result_right = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="result for B",
+            task_id="task-B",
+        )
+
+        call_count = 0
+
+        async def fake_receive(timeout=30.0):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return progress_wrong
+            return result_right
+
+        with patch.object(protocol, "receive_result", side_effect=fake_receive):
+            result = await protocol.receive_until_result(task_id="task-B", timeout=5.0)
+
+        assert result.task_id == "task-B"
+        assert len(protocol._peek_buffer) == 1
+        assert protocol._peek_buffer[0].task_id == "task-A"
+
+    async def test_no_task_filter_still_works(self) -> None:
+        """When task_id is None, all messages are accepted (no buffering)."""
+        mock_stdin = MagicMock()
+        mock_stdout = MagicMock(spec=asyncio.StreamReader)
+
+        stream = IPCStream(mock_stdin, mock_stdout)
+        protocol = IPCProtocol(stream)
+
+        msg = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="result",
+            task_id="any-task",
+        )
+
+        with patch.object(protocol, "receive_result", return_value=msg):
+            result = await protocol.receive_until_result(task_id=None, timeout=5.0)
+
+        assert result.task_id == "any-task"
+        assert len(protocol._peek_buffer) == 0
+
+
+# ============================================================================
+# Iteration 15 merge: TestIPCHearbeatPongCheck
+# ============================================================================
+
+
+class TestIPCHearbeatPongCheck:
+    """send_heartbeat should only accept PROGRESS messages with pong content."""
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_rejects_progress_without_pong(self) -> None:
+        """A PROGRESS message without 'pong' content should NOT be accepted."""
+        mock_stdin = AsyncMock()
+        mock_stdout = MagicMock()
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        protocol = IPCProtocol(stream)
+
+        with patch.object(protocol, "send_chat", new_callable=AsyncMock):
+            with patch.object(
+                protocol._stream,
+                "receive",
+                new_callable=AsyncMock,
+                side_effect=[
+                    MagicMock(
+                        type=AgentToPlatformType.PROGRESS,
+                        content="working on task...",
+                        task_id="t1",
+                    ),
+                    asyncio.TimeoutError(),
+                ],
+            ):
+                result = await protocol.send_heartbeat()
+        assert result is False
+        assert len(protocol._peek_buffer) >= 1
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_accepts_progress_with_pong(self) -> None:
+        """A PROGRESS message with 'pong' content should be accepted."""
+        mock_stdin = AsyncMock()
+        mock_stdout = MagicMock()
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        protocol = IPCProtocol(stream)
+
+        with patch.object(protocol, "send_chat", new_callable=AsyncMock):
+            with patch.object(
+                protocol._stream,
+                "receive",
+                new_callable=AsyncMock,
+                return_value=MagicMock(
+                    type=AgentToPlatformType.PROGRESS,
+                    content="pong",
+                ),
+            ):
+                result = await protocol.send_heartbeat()
+        assert result is True
+
+
+# ============================================================================
+# Iteration 22 merge: TestIPCSendDrainTimeout
+# ============================================================================
+
+
+class TestIPCSendDrainTimeout:
+    """send() must not block indefinitely on drain()."""
+
+    @pytest.mark.asyncio
+    async def test_send_drain_timeout_raises(self) -> None:
+        """If drain() blocks beyond 5s, send() raises TimeoutError."""
+        mock_stdin = MagicMock()
+        mock_stdin.write = MagicMock()
+        mock_stdin.drain = AsyncMock(side_effect=asyncio.TimeoutError)
+        mock_stdout = MagicMock()
+        mock_stdout.read = AsyncMock(return_value=b"")
+        mock_stdout.readline = AsyncMock(return_value=b"")
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
+
+        with pytest.raises(asyncio.TimeoutError):
+            await stream.send(msg)
+
+    @pytest.mark.asyncio
+    async def test_send_drain_succeeds_within_timeout(self) -> None:
+        """send() completes when drain() resolves within timeout."""
+        mock_stdin = MagicMock()
+        mock_stdin.write = MagicMock()
+        mock_stdin.drain = AsyncMock()
+        mock_stdout = MagicMock()
+        mock_stdout.read = AsyncMock(return_value=b"")
+        mock_stdout.readline = AsyncMock(return_value=b"")
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
+        await stream.send(msg)
+
+        mock_stdin.write.assert_called_once()
