@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ class SubtaskController:
         self,
         coro_factory: Callable[[], Coroutine[Any, Any, Any]],
         max_retries: int | None = None,
+        timeout: float | None = None,
     ) -> Any:
         """Run with retry on failure.
 
@@ -71,6 +72,7 @@ class SubtaskController:
             coro_factory: A callable that creates a fresh coroutine each attempt.
                 This is necessary because coroutines cannot be awaited more than once.
             max_retries: Override max retry count. Falls back to config default.
+            timeout: Override timeout per attempt. Falls back to config default.
 
         Returns:
             The coroutine's return value on the first successful attempt.
@@ -83,7 +85,7 @@ class SubtaskController:
 
         for attempt in range(attempts + 1):
             try:
-                return await self.run_with_timeout(coro_factory())
+                return await self.run_with_timeout(coro_factory(), timeout=timeout)
             except Exception as exc:
                 last_exc = exc
                 logger.warning(
@@ -98,7 +100,7 @@ class SubtaskController:
 
         raise last_exc  # type: ignore[misc]
 
-    async def run_parallel(self, coros: list[Coroutine[Any, Any, Any]]) -> list[Any]:
+    async def run_parallel(self, coros: Sequence[Coroutine[Any, Any, Any]]) -> list[Any]:
         """Run multiple coroutines in parallel with max_parallel concurrency.
 
         Uses asyncio.Semaphore to limit concurrency.

@@ -107,5 +107,7 @@ class EvolutionContext(BaseModel):
     task_description: str = ""
     task_completed: bool = False
     skill_ids_used: list[str] = Field(default_factory=list)
+    skills_applied: list[str] = Field(default_factory=list)
+    skills_fell_back: list[str] = Field(default_factory=list)
     execution_output: str | None = None
     execution_error: str | None = None

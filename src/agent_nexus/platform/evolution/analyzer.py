@@ -143,16 +143,18 @@ class ExecutionAnalyzer:
         )
 
         # Build judgments for each skill referenced in the task
+        applied_set = set(ctx.skills_applied)
+        fell_back_set = set(ctx.skills_fell_back)
         judgments: list[dict[str, Any]] = []
         for skill_id in corrected_ids:
             skill = skills_by_id.get(skill_id)
             if skill is None:
                 continue
 
-            # Determine judgment based on task outcome
-            applied = ctx.task_completed
-            completed = ctx.task_completed and applied
-            fell_back = not applied and not ctx.task_completed
+            # Determine judgment based on per-skill outcome
+            applied = skill_id in applied_set
+            fell_back = skill_id in fell_back_set
+            completed = applied and ctx.task_completed
 
             judgments.append({
                 "skill_id": skill_id,

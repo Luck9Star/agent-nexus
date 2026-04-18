@@ -538,7 +538,7 @@ class TestBuildPhaseMessage:
 
     def test_research_feeds_synthesis(self) -> None:
         msg = PlatformRouter._build_phase_message(
-            WorkflowPhase.research, "found X", {}
+            WorkflowPhase.research, "found X"
         )
         assert "Research Results" in msg
         assert "found X" in msg
@@ -546,7 +546,7 @@ class TestBuildPhaseMessage:
 
     def test_synthesis_feeds_implementation(self) -> None:
         msg = PlatformRouter._build_phase_message(
-            WorkflowPhase.synthesis, "plan: do Y", {}
+            WorkflowPhase.synthesis, "plan: do Y"
         )
         assert "Implementation Plan" in msg
         assert "plan: do Y" in msg
@@ -554,7 +554,7 @@ class TestBuildPhaseMessage:
 
     def test_implementation_feeds_verification(self) -> None:
         msg = PlatformRouter._build_phase_message(
-            WorkflowPhase.implementation, "built Z", {}
+            WorkflowPhase.implementation, "built Z"
         )
         assert "Implementation Output" in msg
         assert "built Z" in msg
@@ -562,7 +562,7 @@ class TestBuildPhaseMessage:
 
     def test_verification_returns_raw(self) -> None:
         msg = PlatformRouter._build_phase_message(
-            WorkflowPhase.verification, "all good", {}
+            WorkflowPhase.verification, "all good"
         )
         assert msg == "all good"
 

@@ -31,10 +31,6 @@ from agent_nexus.platform.evolution.analyzer import (
     EvolutionSuggestion,
 )
 
-# Agent loop / retry constants
-_MAX_EVOLUTION_ITERATIONS = 5
-_MAX_EVOLUTION_ATTEMPTS = 3
-
 
 class EvolutionTrigger(StrEnum):
     """What initiated this evolution."""
@@ -213,6 +209,12 @@ class SkillEvolver:
         if not suggestion.target_skill_ids:
             return EvolveResult(
                 success=False, error="FIX requires exactly 1 parent"
+            )
+
+        if len(suggestion.target_skill_ids) != 1:
+            return EvolveResult(
+                success=False,
+                error=f"FIX requires exactly 1 parent, got {len(suggestion.target_skill_ids)}",
             )
 
         parent_id = suggestion.target_skill_ids[0]

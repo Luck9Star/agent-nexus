@@ -27,7 +27,7 @@ from agent_nexus.platform.orchestration.dsl import OrchestrationDefinition
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
-from .subtask import SubtaskController, SubtaskConfig
+from .subtask import SubtaskController
 from .workflow import WorkflowContext, WorkflowPhase, WorkflowResult
 
 logger = logging.getLogger(__name__)
@@ -52,13 +52,28 @@ class PlatformRouter:
         self,
         process_manager: ProcessManager,
         subtask_controller: SubtaskController | None = None,
+        composite_definitions: dict[str, OrchestrationDefinition] | None = None,
     ) -> None:
         self._pm = process_manager
         self._subtask = subtask_controller or SubtaskController()
+        self._composite_defs: dict[str, OrchestrationDefinition] = (
+            composite_definitions or {}
+        )
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def register_composite(
+        self, name: str, definition: OrchestrationDefinition,
+    ) -> None:
+        """Register a composite agent definition for routing.
+
+        Args:
+            name: Agent name to match in ``route_chat``.
+            definition: Parsed TOML orchestration definition.
+        """
+        self._composite_defs[name] = definition
 
     async def route_chat(
         self,
@@ -80,6 +95,13 @@ class PlatformRouter:
             Dict with ``output`` and ``success`` keys.
         """
         conv_id = conversation_id or str(uuid.uuid4())
+
+        # Check if this is a composite agent with an orchestration definition
+        definition = self._composite_defs.get(agent_name)
+        if definition is not None:
+            result = await self.route_composite(definition, message, conv_id)
+            return {"output": result.final_output, "success": result.success}
+
         return await self.route_to_atomic(agent_name, message, conv_id)
 
     async def route_composite(
@@ -131,7 +153,7 @@ class PlatformRouter:
                 completed += 1
 
                 # Feed previous phase output into next phase's message
-                message = self._build_phase_message(phase, result, phase_results)
+                message = self._build_phase_message(phase, result)
 
             except Exception as exc:
                 last_error = f"Phase {phase.value} failed: {exc}"
@@ -310,7 +332,8 @@ class PlatformRouter:
             return await self._subtask.run_with_retry(
                 coro_factory=lambda n=name: self._execute_single_agent(
                     n, message, conversation_id
-                )
+                ),
+                timeout=300.0,
             )
 
         coros = [_run_agent(name) for name in agent_names]
@@ -334,9 +357,7 @@ class PlatformRouter:
 
         await handle.ipc.send_chat(message, conversation_id=conversation_id)
 
-        response = await self._subtask.run_with_timeout(
-            handle.ipc.receive_until_result(timeout=300.0)
-        )
+        response = await handle.ipc.receive_until_result(timeout=300.0)
 
         if response.type == AgentToPlatformType.ERROR:
             raise RuntimeError(
@@ -364,7 +385,6 @@ class PlatformRouter:
     def _build_phase_message(
         phase: WorkflowPhase,
         phase_result: str,
-        all_results: dict[WorkflowPhase, str],
     ) -> str:
         """Build the message for the next phase based on completed results.
 
