@@ -231,6 +231,7 @@ class HookExecutor:
         timeout = hook.timeout_seconds
 
         start = time.monotonic()
+        proc: asyncio.subprocess.Process | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -263,7 +264,8 @@ class HookExecutor:
         except asyncio.TimeoutError:
             duration_ms = (time.monotonic() - start) * 1000
             try:
-                proc.kill()  # type: ignore[union-attr]
+                if proc is not None:
+                    proc.kill()
             except Exception:
                 pass
             return HookExecution(

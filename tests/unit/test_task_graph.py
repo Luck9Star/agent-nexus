@@ -7,6 +7,7 @@ Tests add_task, state transitions, queries, cycle detection, and snapshots.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 

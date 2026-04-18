@@ -212,7 +212,7 @@ class TaskGraph:
                 (TaskState.IN_PROGRESS.value, now, task_id),
             )
 
-            return self._get_task_conn(conn, task_id)  # type: ignore[return-value]
+            return self._get_task_conn_required(conn, task_id)
 
     def complete_task(self, task_id: str) -> TaskItem:
         """Transition task to completed.
@@ -236,7 +236,7 @@ class TaskGraph:
                 (TaskState.COMPLETED.value, now, task_id),
             )
 
-            return self._get_task_conn(conn, task_id)  # type: ignore[return-value]
+            return self._get_task_conn_required(conn, task_id)
 
     def fail_task(self, task_id: str) -> TaskItem:
         """Transition task to failed.
@@ -259,7 +259,7 @@ class TaskGraph:
                 (TaskState.FAILED.value, now, task_id),
             )
 
-            return self._get_task_conn(conn, task_id)  # type: ignore[return-value]
+            return self._get_task_conn_required(conn, task_id)
 
     # ------------------------------------------------------------------
     # Queries
@@ -488,6 +488,15 @@ class TaskGraph:
         if row is None:
             return None
         return self._task_from_row(conn, row)
+
+    def _get_task_conn_required(
+        self, conn: sqlite3.Connection, task_id: str
+    ) -> TaskItem:
+        """Get task using an existing connection, raising on missing."""
+        result = self._get_task_conn(conn, task_id)
+        if result is None:
+            raise ValueError(f"Task '{task_id}' disappeared during update")
+        return result
 
     def _get_unresolved_blockers(
         self, conn: sqlite3.Connection, task_id: str

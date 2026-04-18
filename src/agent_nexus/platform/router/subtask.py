@@ -81,7 +81,7 @@ class SubtaskController:
             The last exception if all attempts fail.
         """
         attempts = max_retries if max_retries is not None else self._config.max_retries
-        last_exc: Exception | None = None
+        last_exc: Exception = RuntimeError("no attempts made")
 
         for attempt in range(attempts + 1):
             try:
@@ -98,7 +98,7 @@ class SubtaskController:
                     # Brief backoff before retry
                     await asyncio.sleep(0.1 * (attempt + 1))
 
-        raise last_exc  # type: ignore[misc]
+        raise last_exc
 
     async def run_parallel(self, coros: Sequence[Coroutine[Any, Any, Any]]) -> list[Any]:
         """Run multiple coroutines in parallel with max_parallel concurrency.

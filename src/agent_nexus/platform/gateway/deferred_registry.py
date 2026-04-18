@@ -171,7 +171,8 @@ class DeferredAgentRegistry:
 
             # Already activated?
             if info.is_activated:
-                return info.tool_schemas  # type: ignore[return-value]
+                assert info.tool_schemas is not None
+                return info.tool_schemas
 
             # 1. Start subprocess if not running
             if not info.is_running and info.start_command:
