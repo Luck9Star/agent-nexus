@@ -56,6 +56,9 @@ class AgentHandle:
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_heartbeat: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
+    # Background tasks
+    drain_task: asyncio.Task | None = None
+
     @property
     def is_alive(self) -> bool:
         """Check if process is still running."""
@@ -179,7 +182,8 @@ class ProcessManager:
 
         # Drain stderr in background to prevent pipe buffer deadlock
         assert process.stderr is not None
-        asyncio.create_task(self._drain_stderr(process, name))
+        drain_task = asyncio.create_task(self._drain_stderr(process, name))
+        handle.drain_task = drain_task
 
         self._agents[name] = handle
         logger.info(
@@ -216,6 +220,14 @@ class ProcessManager:
             raise KeyError(f"Agent '{name}' not found")
 
         process = handle.process
+
+        # Cancel the stderr drain task to prevent it from reading a closed pipe.
+        if handle.drain_task is not None and not handle.drain_task.done():
+            handle.drain_task.cancel()
+            try:
+                await handle.drain_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
         if not handle.is_alive:
             # Already dead — just clean up.

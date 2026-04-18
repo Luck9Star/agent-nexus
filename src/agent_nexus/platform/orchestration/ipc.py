@@ -156,6 +156,7 @@ class IPCProtocol:
 
     def __init__(self, stream: IPCStream) -> None:
         self._stream = stream
+        self._peek_buffer: list[AgentToPlatform] = []
 
     @property
     def stream(self) -> IPCStream:
@@ -215,6 +216,8 @@ class IPCProtocol:
         This is the primary receive loop entry point.  The caller is
         expected to inspect ``msg.type`` to determine how to handle it.
         """
+        if self._peek_buffer:
+            return self._peek_buffer.pop(0)
         return await self._stream.receive(timeout=timeout)
 
     async def receive_until_result(
@@ -245,7 +248,7 @@ class IPCProtocol:
                     f"Timed out after {timeout:.1f}s waiting for final result"
                 )
 
-            msg = await self._stream.receive(timeout=max(remaining, _MIN_RECEIVE_TIMEOUT))
+            msg = await self.receive_result(timeout=max(remaining, _MIN_RECEIVE_TIMEOUT))
 
             # Optional task-id filter
             if task_id is not None and msg.task_id != task_id:
@@ -279,7 +282,22 @@ class IPCProtocol:
         """
         try:
             await self.send_chat("__heartbeat__", conversation_id="__hb__")
-            resp = await self._stream.receive(timeout=_HEARTBEAT_TIMEOUT)
-            return resp.type == AgentToPlatformType.PROGRESS
+            # Read messages until we find the pong or exhaust attempts.
+            # Non-pong messages (e.g. progress) are buffered so they
+            # are not lost — callers of receive() / receive_until_result()
+            # will find them in _peek_buffer.
+            deadline = asyncio.get_running_loop().time() + _HEARTBEAT_TIMEOUT
+            while True:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    return False
+                try:
+                    resp = await self._stream.receive(timeout=remaining)
+                except (IPCError, asyncio.TimeoutError):
+                    return False
+                if resp.type == AgentToPlatformType.PROGRESS:
+                    return True
+                # Not the pong — buffer it for later consumption.
+                self._peek_buffer.append(resp)
         except (IPCError, asyncio.TimeoutError):
             return False

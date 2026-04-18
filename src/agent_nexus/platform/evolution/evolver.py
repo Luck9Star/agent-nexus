@@ -126,14 +126,31 @@ class SkillEvolver:
         self,
         tool_key: str,
         problem_description: str,
+        affected_skill_ids: set[str] | None = None,
     ) -> list[EvolveResult]:
         """Fix skills that depend on a degraded tool.
+
+        Args:
+            tool_key: Identifier of the degraded tool.
+            problem_description: Human-readable description of the degradation.
+            affected_skill_ids: If provided, only evolve skills whose IDs are
+                in this set.  When ``None`` (backward compat), all active
+                skills are considered (with a warning).
 
         Anti-loop: tracks which skills have already been evolved for each
         degraded tool.  Skips already-addressed skills.
         """
+        import logging as _logging
+
+        _logger = _logging.getLogger(__name__)
+
         addressed = self._addressed.get(tool_key, set())
         active_skills = self._store.get_active_skills()
+
+        if affected_skill_ids is not None:
+            active_skills = [s for s in active_skills if s.id in affected_skill_ids]
+        else:
+            _logger.warning("Evolving all skills for tool degradation (no filter)")
 
         results: list[EvolveResult] = []
         for skill in active_skills:

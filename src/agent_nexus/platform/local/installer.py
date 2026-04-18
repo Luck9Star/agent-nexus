@@ -16,7 +16,7 @@ import asyncio
 import hashlib
 import logging
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -160,7 +160,7 @@ class GitInstaller:
             source=source.name,
             commit_sha=commit_sha,
             agent_type=agent_type,
-            installed_at=datetime.now(),
+            installed_at=datetime.now(timezone.utc),
             venv_path=str(venv_path) if venv_path else "",
             dependencies=manifest.pip_dependencies if manifest else [],
         )

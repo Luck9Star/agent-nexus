@@ -144,10 +144,16 @@ class SkillLoader:
         if not stripped.startswith("---"):
             return None, content
 
-        # Find the closing delimiter.
-        close_idx = stripped.find("\n---", 3)
-        if close_idx == -1:
+        # Find the closing delimiter.  The YAML frontmatter spec requires the
+        # closing ``---`` to be on its own line.  A simple ``.find()`` would
+        # incorrectly match ``---`` that appears inside fenced code blocks or
+        # as a horizontal rule in the Markdown body, so we use a regex that
+        # anchors to end-of-line (with optional trailing whitespace).
+        match = re.search(r"\n---\s*$", stripped[3:], re.MULTILINE)
+        if match is None:
             return None, content
+
+        close_idx = 3 + match.start()
 
         yaml_text = stripped[3:close_idx]  # text between opening and closing ---
         remaining = stripped[close_idx + 4 :].lstrip("\n")  # after closing ---
