@@ -34,3 +34,6 @@ htmlcov/
 # SQLite
 *.db
 *.db-journal
+.gitnexus
+.claude/skills/
+AGENTS.md
