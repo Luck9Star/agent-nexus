@@ -300,6 +300,7 @@ class MCPGateway:
                 # _register_agent_tools still holds it (asyncio.Lock
                 # is non-reentrant).
                 self._registered_agents.discard(adapter.agent_name)
+                McpToolAdapter.remove_lock(adapter.agent_name)
                 return f"Error: agent '{adapter.agent_name}' process has died"
 
             result = await adapter.execute(info.handle, kwargs)
@@ -346,10 +347,12 @@ class MCPGateway:
         """Stop all agents and shut down the gateway.
 
         Delegates to ProcessManager to gracefully stop all running
-        agent subprocesses.
+        agent subprocesses.  Cleans up class-level IPC locks to
+        prevent memory leaks across stop/start cycles.
         """
         logger.info("Stopping MCP Gateway and all agents")
         await self._pm.stop_all()
+        McpToolAdapter.remove_all_locks()
 
     # ------------------------------------------------------------------
     # Properties

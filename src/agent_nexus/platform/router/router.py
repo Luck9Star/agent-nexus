@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_nexus.models.ipc import AgentToPlatformType
+from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
 from agent_nexus.platform.orchestration.dsl import OrchestrationDefinition
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
@@ -219,10 +220,12 @@ class PlatformRouter:
         handle = self._pm.get_agent(atomic_name)
         if handle is None:
             self._route_locks.pop(atomic_name, None)
+            McpToolAdapter.remove_lock(atomic_name)
             raise KeyError(f"Agent '{atomic_name}' not found")
 
         if not handle.is_alive:
             self._route_locks.pop(atomic_name, None)
+            McpToolAdapter.remove_lock(atomic_name)
             return {
                 "output": "",
                 "success": False,

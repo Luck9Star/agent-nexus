@@ -1796,13 +1796,13 @@ class TestMcpToolAdapterIPCLock:
         handle.ipc.receive_until_result.return_value = response
 
         # Clean _ipc_locks to isolate this test
-        McpToolAdapter._ipc_locks.clear()
+        McpToolAdapter.remove_all_locks()
         try:
             await adapter.execute(handle, {})
             # Lock is keyed by original (unsanitized) agent_name, not server_name
             assert "lock-test-agent" in McpToolAdapter._ipc_locks
         finally:
-            McpToolAdapter._ipc_locks.clear()
+            McpToolAdapter.remove_all_locks()
 
     @pytest.mark.asyncio
     async def test_ipc_lock_prevents_concurrent_interleave(self) -> None:
@@ -1843,7 +1843,7 @@ class TestMcpToolAdapterIPCLock:
         handle2.ipc.send_chat = AsyncMock()
         handle2.ipc.receive_until_result = fast_receive
 
-        McpToolAdapter._ipc_locks.clear()
+        McpToolAdapter.remove_all_locks()
         try:
             # Launch both concurrently
             results = await asyncio.gather(
@@ -1862,7 +1862,7 @@ class TestMcpToolAdapterIPCLock:
                 "receive_start_2"
             ), f"Concurrent calls interleaved: {call_order}"
         finally:
-            McpToolAdapter._ipc_locks.clear()
+            McpToolAdapter.remove_all_locks()
 
     @pytest.mark.asyncio
     async def test_different_agents_use_different_locks(self) -> None:
@@ -1882,7 +1882,7 @@ class TestMcpToolAdapterIPCLock:
             type=AgentToPlatformType.RESULT, content="b", status="completed",
         )
 
-        McpToolAdapter._ipc_locks.clear()
+        McpToolAdapter.remove_all_locks()
         try:
             results = await asyncio.gather(
                 adapter_a.execute(handle_a, {}),
@@ -1893,7 +1893,81 @@ class TestMcpToolAdapterIPCLock:
             assert "agent-a" in McpToolAdapter._ipc_locks
             assert "agent-b" in McpToolAdapter._ipc_locks
         finally:
-            McpToolAdapter._ipc_locks.clear()
+            McpToolAdapter.remove_all_locks()
+
+
+# ============================================================================
+# McpToolAdapter lock cleanup classmethods
+# ============================================================================
+
+
+class TestMcpToolAdapterLockCleanup:
+    """remove_lock and remove_all_locks clean up class-level locks."""
+
+    def setup_method(self) -> None:
+        McpToolAdapter.remove_all_locks()
+
+    def teardown_method(self) -> None:
+        McpToolAdapter.remove_all_locks()
+
+    def test_remove_lock_clears_single_agent(self) -> None:
+        """remove_lock removes only the targeted agent's lock."""
+        McpToolAdapter._ipc_locks["agent-x"] = asyncio.Lock()
+        McpToolAdapter._ipc_locks["agent-y"] = asyncio.Lock()
+        McpToolAdapter.remove_lock("agent-x")
+        assert "agent-x" not in McpToolAdapter._ipc_locks
+        assert "agent-y" in McpToolAdapter._ipc_locks
+
+    def test_remove_lock_noop_for_unknown_agent(self) -> None:
+        """remove_lock on a non-existent agent does not raise."""
+        McpToolAdapter.remove_lock("nonexistent")
+
+    def test_remove_all_locks_clears_everything(self) -> None:
+        """remove_all_locks clears all entries."""
+        McpToolAdapter._ipc_locks["a"] = asyncio.Lock()
+        McpToolAdapter._ipc_locks["b"] = asyncio.Lock()
+        McpToolAdapter.remove_all_locks()
+        assert len(McpToolAdapter._ipc_locks) == 0
+
+    @pytest.mark.asyncio
+    async def test_gateway_stop_cleans_locks(self) -> None:
+        """MCPGateway.stop() calls remove_all_locks."""
+        pm = MagicMock()
+        pm.stop_all = AsyncMock()
+        router = MagicMock()
+        McpToolAdapter._ipc_locks["stale-agent"] = asyncio.Lock()
+
+        gw = MCPGateway(pm, router)
+        await gw.stop()
+        assert len(McpToolAdapter._ipc_locks) == 0
+
+    @pytest.mark.asyncio
+    async def test_invoke_dead_agent_removes_lock(self) -> None:
+        """_invoke removes IPC lock when it detects a dead agent."""
+        pm = MagicMock()
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        schema = _make_tool_schema("test-tool", "desc")
+        adapter = McpToolAdapter("dead-agent", schema)
+        McpToolAdapter._ipc_locks["dead-agent"] = asyncio.Lock()
+
+        # Register the agent info with a dead handle
+        dead_handle = MagicMock()
+        dead_handle.is_alive = False
+        info = AgentInfo(
+            name="dead-agent",
+            manifest=MagicMock(),
+            tool_schemas=[schema],
+            handle=dead_handle,
+        )
+        gw._registry._core_agents["dead-agent"] = info
+        gw._registered_agents.add("dead-agent")
+
+        func = gw._make_tool_func(adapter)
+        result = await func()
+        assert "process has died" in result
+        assert "dead-agent" not in McpToolAdapter._ipc_locks
 
 
 # ============================================================================

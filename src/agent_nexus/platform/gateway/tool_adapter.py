@@ -137,5 +137,21 @@ class McpToolAdapter:
             },
         }
 
+    # -- Cleanup -----------------------------------------------------------
+
+    @classmethod
+    def remove_lock(cls, agent_name: str) -> None:
+        """Remove the IPC lock for a stopped agent.
+
+        Call this when an agent process dies or is stopped to prevent
+        the class-level lock dict from growing without bound.
+        """
+        cls._ipc_locks.pop(agent_name, None)
+
+    @classmethod
+    def remove_all_locks(cls) -> None:
+        """Remove all IPC locks (called on gateway shutdown)."""
+        cls._ipc_locks.clear()
+
     def __repr__(self) -> str:
         return f"McpToolAdapter({self.full_name!r})"
