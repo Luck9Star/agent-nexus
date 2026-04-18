@@ -218,9 +218,11 @@ class PlatformRouter:
         """
         handle = self._pm.get_agent(atomic_name)
         if handle is None:
+            self._route_locks.pop(atomic_name, None)
             raise KeyError(f"Agent '{atomic_name}' not found")
 
         if not handle.is_alive:
+            self._route_locks.pop(atomic_name, None)
             return {
                 "output": "",
                 "success": False,

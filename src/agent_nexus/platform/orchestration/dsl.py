@@ -334,6 +334,10 @@ class OrchestrationDSL:
             seen_task_ids.add(task_id)
 
             description = raw_task.get("description", "")
+            if not description or not isinstance(description, str):
+                raise DSLSyntaxError(
+                    f"tasks[{idx}] ({task_id}): .description must be a non-empty string"
+                )
             agent = raw_task.get("agent")
             if not agent or not isinstance(agent, str):
                 raise DSLSyntaxError(

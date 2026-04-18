@@ -210,6 +210,15 @@ class GitInstaller:
         Removes agent files, venv, and lockfile entry.  Returns ``True`` if
         the agent was installed (and is now removed).
         """
+        # Validate agent name (prevent path traversal)
+        import re
+        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$", agent_name):
+            raise InstallationError(
+                f"Invalid agent name: '{agent_name}'. "
+                "Must start with alphanumeric and contain only "
+                "alphanumeric, dots, hyphens, and underscores."
+            )
+
         existing = self._lockfile.get_entry(agent_name)
         if existing is None:
             return False
@@ -227,8 +236,14 @@ class GitInstaller:
 
         # Remove venv (from lockfile path or default location)
         if existing.venv_path:
-            venv_path = Path(existing.venv_path)
-            if venv_path.exists():
+            venv_path = Path(existing.venv_path).resolve()
+            allowed_prefix = self._venvs_dir.resolve()
+            if not str(venv_path).startswith(str(allowed_prefix)):
+                logger.error(
+                    "Refusing to remove venv_path outside allowed directory: %s",
+                    venv_path,
+                )
+            elif venv_path.exists():
                 shutil.rmtree(venv_path)
                 logger.info("Removed venv: %s", venv_path)
         else:

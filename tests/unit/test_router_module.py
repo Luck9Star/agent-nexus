@@ -1381,23 +1381,22 @@ class TestExecuteSingleAgentErrorWrapping:
 
 
 class TestSubtaskCancelledError:
-    """SubtaskController must catch CancelledError in run_parallel and run_with_retry."""
+    """SubtaskController propagates CancelledError (does not swallow it)."""
 
     @pytest.mark.asyncio
-    async def test_run_parallel_catches_cancelled_error(self) -> None:
-        """CancelledError in run_parallel is captured, not raised."""
+    async def test_run_parallel_propagates_cancelled_error(self) -> None:
+        """CancelledError in run_parallel is propagated, not captured."""
         controller = SubtaskController()
 
         async def failing_coro():
             raise asyncio.CancelledError("test cancel")
 
-        results = await controller.run_parallel([failing_coro()])
-        assert len(results) == 1
-        assert isinstance(results[0], asyncio.CancelledError)
+        with pytest.raises(asyncio.CancelledError, match="test cancel"):
+            await controller.run_parallel([failing_coro()])
 
     @pytest.mark.asyncio
-    async def test_run_with_retry_catches_cancelled_error(self) -> None:
-        """CancelledError in run_with_retry is retried, not propagated."""
+    async def test_run_with_retry_propagates_cancelled_error(self) -> None:
+        """CancelledError in run_with_retry is propagated immediately, not retried."""
 
         attempt = 0
 
@@ -1409,14 +1408,16 @@ class TestSubtaskCancelledError:
             return "ok"
 
         controller = SubtaskController()
-        result = await controller.run_with_retry(
-            cancel_then_succeed, max_retries=2,
-        )
-        assert result == "ok"
+        with pytest.raises(asyncio.CancelledError, match="first cancel"):
+            await controller.run_with_retry(
+                cancel_then_succeed, max_retries=2,
+            )
+        # Should have stopped at first attempt, not retried
+        assert attempt == 1
 
     @pytest.mark.asyncio
     async def test_run_with_retry_all_cancelled(self) -> None:
-        """All attempts CancelledError raises the last one."""
+        """CancelledError propagated on first attempt (no retry loop)."""
 
         async def always_cancel():
             raise asyncio.CancelledError("always")
@@ -1427,7 +1428,7 @@ class TestSubtaskCancelledError:
 
     @pytest.mark.asyncio
     async def test_run_parallel_mixed_success_and_cancel(self) -> None:
-        """Mixed success and CancelledError results."""
+        """CancelledError propagates even when mixed with success."""
         controller = SubtaskController()
 
         async def ok():
@@ -1436,9 +1437,8 @@ class TestSubtaskCancelledError:
         async def cancel():
             raise asyncio.CancelledError("nope")
 
-        results = await controller.run_parallel([ok(), cancel()])
-        assert results[0] == "done"
-        assert isinstance(results[1], asyncio.CancelledError)
+        with pytest.raises(asyncio.CancelledError, match="nope"):
+            await controller.run_parallel([ok(), cancel()])
 
 
 # ============================================================================

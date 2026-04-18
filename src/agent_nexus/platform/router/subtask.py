@@ -87,7 +87,7 @@ class SubtaskController:
             try:
                 return await self.run_with_timeout(coro_factory(), timeout=timeout)
             except BaseException as exc:
-                if isinstance(exc, KeyboardInterrupt):
+                if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError)):
                     raise
                 last_exc = exc
                 logger.warning(
@@ -128,7 +128,7 @@ class SubtaskController:
                 try:
                     results[index] = await coro
                 except BaseException as exc:
-                    if isinstance(exc, KeyboardInterrupt):
+                    if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError)):
                         raise
                     results[index] = exc
 

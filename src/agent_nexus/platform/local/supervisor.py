@@ -349,8 +349,15 @@ class AgentSupervisor:
 
         # Strategy 1: venv python
         if entry.venv_path:
-            venv_python = Path(entry.venv_path) / "bin" / "python"
+            venv_python = Path(entry.venv_path).resolve() / "bin" / "python"
             if venv_python.exists():
+                allowed = self._config_dir.resolve()
+                if not str(venv_python).startswith(str(allowed)):
+                    logger.warning(
+                        "venv_path outside config_dir, skipping: %s",
+                        venv_python,
+                    )
+                    return None
                 agent_main = self._resolve_agent_dir(agent_name) / "main.py"
                 if agent_main.exists():
                     return [str(venv_python), str(agent_main)]
