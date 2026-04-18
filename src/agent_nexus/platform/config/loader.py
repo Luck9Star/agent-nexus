@@ -114,7 +114,7 @@ class ConfigLoader:
         logger.debug("Loading sources from %s", sources_path)
         raw = yaml.safe_load(sources_path.read_text(encoding="utf-8"))
 
-        if not raw or "sources" not in raw:
+        if not isinstance(raw, dict) or "sources" not in raw:
             logger.warning("sources.yaml is empty or missing 'sources' key")
             return []
 

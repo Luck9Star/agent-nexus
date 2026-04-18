@@ -30,6 +30,13 @@ from agent_nexus.platform.evolution.analyzer import (
     AnalysisResult,
     EvolutionSuggestion,
 )
+from agent_nexus.platform.evolution.thresholds import (
+    _FALLBACK_THRESHOLD,
+    _HIGH_APPLIED_FOR_FIX,
+    _LOW_COMPLETION_THRESHOLD,
+    _MODERATE_EFFECTIVE_THRESHOLD,
+    _MIN_APPLIED_FOR_DERIVED,
+)
 
 
 class EvolutionTrigger(StrEnum):
@@ -204,10 +211,16 @@ class SkillEvolver:
 
         return results
 
-    def prune_recovered_tools(self, active_tool_keys: set[str]) -> None:
-        """Remove addressed entries for tools that have recovered."""
+    def prune_recovered_tools(self, still_degraded_tool_keys: set[str]) -> None:
+        """Remove addressed entries for tools no longer in the degraded set.
+
+        Args:
+            still_degraded_tool_keys: Tool keys that are STILL degraded.
+                Any addressed entry NOT in this set is considered recovered
+                and will be pruned.
+        """
         recovered = [
-            k for k in self._addressed if k not in active_tool_keys
+            k for k in self._addressed if k not in still_degraded_tool_keys
         ]
         for k in recovered:
             del self._addressed[k]
@@ -408,7 +421,7 @@ class SkillEvolver:
         )
         effective_rate = record.total_completions / sel
 
-        if fallback_rate > 0.4:
+        if fallback_rate > _FALLBACK_THRESHOLD:
             return EvolutionSuggestion(
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[record.id],
@@ -418,7 +431,7 @@ class SkillEvolver:
                 ),
             )
 
-        if applied_rate > 0.4 and completion_rate < 0.35:
+        if applied_rate > _HIGH_APPLIED_FOR_FIX and completion_rate < _LOW_COMPLETION_THRESHOLD:
             return EvolutionSuggestion(
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[record.id],
@@ -428,7 +441,7 @@ class SkillEvolver:
                 ),
             )
 
-        if effective_rate < 0.55 and applied_rate > 0.25:
+        if effective_rate < _MODERATE_EFFECTIVE_THRESHOLD and applied_rate > _MIN_APPLIED_FOR_DERIVED:
             return EvolutionSuggestion(
                 evolution_type=EvolutionType.DERIVED,
                 target_skill_ids=[record.id],

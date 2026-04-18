@@ -90,20 +90,29 @@ class ModelConfigManager:
 
         # 3. Tier mapping
         if recommended_tier:
-            tier_key = (
-                ModelTier(recommended_tier)
-                if isinstance(recommended_tier, str)
-                else recommended_tier
-            )
-            tier_model = MODEL_TIER_MAP.get(tier_key)
-            if tier_model:
-                logger.debug(
-                    "Model for '%s' resolved from tier %s: %s",
-                    agent_name,
-                    tier_key,
-                    tier_model,
+            try:
+                tier_key = (
+                    ModelTier(recommended_tier)
+                    if isinstance(recommended_tier, str)
+                    else recommended_tier
                 )
-                return tier_model
+            except ValueError:
+                logger.warning(
+                    "Unknown model tier '%s' for agent '%s', ignoring",
+                    recommended_tier,
+                    agent_name,
+                )
+                tier_key = None
+            if tier_key is not None:
+                tier_model = MODEL_TIER_MAP.get(tier_key)
+                if tier_model:
+                    logger.debug(
+                        "Model for '%s' resolved from tier %s: %s",
+                        agent_name,
+                        tier_key,
+                        tier_model,
+                    )
+                    return tier_model
 
         # 4. Config default
         default = self._config.models.default or DEFAULT_MODEL_STRING

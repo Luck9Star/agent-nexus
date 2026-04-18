@@ -21,6 +21,13 @@ from agent_nexus.models.evolution import (
     SkillRecord,
 )
 from agent_nexus.platform.evolution.store import EvolutionStore
+from agent_nexus.platform.evolution.thresholds import (
+    _FALLBACK_THRESHOLD,
+    _HIGH_APPLIED_FOR_FIX,
+    _LOW_COMPLETION_THRESHOLD,
+    _MODERATE_EFFECTIVE_THRESHOLD,
+    _MIN_APPLIED_FOR_DERIVED,
+)
 
 
 @dataclass
@@ -84,10 +91,11 @@ def _correct_skill_ids(
 
         prefix = raw_id.split("__")[0] if "__" in raw_id else ""
 
-        candidates = [
-            k for k in known_ids
-            if prefix and k.split("__")[0] == prefix
-        ]
+        candidates = (
+            [k for k in known_ids if k.split("__")[0] == prefix]
+            if prefix
+            else list(known_ids)
+        )
 
         max_dist = 2 if len(candidates) > 20 else 4
         best: str | None = None
@@ -227,7 +235,7 @@ class ExecutionAnalyzer:
             effective_rate = skill.total_completions / sel
 
             # Threshold checks from docs/04
-            if fallback_rate > 0.4:
+            if fallback_rate > _FALLBACK_THRESHOLD:
                 suggestions.append(EvolutionSuggestion(
                     evolution_type=EvolutionType.FIX,
                     target_skill_ids=[skill_id],
@@ -238,7 +246,7 @@ class ExecutionAnalyzer:
                     confidence=min(fallback_rate, 1.0),
                 ))
 
-            if applied_rate > 0.4 and completion_rate < 0.35:
+            if applied_rate > _HIGH_APPLIED_FOR_FIX and completion_rate < _LOW_COMPLETION_THRESHOLD:
                 suggestions.append(EvolutionSuggestion(
                     evolution_type=EvolutionType.FIX,
                     target_skill_ids=[skill_id],
@@ -249,7 +257,7 @@ class ExecutionAnalyzer:
                     confidence=min(applied_rate * (1 - completion_rate), 1.0),
                 ))
 
-            if effective_rate < 0.55 and applied_rate > 0.25:
+            if effective_rate < _MODERATE_EFFECTIVE_THRESHOLD and applied_rate > _MIN_APPLIED_FOR_DERIVED:
                 suggestions.append(EvolutionSuggestion(
                     evolution_type=EvolutionType.DERIVED,
                     target_skill_ids=[skill_id],

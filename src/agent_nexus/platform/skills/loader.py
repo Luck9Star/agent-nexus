@@ -225,11 +225,19 @@ class SkillLoader:
         known_keys = {"name", "agent_type", "triggers", "capabilities", "model_config"}
         extra = {k: v for k, v in frontmatter.items() if k not in known_keys}
 
+        raw_triggers = frontmatter.get("triggers", [])
+        raw_capabilities = frontmatter.get("capabilities", [])
+        raw_model_config = frontmatter.get("model_config", {})
+
         return SkillMetadata(
             name=str(frontmatter["name"]),
             agent_type=str(frontmatter["agent_type"]),
-            triggers=list(frontmatter.get("triggers", [])),
-            capabilities=list(frontmatter.get("capabilities", [])),
-            model_config=dict(frontmatter.get("model_config", {})),
+            triggers=raw_triggers if isinstance(raw_triggers, list) else [raw_triggers],
+            capabilities=(
+                raw_capabilities
+                if isinstance(raw_capabilities, list)
+                else [raw_capabilities]
+            ),
+            model_config=raw_model_config if isinstance(raw_model_config, dict) else {},
             extra=extra,
         )
