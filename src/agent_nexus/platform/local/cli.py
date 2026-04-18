@@ -11,10 +11,13 @@ This module MUST export ``app`` as a Typer instance at module level.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Optional
 
 import typer
+
+logger = logging.getLogger(__name__)
 
 app = typer.Typer(
     name="agent-nexus",
@@ -340,7 +343,7 @@ async def _info(name: str) -> None:
                 if model_tier:
                     typer.echo(f"  Model tier:   {model_tier}")
         except Exception:
-            pass
+            logger.debug("Failed to read manifest for info display", exc_info=True)
 
     # Try to read SKILL.md summary
     skill_path = agent_dir / "SKILL.md"
@@ -352,7 +355,7 @@ async def _info(name: str) -> None:
             for line in first_lines:
                 typer.echo(f"    {line}")
         except Exception:
-            pass
+            logger.debug("Failed to read SKILL.md preview", exc_info=True)
 
 
 async def _sources(
