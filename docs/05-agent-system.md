@@ -76,7 +76,7 @@ def main():
 | Composite Agent | OrchestrationDSL（TOML DAG） | 声明式编排，Platform Router 执行 |
 | Agent 间通信 | IPC（stdin/stdout JSON-lines） | 管道通信，零文件 IO |
 | 任务管理 | TaskGraph（SQLite + 状态机） | blocked_by 依赖图 + 环检测 |
-| 进程管理 | ProcessManager（asyncio.subprocess） | 健康检查 + 自动重启 |
+| 进程管理 | ProcessManager（asyncio.subprocess + asyncio.Lock） | 健康检查 + 自动重启 + 并发安全 |
 | Token 优化 | DeferredAgentRegistry | Agent 级 Deferred Loading |
 | MCP 暴露 | MCP Gateway | 聚合所有 Agent 为单一 MCP Server |
 

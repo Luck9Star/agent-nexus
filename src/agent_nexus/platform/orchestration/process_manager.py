@@ -90,6 +90,7 @@ class ProcessManager:
 
     def __init__(self) -> None:
         self._agents: dict[str, AgentHandle] = {}
+        self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Start
@@ -137,62 +138,63 @@ class ProcessManager:
             ValueError: An agent with *name* is already registered.
             RuntimeError: The subprocess failed to start.
         """
-        if name in self._agents and self._agents[name].is_alive:
-            raise ValueError(f"Agent '{name}' is already running")
+        async with self._lock:
+            if name in self._agents and self._agents[name].is_alive:
+                raise ValueError(f"Agent '{name}' is already running")
 
-        # Clean up stale handle (dead process) so we can reuse the name.
-        if name in self._agents:
-            self._agents.pop(name, None)
+            # Clean up stale handle (dead process) so we can reuse the name.
+            if name in self._agents:
+                self._agents.pop(name, None)
 
-        spawn_env = os.environ.copy()
-        if env:
-            spawn_env.update(env)
+            spawn_env = os.environ.copy()
+            if env:
+                spawn_env.update(env)
 
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(cwd) if cwd else None,
-                env=spawn_env,
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *command,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=str(cwd) if cwd else None,
+                    env=spawn_env,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to start agent '{name}' with command {command}: {exc}"
+                ) from exc
+
+            assert process.stdin is not None
+            assert process.stdout is not None
+
+            stream = IPCStream(
+                stdin=process.stdin,
+                stdout=process.stdout,
             )
-        except Exception as exc:
-            raise RuntimeError(
-                f"Failed to start agent '{name}' with command {command}: {exc}"
-            ) from exc
+            ipc = IPCProtocol(stream)
 
-        assert process.stdin is not None
-        assert process.stdout is not None
+            handle = AgentHandle(
+                name=name,
+                process=process,
+                ipc=ipc,
+                start_command=list(command),
+                start_cwd=cwd,
+                start_env=dict(env) if env else {},
+            )
 
-        stream = IPCStream(
-            stdin=process.stdin,
-            stdout=process.stdout,
-        )
-        ipc = IPCProtocol(stream)
+            # Drain stderr in background to prevent pipe buffer deadlock
+            assert process.stderr is not None
+            drain_task = asyncio.create_task(self._drain_stderr(process, name))
+            handle.drain_task = drain_task
 
-        handle = AgentHandle(
-            name=name,
-            process=process,
-            ipc=ipc,
-            start_command=list(command),
-            start_cwd=cwd,
-            start_env=dict(env) if env else {},
-        )
-
-        # Drain stderr in background to prevent pipe buffer deadlock
-        assert process.stderr is not None
-        drain_task = asyncio.create_task(self._drain_stderr(process, name))
-        handle.drain_task = drain_task
-
-        self._agents[name] = handle
-        logger.info(
-            "Agent '%s' started (pid=%s, command=%s)",
-            name,
-            process.pid,
-            command,
-        )
-        return handle
+            self._agents[name] = handle
+            logger.info(
+                "Agent '%s' started (pid=%s, command=%s)",
+                name,
+                process.pid,
+                command,
+            )
+            return handle
 
     # ------------------------------------------------------------------
     # Stop

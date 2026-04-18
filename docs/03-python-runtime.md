@@ -115,6 +115,10 @@ Python Runtime 优先，MCP 用于外部通信。不可完全抛弃 Tool Call。
 | `IPythonRuntime` | 同进程 | 即时 | 直接引用（零拷贝） | 宿主死 |
 | `IPyKernelRuntime` | 独立进程(Jupyter) | ~1s | dill 序列化 | kernel 重启，宿主存活 |
 
+#### 超时强制执行
+
+`IPythonExecutor.execute()` 通过 `asyncio.to_thread()` 将 `run_cell()` 调度到线程池执行，配合 `asyncio.wait_for(timeout)` 实现可强制执行的超时机制。由于 IPython 内部的代码执行是同步阻塞操作，直接在事件循环中运行无法被 `wait_for` 取消；通过 `to_thread` 将执行移入线程，事件循环保留控制权，超时时 `CancelledError` 可立即触发。
+
 ### 5.7 与 Atomic Agent 的集成
 
 ```python

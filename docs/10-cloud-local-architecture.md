@@ -517,6 +517,12 @@ class AgentSupervisor:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+
+        # Drain stderr in background to prevent pipe buffer deadlock.
+        # When stderr=PIPE is opened but never read, the OS pipe buffer
+        # fills (~64KB) and the writing process blocks indefinitely.
+        asyncio.create_task(self._drain_stderr(proc, name))
+
         handle = AgentHandle(name=name, process=proc, config=config)
         self.agents[name] = handle
         return handle
