@@ -948,7 +948,7 @@ def _make_agent_context(
     l1_content: str = "",
 ) -> AgentContext:
     """Create an AgentContext for compaction tests."""
-    usage = TokenUsage(total_tokens=total_tokens)
+    usage = TokenUsage(prompt_tokens=total_tokens, completion_tokens=0)
     return AgentContext(
         agent_id=agent_id,
         session_id=session_id,

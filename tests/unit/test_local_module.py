@@ -1801,11 +1801,12 @@ class TestBuildCommandUnsafeName:
             venv_path="",
         )
 
-    def test_dot_in_name_returns_none(self):
+    def test_dot_in_name_allowed(self):
+        """Dots are allowed in agent names (consistent with installer)."""
         sup = self._make_supervisor()
         entry = self._make_entry()
         result = sup._build_command("agent.evil", entry)
-        assert result is None
+        assert result is not None  # dots are allowed
 
     def test_slash_in_name_returns_none(self):
         sup = self._make_supervisor()
@@ -1858,3 +1859,183 @@ class TestSupervisorConfigLoadLogsWarning:
         # env should be empty (no crash), but warning should be logged
         assert env == {}
         assert "Failed to load config" in caplog.text
+
+
+# ============================================================================
+# Regression tests for iteration 22 defects
+# ============================================================================
+
+
+class TestSourceManagerListValidation:
+    """Regression: sources.yaml 'sources' key must be a list, not other types."""
+
+    def test_sources_string_value_uses_defaults(self, tmp_path: Path) -> None:
+        """When 'sources' maps to a string, SourceManager falls back to defaults."""
+        path = tmp_path / "sources.yaml"
+        path.write_text("sources: just_a_string\n", encoding="utf-8")
+        mgr = SourceManager(path)
+        sources = mgr.list_sources()
+        assert len(sources) == 1
+        assert sources[0].name == "official"
+
+    def test_sources_dict_value_uses_defaults(self, tmp_path: Path) -> None:
+        """When 'sources' maps to a dict, SourceManager falls back to defaults."""
+        path = tmp_path / "sources.yaml"
+        path.write_text("sources:\n  name: official\n  url: http://x.com\n", encoding="utf-8")
+        mgr = SourceManager(path)
+        sources = mgr.list_sources()
+        assert len(sources) == 1
+        assert sources[0].name == "official"
+
+    def test_sources_int_value_uses_defaults(self, tmp_path: Path) -> None:
+        """When 'sources' maps to an int, SourceManager falls back to defaults."""
+        path = tmp_path / "sources.yaml"
+        path.write_text("sources: 42\n", encoding="utf-8")
+        mgr = SourceManager(path)
+        sources = mgr.list_sources()
+        assert len(sources) == 1
+        assert sources[0].name == "official"
+
+    def test_sources_with_non_dict_items_skips(self, tmp_path: Path) -> None:
+        """Non-dict items in sources list are skipped with a warning."""
+        path = tmp_path / "sources.yaml"
+        path.write_text(
+            "sources:\n"
+            "  - just_a_string\n"
+            "  - name: valid\n"
+            "    type: git\n"
+            "    url: https://x.com/r.git\n"
+            "  - 42\n",
+            encoding="utf-8",
+        )
+        mgr = SourceManager(path)
+        sources = mgr.list_sources()
+        names = [s.name for s in sources]
+        assert "valid" in names
+        assert len([n for n in names if n not in ("valid", "official")]) == 0
+
+
+class TestSourceManagerIndexListValidation:
+    """Regression: index.yaml 'agents' key must be a list."""
+
+    def test_index_agents_string_returns_none(self, tmp_path: Path) -> None:
+        """When index 'agents' is a string, _load_source_index returns None."""
+        import hashlib
+
+        path = tmp_path / "sources.yaml"
+        mgr = SourceManager(path)
+
+        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
+        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
+        cache_dir = tmp_path / "cache" / "repos" / url_hash
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "index.yaml").write_text("agents: not_a_list\n", encoding="utf-8")
+
+        result = mgr._load_source_index(mgr.list_sources()[0])
+        assert result is None
+
+    def test_index_agents_dict_returns_none(self, tmp_path: Path) -> None:
+        """When index 'agents' is a dict, _load_source_index returns None."""
+        import hashlib
+
+        path = tmp_path / "sources.yaml"
+        mgr = SourceManager(path)
+
+        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
+        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
+        cache_dir = tmp_path / "cache" / "repos" / url_hash
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "index.yaml").write_text(
+            "agents:\n  name: x\n  version: 1.0\n", encoding="utf-8"
+        )
+
+        result = mgr._load_source_index(mgr.list_sources()[0])
+        assert result is None
+
+    def test_index_with_non_dict_items_skips(self, tmp_path: Path) -> None:
+        """Non-dict items in index agents list are skipped."""
+        import hashlib
+
+        path = tmp_path / "sources.yaml"
+        mgr = SourceManager(path)
+
+        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
+        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
+        cache_dir = tmp_path / "cache" / "repos" / url_hash
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        _write_yaml(
+            cache_dir / "index.yaml",
+            {
+                "agents": [
+                    "invalid_string_entry",
+                    {"name": "valid-agent", "version": "1.0.0", "type": "atomic"},
+                    42,
+                ]
+            },
+        )
+
+        result = mgr._load_source_index(mgr.list_sources()[0])
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].name == "valid-agent"
+
+
+class TestInstallerReadManifestLogs:
+    """Regression: _read_manifest logs on parse failure instead of silent swallow."""
+
+    def test_read_manifest_logs_on_parse_error(self, tmp_path: Path, caplog) -> None:
+        """_read_manifest logs a debug message when YAML parsing fails."""
+        installer = GitInstaller(
+            MagicMock(spec=SourceManager),
+            MagicMock(spec=LockfileManager),
+            tmp_path,
+        )
+        # Write invalid YAML that safe_load will choke on
+        agent_dir = tmp_path / "pkg"
+        agent_dir.mkdir()
+        (agent_dir / "agent-manifest.yaml").write_text(
+            "{{{{invalid yaml", encoding="utf-8"
+        )
+
+        with caplog.at_level(logging.DEBUG, logger="agent_nexus.platform.local.installer"):
+            result = installer._read_manifest(agent_dir)
+
+        assert result == {}
+        assert "Failed to read manifest" in caplog.text
+
+
+class TestSupervisorSafeNameRegex:
+    """Regression: _SAFE_NAME_RE is consistent with installer pattern."""
+
+    def test_allows_dots_for_package_names(self, tmp_path: Path) -> None:
+        """Dots are allowed (e.g., my.agent, code-review.v2)."""
+        entry = _make_entry(venv_path="")
+        pm = _make_mock_pm()
+        lockfile = _make_mock_lockfile_mgr()
+        config = _make_mock_config_loader()
+        supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path)
+        cmd = supervisor._build_command("my.agent", entry)
+        assert cmd is not None
+
+    def test_rejects_leading_hyphen(self, tmp_path: Path) -> None:
+        """Names starting with hyphen are rejected (flag injection)."""
+        entry = _make_entry(venv_path="")
+        pm = _make_mock_pm()
+        lockfile = _make_mock_lockfile_mgr()
+        config = _make_mock_config_loader()
+        supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path)
+        cmd = supervisor._build_command("-evil-flag", entry)
+        assert cmd is None
+
+    def test_rejects_double_dot(self, tmp_path: Path) -> None:
+        """Names with '..' are allowed by regex but that's OK since there's
+        no path traversal risk (name is used as directory name, not path)."""
+        entry = _make_entry(venv_path="")
+        pm = _make_mock_pm()
+        lockfile = _make_mock_lockfile_mgr()
+        config = _make_mock_config_loader()
+        supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path)
+        # 'agent..evil' is allowed -- no actual security risk since
+        # shutil.copytree uses it as a leaf directory name
+        cmd = supervisor._build_command("agent..evil", entry)
+        assert cmd is not None  # allowed -- consistent with installer

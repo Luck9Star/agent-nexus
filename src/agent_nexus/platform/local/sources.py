@@ -148,8 +148,17 @@ class SourceManager:
             self._sources = [_OFFICIAL_SOURCE]
             return
 
+        sources_list = raw["sources"]
+        if not isinstance(sources_list, list):
+            logger.warning("sources.yaml 'sources' key is not a list, using defaults")
+            self._sources = [_OFFICIAL_SOURCE]
+            return
+
         entries: list[SourceEntry] = []
-        for item in raw["sources"]:
+        for item in sources_list:
+            if not isinstance(item, dict):
+                logger.warning("Skipping non-mapping source entry: %r", item)
+                continue
             try:
                 entry = SourceEntry(
                     name=item["name"],
@@ -190,10 +199,17 @@ class SourceManager:
         if not raw or "agents" not in raw:
             return None
 
+        if not isinstance(raw["agents"], list):
+            logger.warning("index.yaml 'agents' key is not a list")
+            return None
+
         from agent_nexus.models.agent import AgentType
 
         entries: list[IndexEntry] = []
         for item in raw["agents"]:
+            if not isinstance(item, dict):
+                logger.warning("Skipping non-mapping index entry: %r", item)
+                continue
             try:
                 entries.append(IndexEntry(
                     name=item["name"],

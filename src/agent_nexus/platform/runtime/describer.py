@@ -118,8 +118,9 @@ class TieredRuntimeDescriber:
             Formatted string with the variable's current value,
             or empty string if not found.
         """
-        value = self._runtime.retrieve(var_name)
-        if value is None:
+        _MISSING = object()
+        value = self._runtime.retrieve(var_name, default=_MISSING)
+        if value is _MISSING:
             return ""
 
         try:

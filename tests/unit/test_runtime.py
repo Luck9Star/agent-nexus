@@ -11,6 +11,8 @@ from agent_nexus.models.runtime import (
     Variable,
 )
 from agent_nexus.platform.runtime.runtime import PythonRuntime
+from agent_nexus.platform.runtime.executor import _IPYTHON_INTERNALS, IPythonExecutor
+from agent_nexus.platform.runtime.describer import TieredRuntimeDescriber
 
 
 # ---------------------------------------------------------------------------
@@ -273,3 +275,128 @@ class TestFormatSignature:
     def test_non_callable(self) -> None:
         sig = PythonRuntime._format_signature("not_a_function")
         assert sig == ""
+
+
+# ============================================================================
+# _IPYTHON_INTERNALS no duplicates (from iter39)
+# ============================================================================
+
+
+class TestIPythonInternalsNoDuplicates:
+    """_IPYTHON_INTERNALS frozenset should not contain duplicate entries."""
+
+    def test_no_duplicate_entries(self) -> None:
+        """Each internal key appears exactly once."""
+        items = list(_IPYTHON_INTERNALS)
+        assert len(items) == len(set(items))
+
+    def test_contains_expected_keys(self) -> None:
+        """All expected IPython internal keys are present."""
+        expected = {"In", "Out", "exit", "quit", "get_ipython",
+                    "_", "__", "___", "_ih", "_oh", "_sh", "_dh"}
+        assert _IPYTHON_INTERNALS == expected
+
+
+# ============================================================================
+# Retrieve/get distinguishes None value from missing key (from iter39)
+# ============================================================================
+
+
+class TestRetrieveDistinguishesNoneFromMissing:
+    """retrieve() and get() must distinguish between 'value is None' and 'key missing'."""
+
+    @pytest.mark.asyncio
+    async def test_executor_get_returns_default_for_missing_key(self) -> None:
+        """get() returns the provided default for a non-existent key."""
+        executor = IPythonExecutor()
+        try:
+            sentinel = object()
+            result = executor.get("nonexistent_key_xyz", default=sentinel)
+            assert result is sentinel
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_executor_get_returns_none_value(self) -> None:
+        """get() returns actual None when the variable's value is None."""
+        executor = IPythonExecutor()
+        try:
+            executor.inject("x", None)
+            sentinel = object()
+            result = executor.get("x", default=sentinel)
+            assert result is None
+            assert result is not sentinel
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_executor_get_default_none_for_missing(self) -> None:
+        """get() returns None (the default) when key is missing and no custom default."""
+        executor = IPythonExecutor()
+        try:
+            result = executor.get("nonexistent_key_xyz")
+            assert result is None
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_runtime_retrieve_distinguishes_none_value(self) -> None:
+        """retrieve() distinguishes variable set to None from non-existent variable."""
+        runtime = PythonRuntime()
+        try:
+            runtime.inject_variable(Variable(name="x", description="test", value=None))
+            sentinel = object()
+            result = runtime.retrieve("x", default=sentinel)
+            assert result is sentinel
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_describer_l3_value_none_variable(self) -> None:
+        """l3_value returns empty string when variable is not in namespace, even if None."""
+        runtime = PythonRuntime()
+        try:
+            runtime.inject_variable(Variable(name="x", description="test", value=None))
+            describer = TieredRuntimeDescriber(runtime)
+            result = describer.l3_value("x")
+            assert result == ""
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_describer_l3_value_zero_not_confused_with_missing(self) -> None:
+        """l3_value correctly formats a variable whose value is 0 (falsy but not None)."""
+        runtime = PythonRuntime()
+        try:
+            await runtime.execute("x = 0")
+            describer = TieredRuntimeDescriber(runtime)
+            result = describer.l3_value("x")
+            assert "[Variable: x]" in result
+            assert "0" in result
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_describer_l3_value_false_not_confused_with_missing(self) -> None:
+        """l3_value correctly formats a variable whose value is False."""
+        runtime = PythonRuntime()
+        try:
+            await runtime.execute("flag = False")
+            describer = TieredRuntimeDescriber(runtime)
+            result = describer.l3_value("flag")
+            assert "[Variable: flag]" in result
+            assert "false" in result.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_describer_l3_value_empty_string_not_confused_with_missing(self) -> None:
+        """l3_value correctly formats a variable whose value is empty string."""
+        runtime = PythonRuntime()
+        try:
+            await runtime.execute("s = ''")
+            describer = TieredRuntimeDescriber(runtime)
+            result = describer.l3_value("s")
+            assert "[Variable: s]" in result
+        finally:
+            runtime.close()

@@ -358,6 +358,7 @@ class GitInstaller:
             raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
             return raw if isinstance(raw, dict) else {}
         except Exception:
+            logger.debug("Failed to read manifest from %s", agent_dir, exc_info=True)
             return {}
 
     # ------------------------------------------------------------------

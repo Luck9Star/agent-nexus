@@ -83,6 +83,15 @@ class ContextBudget(BaseModel):
                 f"({self.session_hard_ceiling})"
             )
 
+        # bootstrap_max must accommodate l0_max + l1_max combined.
+        if self.l0_max + self.l1_max > self.bootstrap_max:
+            raise ValueError(
+                f"l0_max ({self.l0_max}) + l1_max ({self.l1_max}) = "
+                f"{self.l0_max + self.l1_max}, which exceeds "
+                f"bootstrap_max ({self.bootstrap_max}). "
+                f"bootstrap_max must be at least l0_max + l1_max."
+            )
+
         return self
 
 
@@ -102,10 +111,13 @@ class TokenUsage(BaseModel):
 
     @model_validator(mode="after")
     def _sync_total_tokens(self) -> "TokenUsage":
-        """Ensure total_tokens is derived from prompt + completion when set."""
-        expected = self.prompt_tokens + self.completion_tokens
-        if expected > 0:
-            self.total_tokens = expected
+        """Ensure total_tokens is derived from prompt + completion.
+
+        Always recomputes total_tokens from the two component counters
+        to prevent desynchronized state (e.g. total_tokens set to a
+        stale value while prompt/completion are both 0).
+        """
+        self.total_tokens = self.prompt_tokens + self.completion_tokens
         return self
 
     def check_budget(

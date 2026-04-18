@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 from agent_nexus.models.distribution import LockfileEntry
 from agent_nexus.platform.config.loader import ConfigLoader

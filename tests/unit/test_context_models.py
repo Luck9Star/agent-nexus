@@ -75,7 +75,7 @@ class TestContextBudget:
             cb.l0_max = 2000
 
     def test_serialization_round_trip(self):
-        cb = ContextBudget(l0_max=1200, l1_max=4000)
+        cb = ContextBudget(l0_max=1200, l1_max=4000, bootstrap_max=6000)
         data = cb.model_dump()
         cb2 = ContextBudget(**data)
         assert cb2 == cb
@@ -136,44 +136,53 @@ class TestTokenUsage:
 
 class TestTokenUsageCheckBudget:
     def test_within_budget(self):
-        tu = TokenUsage(total_tokens=500)
+        tu = TokenUsage(prompt_tokens=400, completion_tokens=100)
+        assert tu.total_tokens == 500
         assert tu.check_budget(context_window=10000) is None
 
     def test_compaction_threshold(self):
         """81% usage triggers 'compaction' alert."""
-        tu = TokenUsage(total_tokens=810)
+        tu = TokenUsage(prompt_tokens=700, completion_tokens=110)
+        assert tu.total_tokens == 810
         assert tu.check_budget(context_window=1000) == "compaction"
 
     def test_compaction_exact_boundary(self):
         """81% triggers compaction, 80% does not."""
-        tu_80 = TokenUsage(total_tokens=800)
+        tu_80 = TokenUsage(prompt_tokens=700, completion_tokens=100)
+        assert tu_80.total_tokens == 800
         assert tu_80.check_budget(context_window=1000) is None
 
-        tu_81 = TokenUsage(total_tokens=801)
+        tu_81 = TokenUsage(prompt_tokens=700, completion_tokens=101)
+        assert tu_81.total_tokens == 801
         assert tu_81.check_budget(context_window=1000) == "compaction"
 
     def test_forced_truncate_threshold(self):
         """91% usage triggers 'forced_truncate' alert."""
-        tu = TokenUsage(total_tokens=910)
+        tu = TokenUsage(prompt_tokens=800, completion_tokens=110)
+        assert tu.total_tokens == 910
         assert tu.check_budget(context_window=1000) == "forced_truncate"
 
     def test_hard_ceiling_threshold(self):
         """96% usage triggers 'hard_ceiling' alert."""
-        tu = TokenUsage(total_tokens=960)
+        tu = TokenUsage(prompt_tokens=800, completion_tokens=160)
+        assert tu.total_tokens == 960
         assert tu.check_budget(context_window=1000) == "hard_ceiling"
 
     def test_priority_hard_ceiling_over_others(self):
         """hard_ceiling is checked first, even if other thresholds are met."""
-        tu = TokenUsage(total_tokens=990)
+        tu = TokenUsage(prompt_tokens=800, completion_tokens=190)
+        assert tu.total_tokens == 990
         result = tu.check_budget(context_window=1000)
         assert result == "hard_ceiling"
 
     def test_zero_context_window(self):
-        tu = TokenUsage(total_tokens=100)
+        tu = TokenUsage(prompt_tokens=80, completion_tokens=20)
+        assert tu.total_tokens == 100
         assert tu.check_budget(context_window=0) is None
 
     def test_negative_context_window(self):
-        tu = TokenUsage(total_tokens=100)
+        tu = TokenUsage(prompt_tokens=80, completion_tokens=20)
+        assert tu.total_tokens == 100
         assert tu.check_budget(context_window=-1) is None
 
     def test_zero_tokens(self):
@@ -367,3 +376,61 @@ class TestContextBudgetFieldValidation:
     def test_consecutive_compaction_alert_zero_rejected(self):
         with pytest.raises(ValidationError):
             ContextBudget(consecutive_compaction_alert=0)
+
+
+# ============================================================================
+# TokenUsage always syncs total_tokens (from iter39)
+# ============================================================================
+
+
+class TestTokenUsageAlwaysSyncs:
+    """TokenUsage.total_tokens is always derived from prompt + completion."""
+
+    def test_zero_components_produce_zero_total(self) -> None:
+        """When both prompt and completion are 0, total must be 0."""
+        tu = TokenUsage(prompt_tokens=0, completion_tokens=0)
+        assert tu.total_tokens == 0
+
+    def test_explicit_total_tokens_overridden(self) -> None:
+        """Explicit total_tokens is always overridden by prompt + completion."""
+        tu = TokenUsage(prompt_tokens=100, completion_tokens=50)
+        assert tu.total_tokens == 150
+
+    def test_total_tokens_not_stale(self) -> None:
+        """Cannot set total_tokens independently of its components."""
+        tu = TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=999)
+        assert tu.total_tokens == 0  # must be overridden to 0
+
+    def test_nonzero_components_sync(self) -> None:
+        """Non-zero components always produce correct total."""
+        tu = TokenUsage(prompt_tokens=200, completion_tokens=300)
+        assert tu.total_tokens == 500
+
+
+# ============================================================================
+# ContextBudget bootstrap_max >= l0_max + l1_max (from iter39)
+# ============================================================================
+
+
+class TestContextBudgetBootstrapValidation:
+    """ContextBudget rejects l0_max + l1_max exceeding bootstrap_max."""
+
+    def test_rejects_l0_l1_exceeding_bootstrap(self) -> None:
+        """l0_max + l1_max > bootstrap_max must raise ValueError."""
+        with pytest.raises(Exception, match="exceeds bootstrap_max"):
+            ContextBudget(l0_max=3000, l1_max=3000, bootstrap_max=5000)
+
+    def test_accepts_exact_match(self) -> None:
+        """l0_max + l1_max == bootstrap_max is valid."""
+        cb = ContextBudget(l0_max=3000, l1_max=2000, bootstrap_max=5000)
+        assert cb.l0_max + cb.l1_max == cb.bootstrap_max
+
+    def test_accepts_within_budget(self) -> None:
+        """l0_max + l1_max < bootstrap_max is valid."""
+        cb = ContextBudget(l0_max=400, l1_max=1000, bootstrap_max=5000)
+        assert cb.l0_max + cb.l1_max < cb.bootstrap_max
+
+    def test_default_values_valid(self) -> None:
+        """Default values (800 + 3000 = 3800 < 5000) pass validation."""
+        cb = ContextBudget()
+        assert cb.l0_max + cb.l1_max <= cb.bootstrap_max

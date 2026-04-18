@@ -470,3 +470,44 @@ class TestConfigLoaderProviderApiTypeValidation:
         with pytest.raises(Exception):
             # toml.TomlDecodeError or similar parse error
             loader.load_config()
+
+
+# ============================================================================
+# Regression tests for iteration 22 defects
+# ============================================================================
+
+
+class TestConfigLoaderSourcesValidation:
+    """Regression tests for ConfigLoader.load_sources edge cases."""
+
+    def test_load_sources_malformed_yaml_returns_empty(self, tmp_path: Path) -> None:
+        """Malformed YAML in sources.yaml returns empty list, not exception."""
+        _write_sources(tmp_path, "{{{{invalid yaml")
+        loader = ConfigLoader(config_dir=tmp_path)
+        sources = loader.load_sources()
+        assert sources == []
+
+    def test_load_sources_non_dict_items_skipped(self, tmp_path: Path) -> None:
+        """Non-dict items in sources list are skipped with warning."""
+        _write_sources(
+            tmp_path,
+            "sources:\n  - just_a_string\n  - 42\n  - name: valid\n    type: git\n    url: http://x.com\n",
+        )
+        loader = ConfigLoader(config_dir=tmp_path)
+        sources = loader.load_sources()
+        assert len(sources) == 1
+        assert sources[0].name == "valid"
+
+    def test_load_sources_string_sources_key(self, tmp_path: Path) -> None:
+        """When 'sources' key maps to a string, returns empty list."""
+        _write_sources(tmp_path, "sources: not_a_list\n")
+        loader = ConfigLoader(config_dir=tmp_path)
+        sources = loader.load_sources()
+        assert sources == []
+
+    def test_load_sources_empty_file(self, tmp_path: Path) -> None:
+        """Empty sources.yaml file returns empty list."""
+        _write_sources(tmp_path, "")
+        loader = ConfigLoader(config_dir=tmp_path)
+        sources = loader.load_sources()
+        assert sources == []

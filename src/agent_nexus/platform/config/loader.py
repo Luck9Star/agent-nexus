@@ -112,7 +112,11 @@ class ConfigLoader:
             return []
 
         logger.debug("Loading sources from %s", sources_path)
-        raw = yaml.safe_load(sources_path.read_text(encoding="utf-8"))
+        try:
+            raw = yaml.safe_load(sources_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Failed to parse %s: %s", sources_path, exc)
+            return []
 
         if not isinstance(raw, dict) or "sources" not in raw:
             logger.warning("sources.yaml is empty or missing 'sources' key")
@@ -125,6 +129,9 @@ class ConfigLoader:
 
         entries: list[SourceEntry] = []
         for item in sources_list:
+            if not isinstance(item, dict):
+                logger.warning("Skipping non-mapping source entry: %r", item)
+                continue
             try:
                 entry = SourceEntry(
                     name=item["name"],

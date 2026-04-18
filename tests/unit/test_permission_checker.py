@@ -13,6 +13,7 @@ from agent_nexus.models.permission import (
 from agent_nexus.platform.runtime.permission_checker import (
     READONLY_TOOLS,
     PermissionChecker,
+    _fnmatch_recursive,
 )
 
 
@@ -473,3 +474,73 @@ class TestPathRuleMinLength:
 
         with pytest.raises(ValidationError):
             PathRule(pattern="")
+
+
+# ============================================================================
+# _fnmatch_recursive ** glob support (from iter39)
+# ============================================================================
+
+
+class TestFnmatchRecursive:
+    """_fnmatch_recursive handles ** patterns that fnmatch does not support."""
+
+    def test_recursive_glob_matches_nested_path(self) -> None:
+        """Pattern /tmp/** matches /tmp/a/b/c."""
+        assert _fnmatch_recursive("/tmp/a/b/c", "/tmp/**")
+
+    def test_recursive_glob_matches_direct_child(self) -> None:
+        """Pattern /tmp/** matches /tmp/file.txt."""
+        assert _fnmatch_recursive("/tmp/file.txt", "/tmp/**")
+
+    def test_recursive_glob_matches_base(self) -> None:
+        """Pattern /tmp/** matches /tmp itself."""
+        assert _fnmatch_recursive("/tmp", "/tmp/**")
+
+    def test_recursive_glob_no_false_positive(self) -> None:
+        """Pattern /tmp/** does not match /home/file.txt."""
+        assert not _fnmatch_recursive("/home/file.txt", "/tmp/**")
+
+    def test_plain_glob_still_works(self) -> None:
+        """Patterns without ** still work via fnmatch."""
+        assert _fnmatch_recursive("report.docx", "*.docx")
+        assert not _fnmatch_recursive("report.txt", "*.docx")
+
+
+class TestPathRuleRecursiveGlob:
+    """User path_rules with ** patterns work correctly in PermissionChecker."""
+
+    def test_recursive_glob_deny(self) -> None:
+        """PathRule with /tmp/** pattern denies nested paths."""
+        checker = PermissionChecker(PermissionConfig(
+            mode=PermissionMode.FULL_AUTO,
+            path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.DENY)],
+        ))
+        d = checker.check_path("file_read", "/tmp/secrets/deep/nested/key.pem")
+        assert not d.allowed
+
+    def test_recursive_glob_write(self) -> None:
+        """PathRule with /data/** WRITE pattern allows write to nested paths."""
+        checker = PermissionChecker(PermissionConfig(
+            mode=PermissionMode.FULL_AUTO,
+            path_rules=[PathRule(pattern="/data/**", access=PathAccess.WRITE)],
+        ))
+        d = checker.check_path("file_write", "/data/projects/myapp/config.json")
+        assert d.allowed
+
+    def test_recursive_glob_read_blocks_write_tool(self) -> None:
+        """PathRule with /docs/** READ pattern blocks write tool on nested paths."""
+        checker = PermissionChecker(PermissionConfig(
+            mode=PermissionMode.FULL_AUTO,
+            path_rules=[PathRule(pattern="/docs/**", access=PathAccess.READ)],
+        ))
+        d = checker.check_path("file_write", "/docs/archive/old/report.txt")
+        assert not d.allowed
+
+    def test_recursive_glob_does_not_match_unrelated(self) -> None:
+        """PathRule with /tmp/** does not affect /home paths."""
+        checker = PermissionChecker(PermissionConfig(
+            mode=PermissionMode.FULL_AUTO,
+            path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.DENY)],
+        ))
+        d = checker.check_path("file_read", "/home/user/file.txt")
+        assert d.allowed

@@ -135,18 +135,21 @@ class PythonRuntime:
 
     # ── Retrieval ──────────────────────────────────────────────────────
 
-    def retrieve(self, name: str) -> Any:
+    _MISSING = object()
+
+    def retrieve(self, name: str, default: Any = None) -> Any:
         """Retrieve a runtime value by name.
 
         Looks up in the IPython namespace directly.
 
         Args:
             name: Variable name to retrieve.
+            default: Value to return if the name is not found (default None).
 
         Returns:
-            The Python object, or None if not found.
+            The Python object, or *default* if not found.
         """
-        return self._executor.get(name)
+        return self._executor.get(name, default=default)
 
     # ── Description (for LLM context injection) ────────────────────────
 

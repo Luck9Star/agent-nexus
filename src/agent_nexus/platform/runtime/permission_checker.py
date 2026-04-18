@@ -81,10 +81,29 @@ def _expand_user(path: str) -> str:
     return os.path.abspath(os.path.expanduser(path))
 
 
+def _fnmatch_recursive(value: str, pattern: str) -> bool:
+    """Match *value* against *pattern*, supporting recursive ** globs.
+
+    fnmatch does not handle ** (match across directory separators).
+    This helper converts ** patterns to a prefix check so that e.g.
+    /tmp/** matches /tmp/a/b/c.
+    """
+    if "/**" in pattern:
+        # Recursive glob: /tmp/** matches /tmp, /tmp/a, /tmp/a/b/c
+        prefix = pattern[:pattern.index("/**")]
+        if value == prefix or value.startswith(prefix + "/"):
+            return True
+        # Also try plain fnmatch for non-recursive remainder after **
+        remainder = pattern[pattern.index("/**") + 3:]
+        if not remainder:
+            return False
+    return fnmatch.fnmatch(value, pattern)
+
+
 def _matches_any_pattern(value: str, patterns: list[str] | tuple[str, ...]) -> bool:
     """Check whether *value* matches any of the given fnmatch patterns."""
     for pattern in patterns:
-        if fnmatch.fnmatch(value, pattern):
+        if _fnmatch_recursive(value, pattern):
             return True
     return False
 
@@ -195,7 +214,7 @@ class PermissionChecker:
         expanded = _expand_user(path)
         for rule in self._config.path_rules:
             expanded_pattern = _expand_user(rule.pattern)
-            if fnmatch.fnmatch(expanded, expanded_pattern):
+            if _fnmatch_recursive(expanded, expanded_pattern):
                 return self._apply_path_access(rule.access, tool_name, path)
 
         # 4. No matching rule — default allow (sensitive paths already handled above)

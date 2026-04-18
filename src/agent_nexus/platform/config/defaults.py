@@ -32,7 +32,7 @@ LOCKFILE: str = "lockfile.json"
 # Built-in provider definitions
 # ---------------------------------------------------------------------------
 
-DEFAULT_PROVIDERS: dict[str, dict[str, str]] = {
+DEFAULT_PROVIDERS: dict[str, dict[str, object]] = {
     "openai": {
         "api_key_env": "OPENAI_API_KEY",
         "api": ProviderApiType.OPENAI_COMPATIBLE,

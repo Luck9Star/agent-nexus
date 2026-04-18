@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 # User namespace keys that are IPython internals, not user variables
 _IPYTHON_INTERNALS = frozenset({
-    "In", "Out", "exit", "quit", "get_ipython", "_", "__", "___",
-    "_ih", "_oh", "_sh", "_dh", "_", "__", "___",
+    "In", "Out", "exit", "quit", "get_ipython",
+    "_", "__", "___", "_ih", "_oh", "_sh", "_dh",
 })
 
 
@@ -215,15 +215,24 @@ class IPythonExecutor:
         else:
             self._pending_injects[name] = value
 
-    def get(self, name: str) -> Any:
+    _MISSING = object()
+
+    def get(self, name: str, default: Any = None) -> Any:
         """Retrieve a variable from the namespace.
 
+        Args:
+            name: Variable name to retrieve.
+            default: Value to return if the name is not found (default None).
+
         Returns:
-            The Python object, or None if not found.
+            The Python object, or *default* if not found.
         """
-        if self._shell is not None:
-            return self._shell.user_ns.get(name)
-        return self._pending_injects.get(name)
+        ns = self._shell.user_ns if self._shell is not None else self._pending_injects
+        sentinel = object()
+        result = ns.get(name, sentinel)
+        if result is sentinel:
+            return default
+        return result
 
     def namespace_keys(self) -> list[str]:
         """List all user-defined variables in the namespace.
