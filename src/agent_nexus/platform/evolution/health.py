@@ -44,7 +44,10 @@ class HealthReport:
         status = "HEALTHY" if self.is_healthy else "UNHEALTHY"
         parts = [f"[{status}] {self.skill_name} ({self.skill_id})"]
         for key, val in self.metrics.items():
-            parts.append(f"  {key}: {val:.2%}" if val < 10 else f"  {key}: {val}")
+            if key.endswith("_rate"):
+                parts.append(f"  {key}: {val:.2%}")
+            else:
+                parts.append(f"  {key}: {val}")
         for s in self.suggestions:
             targets = ", ".join(s.target_skill_ids) or "(new)"
             parts.append(

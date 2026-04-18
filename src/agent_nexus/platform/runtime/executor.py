@@ -104,8 +104,15 @@ class IPythonExecutor:
 
             with capture_output() as captured:
                 transformed = self._shell.transform_cell(code)
+                # Run in a thread so asyncio.wait_for can enforce the
+                # timeout.  run_cell_async runs synchronous Python which
+                # never yields to the event loop; wrapping in to_thread
+                # gives the loop control so CancelledError is delivered
+                # promptly on timeout.
                 result = await asyncio.wait_for(
-                    self._shell.run_cell_async(transformed, transformed_cell=transformed),
+                    asyncio.to_thread(
+                        self._run_cell_sync, transformed,
+                    ),
                     timeout=timeout,
                 )
 
@@ -145,6 +152,14 @@ class IPythonExecutor:
                 success=False,
                 error=f"Execution error: {e}",
             )
+
+    def _run_cell_sync(self, transformed: str) -> Any:
+        """Synchronous cell execution for use with asyncio.to_thread.
+
+        Uses run_cell (synchronous API) so the event loop retains
+        control and can enforce timeouts via wait_for.
+        """
+        return self._shell.run_cell(transformed, store_history=False)
 
     def inject(self, name: str, value: Any) -> None:
         """Inject a variable into the IPython namespace.

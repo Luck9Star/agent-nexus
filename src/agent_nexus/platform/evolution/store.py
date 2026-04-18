@@ -702,38 +702,35 @@ class EvolutionStore:
         skill_ids: list[str],
         orchestration_toml: str | None = None,
     ) -> None:
-        """Insert or replace an agent record."""
+        """Insert or update an agent record."""
         skill_ids_json = json.dumps(skill_ids, ensure_ascii=False)
         now = _now_iso()
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO agent_records (
+                INSERT INTO agent_records (
                     agent_id, name, type, skill_ids, orchestration_toml,
                     effective_rate, avg_steps, avg_duration_ms,
                     is_active, created_at, updated_at
                 ) VALUES (
                     ?, ?, ?, ?, ?,
-                    COALESCE(
-                        (SELECT effective_rate FROM agent_records WHERE agent_id = ?),
-                        0.0
-                    ),
-                    (SELECT avg_steps FROM agent_records WHERE agent_id = ?),
-                    (SELECT avg_duration_ms FROM agent_records WHERE agent_id = ?),
-                    COALESCE(
-                        (SELECT is_active FROM agent_records WHERE agent_id = ?),
-                        1
-                    ),
-                    COALESCE(
-                        (SELECT created_at FROM agent_records WHERE agent_id = ?),
-                        ?
-                    ),
-                    ?
+                    0.0, NULL, NULL,
+                    1, ?, ?
                 )
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    name = excluded.name,
+                    type = excluded.type,
+                    skill_ids = excluded.skill_ids,
+                    orchestration_toml = COALESCE(excluded.orchestration_toml, agent_records.orchestration_toml),
+                    effective_rate = CASE WHEN agent_records.effective_rate IS NOT NULL THEN agent_records.effective_rate ELSE 0.0 END,
+                    avg_steps = agent_records.avg_steps,
+                    avg_duration_ms = agent_records.avg_duration_ms,
+                    is_active = agent_records.is_active,
+                    created_at = agent_records.created_at,
+                    updated_at = excluded.updated_at
                 """,
                 (
                     agent_id, name, type, skill_ids_json, orchestration_toml,
-                    agent_id, agent_id, agent_id, agent_id, agent_id,
                     now, now,
                 ),
             )

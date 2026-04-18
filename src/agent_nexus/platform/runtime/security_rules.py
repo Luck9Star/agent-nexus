@@ -227,3 +227,23 @@ class RegexRule(SecurityRule):
                 )
 
         return violations
+
+    def check_source(self, source: str) -> list[SecurityViolation]:
+        """Check the full source code string against regex patterns.
+
+        Unlike check() which operates on a single AST node, this runs
+        all patterns against the complete source string for efficiency.
+        """
+        violations: list[SecurityViolation] = []
+        for compiled_pattern in self.patterns:
+            if compiled_pattern.search(source):
+                desc = self.description or compiled_pattern.pattern
+                violations.append(
+                    SecurityViolation(
+                        rule_type="regex",
+                        node_type="Module",
+                        code_snippet=source[:200],
+                        message=f"Regex rule violation: '{desc}'",
+                    )
+                )
+        return violations

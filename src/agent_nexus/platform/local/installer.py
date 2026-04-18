@@ -428,9 +428,8 @@ class GitInstaller:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.wait()
+        _, stderr = await proc.communicate()
         if proc.returncode != 0:
-            stderr = await proc.stderr.read() if proc.stderr else b""
             raise InstallationError(
                 f"git {' '.join(args)} failed (rc={proc.returncode}): "
                 f"{stderr.decode().strip()}"
@@ -445,9 +444,12 @@ class GitInstaller:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
-            raise InstallationError(f"git {' '.join(args)} failed (rc={proc.returncode})")
+            raise InstallationError(
+                f"git {' '.join(args)} failed (rc={proc.returncode}): "
+                f"{stderr.decode().strip()}"
+            )
         return stdout.decode()
 
 

@@ -297,8 +297,12 @@ class IPCProtocol:
                 except (IPCError, asyncio.TimeoutError):
                     return False
                 if resp.type == AgentToPlatformType.PROGRESS:
-                    return True
-                # Not the pong — buffer it for later consumption.
+                    if resp.content and "pong" in resp.content.lower():
+                        return True
+                    # Not a pong — buffer it for later consumption.
+                    self._peek_buffer.append(resp)
+                    continue
+                # Non-progress message — buffer and keep looking for pong.
                 self._peek_buffer.append(resp)
         except (IPCError, asyncio.TimeoutError):
             return False
