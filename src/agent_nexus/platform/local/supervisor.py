@@ -379,6 +379,6 @@ class AgentSupervisor:
                     if key:
                         env[provider.api_key_env] = key
         except Exception:
-            pass  # Config loading failure should not prevent startup
+            logger.warning("Failed to load config for env building", exc_info=True)
 
         return env

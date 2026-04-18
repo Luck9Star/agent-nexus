@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -1825,3 +1826,35 @@ class TestBuildCommandUnsafeName:
         assert result is not None
         assert isinstance(result, list)
         assert len(result) > 0
+
+
+class TestSupervisorConfigLoadLogsWarning:
+    """_build_env must log a warning (not silently swallow) when config
+    loading fails.  Regression test for silent `except Exception: pass`.
+    """
+
+    def test_config_load_failure_logs_warning(self, caplog) -> None:
+        """When config_loader.load_config raises, a warning is logged."""
+        pm = MagicMock()
+        lockfile = MagicMock()
+        config_loader = MagicMock()
+        config_loader.load_config.side_effect = RuntimeError("config exploded")
+
+        supervisor = AgentSupervisor(
+            process_manager=pm,
+            lockfile_manager=lockfile,
+            config_loader=config_loader,
+            config_dir=Path("/tmp/test"),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.local.supervisor"):
+            env = supervisor._build_env("test-agent", LockfileEntry(
+                source="git+https://example.com/test-agent",
+                version="1.0.0",
+                commit_sha="abc123",
+                agent_type="atomic",
+            ))
+
+        # env should be empty (no crash), but warning should be logged
+        assert env == {}
+        assert "Failed to load config" in caplog.text

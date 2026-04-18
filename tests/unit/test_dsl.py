@@ -243,6 +243,23 @@ class TestOrchestrationDefinition:
         d = defn.get_task_depth("T1")
         assert d == -1
 
+    def test_downstream_of_cycle_also_neg_one(self) -> None:
+        """Tasks depending on a cyclic task also get depth -1."""
+        agents = {"a1": DSLAgent(name="a1", description="A")}
+        tasks = [
+            DSLTask(id="T1", description="", agent="a1", blocked_by=["T2"]),
+            DSLTask(id="T2", description="", agent="a1", blocked_by=["T1"]),
+            DSLTask(id="T3", description="", agent="a1", blocked_by=["T1"]),
+        ]
+        defn = OrchestrationDefinition(
+            goal="Cycle + downstream",
+            agent_name="test",
+            agents=agents,
+            tasks=tasks,
+            tool_loading=DSLToolLoading(),
+        )
+        assert defn.get_task_depth("T3") == -1
+
 
 # ============================================================================
 # parse_string() — valid and error cases

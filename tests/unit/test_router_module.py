@@ -1373,3 +1373,102 @@ class TestExecuteSingleAgentErrorWrapping:
             await router._execute_single_agent(
                 "test-agent", "hello", conversation_id="c1"
             )
+
+
+# ============================================================================
+# Merged from iteration 23: SubtaskController CancelledError handling
+# ============================================================================
+
+
+class TestSubtaskCancelledError:
+    """SubtaskController must catch CancelledError in run_parallel and run_with_retry."""
+
+    @pytest.mark.asyncio
+    async def test_run_parallel_catches_cancelled_error(self) -> None:
+        """CancelledError in run_parallel is captured, not raised."""
+        controller = SubtaskController()
+
+        async def failing_coro():
+            raise asyncio.CancelledError("test cancel")
+
+        results = await controller.run_parallel([failing_coro()])
+        assert len(results) == 1
+        assert isinstance(results[0], asyncio.CancelledError)
+
+    @pytest.mark.asyncio
+    async def test_run_with_retry_catches_cancelled_error(self) -> None:
+        """CancelledError in run_with_retry is retried, not propagated."""
+
+        attempt = 0
+
+        async def cancel_then_succeed():
+            nonlocal attempt
+            attempt += 1
+            if attempt == 1:
+                raise asyncio.CancelledError("first cancel")
+            return "ok"
+
+        controller = SubtaskController()
+        result = await controller.run_with_retry(
+            cancel_then_succeed, max_retries=2,
+        )
+        assert result == "ok"
+
+    @pytest.mark.asyncio
+    async def test_run_with_retry_all_cancelled(self) -> None:
+        """All attempts CancelledError raises the last one."""
+
+        async def always_cancel():
+            raise asyncio.CancelledError("always")
+
+        controller = SubtaskController()
+        with pytest.raises(asyncio.CancelledError, match="always"):
+            await controller.run_with_retry(always_cancel, max_retries=1)
+
+    @pytest.mark.asyncio
+    async def test_run_parallel_mixed_success_and_cancel(self) -> None:
+        """Mixed success and CancelledError results."""
+        controller = SubtaskController()
+
+        async def ok():
+            return "done"
+
+        async def cancel():
+            raise asyncio.CancelledError("nope")
+
+        results = await controller.run_parallel([ok(), cancel()])
+        assert results[0] == "done"
+        assert isinstance(results[1], asyncio.CancelledError)
+
+
+# ============================================================================
+# Merged from iteration 23: WorkflowContext.close() drops task_graph
+# ============================================================================
+
+
+class TestWorkflowContextClose:
+    """WorkflowContext.close() must set task_graph to None."""
+
+    def test_close_sets_task_graph_none(self) -> None:
+        ctx = WorkflowContext(
+            conversation_id="c1",
+            message="hi",
+            agent_name="test",
+        )
+        assert ctx.task_graph is None
+        ctx.close()
+        assert ctx.task_graph is None
+
+    def test_close_with_task_graph(self, tmp_path) -> None:
+        from agent_nexus.platform.orchestration.task_graph import TaskGraph
+
+        tg = TaskGraph(tmp_path / "test.db")
+        ctx = WorkflowContext(
+            conversation_id="c1",
+            message="hi",
+            agent_name="test",
+            task_graph=tg,
+        )
+        assert ctx.task_graph is not None
+        ctx.close()
+        assert ctx.task_graph is None

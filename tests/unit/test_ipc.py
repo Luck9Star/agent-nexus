@@ -542,3 +542,81 @@ class TestIPCSendDrainTimeout:
         await stream.send(msg)
 
         mock_stdin.write.assert_called_once()
+
+
+# ============================================================================
+# Iteration 23 merge: TestIPCSendBrokenPipe
+# ============================================================================
+
+
+class TestIPCSendBrokenPipe:
+    @pytest.mark.asyncio
+    async def test_write_broken_pipe(self) -> None:
+        """write() BrokenPipeError is wrapped as IPCConnectionError."""
+        mock_stdin = MagicMock()
+        mock_stdin.write = MagicMock(side_effect=BrokenPipeError("pipe closed"))
+        mock_stdout = MagicMock()
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
+
+        with pytest.raises(IPCConnectionError, match="stdin closed"):
+            await stream.send(msg)
+
+    @pytest.mark.asyncio
+    async def test_drain_broken_pipe(self) -> None:
+        """drain() BrokenPipeError is wrapped as IPCConnectionError."""
+        mock_stdin = MagicMock()
+        mock_stdin.write = MagicMock()
+        mock_stdin.drain = AsyncMock(side_effect=BrokenPipeError("gone"))
+        mock_stdout = MagicMock()
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
+
+        with pytest.raises(IPCConnectionError, match="stdin closed during drain"):
+            await stream.send(msg)
+
+    @pytest.mark.asyncio
+    async def test_drain_connection_reset(self) -> None:
+        """drain() ConnectionResetError is wrapped as IPCConnectionError."""
+        mock_stdin = MagicMock()
+        mock_stdin.write = MagicMock()
+        mock_stdin.drain = AsyncMock(side_effect=ConnectionResetError("reset"))
+        mock_stdout = MagicMock()
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
+
+        with pytest.raises(IPCConnectionError, match="stdin closed during drain"):
+            await stream.send(msg)
+
+
+# ============================================================================
+# Iteration 23 merge: TestIPCCloseDrainBound
+# ============================================================================
+
+
+class TestIPCCloseDrainBound:
+    @pytest.mark.asyncio
+    async def test_close_drain_stops_after_max_chunks(self) -> None:
+        """close() drain loop stops after 64 chunks even with more data."""
+        mock_stdin = MagicMock()
+        mock_stdin.is_closing.return_value = True
+        mock_stdin.wait_closed = AsyncMock()
+        mock_stdout = MagicMock()
+        # Simulate unlimited output
+        call_count = 0
+
+        async def infinite_read(n):
+            nonlocal call_count
+            call_count += 1
+            return b"x" * n  # never returns b"" → would loop forever
+
+        mock_stdout.read = infinite_read
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        await stream.close()
+
+        # Should stop at 64 chunks, not loop forever
+        assert call_count == 64

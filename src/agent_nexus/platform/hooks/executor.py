@@ -284,7 +284,10 @@ class HookExecutor:
                     proc.kill()
                 except ProcessLookupError:
                     pass
-                await proc.wait()
+                try:
+                    await proc.wait()
+                except ProcessLookupError:
+                    pass
             return HookExecution(
                 hook=hook,
                 passed=False,

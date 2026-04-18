@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -481,3 +481,54 @@ class TestBlockingBehavior:
         assert len(result.results) == 2  # prompt + failed command
         assert result.results[0].passed is True
         assert result.results[1].passed is False
+
+
+class TestCommandHookProcessCleanup:
+    """_execute_command must not crash on ProcessLookupError during cleanup.
+
+    When the generic exception handler runs, it calls proc.kill() then
+    proc.wait(). If the process was already reaped (race condition),
+    both can raise ProcessLookupError — which must be caught, not propagated.
+    """
+
+    @pytest.mark.asyncio
+    async def test_process_reaped_before_kill(self) -> None:
+        """If proc.kill() raises ProcessLookupError, it's caught."""
+        hook = _cmd_hook(command="sleep 999")
+        executor = HookExecutor(hooks=[hook])
+
+        with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
+            mock_proc = AsyncMock()
+            mock_proc.communicate = AsyncMock(
+                side_effect=RuntimeError("simulated subprocess failure")
+            )
+            mock_proc.kill = Mock(side_effect=ProcessLookupError("already dead"))
+            mock_proc.wait = AsyncMock()
+            mock_proc.returncode = None
+            mock_sp.return_value = mock_proc
+
+            result = await executor.execute_event(HookEvent.PRE_EXECUTION)
+            assert len(result.results) == 1
+            assert result.results[0].passed is False
+
+    @pytest.mark.asyncio
+    async def test_process_reaped_before_wait(self) -> None:
+        """If proc.wait() raises ProcessLookupError after kill, it's caught."""
+        hook = _cmd_hook(command="sleep 999")
+        executor = HookExecutor(hooks=[hook])
+
+        with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
+            mock_proc = AsyncMock()
+            mock_proc.communicate = AsyncMock(
+                side_effect=RuntimeError("simulated subprocess failure")
+            )
+            mock_proc.kill = Mock()
+            mock_proc.wait = AsyncMock(
+                side_effect=ProcessLookupError("already dead")
+            )
+            mock_proc.returncode = None
+            mock_sp.return_value = mock_proc
+
+            result = await executor.execute_event(HookEvent.PRE_EXECUTION)
+            assert len(result.results) == 1
+            assert result.results[0].passed is False

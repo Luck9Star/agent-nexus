@@ -156,7 +156,7 @@ class TestEvolutionStoreCRUD:
         store = _store_with_records(tmp_path, r)
         assert store.deactivate_skill("s1") is True
         assert store.get_skill_record("s1") is not None
-        assert store.get_skill_record("s1").is_active is False
+        assert store.get_skill_record("s1").is_active is False  # type: ignore[union-attr]
 
     def test_deactivate_nonexistent(self, tmp_path: Path) -> None:
         store = _store_with_records(tmp_path)
@@ -168,6 +168,7 @@ class TestEvolutionStoreCRUD:
         updated = _make_record("s1", "updated")
         store.save_skill_record(updated)
         got = store.get_skill_record("s1")
+        assert got is not None
         assert got.name == "updated"
 
     def test_get_versions(self, tmp_path: Path) -> None:
@@ -189,6 +190,7 @@ class TestEvolutionStoreLineageParents:
         )
         store = _store_with_records(tmp_path, p1, p2, r)
         got = store.get_skill_record("s1")
+        assert got is not None
         assert set(got.lineage.parent_skill_ids) == {"p1", "p2"}
 
     def test_parents_updated_on_resave(self, tmp_path: Path) -> None:
@@ -200,6 +202,7 @@ class TestEvolutionStoreLineageParents:
         r2 = _make_record("s1", "child", parent_ids=["pb", "pc"])
         store.save_skill_record(r2)
         got = store.get_skill_record("s1")
+        assert got is not None
         assert set(got.lineage.parent_skill_ids) == {"pb", "pc"}
 
 
@@ -209,6 +212,7 @@ class TestEvolutionStoreCounters:
         store = _store_with_records(tmp_path, r)
         store.increment_counters("s1", selected=True)
         got = store.get_skill_record("s1")
+        assert got is not None
         assert got.total_selections == 6
 
     def test_increment_multiple(self, tmp_path: Path) -> None:
@@ -218,6 +222,7 @@ class TestEvolutionStoreCounters:
             "s1", selected=True, applied=True, completed=True
         )
         got = store.get_skill_record("s1")
+        assert got is not None
         assert got.total_selections == 11
         assert got.total_applied == 6
         assert got.total_completions == 4
@@ -227,13 +232,16 @@ class TestEvolutionStoreCounters:
         store = _store_with_records(tmp_path, r)
         store.increment_counters("s1")
         got = store.get_skill_record("s1")
+        assert got is not None
         assert got.total_selections == 5
 
     def test_increment_fallback(self, tmp_path: Path) -> None:
         r = _make_record("s1", "x", selections=3, fallbacks=2)
         store = _store_with_records(tmp_path, r)
         store.increment_counters("s1", fell_back=True)
-        assert store.get_skill_record("s1").total_fallbacks == 3
+        got = store.get_skill_record("s1")
+        assert got is not None
+        assert got.total_fallbacks == 3
 
 
 class TestEvolutionStoreAnalysis:
@@ -283,6 +291,7 @@ class TestEvolutionStoreAnalysis:
             ],
         )
         got = store.get_skill_record("s1")
+        assert got is not None
         assert got.total_selections == 1
         assert got.total_applied == 1
         assert got.total_completions == 1
@@ -303,8 +312,12 @@ class TestEvolutionStoreEvolveSkill:
         )
         store.evolve_skill(child, ["p1"])
 
-        assert store.get_skill_record("p1").is_active is False
-        assert store.get_skill_record("c1").is_active is True
+        rec_p1 = store.get_skill_record("p1")
+        assert rec_p1 is not None
+        assert rec_p1.is_active is False
+        rec_c1 = store.get_skill_record("c1")
+        assert rec_c1 is not None
+        assert rec_c1.is_active is True
 
     def test_derived_keeps_parent_active(self, tmp_path: Path) -> None:
         parent = _make_record("p1", "base", is_active=True)
@@ -319,8 +332,12 @@ class TestEvolutionStoreEvolveSkill:
         )
         store.evolve_skill(child, ["p1"])
 
-        assert store.get_skill_record("p1").is_active is True
-        assert store.get_skill_record("c1").is_active is True
+        rec_p1 = store.get_skill_record("p1")
+        assert rec_p1 is not None
+        assert rec_p1.is_active is True
+        rec_c1 = store.get_skill_record("c1")
+        assert rec_c1 is not None
+        assert rec_c1.is_active is True
 
     def test_lineage_parents_stored(self, tmp_path: Path) -> None:
         p1 = _make_record("p1", "a")
@@ -333,6 +350,7 @@ class TestEvolutionStoreEvolveSkill:
         store.evolve_skill(child, ["p1", "p2"])
 
         got = store.get_skill_record("c1")
+        assert got is not None
         assert set(got.lineage.parent_skill_ids) == {"p1", "p2"}
 
 
@@ -633,7 +651,9 @@ class TestSkillEvolverFix:
             direction="Fix needed",
         )
         evolver.evolve(suggestion)
-        assert store.get_skill_record("p1").is_active is False
+        rec = store.get_skill_record("p1")
+        assert rec is not None
+        assert rec.is_active is False
 
     def test_fix_no_parent_returns_error(self, tmp_path: Path) -> None:
         store = _store_with_records(tmp_path)
@@ -671,6 +691,7 @@ class TestSkillEvolverDerived:
         )
         result = evolver.evolve(suggestion)
         assert result.success
+        assert result.new_record is not None
         assert "enhanced" in result.new_record.name
         assert result.new_record.lineage.origin == SkillOrigin.DERIVED
 
@@ -684,7 +705,9 @@ class TestSkillEvolverDerived:
             target_skill_ids=["p1"],
         )
         evolver.evolve(suggestion)
-        assert store.get_skill_record("p1").is_active is True
+        rec = store.get_skill_record("p1")
+        assert rec is not None
+        assert rec.is_active is True
 
     def test_derived_merge_two_parents(self, tmp_path: Path) -> None:
         p1 = _make_record("p1", "skill-a", generation=0)
@@ -698,6 +721,7 @@ class TestSkillEvolverDerived:
         )
         result = evolver.evolve(suggestion)
         assert result.success
+        assert result.new_record is not None
         assert "merged" in result.new_record.name
         assert result.new_record.lineage.generation == 2
 
@@ -724,6 +748,7 @@ class TestSkillEvolverCaptured:
         )
         result = evolver.evolve(suggestion)
         assert result.success
+        assert result.new_record is not None
         assert result.new_record.lineage.origin == SkillOrigin.CAPTURED
         assert result.new_record.lineage.generation == 0
         assert result.new_record.lineage.parent_skill_ids == []
@@ -740,6 +765,7 @@ class TestSkillEvolverCaptured:
             suggestion, capture_directory="skills/custom"
         )
         assert result.success
+        assert result.new_record is not None
         assert result.new_record.directory == "skills/custom"
 
     def test_captured_no_direction_returns_error(self, tmp_path: Path) -> None:
@@ -803,6 +829,7 @@ class TestSkillEvolverToolDegradation:
         )
         assert len(results) == 1
         assert results[0].success
+        assert results[0].new_record is not None
         assert "skill-1" in results[0].new_record.lineage.parent_skill_ids
 
     def test_anti_loop_skips_already_addressed(self, tmp_path: Path) -> None:
@@ -1792,3 +1819,32 @@ class TestAddressedOnSuccessOnly:
         assert len(results) == 1
         assert results[0].success is True
         assert skill.id in evolver._addressed.get("tool-x", set())
+
+
+class TestAnalyzerCapturedDedup:
+    """Analyzer dedup with CAPTURED suggestions (empty target_skill_ids) must
+    not crash.  Regression test for the IndexError that occurred when
+    target_skill_ids was [] and the dedup code indexed [0].
+    """
+
+    def test_captured_suggestion_dedup_no_crash(self, tmp_path: Path) -> None:
+        """CAPTURED with empty target_skill_ids deduplicates safely."""
+        store = EvolutionStore(tmp_path / "test.db")
+        analyzer = ExecutionAnalyzer(store)
+
+        # Task completed with no skills -> CAPTURED suggestion
+        ctx = EvolutionContext(
+            agent_id="a",
+            task_id="t-1",
+            skill_ids_used=[],
+            skills_applied=[],
+            skills_fell_back=[],
+            task_completed=True,
+        )
+        result = analyzer.analyze_execution(ctx)
+        captured = [
+            s for s in result.suggestions
+            if s.evolution_type == EvolutionType.CAPTURED
+        ]
+        assert len(captured) == 1
+        assert captured[0].target_skill_ids == []

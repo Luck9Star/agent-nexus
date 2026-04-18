@@ -288,7 +288,8 @@ class ExecutionAnalyzer:
         # multiple thresholds — keep the one with highest confidence.
         seen: dict[tuple[EvolutionType, str], EvolutionSuggestion] = {}
         for s in suggestions:
-            key = (s.evolution_type, s.target_skill_ids[0] if s.target_skill_ids else "")
+            dedup_id = s.target_skill_ids[0] if s.target_skill_ids else ""
+            key = (s.evolution_type, dedup_id)
             if key not in seen or s.confidence > seen[key].confidence:
                 seen[key] = s
         return list(seen.values())
