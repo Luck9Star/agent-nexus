@@ -1784,8 +1784,8 @@ class TestMcpToolAdapterIPCLock:
         schema = _make_tool_schema("tool")
         adapter = McpToolAdapter(server_name="lock-test-agent", tool_schema=schema)
 
-        # Before any execute, no lock for this agent's sanitized name
-        assert "lock_test_agent" not in McpToolAdapter._ipc_locks
+        # Before any execute, no lock for this agent's original name
+        assert "lock-test-agent" not in McpToolAdapter._ipc_locks
 
         handle = _mock_agent_handle("lock-test-agent", alive=True)
         response = AgentToPlatform(
@@ -1799,7 +1799,8 @@ class TestMcpToolAdapterIPCLock:
         McpToolAdapter._ipc_locks.clear()
         try:
             await adapter.execute(handle, {})
-            assert "lock_test_agent" in McpToolAdapter._ipc_locks
+            # Lock is keyed by original (unsanitized) agent_name, not server_name
+            assert "lock-test-agent" in McpToolAdapter._ipc_locks
         finally:
             McpToolAdapter._ipc_locks.clear()
 
@@ -1889,8 +1890,8 @@ class TestMcpToolAdapterIPCLock:
             )
             assert results[0]["output"] == "a"
             assert results[1]["output"] == "b"
-            assert "agent_a" in McpToolAdapter._ipc_locks
-            assert "agent_b" in McpToolAdapter._ipc_locks
+            assert "agent-a" in McpToolAdapter._ipc_locks
+            assert "agent-b" in McpToolAdapter._ipc_locks
         finally:
             McpToolAdapter._ipc_locks.clear()
 

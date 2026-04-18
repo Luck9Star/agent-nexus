@@ -94,7 +94,7 @@ class McpToolAdapter:
         )
 
         try:
-            lock = self._ipc_locks.setdefault(self.server_name, asyncio.Lock())
+            lock = self._ipc_locks.setdefault(self.agent_name, asyncio.Lock())
             async with lock:
                 await handle.ipc.send_chat(payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__")
                 response = await handle.ipc.receive_until_result(timeout=300.0)
