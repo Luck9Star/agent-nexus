@@ -5,7 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import IntEnum
 
+import logging
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 _utc_now = lambda: datetime.now(timezone.utc)
 
@@ -55,7 +59,7 @@ class ContextBudget(BaseModel):
             "forced_truncate_threshold",
         ):
             value = getattr(self, field_name)
-            if value > 1.0:
+            if not (0.0 <= value <= 1.0):
                 raise ValueError(
                     f"{field_name}={value} is out of range. "
                     "Thresholds must be fractions between 0.0 and 1.0 "
@@ -88,6 +92,10 @@ class TokenUsage(BaseModel):
             None -- within budget
         """
         if context_window <= 0:
+            logger.warning(
+                "context_window=%s is invalid, budget check skipped",
+                context_window,
+            )
             return None
         ratio = self.total_tokens / context_window
         if ratio > 0.95:

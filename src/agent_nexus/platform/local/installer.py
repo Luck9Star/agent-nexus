@@ -243,7 +243,11 @@ class GitInstaller:
         Returns the path to the cloned agent directory inside the cache.
         """
         cache_path = self._get_cache_path(source_url)
-        cache_path.mkdir(parents=True, exist_ok=True)
+
+        git_dir = cache_path / ".git"
+        if not git_dir.exists():
+            # Only create parent directory; git clone creates the target itself
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
 
         git_dir = cache_path / ".git"
         if not git_dir.exists():
@@ -342,7 +346,8 @@ class GitInstaller:
         if not manifest_path.exists():
             return {}
         try:
-            return yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+            raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+            return raw if isinstance(raw, dict) else {}
         except Exception:
             return {}
 

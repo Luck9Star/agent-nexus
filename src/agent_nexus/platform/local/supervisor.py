@@ -12,8 +12,11 @@ Not persistent across platform restarts -- reads lockfile on start.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
+
+_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 from agent_nexus.models.distribution import LockfileEntry
 from agent_nexus.platform.config.loader import ConfigLoader
@@ -319,6 +322,13 @@ class AgentSupervisor:
         2. Otherwise, try ``uvx <agent_name>``.
         3. Fallback: ``python3 <agent_dir>/main.py``.
         """
+        if not _SAFE_NAME_RE.match(agent_name):
+            logger.warning(
+                "Agent name '%s' contains unsafe characters, skipping command build",
+                agent_name,
+            )
+            return None
+
         # Strategy 1: venv python
         if entry.venv_path:
             venv_python = Path(entry.venv_path) / "bin" / "python"

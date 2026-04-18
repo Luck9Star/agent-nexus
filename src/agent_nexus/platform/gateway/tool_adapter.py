@@ -82,7 +82,7 @@ class McpToolAdapter:
             return {
                 "output": "",
                 "success": False,
-                "error": f"Agent '{self.server_name}' process is not alive",
+                "error": f"Agent '{self.agent_name}' process is not alive",
             }
 
         payload = json.dumps(
@@ -111,7 +111,7 @@ class McpToolAdapter:
 
         return {
             "output": response.content or "",
-            "success": response.status != "failed",
+            "success": response.status not in (None, "failed"),
         }
 
     # -- Schema helpers ----------------------------------------------------
