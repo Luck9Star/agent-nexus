@@ -245,6 +245,12 @@ class SkillLoader:
                 "SKILL.md frontmatter 'name' must not be empty or whitespace-only"
             )
 
+        type_val = str(frontmatter["agent_type"]).strip()
+        if not type_val:
+            raise ValueError(
+                "SKILL.md frontmatter 'agent_type' must not be empty or whitespace-only"
+            )
+
         known_keys = {"name", "agent_type", "triggers", "capabilities", "model_config"}
         extra = {k: v for k, v in frontmatter.items() if k not in known_keys}
 
@@ -253,8 +259,8 @@ class SkillLoader:
         raw_model_config = frontmatter.get("model_config", {})
 
         return SkillMetadata(
-            name=str(frontmatter["name"]),
-            agent_type=str(frontmatter["agent_type"]),
+            name=name_val,
+            agent_type=type_val,
             triggers=raw_triggers if isinstance(raw_triggers, list) else [raw_triggers],
             capabilities=(
                 raw_capabilities

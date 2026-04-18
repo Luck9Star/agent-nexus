@@ -109,6 +109,16 @@ class EvolutionMetrics(BaseModel):
     total_completions: int = Field(default=0, ge=0)
     total_fallbacks: int = Field(default=0, ge=0)
 
+    @model_validator(mode='after')
+    def _validate_counters(self) -> 'EvolutionMetrics':
+        if self.total_applied > self.total_selections:
+            raise ValueError("total_applied cannot exceed total_selections")
+        if self.total_completions > self.total_applied:
+            raise ValueError("total_completions cannot exceed total_applied")
+        if self.total_fallbacks > self.total_applied:
+            raise ValueError("total_fallbacks cannot exceed total_applied")
+        return self
+
 
 class EvolutionContext(BaseModel):
     """Context passed to the Evolution Engine when triggering evolution.

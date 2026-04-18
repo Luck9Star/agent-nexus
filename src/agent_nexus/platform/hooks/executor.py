@@ -227,7 +227,16 @@ class HookExecutor:
             )
 
         stdin_data = json.dumps(context).encode("utf-8")
-        args = shlex.split(hook.command)
+        try:
+            args = shlex.split(hook.command)
+        except ValueError as exc:
+            return HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error=f"Malformed command string: {exc}",
+                duration_ms=0.0,
+            )
         timeout = hook.timeout_seconds
 
         start = time.monotonic()

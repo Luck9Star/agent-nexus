@@ -335,7 +335,7 @@ class GitInstaller:
             )
             return result.strip()
         except Exception:
-            return "unknown"
+            return "latest"
 
     # ------------------------------------------------------------------
     # Internal: validation

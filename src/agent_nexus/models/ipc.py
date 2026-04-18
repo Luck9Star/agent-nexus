@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from enum import StrEnum
+import json
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class MessageDirection(StrEnum):
@@ -69,6 +70,15 @@ class AgentToPlatform(BaseModel):
     error: str | None = Field(default=None, max_length=65536)
     status: str | None = None
     output: Any | None = None
+
+    @field_validator("output")
+    @classmethod
+    def _validate_output_size(cls, v):
+        if v is not None:
+            serialized = json.dumps(v, default=str)
+            if len(serialized) > 65536:
+                raise ValueError("output exceeds maximum serialized size of 65536 bytes")
+        return v
 
 
 class IPCMessage(BaseModel):
