@@ -1,6 +1,7 @@
 """Self-Evolution Engine -- skill evolution, health diagnostics, and promotion.
 
 Public API:
+    EvolutionEngine         -- unified facade for all evolution operations
     EvolutionStore           -- SQLite persistence for skill records
     ExecutionAnalyzer        -- post-task analysis and quality evaluation
     SkillEvolver             -- FIX / DERIVED / CAPTURED evolution execution
@@ -29,8 +30,10 @@ from agent_nexus.platform.evolution.promotion import (
 from agent_nexus.platform.evolution.context_describer import (
     EvolutionContextDescriber,
 )
+from agent_nexus.platform.evolution.engine import EvolutionEngine
 
 __all__ = [
+    "EvolutionEngine",
     "EvolutionStore",
     "ExecutionAnalyzer",
     "SkillEvolver",

@@ -2057,3 +2057,281 @@ class TestCapturedSentenceSplit:
         assert result.new_record is not None
         # Should only use first sentence
         assert result.new_record.name == "handle-special-cases"
+
+
+# ============================================================================
+# 7. EvolutionEngine facade
+# ============================================================================
+
+
+from agent_nexus.platform.evolution.engine import EvolutionEngine
+
+
+class TestEvolutionEngineInit:
+    """EvolutionEngine creates all sub-components on init."""
+
+    def test_creates_all_sub_components(self, tmp_path: Path) -> None:
+        store = _store_with_records(tmp_path)
+        engine = EvolutionEngine(store)
+
+        assert isinstance(engine.analyzer, ExecutionAnalyzer)
+        assert isinstance(engine.evolver, SkillEvolver)
+        assert isinstance(engine.health_checker, HealthChecker)
+        assert isinstance(engine.compaction_guard, CompactionGuard)
+        assert isinstance(engine.promoter, AgentPromoter)
+
+    def test_store_property_returns_store(self, tmp_path: Path) -> None:
+        store = _store_with_records(tmp_path)
+        engine = EvolutionEngine(store)
+        assert engine.store is store
+
+    def test_sub_components_share_same_store(self, tmp_path: Path) -> None:
+        store = _store_with_records(tmp_path)
+        engine = EvolutionEngine(store)
+
+        assert engine.analyzer.store is store
+        assert engine.evolver.store is store
+        assert engine.health_checker.store is store
+        # CompactionGuard does not expose a public store property
+        assert engine.promoter.store is store
+
+
+class TestEvolutionEngineEvolvePostAnalysis:
+    """evolve(trigger='post_analysis') delegates to analyzer then evolver."""
+
+    def test_post_analysis_returns_analysis_result(self, tmp_path: Path) -> None:
+        r = _make_record("s1", "buggy", selections=100, fallbacks=50)
+        store = _store_with_records(tmp_path, r)
+        engine = EvolutionEngine(store)
+
+        ctx = EvolutionContext(
+            agent_id="agent-a",
+            task_id="t1",
+            task_completed=False,
+            skill_ids_used=["s1"],
+        )
+        result = engine.evolve(trigger="post_analysis", ctx=ctx)
+        assert isinstance(result, AnalysisResult)
+        assert result.task_id == "t1"
+
+    def test_post_analysis_creates_evolved_skill(self, tmp_path: Path) -> None:
+        """Post-analysis on unhealthy skill produces a new evolved skill."""
+        r = _make_record("s1", "buggy", selections=100, fallbacks=60)
+        store = _store_with_records(tmp_path, r)
+        engine = EvolutionEngine(store)
+
+        ctx = EvolutionContext(
+            agent_id="agent-a",
+            task_id="t1",
+            task_completed=False,
+            skill_ids_used=["s1"],
+        )
+        result = engine.evolve(trigger="post_analysis", ctx=ctx)
+        # The original should be deactivated (FIX evolution)
+        original = store.get_skill_record("s1")
+        assert original is not None
+        assert original.is_active is False
+
+    def test_post_analysis_requires_ctx(self, tmp_path: Path) -> None:
+        store = _store_with_records(tmp_path)
+        engine = EvolutionEngine(store)
+
+        with pytest.raises(ValueError, match="ctx.*required"):
+            engine.evolve(trigger="post_analysis")
+
+
+class TestEvolutionEngineEvolveToolDegradation:
+    """evolve(trigger='tool_degradation') delegates to evolver."""
+
+    def test_tool_degradation_returns_evolve_results(self, tmp_path: Path) -> None:
+        s1 = _make_record("s1", "a")
+        store = _store_with_records(tmp_path, s1)
+        engine = EvolutionEngine(store)
+
+        results = engine.evolve(
+            trigger="tool_degradation",
+            tool_key="tool-x",
+            problem_description="API changed",
+        )
+        assert isinstance(results, list)
+        assert all(isinstance(r, EvolveResult) for r in results)
+        assert len(results) == 1
+
+    def test_tool_degradation_filters_affected(self, tmp_path: Path) -> None:
+        s1 = _make_record("s1", "a")
+        s2 = _make_record("s2", "b")
+        store = _store_with_records(tmp_path, s1, s2)
+        engine = EvolutionEngine(store)
+
+        results = engine.evolve(
+            trigger="tool_degradation",
+            tool_key="tool-x",
+            problem_description="broken",
+            affected_skill_ids={"s1"},
+        )
+        assert len(results) == 1
+
+    def test_tool_degradation_requires_tool_key(self, tmp_path: Path) -> None:
+        store = _store_with_records(tmp_path)
+        engine = EvolutionEngine(store)
+
+        with pytest.raises(ValueError, match="tool_key.*required"):
+            engine.evolve(trigger="tool_degradation")
+
+
+class TestEvolutionEngineEvolveMetricCheck:
+    """evolve(trigger='metric_check') delegates to evolver."""
+
+    def test_metric_check_returns_evolve_results(self, tmp_path: Path) -> None:
+        r = _make_record("s1", "bad", selections=100, fallbacks=60)
+        store = _store_with_records(tmp_path, r)
+        engine = EvolutionEngine(store)
+
+        results = engine.evolve(trigger="metric_check")
+        assert isinstance(results, list)
+        assert len(results) == 1
+        assert results[0].success
+
+    def test_metric_check_skips_below_min(self, tmp_path: Path) -> None:
+        r = _make_record("s1", "new", selections=3, fallbacks=2)
+        store = _store_with_records(tmp_path, r)
+        engine = EvolutionEngine(store)
+
+        results = engine.evolve(trigger="metric_check", min_selections=5)
+        assert results == []
+
+
+class TestEvolutionEngineEvolveUnknown:
+    """evolve() rejects unknown triggers."""
+
+    def test_unknown_trigger_raises(self, tmp_path: Path) -> None:
+        store = _store_with_records(tmp_path)
+        engine = EvolutionEngine(store)
+
+        with pytest.raises(ValueError, match="Unknown trigger"):
+            engine.evolve(trigger="nonexistent")
+
+
+class TestEvolutionEngineConvenienceMethods:
+    """Convenience methods delegate correctly."""
+
+    def test_check_health_healthy(self, tmp_path: Path) -> None:
+        r = _make_record("s1", "good", selections=100, applied=80, completions=70, fallbacks=5)
+        store = _store_with_records(tmp_path, r)
+        engine = EvolutionEngine(store)
+
+        suggestions = engine.check_health("s1")
+        assert suggestions == []
+
+    def test_check_health_unhealthy(self, tmp_path: Path) -> None:
+        r = _make_record("s1", "bad", selections=100, fallbacks=60)
+        store = _store_with_records(tmp_path, r)
+        engine = EvolutionEngine(store)
+
+        suggestions = engine.check_health("s1")
+        assert len(suggestions) >= 1
+        assert any(s.evolution_type == EvolutionType.FIX for s in suggestions)
+
+    def test_check_health_missing_skill_raises(self, tmp_path: Path) -> None:
+        store = _store_with_records(tmp_path)
+        engine = EvolutionEngine(store)
+
+        with pytest.raises(ValueError, match="Skill not found"):
+            engine.check_health("nonexistent")
+
+    def test_diagnose_all(self, tmp_path: Path) -> None:
+        r1 = _make_record("s1", "healthy", selections=100, applied=80, completions=70, fallbacks=5)
+        r2 = _make_record("s2", "bad", selections=100, fallbacks=60)
+        store = _store_with_records(tmp_path, r1, r2)
+        engine = EvolutionEngine(store)
+
+        reports = engine.diagnose_all()
+        assert len(reports) == 2
+        assert reports["s1"].is_healthy is True
+        assert reports["s2"].is_healthy is False
+
+    def test_promote_candidate(self, tmp_path: Path) -> None:
+        r = _make_record(
+            "s1", "great",
+            selections=100, applied=90, completions=90,
+            directory="skills/great",
+        )
+        agents_dir = tmp_path / "agents"
+        store = _store_with_records(tmp_path, r)
+        engine = EvolutionEngine(store, agents_root=agents_dir)
+
+        candidate = PromotionCandidate(
+            skill_id="s1",
+            skill_name="great",
+            effective_rate=0.9,
+            total_selections=100,
+            directory="skills/great",
+            reason="test",
+        )
+        result = engine.promote_candidate(candidate)
+        assert isinstance(result, PromotionResult)
+        assert result.success
+        assert result.agent_name == "great"
+
+    def test_should_compact_true(self, tmp_path: Path) -> None:
+        store = _store_with_records(tmp_path)
+        engine = EvolutionEngine(store, agent_id="agent-a")
+        ctx = _make_agent_context(total_tokens=110_000, last_compaction_turn=0, turn=10)
+        assert engine.should_compact(ctx) is True
+
+    def test_should_compact_false(self, tmp_path: Path) -> None:
+        store = _store_with_records(tmp_path)
+        engine = EvolutionEngine(store, agent_id="agent-a")
+        ctx = _make_agent_context(total_tokens=50_000)
+        assert engine.should_compact(ctx) is False
+
+
+class TestEvolutionEngineImport:
+    """EvolutionEngine is importable from the evolution package."""
+
+    def test_import_from_package(self) -> None:
+        from agent_nexus.platform.evolution import EvolutionEngine as EE
+        assert EE is EvolutionEngine
+
+    def test_in_all(self) -> None:
+        import agent_nexus.platform.evolution as evo_pkg
+        assert "EvolutionEngine" in evo_pkg.__all__
+
+
+# ============================================================================
+# 8. Evolution health threshold constants
+# ============================================================================
+
+
+from agent_nexus.platform.evolution import thresholds
+
+
+class TestThresholdConstants:
+    """Verify threshold constants are in valid ranges and match documented values."""
+
+    def test_fallback_threshold_in_range(self) -> None:
+        assert 0.0 < thresholds._FALLBACK_THRESHOLD < 1.0
+
+    def test_fallback_threshold_value(self) -> None:
+        assert thresholds._FALLBACK_THRESHOLD == 0.4
+
+    def test_high_applied_for_fix_in_range(self) -> None:
+        assert 0.0 < thresholds._HIGH_APPLIED_FOR_FIX < 1.0
+
+    def test_low_completion_threshold_in_range(self) -> None:
+        assert 0.0 < thresholds._LOW_COMPLETION_THRESHOLD < 1.0
+
+    def test_moderate_effective_threshold_in_range(self) -> None:
+        assert 0.0 < thresholds._MODERATE_EFFECTIVE_THRESHOLD < 1.0
+
+    def test_min_applied_for_derived_in_range(self) -> None:
+        assert 0.0 < thresholds._MIN_APPLIED_FOR_DERIVED < 1.0
+
+    def test_fix_thresholds_consistent(self) -> None:
+        """FIX triggers when fallback > _FALLBACK_THRESHOLD."""
+        # Fallback rate of 0.5 should exceed the 0.4 threshold
+        assert 0.5 > thresholds._FALLBACK_THRESHOLD
+
+    def test_derived_thresholds_consistent(self) -> None:
+        """DERIVED triggers when effective < _MODERATE and applied > _MIN_APPLIED."""
+        assert thresholds._MODERATE_EFFECTIVE_THRESHOLD > thresholds._MIN_APPLIED_FOR_DERIVED
