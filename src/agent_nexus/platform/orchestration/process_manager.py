@@ -337,7 +337,13 @@ class ProcessManager:
             cwd = kwargs.get("cwd", handle.start_cwd)
             env = kwargs.get("env", handle.start_env)
 
-        await self.stop_agent(name)
+        try:
+            await self.stop_agent(name)
+        except KeyError:
+            logger.warning(
+                "Agent '%s' already removed during restart (concurrent stop)",
+                name,
+            )
         return await self.start_agent(name, command=command, cwd=cwd, env=env)
 
     # ------------------------------------------------------------------
@@ -357,6 +363,7 @@ class ProcessManager:
             KeyError: Agent *name* not found.
         """
         async with self._lock:
+            self._cleanup_dead()
             handle = self._agents.get(name)
             if handle is None:
                 raise KeyError(f"Agent '{name}' not found")

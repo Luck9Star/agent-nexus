@@ -377,15 +377,20 @@ class TestHealthCheck:
     async def test_health_check_dead_process(
         self, mock_spawn: AsyncMock, pm: ProcessManager
     ) -> None:
-        """Health check returns False for dead process."""
+        """Health check raises KeyError for dead process (cleaned up by _cleanup_dead)."""
         mock_spawn.return_value = _make_mock_process(returncode=None)
         handle = await pm.start_agent(name="dead-hc", command=["echo"])
 
         # Simulate process death
         handle.process.returncode = 1
 
-        result = await pm.health_check("dead-hc")
-        assert result is False
+        # _cleanup_dead inside health_check removes the dead handle,
+        # so the subsequent lookup raises KeyError
+        with pytest.raises(KeyError, match="not found"):
+            await pm.health_check("dead-hc")
+
+        # The dead handle should have been removed
+        assert pm.get_agent("dead-hc") is None
 
     async def test_health_check_not_found(self, pm: ProcessManager) -> None:
         """Health check for unknown agent raises KeyError."""
@@ -855,3 +860,121 @@ class TestProcessManagerStopAllLogsErrors:
 
         # Should have logged the error
         assert any("Error stopping agent" in r.message for r in caplog.records)
+
+
+# ============================================================================
+# Iteration 23: restart_agent race condition + health_check cleanup
+# ============================================================================
+
+
+class TestRestartAgentRaceCondition:
+    """restart_agent handles concurrent removal gracefully (Defect 1)."""
+
+    @pytest.mark.asyncio
+    async def test_restart_handles_concurrent_stop_no_crash(self):
+        """If another coroutine removes the agent between param snapshot and stop, no KeyError."""
+        pm = ProcessManager()
+
+        original_proc = _iter17_make_mock_process(pid=40001)
+        with patch(_SUBPROCESS_PATCH, return_value=original_proc):
+            await pm.start_agent("race-agent", command=["echo"])
+
+        # Snapshot the start params before removing the handle
+        handle = pm._agents["race-agent"]
+        handle.process.returncode = 0
+
+        # Simulate another coroutine removing the handle before restart's stop_agent runs.
+        # We do this by making stop_agent raise KeyError (handle already gone).
+        original_stop = pm.stop_agent
+
+        async def _stop_then_remove(name, timeout=10.0):
+            # Remove the handle first, then call real stop which will KeyError
+            pm._agents.pop(name, None)
+            await original_stop(name, timeout=timeout)
+
+        with patch.object(pm, "stop_agent", side_effect=_stop_then_remove):
+            new_proc = _iter17_make_mock_process(pid=40002)
+            with patch(_SUBPROCESS_PATCH, return_value=new_proc):
+                # Should NOT raise KeyError — the try/except catches it
+                result = await pm.restart_agent("race-agent")
+
+        assert isinstance(result, AgentHandle)
+        assert result.pid == 40002
+        assert pm.get_agent("race-agent") is result
+
+    @pytest.mark.asyncio
+    async def test_restart_logs_warning_on_concurrent_removal(self, caplog):
+        """restart_agent logs a warning when KeyError is caught during stop."""
+        import logging
+
+        pm = ProcessManager()
+
+        original_proc = _iter17_make_mock_process(pid=50001)
+        with patch(_SUBPROCESS_PATCH, return_value=original_proc):
+            await pm.start_agent("warn-agent", command=["echo"])
+
+        pm._agents["warn-agent"].process.returncode = 0
+
+        # Make stop_agent raise KeyError to simulate concurrent removal
+        async def _stop_raises_keyerror(name, timeout=10.0):
+            raise KeyError(f"Agent '{name}' not found")
+
+        with patch.object(pm, "stop_agent", side_effect=_stop_raises_keyerror):
+            new_proc = _iter17_make_mock_process(pid=50002)
+            with patch(_SUBPROCESS_PATCH, return_value=new_proc):
+                with caplog.at_level(
+                    logging.WARNING,
+                    logger="agent_nexus.platform.orchestration.process_manager",
+                ):
+                    result = await pm.restart_agent("warn-agent")
+
+        assert isinstance(result, AgentHandle)
+        assert any(
+            "already removed during restart" in r.message for r in caplog.records
+        )
+
+
+class TestHealthCheckCleanup:
+    """health_check calls _cleanup_dead before lookup (Defects 2 & 3)."""
+
+    @pytest.mark.asyncio
+    async def test_cleanup_dead_called_during_health_check(self):
+        """Dead agent handles are cleaned up when health_check runs."""
+        pm = ProcessManager()
+
+        # Manually insert a dead handle (no subprocess needed)
+        dead_handle = _iter17_make_handle("dead-agent", pid=60001, returncode=1)
+        alive_handle = _iter17_make_handle("alive-agent", pid=60002, returncode=None)
+        pm._agents["dead-agent"] = dead_handle
+        pm._agents["alive-agent"] = alive_handle
+
+        # Mock heartbeat on alive agent so health_check succeeds
+        alive_handle.ipc.send_heartbeat = AsyncMock(return_value=True)
+
+        # Before: both handles present
+        assert pm.get_agent("dead-agent") is not None
+        assert pm.get_agent("alive-agent") is not None
+
+        # Run health_check on the alive agent — _cleanup_dead should clean the dead one
+        result = await pm.health_check("alive-agent")
+        assert result is True
+
+        # Dead handle should have been cleaned up by _cleanup_dead inside health_check
+        assert pm.get_agent("dead-agent") is None
+        assert pm.get_agent("alive-agent") is alive_handle
+
+    @pytest.mark.asyncio
+    async def test_health_check_raises_keyerror_for_cleaned_agent(self):
+        """If _cleanup_dead removes the target, health_check raises KeyError."""
+        pm = ProcessManager()
+
+        # Insert a dead handle
+        dead_handle = _iter17_make_handle("will-be-cleaned", pid=60003, returncode=1)
+        pm._agents["will-be-cleaned"] = dead_handle
+
+        # health_check should clean it up then raise KeyError
+        with pytest.raises(KeyError, match="not found"):
+            await pm.health_check("will-be-cleaned")
+
+        # Confirm it was removed
+        assert pm.get_agent("will-be-cleaned") is None

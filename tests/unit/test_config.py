@@ -459,17 +459,35 @@ class TestConfigLoaderProviderApiTypeValidation:
         config = loader.load_config()
         assert config.models.default is not None
 
-    def test_load_malformed_toml_raises_toml_error(self, tmp_path: Path) -> None:
-        """Malformed TOML syntax propagates toml.TomlDecodeError."""
+    def test_load_malformed_toml_falls_back_to_defaults(self, tmp_path: Path) -> None:
+        """Malformed TOML is caught and falls back to defaults without crashing."""
         config_dir = tmp_path / "config"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text(
             "[section\nkey = value\n", encoding="utf-8"
         )
         loader = ConfigLoader(config_dir=config_dir)
-        with pytest.raises(Exception):
-            # toml.TomlDecodeError or similar parse error
-            loader.load_config()
+        config = loader.load_config()
+        # Should not crash — falls back to built-in defaults
+        assert config.models.default == DEFAULT_MODEL_STRING
+        assert set(config.models.providers.keys()) == set(DEFAULT_PROVIDERS.keys())
+
+    def test_load_valid_toml_still_works(self, tmp_path: Path) -> None:
+        """Valid TOML file is parsed correctly after adding TomlDecodeError handler."""
+        _write_config(
+            tmp_path,
+            '[models]\ndefault = "deepseek:deepseek-chat"\n'
+            "[models.providers.custom]\n"
+            'base_url = "http://localhost:9999/v1"\n'
+            'api_key_env = "CUSTOM_KEY"\n'
+            'api = "openai-compatible"\n',
+        )
+        loader = ConfigLoader(config_dir=tmp_path)
+        config = loader.load_config()
+
+        assert config.models.default == "deepseek:deepseek-chat"
+        assert "custom" in config.models.providers
+        assert config.models.providers["custom"].base_url == "http://localhost:9999/v1"
 
 
 # ============================================================================

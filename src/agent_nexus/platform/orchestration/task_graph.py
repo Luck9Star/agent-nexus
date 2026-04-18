@@ -72,8 +72,15 @@ class TaskGraph:
 
         Uses WAL mode for concurrent read/write access.
         Creates tables on first init.
+
+        For ``:memory:`` databases, a persistent connection is kept alive
+        so that all operations share the same in-memory store.  File-based
+        databases open a new connection per operation (original behaviour).
         """
         self._db_path = db_path
+        self._mem_conn: sqlite3.Connection | None = None
+        if str(self._db_path) == ":memory:":
+            self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
         self._init_db()
 
     def _init_db(self) -> None:
@@ -90,12 +97,32 @@ class TaskGraph:
         """Context manager for DB connections.
 
         Uses check_same_thread=False for async compatibility.
-        Connection is NOT shared -- create per-operation.
+
+        For ``:memory:`` databases the same persistent connection is
+        yielded every time (sqlite3.connect(":memory:") creates a new
+        empty DB each call, so sharing is mandatory).
+
+        For file-based databases a fresh connection is opened per
+        operation and closed afterwards.
 
         Args:
             immediate: If True, use BEGIN IMMEDIATE for write serialization.
                 Prevents TOCTOU races in read-then-write mutation methods.
         """
+        # In-memory DB: reuse the persistent connection created in __init__.
+        if self._mem_conn is not None:
+            conn = self._mem_conn
+            if immediate:
+                conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            return
+
+        # File-based DB: open a fresh connection per operation.
         conn = sqlite3.connect(
             str(self._db_path),
             check_same_thread=False,

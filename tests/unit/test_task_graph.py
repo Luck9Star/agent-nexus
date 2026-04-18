@@ -448,3 +448,68 @@ class TestTaskGraphCorruptRow:
         assert result is not None
         assert result.blocked_by == ["A"]
         assert result.state == TaskState.PENDING
+
+
+# ============================================================================
+# Regression: :memory: SQLite shares a single persistent connection
+# ============================================================================
+
+
+class TestTaskGraphInMemory:
+    """TaskGraph with Path(':memory:') must persist data across operations.
+
+    sqlite3.connect(':memory:') creates a brand-new empty database on each
+    call.  TaskGraph must detect this and keep a single persistent connection
+    alive so that _init_db() tables survive into subsequent operations.
+    """
+
+    def test_add_and_get_task(self) -> None:
+        """add_task then get_task must return the same task."""
+        tg = TaskGraph(Path(":memory:"))
+        task = _make_task("M1", description="memory task")
+        tg.add_task(task)
+
+        result = tg.get_task("M1")
+        assert result is not None
+        assert result.id == "M1"
+        assert result.description == "memory task"
+
+    def test_full_lifecycle(self) -> None:
+        """Full lifecycle: add -> start -> complete on in-memory DB."""
+        tg = TaskGraph(Path(":memory:"))
+        tg.add_task(_make_task("A"))
+        tg.add_task(_make_task("B", blocked_by=["A"]))
+
+        # Start and complete A
+        tg.start_task("A")
+        tg.complete_task("A")
+
+        # B should now be ready
+        ready = tg.get_ready_tasks()
+        assert any(t.id == "B" for t in ready)
+
+        # Start and complete B
+        tg.start_task("B")
+        result = tg.complete_task("B")
+        assert result.state == TaskState.COMPLETED
+
+    def test_snapshot_and_clear(self) -> None:
+        """get_snapshot and clear work correctly on in-memory DB."""
+        tg = TaskGraph(Path(":memory:"))
+        tg.add_task(_make_task("X"))
+        tg.add_task(_make_task("Y", blocked_by=["X"]))
+
+        snapshot = tg.get_snapshot()
+        assert len(snapshot.tasks) == 2
+
+        tg.clear()
+        assert tg.get_snapshot().tasks == []
+
+    def test_detect_cycles(self) -> None:
+        """detect_cycles works on in-memory DB."""
+        tg = TaskGraph(Path(":memory:"))
+        tg.add_task(_make_task("A"))
+        tg.add_task(_make_task("B"))
+
+        # No cycles initially
+        assert tg.detect_cycles() == []
