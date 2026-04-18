@@ -529,14 +529,15 @@ class EvolutionStore:
                         (_now_iso(), pid),
                     )
 
-            # Insert new record
+            # Insert new record — evolved skills always have unique IDs
+            # (uuid-suffixed), so plain INSERT is sufficient.
             lin = new_record.lineage
             snapshot_json = json.dumps(
                 lin.content_snapshot or {}, ensure_ascii=False
             )
             conn.execute(
                 """
-                INSERT INTO skill_records (
+                INSERT OR IGNORE INTO skill_records (
                     id, name, version,
                     lineage_origin, lineage_generation,
                     lineage_content_diff, lineage_content_snapshot,
@@ -545,32 +546,6 @@ class EvolutionStore:
                     total_completions, total_fallbacks,
                     created_at, updated_at
                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(id) DO UPDATE SET
-                    name = excluded.name,
-                    version = excluded.version,
-                    lineage_origin = excluded.lineage_origin,
-                    lineage_generation = excluded.lineage_generation,
-                    lineage_content_diff = excluded.lineage_content_diff,
-                    lineage_content_snapshot = excluded.lineage_content_snapshot,
-                    directory = excluded.directory,
-                    is_active = excluded.is_active,
-                    total_selections = CASE
-                        WHEN excluded.total_selections > 0 THEN excluded.total_selections
-                        ELSE total_selections
-                    END,
-                    total_applied = CASE
-                        WHEN excluded.total_applied > 0 THEN excluded.total_applied
-                        ELSE total_applied
-                    END,
-                    total_completions = CASE
-                        WHEN excluded.total_completions > 0 THEN excluded.total_completions
-                        ELSE total_completions
-                    END,
-                    total_fallbacks = CASE
-                        WHEN excluded.total_fallbacks > 0 THEN excluded.total_fallbacks
-                        ELSE total_fallbacks
-                    END,
-                    updated_at = excluded.updated_at
                 """,
                 (
                     new_record.id,

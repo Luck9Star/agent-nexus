@@ -844,26 +844,30 @@ class TestMCPGatewayInit:
 class TestMCPGatewayRegisterAgent:
     """Tests for MCPGateway.register_agent()."""
 
-    def test_register_core(self, gateway: MCPGateway) -> None:
+    @pytest.mark.asyncio
+    async def test_register_core(self, gateway: MCPGateway) -> None:
         manifest = _make_manifest("core-agent")
-        gateway.register_agent(manifest, deferred=False)
+        await gateway.register_agent(manifest, deferred=False)
         assert len(gateway.registry.list_core_agents()) == 1
 
-    def test_register_deferred(self, gateway: MCPGateway) -> None:
+    @pytest.mark.asyncio
+    async def test_register_deferred(self, gateway: MCPGateway) -> None:
         manifest = _make_manifest("deferred-agent")
-        gateway.register_agent(manifest, deferred=True)
+        await gateway.register_agent(manifest, deferred=True)
         assert len(gateway.registry.list_deferred_agents()) == 1
 
-    def test_register_multiple(self, gateway: MCPGateway) -> None:
+    @pytest.mark.asyncio
+    async def test_register_multiple(self, gateway: MCPGateway) -> None:
         for i in range(3):
-            gateway.register_agent(
+            await gateway.register_agent(
                 _make_manifest(f"agent-{i}"), deferred=True
             )
         assert len(gateway.registry.list_deferred_agents()) == 3
 
-    def test_register_with_start_command(self, gateway: MCPGateway) -> None:
+    @pytest.mark.asyncio
+    async def test_register_with_start_command(self, gateway: MCPGateway) -> None:
         manifest = _make_manifest("cmd-agent")
-        gateway.register_agent(
+        await gateway.register_agent(
             manifest,
             deferred=True,
             start_command=["uvx", "cmd-agent"],
@@ -885,22 +889,24 @@ class TestMCPGatewayRegisterAgentTools:
         self, gateway: MCPGateway
     ) -> None:
         manifest = _make_manifest("tool-agent")
-        gateway.register_agent(manifest, deferred=True, start_command=[])
+        await gateway.register_agent(manifest, deferred=True, start_command=[])
         await gateway.registry.activate_agent("tool-agent")
-        gateway._register_agent_tools("tool-agent")
+        await gateway._register_agent_tools("tool-agent")
         # Verify adapters were created
         adapters = gateway.registry._tool_adapters.get("tool-agent", [])
         assert len(adapters) >= 1
 
-    def test_register_tools_unknown_agent(self, gateway: MCPGateway) -> None:
+    @pytest.mark.asyncio
+    async def test_register_tools_unknown_agent(self, gateway: MCPGateway) -> None:
         """Registering tools for nonexistent agent does nothing."""
-        gateway._register_agent_tools("nonexistent")
+        await gateway._register_agent_tools("nonexistent")
 
-    def test_register_tools_not_activated(self, gateway: MCPGateway) -> None:
+    @pytest.mark.asyncio
+    async def test_register_tools_not_activated(self, gateway: MCPGateway) -> None:
         """Registering tools for dormant agent does nothing."""
         manifest = _make_manifest("dormant")
-        gateway.register_agent(manifest, deferred=True)
-        gateway._register_agent_tools("dormant")
+        await gateway.register_agent(manifest, deferred=True)
+        await gateway._register_agent_tools("dormant")
 
 
 # ============================================================================
@@ -946,7 +952,7 @@ class TestMCPGatewayMakeToolFunc:
     ) -> None:
         # Use a name without hyphens so sanitized name == registry key
         manifest = _make_manifest("run_agent")
-        gateway.register_agent(manifest, deferred=False)
+        await gateway.register_agent(manifest, deferred=False)
         info = gateway.registry.get_agent_info("run_agent")
         mock_handle = _mock_agent_handle("run_agent", alive=True)
         response = AgentToPlatform(
@@ -989,7 +995,7 @@ class TestMCPGatewayCoreTools:
         manifest = _make_manifest(
             "test-agent", description="A test agent for searching"
         )
-        gateway.register_agent(manifest, deferred=True, start_command=[])
+        await gateway.register_agent(manifest, deferred=True, start_command=[])
         result = await gateway._search_and_activate("test")
         assert "test-agent" in result
         assert "activated" in result.lower() or "loaded" in result.lower()
@@ -1001,10 +1007,10 @@ class TestMCPGatewayCoreTools:
 
     @pytest.mark.asyncio
     async def test_list_agents_with_agents(self, gateway: MCPGateway) -> None:
-        gateway.register_agent(
+        await gateway.register_agent(
             _make_manifest("core-a", description="Core agent"), deferred=False
         )
-        gateway.register_agent(
+        await gateway.register_agent(
             _make_manifest("deferred-a", description="Deferred agent"),
             deferred=True,
         )
@@ -1024,7 +1030,7 @@ class TestMCPGatewayCoreTools:
             description="Detailed agent",
             role=None,
         )
-        gateway.register_agent(manifest, deferred=True)
+        await gateway.register_agent(manifest, deferred=True)
         result = await gateway._agent_info("detail-agent")
         assert "detail-agent" in result
         assert "0.1.0" in result
@@ -1035,7 +1041,7 @@ class TestMCPGatewayCoreTools:
     async def test_agent_info_with_activated_tools(
         self, gateway: MCPGateway
     ) -> None:
-        gateway.register_agent(
+        await gateway.register_agent(
             _make_manifest("act-agent", description="Active agent"),
             deferred=True,
             start_command=[],
@@ -1046,7 +1052,7 @@ class TestMCPGatewayCoreTools:
 
     @pytest.mark.asyncio
     async def test_list_agents_shows_tier(self, gateway: MCPGateway) -> None:
-        gateway.register_agent(
+        await gateway.register_agent(
             _make_manifest("core-x"), deferred=False
         )
         result = await gateway._list_agents()
@@ -1056,7 +1062,7 @@ class TestMCPGatewayCoreTools:
     async def test_list_agents_shows_available(
         self, gateway: MCPGateway
     ) -> None:
-        gateway.register_agent(
+        await gateway.register_agent(
             _make_manifest("def-x"), deferred=True
         )
         result = await gateway._list_agents()
@@ -1182,7 +1188,8 @@ class TestToolAdapterOriginalName:
 class TestCoreAgentToolRegistration:
     """register_agent(deferred=False) must immediately call _register_agent_tools."""
 
-    def test_core_agent_tools_registered(self) -> None:
+    @pytest.mark.asyncio
+    async def test_core_agent_tools_registered(self) -> None:
         pm = MagicMock()
         router = MagicMock()
         gateway = MCPGateway(process_manager=pm, router=router)
@@ -1190,18 +1197,19 @@ class TestCoreAgentToolRegistration:
         registered_agents = []
         original_register = gateway._register_agent_tools
 
-        def tracking_register(name: str) -> None:
+        async def tracking_register(name: str) -> None:
             registered_agents.append(name)
-            original_register(name)
+            await original_register(name)
 
         gateway._register_agent_tools = tracking_register
 
         manifest = _make_manifest("core-agent")
-        gateway.register_agent(manifest, deferred=False)
+        await gateway.register_agent(manifest, deferred=False)
 
         assert "core-agent" in registered_agents
 
-    def test_deferred_agent_tools_not_registered(self) -> None:
+    @pytest.mark.asyncio
+    async def test_deferred_agent_tools_not_registered(self) -> None:
         pm = MagicMock()
         router = MagicMock()
         gateway = MCPGateway(process_manager=pm, router=router)
@@ -1209,14 +1217,14 @@ class TestCoreAgentToolRegistration:
         registered_agents = []
         original_register = gateway._register_agent_tools
 
-        def tracking_register(name: str) -> None:
+        async def tracking_register(name: str) -> None:
             registered_agents.append(name)
-            original_register(name)
+            await original_register(name)
 
         gateway._register_agent_tools = tracking_register
 
         manifest = _make_manifest("lazy-agent")
-        gateway.register_agent(manifest, deferred=True)
+        await gateway.register_agent(manifest, deferred=True)
 
         assert "lazy-agent" not in registered_agents
 
@@ -1231,7 +1239,7 @@ class TestListAgentsNameComparison:
         gateway = MCPGateway(process_manager=pm, router=router)
 
         manifest = _make_manifest("test-core")
-        gateway.register_agent(manifest, deferred=False)
+        await gateway.register_agent(manifest, deferred=False)
 
         result = await gateway._list_agents()
         assert "test-core" in result

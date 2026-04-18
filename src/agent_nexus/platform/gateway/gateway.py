@@ -53,6 +53,7 @@ class MCPGateway:
         self._pm = process_manager
         self._router = router
         self._registered_agents: set[str] = set()
+        self._reg_lock = asyncio.Lock()
         self._registry = DeferredAgentRegistry(process_manager)
         self._mcp = FastMCP("agent-nexus-gateway")
         self._setup_core_tools()
@@ -90,7 +91,7 @@ class MCPGateway:
             try:
                 schemas = await self._registry.activate_agent(manifest.name)
                 # Register the discovered tools with the FastMCP server
-                self._register_agent_tools(manifest.name)
+                await self._register_agent_tools(manifest.name)
                 activated.append(
                     f"- {manifest.name}: {manifest.description} "
                     f"({len(schemas)} tools loaded)"
@@ -190,7 +191,7 @@ class MCPGateway:
     # Agent registration
     # ------------------------------------------------------------------
 
-    def register_agent(
+    async def register_agent(
         self,
         manifest: AgentManifest,
         *,
@@ -221,41 +222,42 @@ class MCPGateway:
 
         if not deferred:
             # Core agents: register tool schemas immediately (if available)
-            self._register_agent_tools(manifest.name)
+            await self._register_agent_tools(manifest.name)
 
-    def _register_agent_tools(self, agent_name: str) -> None:
+    async def _register_agent_tools(self, agent_name: str) -> None:
         """Register discovered agent tools with the FastMCP server.
 
         Creates a closure for each tool that captures the agent handle
         and delegates execution via the McpToolAdapter.
         """
-        if agent_name in self._registered_agents:
-            logger.debug("Agent '%s' tools already registered, skipping", agent_name)
-            return
+        async with self._reg_lock:
+            if agent_name in self._registered_agents:
+                logger.debug("Agent '%s' tools already registered, skipping", agent_name)
+                return
 
-        info = self._registry.get_agent_info(agent_name)
-        if info is None or info.tool_schemas is None:
-            return
+            info = self._registry.get_agent_info(agent_name)
+            if info is None or info.tool_schemas is None:
+                return
 
-        adapters = self._registry.get_tool_adapters(agent_name)
+            adapters = self._registry.get_tool_adapters(agent_name)
 
-        for adapter in adapters:
-            # Avoid duplicate registration
-            try:
-                # Capture adapter in closure scope
-                self._mcp.tool(self._make_tool_func(adapter))
-                logger.debug(
-                    "Registered gateway tool: %s", adapter.full_name
-                )
-            except Exception as exc:
-                # FastMCP may raise if tool name already registered
-                logger.debug(
-                    "Tool '%s' already registered or error: %s",
-                    adapter.full_name,
-                    exc,
-                )
+            for adapter in adapters:
+                # Avoid duplicate registration
+                try:
+                    # Capture adapter in closure scope
+                    self._mcp.tool(self._make_tool_func(adapter))
+                    logger.debug(
+                        "Registered gateway tool: %s", adapter.full_name
+                    )
+                except Exception as exc:
+                    # FastMCP may raise if tool name already registered
+                    logger.debug(
+                        "Tool '%s' already registered or error: %s",
+                        adapter.full_name,
+                        exc,
+                    )
 
-        self._registered_agents.add(agent_name)
+            self._registered_agents.add(agent_name)
 
     def _make_tool_func(self, adapter: McpToolAdapter) -> Any:
         """Create an async callable that the FastMCP server can invoke.
