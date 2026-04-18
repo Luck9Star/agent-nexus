@@ -88,7 +88,7 @@ class LockfileEntry(BaseModel):
         pattern=r"^[a-zA-Z0-9._-]+$",
         description="Version string used in git ref construction; alphanumeric, dots, hyphens, underscores",
     )
-    source: str
+    source: str = Field(min_length=1)
     commit_sha: str = Field(
         pattern=r"^[0-9a-f]{40}$|^[0-9a-f]{64}$|^latest$|^head$",
         description="Hex SHA-1 (40 chars), SHA-256 (64 chars), or sentinel 'latest'/'head'",
@@ -120,7 +120,7 @@ class PackageSource(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
+    name: str = Field(min_length=1)
     type: str = "git"
     url: str = ""
     branch: str = "main"

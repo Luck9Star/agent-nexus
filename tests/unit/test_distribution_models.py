@@ -183,6 +183,28 @@ class TestLockfileEntry:
         assert le2 == le
 
 
+class TestLockfileEntrySourceValidation:
+    """LockfileEntry.source must be non-empty (min_length=1)."""
+
+    def test_empty_source_rejected(self):
+        with pytest.raises(ValidationError):
+            LockfileEntry(
+                version="1.0.0",
+                source="",
+                commit_sha="a" * 40,
+                agent_type=AgentType.ATOMIC,
+            )
+
+    def test_valid_source_accepted(self):
+        le = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="a" * 40,
+            agent_type=AgentType.ATOMIC,
+        )
+        assert le.source == "official"
+
+
 class TestLockfileEntryCommitShaValidation:
     """commit_sha must be a valid 40-char or 64-char hex string, or 'latest'/'head'."""
 
@@ -342,6 +364,18 @@ class TestPackageSource:
         ps = PackageSource(name="test", url="https://github.com/user/repo.git")
         with pytest.raises(ValidationError):
             ps.local_cache = "changed"
+
+
+class TestPackageSourceNameValidation:
+    """PackageSource.name must be non-empty (min_length=1)."""
+
+    def test_empty_name_rejected(self):
+        with pytest.raises(ValidationError):
+            PackageSource(name="", url="https://github.com/user/repo.git")
+
+    def test_valid_name_accepted(self):
+        ps = PackageSource(name="official", url="https://github.com/user/repo.git")
+        assert ps.name == "official"
 
 
 class TestPackageSourceValidation:

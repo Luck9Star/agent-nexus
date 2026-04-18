@@ -375,17 +375,20 @@ class TestSkillRecordCounterValidation:
         )
         assert sr.total_selections == 10
 
-    def test_all_equal_with_nonzero_fallbacks_valid(self):
-        """applied=10, fallbacks=10 is valid because fallbacks <= applied."""
-        sr = SkillRecord(
-            id="s1",
-            name="test",
-            total_selections=10,
-            total_applied=10,
-            total_completions=10,
-            total_fallbacks=10,
-        )
-        assert sr.total_fallbacks == sr.total_applied
+    def test_completions_plus_fallbacks_exceeds_applied_rejected(self):
+        """completions + fallbacks cannot exceed applied."""
+        with pytest.raises(
+            ValidationError,
+            match="total_completions \\+ total_fallbacks cannot exceed total_applied",
+        ):
+            SkillRecord(
+                id="s1",
+                name="test",
+                total_selections=10,
+                total_applied=10,
+                total_completions=6,
+                total_fallbacks=5,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -506,3 +509,79 @@ class TestSkillRecordCounterInvariant:
             total_fallbacks=3,
         )
         assert sr.total_applied == sr.total_selections
+
+
+class TestSkillRecordCompletionsFallbacksInvariant:
+    """completions + fallbacks <= applied for SkillRecord."""
+
+    def test_completions_plus_fallbacks_exceeds_applied(self):
+        with pytest.raises(
+            ValidationError,
+            match="total_completions \\+ total_fallbacks cannot exceed total_applied",
+        ):
+            SkillRecord(
+                id="s1",
+                name="test",
+                total_selections=10,
+                total_applied=5,
+                total_completions=3,
+                total_fallbacks=3,
+            )
+
+    def test_completions_plus_fallbacks_equals_applied_valid(self):
+        sr = SkillRecord(
+            id="s1",
+            name="test",
+            total_selections=10,
+            total_applied=8,
+            total_completions=5,
+            total_fallbacks=3,
+        )
+        assert sr.total_completions + sr.total_fallbacks == sr.total_applied
+
+
+class TestEvolutionMetricsCounterInvariant:
+    """Counter invariants for EvolutionMetrics."""
+
+    def test_zero_selections_with_applied_rejected(self):
+        with pytest.raises(
+            ValidationError,
+            match="zero selections requires zero applied and zero fallbacks",
+        ):
+            EvolutionMetrics(total_selections=0, total_applied=1, total_fallbacks=0)
+
+    def test_zero_selections_with_fallbacks_rejected(self):
+        with pytest.raises(
+            ValidationError,
+            match="zero selections requires zero applied and zero fallbacks",
+        ):
+            EvolutionMetrics(total_selections=0, total_applied=0, total_fallbacks=1)
+
+    def test_zero_selections_all_zero_valid(self):
+        em = EvolutionMetrics(total_selections=0, total_applied=0, total_fallbacks=0)
+        assert em.total_selections == 0
+
+    def test_completions_plus_fallbacks_exceeds_applied(self):
+        with pytest.raises(
+            ValidationError,
+            match="total_completions \\+ total_fallbacks cannot exceed total_applied",
+        ):
+            EvolutionMetrics(
+                total_selections=10,
+                total_applied=5,
+                total_completions=3,
+                total_fallbacks=3,
+            )
+
+    def test_completions_plus_fallbacks_equals_applied_valid(self):
+        em = EvolutionMetrics(
+            total_selections=10,
+            total_applied=8,
+            total_completions=5,
+            total_fallbacks=3,
+        )
+        assert em.total_completions + em.total_fallbacks == em.total_applied
+
+    def test_applied_exceeds_selections_rejected(self):
+        with pytest.raises(ValidationError, match="total_applied cannot exceed total_selections"):
+            EvolutionMetrics(total_selections=5, total_applied=6)

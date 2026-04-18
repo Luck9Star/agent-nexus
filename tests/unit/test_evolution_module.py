@@ -912,7 +912,7 @@ class TestSkillEvolverUnknownType:
 
 class TestSkillEvolverDiagnose:
     def test_high_fallback_suggests_fix(self) -> None:
-        r = _make_record("s1", "x", selections=100, applied=100, completions=100, fallbacks=50)
+        r = _make_record("s1", "x", selections=100, applied=100, completions=50, fallbacks=50)
         suggestion = SkillEvolver._diagnose_skill_health(r)
         assert suggestion is not None
         assert suggestion.evolution_type == EvolutionType.FIX
@@ -1369,7 +1369,7 @@ class TestHealthCheckerCheckHealth:
 
     def test_high_fallback_triggers_fix(self) -> None:
         # fallback_rate = 50/100 = 0.5 > 0.4
-        r = _make_record("s1", "x", selections=100, applied=100, completions=100, fallbacks=50)
+        r = _make_record("s1", "x", selections=100, applied=100, completions=50, fallbacks=50)
         from unittest.mock import MagicMock
 
         checker = HealthChecker(MagicMock())
@@ -1712,12 +1712,13 @@ class TestSuggestionDeduplication:
         store = EvolutionStore(tmp_path / "test.db")
         analyzer = ExecutionAnalyzer(store)
 
+        # completions(1) + fallbacks(6) = 7 <= applied(7)
         # fallback_rate = 6/10 = 0.6 > 0.4 threshold (FIX)
-        # applied_rate = 6/10 = 0.6 > 0.4, completion_rate = 1/6 = 0.17 < 0.35 (FIX again)
+        # applied_rate = 7/10 = 0.7 > 0.4, completion_rate = 1/7 = 0.14 < 0.35 (FIX again)
         skill = self._make_skill(
             selections=10,
             fallbacks=6,
-            applied=6,
+            applied=7,
             completions=1,
         )
         store.save_skill_record(skill)
@@ -1744,13 +1745,14 @@ class TestSuggestionDeduplication:
         store = EvolutionStore(tmp_path / "test.db")
         analyzer = ExecutionAnalyzer(store)
 
+        # completions(3) + fallbacks(6) = 9 <= applied(9)
         # fallback_rate = 6/10 = 0.6 > 0.4 (FIX)
-        # effective_rate = 3/10 = 0.3 < 0.55, applied_rate = 6/10 = 0.6 > 0.25 (DERIVED)
+        # effective_rate = 3/10 = 0.3 < 0.55, applied_rate = 9/10 = 0.9 > 0.25 (DERIVED)
         # But FIX takes priority, so only FIX should appear
         skill = self._make_skill(
             selections=10,
             fallbacks=6,
-            applied=6,
+            applied=9,
             completions=3,
         )
         store.save_skill_record(skill)
@@ -1915,9 +1917,10 @@ class TestHealthCheckerDedupFix:
         """
         from unittest.mock import MagicMock
 
+        # completions(10) + fallbacks(60) = 70 <= applied(70)
         # fallback_rate = 60/100 = 0.6 > 0.4 (Rule 1: FIX)
-        # applied_rate = 60/100 = 0.6 > 0.4, completion_rate = 10/60 = 0.17 < 0.35 (Rule 2: FIX)
-        r = _make_record("s1", "x", selections=100, applied=60, completions=10, fallbacks=60)
+        # applied_rate = 70/100 = 0.7 > 0.4, completion_rate = 10/70 = 0.14 < 0.35 (Rule 2: FIX)
+        r = _make_record("s1", "x", selections=100, applied=70, completions=10, fallbacks=60)
         checker = HealthChecker(MagicMock())
         suggestions = checker.check_health(r)
 
@@ -1931,12 +1934,12 @@ class TestHealthCheckerDedupFix:
 
         This skill triggers both:
           - fallback_rate = 60/100 = 0.6 > 0.4 (FIX)
-          - effective_rate = 10/100 = 0.1 < 0.55, applied_rate = 60/100 = 0.6 > 0.25 (DERIVED)
+          - effective_rate = 10/100 = 0.1 < 0.55, applied_rate = 70/100 = 0.7 > 0.25 (DERIVED)
         After fix: only FIX, no DERIVED.
         """
         from unittest.mock import MagicMock
 
-        r = _make_record("s1", "x", selections=100, applied=60, completions=10, fallbacks=60)
+        r = _make_record("s1", "x", selections=100, applied=70, completions=10, fallbacks=60)
         checker = HealthChecker(MagicMock())
         suggestions = checker.check_health(r)
 
@@ -1961,14 +1964,20 @@ class TestHealthCheckerDedupFix:
         assert len(derived) == 1
 
     def test_best_fix_keeps_higher_confidence(self) -> None:
-        """When both FIX rules trigger, the FIX with higher confidence wins."""
+        """When both FIX rules trigger, the FIX with higher confidence wins.
+
+        Under invariant completions + fallbacks <= applied, the completion
+        FIX confidence = (applied - completions)/selections always >=
+        fallbacks/selections, so the completion FIX naturally wins.
+        """
         from unittest.mock import MagicMock
 
-        # fallback_rate = 60/100 = 0.6 -> confidence = 0.6
-        # applied_rate = 60/100 = 0.6, completion_rate = 10/60 = 0.17
-        #   -> confidence = min(0.6 * 0.83, 1.0) = 0.5
-        # fallback FIX has higher confidence (0.6 > 0.5)
-        r = _make_record("s1", "x", selections=100, applied=60, completions=10, fallbacks=60)
+        # completions(10) + fallbacks(55) = 65 <= applied(70)
+        # fallback_rate = 55/100 = 0.55 -> fallback FIX confidence = 0.55
+        # applied_rate = 70/100 = 0.7, completion_rate = 10/70 = 0.143
+        #   -> completion FIX confidence = min(0.7 * 0.857, 1.0) = 0.6
+        # completion FIX has higher confidence (0.6 > 0.55)
+        r = _make_record("s1", "x", selections=100, applied=70, completions=10, fallbacks=55)
         checker = HealthChecker(MagicMock())
         suggestions = checker.check_health(r)
 

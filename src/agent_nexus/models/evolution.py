@@ -93,6 +93,8 @@ class SkillRecord(BaseModel):
             raise ValueError("total_completions cannot exceed total_applied")
         if self.total_fallbacks > self.total_applied:
             raise ValueError("total_fallbacks cannot exceed total_applied")
+        if self.total_completions + self.total_fallbacks > self.total_applied:
+            raise ValueError("total_completions + total_fallbacks cannot exceed total_applied")
         return self
 
 
@@ -111,12 +113,19 @@ class EvolutionMetrics(BaseModel):
 
     @model_validator(mode='after')
     def _validate_counters(self) -> 'EvolutionMetrics':
+        if self.total_selections == 0:
+            if self.total_applied != 0 or self.total_fallbacks != 0:
+                raise ValueError(
+                    "counter invariant violated: zero selections requires zero applied and zero fallbacks"
+                )
         if self.total_applied > self.total_selections:
             raise ValueError("total_applied cannot exceed total_selections")
         if self.total_completions > self.total_applied:
             raise ValueError("total_completions cannot exceed total_applied")
         if self.total_fallbacks > self.total_applied:
             raise ValueError("total_fallbacks cannot exceed total_applied")
+        if self.total_completions + self.total_fallbacks > self.total_applied:
+            raise ValueError("total_completions + total_fallbacks cannot exceed total_applied")
         return self
 
 

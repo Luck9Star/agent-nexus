@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections import deque
 from typing import Any
 
 from agent_nexus.models.ipc import (
@@ -175,7 +176,7 @@ class IPCProtocol:
 
     def __init__(self, stream: IPCStream) -> None:
         self._stream = stream
-        self._peek_buffer: list[AgentToPlatform] = []
+        self._peek_buffer: deque[AgentToPlatform] = deque()
 
     @property
     def stream(self) -> IPCStream:
@@ -195,7 +196,7 @@ class IPCProtocol:
                 "IPC peek buffer reached max size (%d); discarding oldest message",
                 self._MAX_PEEK_BUFFER_SIZE,
             )
-            self._peek_buffer.pop(0)
+            self._peek_buffer.popleft()
         self._peek_buffer.append(msg)
 
     # -- outbound helpers ---------------------------------------------------
@@ -252,7 +253,7 @@ class IPCProtocol:
         expected to inspect ``msg.type`` to determine how to handle it.
         """
         if self._peek_buffer:
-            return self._peek_buffer.pop(0)
+            return self._peek_buffer.popleft()
         return await self._stream.receive(timeout=timeout)
 
     async def receive_until_result(
