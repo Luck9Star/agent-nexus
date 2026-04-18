@@ -126,6 +126,16 @@ class PackageSource(BaseModel):
     branch: str = "main"
     local_cache: str = ""
 
+    @model_validator(mode="after")
+    def _validate_git_url(self) -> "PackageSource":
+        """Git-type sources must have a non-empty URL."""
+        if self.type == "git" and not self.url.strip():
+            raise ValueError(
+                "Git-type source requires a non-empty 'url'. "
+                f"Source '{self.name}' has type='git' but url is empty."
+            )
+        return self
+
 
 class IndexEntry(BaseModel):
     """A single Agent entry from a source's index.yaml.

@@ -263,7 +263,7 @@ CREATE INDEX idx_ar_name ON agent_records(name);
 class EvolutionContextDescriber:
     """进化引擎数据的分层描述"""
 
-    def describe_layer0(self) -> str:
+    def l0_context(self) -> str:
         """L0 Metrics 摘要（每轮注入，~30 tokens）"""
         agent = self.store.get_agent(self.agent_id)
         return (
@@ -272,11 +272,11 @@ class EvolutionContextDescriber:
             f"completions={agent.total_completions}/{agent.total_selections}"
         )
 
-    def describe_layer1(self, task_context: str) -> str:
+    def l1_context(self, skill_ids: list[str] | None = None) -> str:
         """L1 当前任务相关的进化建议（首轮注入）"""
         suggestions = self.store.get_active_suggestions(
             agent_id=self.agent_id,
-            task_context=task_context,
+            skill_ids=skill_ids,
             limit=3
         )
         return "\n".join(
@@ -284,7 +284,7 @@ class EvolutionContextDescriber:
             for s in suggestions
         )
 
-    def get_evolution_history(self, skill_id: str) -> str:
+    def l2_context(self, skill_ids: list[str] | None = None) -> str:
         """L2 按需获取完整进化历史"""
         lineage = self.store.get_lineage(skill_id)
         return lineage.describe_full_chain()
@@ -325,8 +325,8 @@ class CompactionGuard:
 
     def reinject_after_compaction(self, ctx: AgentContext) -> str:
         """Compaction 后只重注入 L0 + L1 摘要"""
-        l0 = self.tiered_describer.describe_layer0()
-        l1_summary = self.tiered_describer.describe_layer1_summary()
+        l0 = self.tiered_describer.l0_context()
+        l1_summary = self.tiered_describer.l1_context()
         return f"{l0}\n{l1_summary}"
 
     async def check_and_log(self, ctx: AgentContext) -> None:

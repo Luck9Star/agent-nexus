@@ -332,16 +332,38 @@ class TestPackageSource:
         assert ps.local_cache == "/tmp/cache"
 
     def test_defaults(self):
-        ps = PackageSource(name="test")
+        ps = PackageSource(name="test", url="https://github.com/user/repo.git")
         assert ps.type == "git"
-        assert ps.url == ""
+        assert ps.url == "https://github.com/user/repo.git"
         assert ps.branch == "main"
         assert ps.local_cache == ""
 
     def test_frozen(self):
-        ps = PackageSource(name="test")
+        ps = PackageSource(name="test", url="https://github.com/user/repo.git")
         with pytest.raises(ValidationError):
             ps.local_cache = "changed"
+
+
+class TestPackageSourceValidation:
+    """PackageSource git-URL validation (mirrors SourceEntry)."""
+
+    def test_git_type_with_url_succeeds(self):
+        ps = PackageSource(
+            name="official", url="https://github.com/user/repo.git"
+        )
+        assert ps.url == "https://github.com/user/repo.git"
+
+    def test_git_type_empty_url_rejected(self):
+        with pytest.raises(ValidationError, match="non-empty"):
+            PackageSource(name="official", type="git", url="")
+
+    def test_git_type_whitespace_url_rejected(self):
+        with pytest.raises(ValidationError, match="non-empty"):
+            PackageSource(name="official", type="git", url="   ")
+
+    def test_non_git_type_allows_empty_url(self):
+        ps = PackageSource(name="local", type="local", url="")
+        assert ps.type == "local"
 
 
 # ---------------------------------------------------------------------------

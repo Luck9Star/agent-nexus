@@ -171,34 +171,31 @@ class DocFillerAgent:
 
 | 组件 | L0 (每轮) | L1 (首轮) | L2 (按需) |
 |------|----------|----------|----------|
-| `describe_variables()` | 全量（仅 name + description） | — | Variable 当前值（`retrieve()`） |
+| `describe_variables()` | 全量（仅 name + description） | — | Variable 当前值（`l3_value()`） |
 | `describe_functions()` | — | 全量（name + description + 签名） | — |
-| `describe_types()` | Type 名称 + 一句话描述 | 与当前任务相关的 Type Schema | 完整 JSON Schema（所有 Types） |
+| `describe_types(level="names")` | Type 名称 + 一句话描述 | 与当前任务相关的 Type Schema | 完整 JSON Schema（所有 Types） |
 
 ```python
 class TieredRuntimeDescriber:
     """Runtime Context 四层描述"""
 
-    def describe_layer0(self) -> str:
+    def l0_context(self) -> str:
         """L0 身份核心（每轮注入）"""
         vars_desc = self.runtime.describe_variables()  # name + description only
-        type_names = [t.name for t in self.runtime._types.values()]
-        return f"Variables: {vars_desc}\nTypes: {', '.join(type_names)}"
+        type_names = self.runtime.describe_types(level="names")
+        return f"Variables: {vars_desc}\nTypes: {type_names}"
 
-    def describe_layer1(self, task_relevant_types: list[str]) -> str:
+    def l1_context(self) -> str:
         """L1 执行上下文（首轮注入）"""
         funcs_desc = self.runtime.describe_functions()
-        # 只注入与当前任务相关的 Type Schema
-        relevant_schemas = [
-            self.runtime.describe_type(t) for t in task_relevant_types
-        ]
-        return f"Functions: {funcs_desc}\nRelevant Types:\n" + "\n".join(relevant_schemas)
+        types_summary = self.runtime.describe_types(level="summary")
+        return f"Functions: {funcs_desc}\nTypes:\n{types_summary}"
 
-    async def get_full_type_schema(self, type_name: str) -> str:
+    def l2_context(self) -> str:
         """L2 按需获取完整 Type Schema"""
-        return self.runtime.describe_type(type_name)  # include_schema=True
+        return self.runtime.describe_types(level="schema")
 
-    async def retrieve_value(self, var_name: str) -> Any:
+    def l3_value(self, var_name: str) -> str:
         """L3 运行时获取 Variable 当前值"""
         return self.runtime.retrieve(var_name)
 ```
