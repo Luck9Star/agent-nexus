@@ -10,9 +10,9 @@
 
 目标：验证 PydanticAI Agent + 自建编排层基础
 
-- [ ] TaskGraph 实现（SQLite + blocked_by + 环检测）
-- [ ] ProcessManager 实现（asyncio.subprocess + 健康检查）
-- [ ] IPC 协议实现（stdin/stdout JSON-lines）
+- [x] TaskGraph 实现（SQLite + blocked_by + 环检测）
+- [x] ProcessManager 实现（asyncio.subprocess + 健康检查）
+- [x] IPC 协议实现（stdin/stdout JSON-lines）
 - [ ] doc-filler Agent 实现
 - [ ] MCP Server 暴露测试
 - [ ] Local mode 测试
@@ -23,10 +23,10 @@
 
 目标：Platform Router 编排多个 Agent
 
-- [ ] Platform Router 实现（4-Phase Workflow）
-- [ ] OrchestrationDSL TOML 解析器
-- [ ] Continue vs Spawn 决策矩阵
-- [ ] Model Config 层
+- [x] Platform Router 实现（4-Phase Workflow）
+- [x] OrchestrationDSL TOML 解析器
+- [x] Continue vs Spawn 决策矩阵
+- [x] Model Config 层
 - [ ] requirements-analyzer + doc-filler 串联测试
 
 ### Phase 3：MCP Gateway + Model Config（Week 5）
@@ -35,11 +35,11 @@
 
 目标：统一 MCP 暴露和模型配置
 
-- [ ] MCP Gateway 实现
-- [ ] **T1: Agent 级 Deferred Loading** — DeferredAgentRegistry（manifest 注册 + search_and_activate）
-- [ ] **T2: Tiered Context Loading 基础框架** — TieredContextBuilder（L0/L1 分层注入）
-- [ ] **T5: Provider-Agnostic Tool Search** — AgentSearchTool MCP tool + Anthropic 原生 `defer_loading` 适配
-- [ ] Model Config Manager
+- [x] MCP Gateway 实现
+- [x] **T1: Agent 级 Deferred Loading** — DeferredAgentRegistry（manifest 注册 + search_and_activate）
+- [x] **T2: Tiered Context Loading 基础框架** — TieredContextBuilder（L0/L1 分层注入）
+- [x] **T5: Provider-Agnostic Tool Search** — AgentSearchTool MCP tool + Anthropic 原生 `defer_loading` 适配
+- [x] Model Config Manager
 - [ ] 所有 10 个 Atomic Agent 注册
 - [ ] 端到端 MCP 测试
 
@@ -50,12 +50,12 @@
 目标：Agent 通过 Git 仓库分发，本地 CLI 安装/运行/管理
 
 - [ ] **T8: Cross-Agent Data Reference** — Mailbox 引用传递格式（~50 tokens 引用 vs 全量传递）
-- [ ] Git Installer（SourceManager + GitInstaller：clone --sparse → validate → install）
-- [ ] CLI 命令（install, uninstall, update, run, list, search, info）
-- [ ] Lockfile 管理（lockfile.json：git source + commit SHA）
-- [ ] Config 管理（config.toml + sources.yaml + Provider Registry）
+- [x] Git Installer（SourceManager + GitInstaller：clone --sparse → validate → install）
+- [x] CLI 命令（install, uninstall, update, run, list, search, info）
+- [x] Lockfile 管理（lockfile.json：git source + commit SHA）
+- [x] Config 管理（config.toml + sources.yaml + Provider Registry）
 - [ ] SemVer 版本解析器（从 git tags 解析）
-- [ ] Agent Supervisor（asyncio.subprocess，健康检查，自动重启）
+- [x] Agent Supervisor（asyncio.subprocess，健康检查，自动重启）
 - [ ] 质量验证工具（manifest 检查、SKILL.md 检查、安全审计）
 - [ ] 5 个 Composite Agent 实现
 
@@ -67,24 +67,24 @@
 
 目标：集成 CaveAgent Runtime 和 OpenSpace 进化引擎
 
-- [ ] PythonRuntime 集成到 Atomic Agent
-- [ ] SecurityChecker 实现
-- [ ] **T3: Runtime Context 分层加载** — TieredRuntimeDescriber（Type Schema L0 名称/L2 完整分离）
-- [ ] ExecutionAnalyzer 实现
-- [ ] **T4: 进化数据分层注入** — EvolutionContextDescriber（Metrics L0 / 建议 L1 / 历史 L2）
-- [ ] **T6: CompactionGuard** — min_turns_between_compactions=5 + 重注入限制 + context_budget_log
-- [ ] **T7: Context Budget 硬限制** — L0≤800, L1≤3000, bootstrap≤5000, compaction 80%→40%
-- [ ] FIX / DERIVED / CAPTURED 进化模式
-- [ ] 编排进化（TOML 优化）
-- [ ] Skill → Agent Promotion
+- [x] PythonRuntime 集成到 Atomic Agent
+- [x] SecurityChecker 实现
+- [x] **T3: Runtime Context 分层加载** — TieredRuntimeDescriber（Type Schema L0 名称/L2 完整分离）
+- [x] ExecutionAnalyzer 实现
+- [x] **T4: 进化数据分层注入** — EvolutionContextDescriber（Metrics L0 / 建议 L1 / 历史 L2）
+- [x] **T6: CompactionGuard** — min_turns_between_compactions=5 + 重注入限制 + context_budget_log
+- [x] **T7: Context Budget 硬限制** — L0≤800, L1≤3000, bootstrap≤5000, compaction 80%→40%
+- [x] FIX / DERIVED / CAPTURED 进化模式
+- [x] 编排进化（TOML 优化）
+- [x] Skill → Agent Promotion
 
 ### Phase 6：完善 + 测试（Week 11-12）
 
 目标：生产就绪
 
-- [ ] SKILL.md 三层渐进式加载
-- [ ] SubtaskController 超时控制
-- [ ] 完整测试覆盖
+- [x] SKILL.md 三层渐进式加载
+- [x] SubtaskController 超时控制
+- [x] 完整测试覆盖
 - [ ] 文档完善
 
 ### Phase 7：Rust 重构（Week 13-20，远期）

@@ -138,7 +138,7 @@ def _mock_store(
 def _mock_health_checker(reports: dict[str, HealthReport]) -> MagicMock:
     """Create a partially-mocked HealthChecker that returns fixed reports."""
     checker = MagicMock(spec=HealthChecker)
-    checker.diagnose_all.return_value = reports
+    checker.diagnose_skills.return_value = reports
     return checker
 
 
@@ -283,9 +283,9 @@ class TestL1Context:
             active_skills=[r1, r2],
             metrics=EvolutionMetrics(),
         )
-        # Patch HealthChecker so diagnose_all returns our fixed reports
+        # Patch HealthChecker so diagnose_skills returns our fixed reports
         with patch.object(
-            HealthChecker, "diagnose_all",
+            HealthChecker, "diagnose_skills",
             return_value={"s1": report1, "s2": report2},
         ):
             describer = EvolutionContextDescriber(store)
@@ -318,7 +318,7 @@ class TestL1Context:
             metrics=EvolutionMetrics(),
         )
         with patch.object(
-            HealthChecker, "diagnose_all",
+            HealthChecker, "diagnose_skills",
             return_value={"s1": healthy},
         ):
             describer = EvolutionContextDescriber(store)
@@ -334,7 +334,7 @@ class TestL1Context:
         r_high = _make_record("s2", "high", selections=500, is_active=True)
         r_mid = _make_record("s3", "mid", selections=100, is_active=True)
 
-        def mock_diagnose_all() -> dict[str, HealthReport]:
+        def mock_diagnose_skills(skill_ids=None) -> dict[str, HealthReport]:
             return {
                 "s1": _make_health_report("s1", "low", is_healthy=True),
                 "s2": _make_health_report("s2", "high", is_healthy=True),
@@ -345,7 +345,7 @@ class TestL1Context:
             active_skills=[r_low, r_high, r_mid],
             metrics=EvolutionMetrics(),
         )
-        with patch.object(HealthChecker, "diagnose_all", side_effect=mock_diagnose_all):
+        with patch.object(HealthChecker, "diagnose_skills", side_effect=mock_diagnose_skills):
             describer = EvolutionContextDescriber(store)
             result = describer.l1_context()
 
@@ -425,7 +425,7 @@ class TestL2Context:
             judgments_map={"s1": judgments},
         )
         with patch.object(
-            HealthChecker, "diagnose_all",
+            HealthChecker, "diagnose_skills",
             return_value={"s1": unhealthy_report},
         ):
             describer = EvolutionContextDescriber(store)
@@ -459,7 +459,7 @@ class TestL2Context:
         r2 = _make_record("s2", "beta", selections=200)
         r3 = _make_record("s3", "gamma", selections=300)
 
-        def mock_diagnose_all() -> dict[str, HealthReport]:
+        def mock_diagnose_skills(skill_ids=None) -> dict[str, HealthReport]:
             return {
                 "s1": _make_health_report("s1", "alpha", is_healthy=True),
                 "s2": _make_health_report("s2", "beta", is_healthy=True),
@@ -471,7 +471,7 @@ class TestL2Context:
             metrics=EvolutionMetrics(),
             judgments_map={"s1": [], "s2": [], "s3": []},
         )
-        with patch.object(HealthChecker, "diagnose_all", side_effect=mock_diagnose_all):
+        with patch.object(HealthChecker, "diagnose_skills", side_effect=mock_diagnose_skills):
             describer = EvolutionContextDescriber(store)
             result = describer.l2_context(skill_ids=["s1", "s3"])
 
@@ -499,7 +499,7 @@ class TestL2Context:
             judgments_map={"s1": []},
         )
         with patch.object(
-            HealthChecker, "diagnose_all",
+            HealthChecker, "diagnose_skills",
             return_value={"s1": healthy_report},
         ):
             describer = EvolutionContextDescriber(store)
@@ -542,7 +542,7 @@ class TestL2Context:
             judgments_map={"s1": [], "s2": []},
         )
         with patch.object(
-            HealthChecker, "diagnose_all",
+            HealthChecker, "diagnose_skills",
             return_value={"s1": healthy_report, "s2": unhealthy_report},
         ):
             describer = EvolutionContextDescriber(store)
@@ -564,7 +564,7 @@ class TestL2Context:
             judgments_map={"s1": []},
         )
         with patch.object(
-            HealthChecker, "diagnose_all",
+            HealthChecker, "diagnose_skills",
             return_value={"s1": healthy_report},
         ):
             describer = EvolutionContextDescriber(store)
@@ -593,7 +593,7 @@ class TestL2Context:
             judgments_map={"s1": []},
         )
         with patch.object(
-            HealthChecker, "diagnose_all",
+            HealthChecker, "diagnose_skills",
             return_value={"s1": healthy_report},
         ):
             describer = EvolutionContextDescriber(store)
@@ -625,7 +625,7 @@ class TestL2Context:
             judgments_map={"s1": []},
         )
         with patch.object(
-            HealthChecker, "diagnose_all",
+            HealthChecker, "diagnose_skills",
             return_value={"s1": healthy_report},
         ):
             describer = EvolutionContextDescriber(store)

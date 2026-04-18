@@ -13,6 +13,7 @@ Actions:
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -84,11 +85,8 @@ class AgentPromoter:
             if skill.total_selections < _MIN_TOTAL_SELECTIONS:
                 continue
 
-            effective_rate = (
-                skill.total_completions / skill.total_selections
-                if skill.total_selections > 0
-                else 0.0
-            )
+            # total_selections >= _MIN_TOTAL_SELECTIONS (>= 50) guaranteed here
+            effective_rate = skill.total_completions / skill.total_selections
 
             if effective_rate < _MIN_EFFECTIVE_RATE:
                 continue
@@ -140,37 +138,27 @@ class AgentPromoter:
                 error=f"Failed to create agent directory: {e}",
             )
 
-        # Generate manifest
-        manifest_content = self._generate_manifest(candidate)
-        manifest_path = agent_dir / "agent-manifest.yaml"
         try:
+            # Generate manifest
+            manifest_content = self._generate_manifest(candidate)
+            manifest_path = agent_dir / "agent-manifest.yaml"
             manifest_path.write_text(manifest_content, encoding="utf-8")
-        except OSError as e:
-            return PromotionResult(
-                success=False,
-                error=f"Failed to write manifest: {e}",
-            )
 
-        # Generate entry point
-        entry_content = self._generate_entry_point(candidate)
-        entry_path = agent_dir / "agent.py"
-        try:
+            # Generate entry point
+            entry_content = self._generate_entry_point(candidate)
+            entry_path = agent_dir / "agent.py"
             entry_path.write_text(entry_content, encoding="utf-8")
-        except OSError as e:
-            return PromotionResult(
-                success=False,
-                error=f"Failed to write entry point: {e}",
-            )
 
-        # Generate skill file
-        skill_content = self._generate_skill_md(candidate)
-        skill_path = agent_dir / "SKILL.md"
-        try:
+            # Generate skill file
+            skill_content = self._generate_skill_md(candidate)
+            skill_path = agent_dir / "SKILL.md"
             skill_path.write_text(skill_content, encoding="utf-8")
         except OSError as e:
+            # Clean up partial files on any write failure
+            shutil.rmtree(agent_dir, ignore_errors=True)
             return PromotionResult(
                 success=False,
-                error=f"Failed to write skill file: {e}",
+                error=f"Failed to write agent files: {e}",
             )
 
         return PromotionResult(

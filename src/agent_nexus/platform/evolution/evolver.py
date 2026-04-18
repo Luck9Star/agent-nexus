@@ -365,6 +365,8 @@ class SkillEvolver:
         import re
         name_base = re.sub(r"[^a-z0-9\-]", "-", name_base)
         name_base = re.sub(r"-{2,}", "-", name_base).strip("-")
+        if not name_base:
+            name_base = f"captured_{uuid.uuid4().hex[:6]}"
 
         new_id = f"{name_base}__cap_{uuid.uuid4().hex[:8]}"
         directory = capture_directory or f"skills/{name_base}"

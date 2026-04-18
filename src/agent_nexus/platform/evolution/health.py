@@ -157,7 +157,23 @@ class HealthChecker:
         Returns:
             Dict mapping skill_id -> HealthReport.
         """
+        return self.diagnose_skills(skill_ids=None)
+
+    def diagnose_skills(
+        self, skill_ids: set[str] | None = None,
+    ) -> dict[str, HealthReport]:
+        """Run health diagnostics, optionally filtered to specific skill IDs.
+
+        Args:
+            skill_ids: If provided, only diagnose skills whose IDs are in
+                this set.  If None, diagnose all active skills.
+
+        Returns:
+            Dict mapping skill_id -> HealthReport.
+        """
         active_skills = self._store.get_active_skills()
+        if skill_ids is not None:
+            active_skills = [s for s in active_skills if s.id in skill_ids]
         reports: dict[str, HealthReport] = {}
 
         for skill in active_skills:

@@ -82,15 +82,27 @@ class TokenUsage(BaseModel):
     compaction_count: int = 0
     last_compaction_turn: int = 0
 
-    def check_budget(self, context_window: int) -> str | None:
+    def check_budget(
+        self,
+        context_window: int,
+        budget: ContextBudget | None = None,
+    ) -> str | None:
         """Return alert level or None if within budget.
 
+        Args:
+            context_window: Total token limit for the model.
+            budget: Optional budget config with configurable thresholds.
+                Falls back to ContextBudget defaults if not provided.
+
         Returns:
-            "hard_ceiling" -- forced truncation at 95%
-            "forced_truncate" -- truncate earliest messages at 90%
-            "compaction" -- trigger compaction at 80%
+            "hard_ceiling" -- forced truncation
+            "forced_truncate" -- truncate earliest messages
+            "compaction" -- trigger compaction
             None -- within budget
         """
+        if budget is None:
+            budget = ContextBudget()
+
         if context_window <= 0:
             logger.warning(
                 "context_window=%s is invalid, budget check skipped",
@@ -98,11 +110,11 @@ class TokenUsage(BaseModel):
             )
             return None
         ratio = self.total_tokens / context_window
-        if ratio > 0.95:
+        if ratio > budget.session_hard_ceiling:
             return "hard_ceiling"
-        if ratio > 0.9:
+        if ratio > budget.forced_truncate_threshold:
             return "forced_truncate"
-        if ratio > 0.8:
+        if ratio > budget.compaction_trigger:
             return "compaction"
         return None
 

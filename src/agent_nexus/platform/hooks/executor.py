@@ -266,6 +266,7 @@ class HookExecutor:
             try:
                 if proc is not None:
                     proc.kill()
+                    await proc.wait()
             except Exception:
                 pass
             return HookExecution(

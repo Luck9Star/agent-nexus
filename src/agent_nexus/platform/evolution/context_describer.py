@@ -38,8 +38,13 @@ class EvolutionContextDescriber:
         l2 = describer.l2_context()
     """
 
-    def __init__(self, store: EvolutionStore) -> None:
+    def __init__(
+        self,
+        store: EvolutionStore,
+        agent_name: str | None = None,
+    ) -> None:
         self._store = store
+        self._agent_name = agent_name
         self._health = HealthChecker(store)
 
     # ------------------------------------------------------------------
@@ -65,8 +70,8 @@ class EvolutionContextDescriber:
             1 for s in active if s.lineage.origin.value != "imported"
         )
 
-        # Compute aggregate effective rate
-        metrics = self._store.get_metrics()
+        # Compute aggregate effective rate (scoped to agent if available)
+        metrics = self._store.get_metrics(agent_name=self._agent_name)
         eff_rate = (
             metrics.total_completions / metrics.total_selections
             if metrics.total_selections > 0
@@ -106,8 +111,9 @@ class EvolutionContextDescriber:
         # Sort by total_selections descending (top skills first)
         active.sort(key=lambda s: s.total_selections, reverse=True)
 
-        # Build health reports for requested skills
-        reports = self._health.diagnose_all()
+        # Build health reports only for filtered skills
+        active_id_set = {s.id for s in active}
+        reports = self._health.diagnose_skills(active_id_set)
 
         lines: list[str] = ["[Evolution Skill Metrics]"]
         lines.append(
@@ -160,8 +166,9 @@ class EvolutionContextDescriber:
         # Sort by total_selections descending
         active.sort(key=lambda s: s.total_selections, reverse=True)
 
-        # Build health reports
-        reports = self._health.diagnose_all()
+        # Build health reports only for filtered skills
+        active_id_set = {s.id for s in active}
+        reports = self._health.diagnose_skills(active_id_set)
 
         parts: list[str] = []
 

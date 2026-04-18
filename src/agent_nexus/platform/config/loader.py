@@ -63,10 +63,10 @@ class ConfigLoader:
         config_path = self.config_dir / CONFIG_FILE
         raw: dict[str, Any] = {}
 
-        if config_path.exists():
-            logger.debug("Loading config from %s", config_path)
+        try:
             raw = toml.loads(config_path.read_text(encoding="utf-8"))
-        else:
+            logger.debug("Loading config from %s", config_path)
+        except FileNotFoundError:
             logger.debug("Config file not found at %s, using defaults", config_path)
 
         # --- Runtime section ---
@@ -118,8 +118,13 @@ class ConfigLoader:
             logger.warning("sources.yaml is empty or missing 'sources' key")
             return []
 
+        sources_list = raw["sources"]
+        if not isinstance(sources_list, list):
+            logger.warning("sources.yaml 'sources' key is not a list")
+            return []
+
         entries: list[SourceEntry] = []
-        for item in raw["sources"]:
+        for item in sources_list:
             try:
                 entry = SourceEntry(
                     name=item["name"],

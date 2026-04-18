@@ -134,15 +134,17 @@ class CompactionGuard:
         self._consecutive_compactions += 1
 
         # Log the compaction event
+        result_chars = len(result)
         self._store.log_budget_event(
             agent_name=self._agent_id,
             event_type="compaction",
             tokens_before=ctx.token_usage.total_tokens,
-            tokens_after=len(result) // 4,  # rough token estimate
+            tokens_after=result_chars,  # char count; actual tokens depend on tokenizer
             details={
                 "consecutive_compactions": self._consecutive_compactions,
                 "l0_chars": len(l0),
                 "l1_chars": len(l1),
+                "result_chars": result_chars,
             },
         )
 
