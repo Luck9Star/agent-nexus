@@ -295,52 +295,66 @@ class TaskGraph:
                         blocked.append(task)
             return blocked
 
-    def get_parallel_groups(self) -> list[list[TaskItem]]:
+    def get_parallel_groups(
+        self, conn: Any | None = None,
+    ) -> list[list[TaskItem]]:
         """Get groups of tasks that can run in parallel.
 
         Returns groups ordered by dependency depth (no deps first).
         Within each group, all tasks are independent.
+
+        Args:
+            conn: Optional existing connection for consistent reads.
+                If None, opens a new connection.
         """
-        with self._conn() as conn:
-            # Build adjacency: task -> set of tasks it depends on
-            all_rows = conn.execute(
-                "SELECT id FROM tasks ORDER BY created_at"
-            ).fetchall()
-            task_ids = [r[0] for r in all_rows]
+        if conn is not None:
+            return self._get_parallel_groups_conn(conn)
+        with self._conn() as c:
+            return self._get_parallel_groups_conn(c)
 
-            if not task_ids:
-                return []
+    def _get_parallel_groups_conn(
+        self, conn: Any,
+    ) -> list[list[TaskItem]]:
+        """Internal: compute parallel groups using an existing connection."""
+        # Build adjacency: task -> set of tasks it depends on
+        all_rows = conn.execute(
+            "SELECT id FROM tasks ORDER BY created_at"
+        ).fetchall()
+        task_ids = [r[0] for r in all_rows]
 
-            dep_map: dict[str, set[str]] = {tid: set() for tid in task_ids}
-            dep_rows = conn.execute(
-                "SELECT task_id, blocked_by_id FROM task_dependencies"
-            ).fetchall()
-            for task_id, blocked_by_id in dep_rows:
-                dep_map[task_id].add(blocked_by_id)
+        if not task_ids:
+            return []
 
-            # BFS-based topological grouping
-            groups: list[list[TaskItem]] = []
-            assigned: set[str] = set()
+        dep_map: dict[str, set[str]] = {tid: set() for tid in task_ids}
+        dep_rows = conn.execute(
+            "SELECT task_id, blocked_by_id FROM task_dependencies"
+        ).fetchall()
+        for task_id, blocked_by_id in dep_rows:
+            dep_map[task_id].add(blocked_by_id)
 
-            while len(assigned) < len(task_ids):
-                group_ids = [
-                    tid
-                    for tid in task_ids
-                    if tid not in assigned
-                    and dep_map[tid].issubset(assigned)
-                ]
-                if not group_ids:
-                    # Remaining tasks have unresolvable deps (cycle or missing)
-                    break
-                group_tasks = []
-                for tid in group_ids:
-                    task = self._get_task_conn(conn, tid)
-                    if task is not None:
-                        group_tasks.append(task)
-                groups.append(group_tasks)
-                assigned.update(group_ids)
+        # BFS-based topological grouping
+        groups: list[list[TaskItem]] = []
+        assigned: set[str] = set()
 
-            return groups
+        while len(assigned) < len(task_ids):
+            group_ids = [
+                tid
+                for tid in task_ids
+                if tid not in assigned
+                and dep_map[tid].issubset(assigned)
+            ]
+            if not group_ids:
+                # Remaining tasks have unresolvable deps (cycle or missing)
+                break
+            group_tasks = []
+            for tid in group_ids:
+                task = self._get_task_conn(conn, tid)
+                if task is not None:
+                    group_tasks.append(task)
+            groups.append(group_tasks)
+            assigned.update(group_ids)
+
+        return groups
 
     def detect_cycles(self) -> list[list[str]]:
         """Detect cycles in the dependency graph.
@@ -402,7 +416,7 @@ class TaskGraph:
                 if task is not None:
                     tasks.append(task)
 
-            groups = self.get_parallel_groups()
+            groups = self.get_parallel_groups(conn=conn)
             group_ids = [[t.id for t in group] for group in groups]
 
             return TaskGraphSnapshot(tasks=tasks, parallel_groups=group_ids)

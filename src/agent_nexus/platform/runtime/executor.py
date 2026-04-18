@@ -67,8 +67,11 @@ class IPythonExecutor:
 
     def __init__(self, security_checker: SecurityChecker | None = None) -> None:
         self._config = _create_ipython_config()
-        self._shell = InteractiveShell.instance(config=self._config)
+        # Direct instantiation (not .instance()) to avoid global singleton.
+        # Each IPythonExecutor gets its own isolated shell namespace.
+        self._shell = InteractiveShell(config=self._config, user_ns={})
         self._security = security_checker or SecurityChecker()
+        self._pre_keys: set[str] = set()
 
     async def execute(self, code: str, timeout: float = 30.0) -> ExecutionResult:
         """Execute code with security check and timeout.
@@ -96,6 +99,9 @@ class IPythonExecutor:
 
         # Step 2: Execute
         try:
+            # Snapshot namespace before execution to detect new variables
+            self._pre_keys = set(self.namespace_keys())
+
             with capture_output() as captured:
                 transformed = self._shell.transform_cell(code)
                 result = await asyncio.wait_for(
@@ -175,14 +181,9 @@ class IPythonExecutor:
         )
 
     def _detect_new_variables(self) -> list[str]:
-        """Detect variables that appear to be user-defined.
+        """Detect variables created since the last execution.
 
-        Returns a list of names that look like user variables
-        (not IPython internals or dunder names).
+        Diffs current namespace against keys snapshotted before execution.
         """
-        return [
-            k for k in self._shell.user_ns
-            if k not in _IPYTHON_INTERNALS
-            and not k.startswith("_")
-            and not callable(self._shell.user_ns[k])
-        ]
+        current = set(self.namespace_keys())
+        return sorted(current - self._pre_keys)

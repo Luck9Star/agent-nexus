@@ -92,6 +92,26 @@ class ProcessManager:
     # Start
     # ------------------------------------------------------------------
 
+    async def _drain_stderr(
+        self, process: asyncio.subprocess.Process, name: str,
+    ) -> None:
+        """Consume stderr to prevent pipe buffer deadlock.
+
+        When stderr=PIPE is opened but never read, the OS pipe buffer
+        fills (~64KB) and the writing process blocks indefinitely.  This
+        background task keeps the buffer clear.
+        """
+        assert process.stderr is not None
+        while True:
+            line = await process.stderr.readline()
+            if not line:
+                break
+            logger.debug(
+                "Agent '%s' stderr: %s",
+                name,
+                line.decode(errors="replace").rstrip(),
+            )
+
     async def start_agent(
         self,
         name: str,
@@ -156,6 +176,10 @@ class ProcessManager:
             start_cwd=cwd,
             start_env=dict(env) if env else {},
         )
+
+        # Drain stderr in background to prevent pipe buffer deadlock
+        assert process.stderr is not None
+        asyncio.create_task(self._drain_stderr(process, name))
 
         self._agents[name] = handle
         logger.info(

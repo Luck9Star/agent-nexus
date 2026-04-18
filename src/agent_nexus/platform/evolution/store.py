@@ -610,12 +610,14 @@ class EvolutionStore:
         """
         with self._conn() as conn:
             if agent_name:
+                # Escape LIKE wildcards to prevent unintended matches
+                escaped = agent_name.replace("%", "\\%").replace("_", "\\_")
                 rows = conn.execute(
                     "SELECT total_selections, total_applied, "
                     "total_completions, total_fallbacks "
                     "FROM skill_records WHERE is_active = 1 "
-                    "AND directory LIKE ?",
-                    (f"%{agent_name}%",),
+                    "AND directory LIKE ? ESCAPE '\\'",
+                    (f"%{escaped}%",),
                 ).fetchall()
             else:
                 rows = conn.execute(
