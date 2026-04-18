@@ -18,7 +18,7 @@ from pathlib import Path
 
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
-from agent_nexus.models.distribution import LockfileEntry
+from agent_nexus.models.distribution import Lockfile, LockfileEntry
 from agent_nexus.platform.config.loader import ConfigLoader
 from agent_nexus.platform.orchestration.process_manager import (
     ProcessManager,
@@ -114,7 +114,9 @@ class AgentSupervisor:
 
         for agent_name in lockfile.agents:
             try:
-                ok = await self.start_agent(agent_name)
+                ok = await self.start_agent(
+                    agent_name, lockfile=lockfile,
+                )
                 if ok:
                     started.append(agent_name)
             except Exception as exc:
@@ -141,7 +143,11 @@ class AgentSupervisor:
     # Single agent start / stop
     # ------------------------------------------------------------------
 
-    async def start_agent(self, agent_name: str) -> bool:
+    async def start_agent(
+        self,
+        agent_name: str,
+        lockfile: "Lockfile | None" = None,
+    ) -> bool:
         """Start a single agent by name.
 
         1. Read the lockfile entry for *agent_name*.
@@ -149,13 +155,25 @@ class AgentSupervisor:
         3. Build the launch command.
         4. Start via :meth:`ProcessManager.start_agent`.
 
+        Parameters
+        ----------
+        agent_name:
+            Agent to start.
+        lockfile:
+            Already-loaded lockfile (avoids redundant disk read when
+            called from :meth:`start_all`).  When ``None``, loads from
+            disk.
+
         Returns
         -------
         bool
             ``True`` if started successfully, ``False`` if the agent is
             not installed or could not be launched.
         """
-        entry = self._lockfile.get_entry(agent_name)
+        if lockfile is not None:
+            entry = self._lockfile.get_entry_from(lockfile, agent_name)
+        else:
+            entry = self._lockfile.get_entry(agent_name)
         if entry is None:
             logger.warning("Agent '%s' not found in lockfile", agent_name)
             return False
@@ -379,6 +397,11 @@ class AgentSupervisor:
                     if key:
                         env[provider.api_key_env] = key
         except Exception:
-            logger.warning("Failed to load config for env building", exc_info=True)
+            logger.error(
+                "Failed to load config for agent '%s' env building "
+                "-- agent may lack model config and API keys",
+                agent_name,
+                exc_info=True,
+            )
 
         return env

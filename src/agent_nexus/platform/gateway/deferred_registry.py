@@ -84,7 +84,18 @@ class DeferredAgentRegistry:
         self._core_agents: dict[str, AgentInfo] = {}
         self._deferred_agents: dict[str, AgentInfo] = {}
         self._tool_adapters: dict[str, list[McpToolAdapter]] = {}
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Return the activation lock, creating it lazily.
+
+        Creating ``asyncio.Lock()`` in ``__init__`` can raise
+        ``RuntimeError: no current event loop`` if the registry is
+        instantiated outside an async context (e.g. during CLI setup).
+        """
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     # ------------------------------------------------------------------
     # Registration
@@ -172,7 +183,7 @@ class DeferredAgentRegistry:
             KeyError: Agent not registered.
             RuntimeError: Agent subprocess failed to start.
         """
-        async with self._lock:
+        async with self._get_lock():
             # Check if already activated (could be core or previously activated)
             if name in self._core_agents:
                 info = self._core_agents[name]

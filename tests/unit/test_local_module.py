@@ -1829,13 +1829,14 @@ class TestBuildCommandUnsafeName:
         assert len(result) > 0
 
 
-class TestSupervisorConfigLoadLogsWarning:
-    """_build_env must log a warning (not silently swallow) when config
+class TestSupervisorConfigLoadLogsError:
+    """_build_env must log at ERROR level (not silently swallow) when config
     loading fails.  Regression test for silent `except Exception: pass`.
+    Upgraded from WARNING to ERROR in iteration 22 audit.
     """
 
     def test_config_load_failure_logs_warning(self, caplog) -> None:
-        """When config_loader.load_config raises, a warning is logged."""
+        """When config_loader.load_config raises, an error is logged at ERROR level."""
         pm = MagicMock()
         lockfile = MagicMock()
         config_loader = MagicMock()
@@ -1848,7 +1849,7 @@ class TestSupervisorConfigLoadLogsWarning:
             config_dir=Path("/tmp/test"),
         )
 
-        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.local.supervisor"):
+        with caplog.at_level(logging.ERROR, logger="agent_nexus.platform.local.supervisor"):
             env = supervisor._build_env("test-agent", LockfileEntry(
                 source="git+https://example.com/test-agent",
                 version="1.0.0",
@@ -1856,7 +1857,7 @@ class TestSupervisorConfigLoadLogsWarning:
                 agent_type="atomic",
             ))
 
-        # env should be empty (no crash), but warning should be logged
+        # env should be empty (no crash), but error should be logged
         assert env == {}
         assert "Failed to load config" in caplog.text
 
@@ -2039,3 +2040,145 @@ class TestSupervisorSafeNameRegex:
         # shutil.copytree uses it as a leaf directory name
         cmd = supervisor._build_command("agent..evil", entry)
         assert cmd is not None  # allowed -- consistent with installer
+
+
+# ============================================================================
+# Regression: LockfileManager get_entry_from + supervisor lockfile passthrough
+#             + ERROR log level (from iter 42 audit)
+# ============================================================================
+
+
+class TestLockfileManagerGetEntryFrom:
+    """Regression 3.1: get_entry_from() reads from pre-loaded lockfile.
+
+    Without this method, start_all() would call get_entry() for each agent,
+    causing N redundant disk reads and a TOCTOU window where the lockfile
+    could change between reads.
+    """
+
+    def test_get_entry_from_loaded_lockfile(self, tmp_path: Path) -> None:
+        """get_entry_from() returns correct entry from in-memory lockfile."""
+        lockfile_path = tmp_path / "lockfile.json"
+        mgr = LockfileManager(lockfile_path)
+
+        entry1 = _make_entry(version="1.0.0", commit_sha="sha1")
+        entry2 = _make_entry(
+            version="2.0.0",
+            source="git+https://example.com/other",
+            commit_sha="sha2",
+        )
+
+        lockfile = Lockfile(
+            agents={
+                "agent-a": entry1,
+                "agent-b": entry2,
+            }
+        )
+        mgr.save(lockfile)
+
+        # Load once, query N times without re-reading disk
+        loaded = mgr.load()
+        result = mgr.get_entry_from(loaded, "agent-a")
+        assert result is not None
+        assert result.version == "1.0.0"
+        assert result.commit_sha == "sha1"
+
+        result_b = mgr.get_entry_from(loaded, "agent-b")
+        assert result_b is not None
+        assert result_b.version == "2.0.0"
+
+    def test_get_entry_from_missing_returns_none(
+        self, tmp_path: Path
+    ) -> None:
+        """get_entry_from() returns None for unknown agent names."""
+        lockfile_path = tmp_path / "lockfile.json"
+        mgr = LockfileManager(lockfile_path)
+
+        lockfile = Lockfile(agents={"existing": _make_entry()})
+        mgr.save(lockfile)
+
+        loaded = mgr.load()
+        assert mgr.get_entry_from(loaded, "nonexistent") is None
+
+
+class TestSupervisorLockfilePassthrough:
+    """Regression 3.1 continued: start_all() passes lockfile to start_agent().
+
+    This avoids N redundant disk reads and TOCTOU during bulk startup.
+    """
+
+    @pytest.mark.asyncio
+    async def test_start_all_passes_lockfile(self, tmp_path: Path) -> None:
+        """start_all() loads lockfile once and passes it through."""
+        lockfile_path = tmp_path / "lockfile.json"
+        lockfile_mgr = LockfileManager(lockfile_path)
+
+        entry = _make_entry()
+        lockfile = Lockfile(agents={"test-agent": entry})
+        lockfile_mgr.save(lockfile)
+
+        pm = MagicMock(spec=["start_agent", "stop_agent", "stop_all", "get_agent", "list_running", "health_check"])
+        pm.start_agent = AsyncMock()
+        handle = MagicMock()
+        handle.pid = 12345
+        pm.start_agent.return_value = handle
+
+        config_loader = MagicMock()
+        config_loader.load_config.return_value = MagicMock(
+            models=MagicMock(default=None, providers={})
+        )
+        config_loader.config_dir = tmp_path
+
+        supervisor = AgentSupervisor(
+            process_manager=pm,
+            lockfile_manager=lockfile_mgr,
+            config_loader=config_loader,
+            config_dir=tmp_path,
+        )
+
+        started = await supervisor.start_all()
+        assert "test-agent" in started
+
+
+class TestSupervisorBuildEnvLogsError:
+    """Regression 3.4: _build_env logs at ERROR level on config failure.
+
+    Previously logged at WARNING, which could hide configuration issues
+    that cause agents to run without model settings and API keys.
+    """
+
+    def test_config_failure_logs_error(self, caplog) -> None:
+        """When config_loader.load_config raises, error is logged at ERROR."""
+        pm = MagicMock()
+        lockfile = MagicMock()
+        config_loader = MagicMock()
+        config_loader.load_config.side_effect = RuntimeError("config exploded")
+
+        supervisor = AgentSupervisor(
+            process_manager=pm,
+            lockfile_manager=lockfile,
+            config_loader=config_loader,
+            config_dir=Path("/tmp/test"),
+        )
+
+        with caplog.at_level(
+            logging.ERROR,
+            logger="agent_nexus.platform.local.supervisor",
+        ):
+            env = supervisor._build_env("my-agent", LockfileEntry(
+                source="git+https://example.com/test-agent",
+                version="1.0.0",
+                commit_sha="abc123",
+                agent_type="atomic",
+            ))
+
+        assert env == {}
+        assert "Failed to load config" in caplog.text
+        # Verify it is actually at ERROR level, not just WARNING
+        error_records = [
+            r for r in caplog.records
+            if r.levelname == "ERROR" and "Failed to load config" in r.message
+        ]
+        assert len(error_records) >= 1, (
+            "Expected at least one ERROR-level log record for config failure"
+        )

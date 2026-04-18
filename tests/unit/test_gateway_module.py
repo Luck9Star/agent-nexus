@@ -1602,3 +1602,121 @@ class TestLazyAsyncioLock:
         lock1 = gw._get_lock()
         lock2 = gw._get_lock()
         assert lock1 is lock2
+
+
+# ============================================================================
+# Regression: DeferredRegistry lazy lock + activation guard (from iter 42 audit)
+# ============================================================================
+
+
+class TestDeferredRegistryLazyLock:
+    """Regression 1.2: DeferredRegistry lock is created lazily.
+
+    Creating asyncio.Lock() in __init__ raises RuntimeError when the
+    registry is instantiated outside an async context (e.g. during CLI
+    setup).  The lock must be created on first use via _get_lock().
+    """
+
+    def test_sync_instantiation_no_event_loop(self) -> None:
+        """Creating DeferredRegistry outside async context does not raise."""
+        pm = MagicMock(spec=ProcessManager)
+        # _lock must be None initially (lazy)
+        registry = DeferredAgentRegistry(pm)
+        assert registry._lock is None
+
+    @pytest.mark.asyncio
+    async def test_lock_created_on_first_use(self) -> None:
+        """Lock is created on first call to _get_lock(), not in __init__."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+        assert registry._lock is None
+
+        lock = registry._get_lock()
+        assert lock is not None
+        assert isinstance(lock, asyncio.Lock)
+
+        # Second call returns the same lock
+        lock2 = registry._get_lock()
+        assert lock2 is lock
+
+    @pytest.mark.asyncio
+    async def test_activate_uses_lazy_lock(self) -> None:
+        """activate_agent() works with the lazy lock pattern."""
+        pm = MagicMock(spec=ProcessManager)
+        pm.start_agent = AsyncMock()
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = AgentManifest(
+            name="lazy-agent",
+            version="0.1.0",
+            type=AgentType.ATOMIC,
+            description="A test agent",
+        )
+        registry.register_agent(
+            manifest,
+            deferred=True,
+            start_command=["python3", "-m", "lazy_agent"],
+        )
+
+        # activate_agent should create the lock internally and succeed
+        schemas = await registry.activate_agent("lazy-agent")
+        assert isinstance(schemas, list)
+
+
+class TestDeferredRegistryActivationGuard:
+    """Registry propagates ProcessManager exceptions during activation.
+
+    The registry does not swallow subprocess start errors. It lets them
+    propagate to the caller (Gateway), which handles the failure.
+    """
+
+    @pytest.mark.asyncio
+    async def test_activate_agent_propagates_start_error(self) -> None:
+        """When ProcessManager.start_agent raises, activation propagates
+        the exception so the Gateway layer can handle it."""
+        pm = MagicMock(spec=ProcessManager)
+        pm.start_agent = AsyncMock(side_effect=OSError("subprocess failed"))
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = AgentManifest(
+            name="failing-agent",
+            version="0.1.0",
+            type=AgentType.ATOMIC,
+            description="A test agent",
+        )
+        registry.register_agent(
+            manifest,
+            deferred=True,
+            start_command=["python3", "-m", "failing"],
+        )
+
+        # Registry MUST propagate the error, not swallow it
+        with pytest.raises(OSError, match="subprocess failed"):
+            await registry.activate_agent("failing-agent")
+
+    @pytest.mark.asyncio
+    async def test_activate_agent_no_subprocess_returns_placeholder(
+        self,
+    ) -> None:
+        """When agent has no start_command, activation returns placeholder
+        schemas from manifest metadata (no subprocess needed)."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = AgentManifest(
+            name="static-agent",
+            version="0.1.0",
+            type=AgentType.ATOMIC,
+            description="A static agent",
+        )
+        registry.register_agent(
+            manifest,
+            deferred=True,
+            # No start_command: agent has no subprocess
+        )
+
+        schemas = await registry.activate_agent("static-agent")
+        assert isinstance(schemas, list)
+        assert len(schemas) >= 1
+        # Placeholder schema should have the agent name in the tool name
+        assert "static-agent" in schemas[0].get("name", "")

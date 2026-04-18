@@ -2335,3 +2335,107 @@ class TestThresholdConstants:
     def test_derived_thresholds_consistent(self) -> None:
         """DERIVED triggers when effective < _MODERATE and applied > _MIN_APPLIED."""
         assert thresholds._MODERATE_EFFECTIVE_THRESHOLD > thresholds._MIN_APPLIED_FOR_DERIVED
+
+
+# ============================================================================
+# Regression: EvolutionEngine facade wiring (from iter 42 audit)
+# ============================================================================
+
+
+class TestEvolutionEngineFacadeDelegation:
+    """EvolutionEngine delegates correctly to all sub-components.
+
+    The engine is a thin facade. Each method must route to the correct
+    sub-component with the right arguments, and return results unchanged.
+    """
+
+    @pytest.fixture
+    def engine(self, tmp_path: Path) -> "EvolutionEngine":
+        """Create an EvolutionEngine with a temp SQLite store."""
+        from agent_nexus.platform.evolution.engine import EvolutionEngine
+        db_path = tmp_path / "evolution.db"
+        store = EvolutionStore(db_path)
+        return EvolutionEngine(store, agents_root=tmp_path / "agents")
+
+    def test_properties_return_components(
+        self, engine: "EvolutionEngine"
+    ) -> None:
+        """All sub-component properties return non-None instances."""
+        assert engine.store is not None
+        assert engine.analyzer is not None
+        assert engine.evolver is not None
+        assert engine.health_checker is not None
+        assert engine.compaction_guard is not None
+        assert engine.promoter is not None
+
+    def test_evolve_post_analysis_requires_ctx(
+        self, engine: "EvolutionEngine"
+    ) -> None:
+        """trigger='post_analysis' without ctx raises ValueError."""
+        with pytest.raises(ValueError, match="ctx.*required"):
+            engine.evolve(trigger="post_analysis", ctx=None)
+
+    def test_evolve_tool_degradation_requires_tool_key(
+        self, engine: "EvolutionEngine"
+    ) -> None:
+        """trigger='tool_degradation' without tool_key raises ValueError."""
+        with pytest.raises(ValueError, match="tool_key.*required"):
+            engine.evolve(trigger="tool_degradation")
+
+    def test_evolve_unknown_trigger(self, engine: "EvolutionEngine") -> None:
+        """Unknown trigger raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown trigger"):
+            engine.evolve(trigger="nonexistent")
+
+    def test_evolve_post_analysis_returns_analysis_result(
+        self, engine: "EvolutionEngine"
+    ) -> None:
+        """trigger='post_analysis' with valid ctx returns AnalysisResult."""
+        ctx = EvolutionContext(
+            agent_id="test-agent",
+            task_id="task-1",
+            task_description="test task",
+        )
+        result = engine.evolve(trigger="post_analysis", ctx=ctx)
+        # AnalysisResult has .suggestions attribute
+        assert hasattr(result, "suggestions")
+
+    def test_evolve_tool_degradation_returns_list(
+        self, engine: "EvolutionEngine"
+    ) -> None:
+        """trigger='tool_degradation' returns list[EvolveResult]."""
+        results = engine.evolve(
+            trigger="tool_degradation",
+            tool_key="test-tool",
+            problem_description="tool is slow",
+        )
+        assert isinstance(results, list)
+
+    def test_evolve_metric_check_returns_list(
+        self, engine: "EvolutionEngine"
+    ) -> None:
+        """trigger='metric_check' returns list[EvolveResult]."""
+        results = engine.evolve(trigger="metric_check")
+        assert isinstance(results, list)
+
+    def test_should_compact_delegates(
+        self, engine: "EvolutionEngine"
+    ) -> None:
+        """should_compact delegates to CompactionGuard."""
+        from agent_nexus.platform.evolution.compaction import AgentContext
+        ctx = AgentContext(agent_id="test", session_id="s1")
+        # Should return bool without error
+        result = engine.should_compact(ctx)
+        assert isinstance(result, bool)
+
+    def test_diagnose_all_delegates(self, engine: "EvolutionEngine") -> None:
+        """diagnose_all delegates to HealthChecker."""
+        report = engine.diagnose_all()
+        assert isinstance(report, dict)
+
+    def test_check_health_missing_skill_raises(
+        self, engine: "EvolutionEngine"
+    ) -> None:
+        """check_health raises ValueError for unknown skill_id."""
+        with pytest.raises(ValueError, match="Skill not found"):
+            engine.check_health("nonexistent-skill")

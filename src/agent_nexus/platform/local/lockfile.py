@@ -83,8 +83,24 @@ class LockfileManager:
             raise
 
     def get_entry(self, agent_name: str) -> LockfileEntry | None:
-        """Return the lockfile entry for *agent_name*, or ``None``."""
+        """Return the lockfile entry for *agent_name*, or ``None``.
+
+        Reads the lockfile from disk on every call.  For bulk operations
+        prefer :meth:`get_entry_from` to avoid redundant I/O and TOCTOU
+        races.
+        """
         return self.load().agents.get(agent_name)
+
+    def get_entry_from(
+        self, lockfile: Lockfile, agent_name: str,
+    ) -> LockfileEntry | None:
+        """Return the lockfile entry from an already-loaded lockfile.
+
+        Unlike :meth:`get_entry`, this does **not** read from disk.
+        Use when the caller has already called :meth:`load` to avoid
+        redundant I/O and TOCTOU inconsistencies.
+        """
+        return lockfile.agents.get(agent_name)
 
     def add_entry_by_name(self, agent_name: str, entry: LockfileEntry) -> None:
         """Add or update a lockfile entry keyed by *agent_name* and save."""

@@ -659,3 +659,47 @@ class TestIPCReceiveNonUTF8:
 
         assert result.content == "Chinese: 你好世界"
         assert result.task_id == "t1"
+
+
+# ============================================================================
+# Regression: IPC model roundtrip (from iter 42 audit)
+# ============================================================================
+
+
+class TestIPCModelRoundtrip:
+    """IPC message models serialize/deserialize correctly across the
+    platform-agent boundary.  This validates the contract at the seam."""
+
+    def test_platform_to_agent_roundtrip(self) -> None:
+        """PlatformToAgent serializes and deserializes without data loss."""
+        from agent_nexus.models.ipc import (
+            PlatformToAgent,
+            PlatformToAgentType,
+        )
+
+        p2a = PlatformToAgent(
+            type=PlatformToAgentType.CHAT,
+            conversation_id="conv-1",
+            content="hello agent",
+        )
+        p2a_json = p2a.model_dump_json()
+        p2a_round = PlatformToAgent.model_validate_json(p2a_json)
+        assert p2a_round.content == "hello agent"
+        assert p2a_round.conversation_id == "conv-1"
+
+    def test_agent_to_platform_roundtrip(self) -> None:
+        """AgentToPlatform with output dict roundtrips correctly."""
+        from agent_nexus.models.ipc import (
+            AgentToPlatform,
+            AgentToPlatformType,
+        )
+
+        a2p = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            conversation_id="conv-1",
+            content="task done",
+            output={"result": 42},
+        )
+        a2p_json = a2p.model_dump_json()
+        a2p_round = AgentToPlatform.model_validate_json(a2p_json)
+        assert a2p_round.output == {"result": 42}
