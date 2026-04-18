@@ -69,8 +69,8 @@ class TaskGraph:
         """获取所有可执行的任务（pending 且无阻塞）"""
         ...
 
-    def detect_cycles(self) -> bool:
-        """DFS 环检测（参考 ClawTeam store/file.py:291-319）"""
+    def detect_cycles(self) -> list[list[str]]:
+        """DFS 环检测，返回所有环（每个环为 task ID 列表）（参考 ClawTeam store/file.py:291-319）"""
         ...
 
     def get_parallel_groups(self) -> list[list[str]]:
@@ -98,11 +98,23 @@ class TaskGraph:
 {"type": "task", "task_id": "...", "description": "...", "blocked_by": []}
 {"type": "data_reference", "ref_id": "var://...", "summary": "..."}
 
+# Platform → Agent 心跳
+{"type": "chat", "content": "__heartbeat__", "conversation_id": "__hb__"}
+
 # Agent → Platform 消息格式
 {"type": "result", "task_id": "...", "output": "...", "status": "completed"}
 {"type": "progress", "task_id": "...", "message": "..."}
 {"type": "error", "task_id": "...", "error": "..."}
+
+# 心跳响应（Agent 收到 __heartbeat__ 后回复）
+{"type": "progress", "content": "pong"}
 ```
+
+**HEARTBEAT 机制**：
+- Platform 通过 IPC 发送 `chat` 消息，content 为 `"__heartbeat__"`
+- Agent 收到后回复 `progress` 消息，content 为 `"pong"`
+- 超时时间：10 秒（`_HEARTBEAT_TIMEOUT`）
+- 用于 ProcessManager 健康检查，超时判定为无响应
 
 **与 ClawTeam MailboxManager 的差异**：
 - 传输：stdin/stdout 管道（零文件 IO） vs 文件邮箱（.tmp → rename）
@@ -228,11 +240,11 @@ preload_agents = ["requirements-analyzer"]
 
 | 自建组件 | 代码量估算 | 参考 ClawTeam 源码 | 复杂度 |
 |----------|-----------|-------------------|--------|
-| TaskGraph | ~200 行 | `store/file.py` (blocked_by + 环检测) | 中 |
-| IPC 协议 | ~100 行 | `team/mailbox.py` (消息格式参考) | 低 |
-| ProcessManager | ~300 行 | `spawn/subprocess_backend.py` + 健康检查 | 中 |
-| OrchestrationDSL | ~150 行 | `templates/__init__.py` + TOML 解析 | 低 |
-| **总计** | **~750 行** | | |
+| TaskGraph | ~524 行 | `store/file.py` (blocked_by + 环检测) | 中 |
+| IPC 协议 | ~286 行 | `team/mailbox.py` (消息格式参考) | 低 |
+| ProcessManager | ~355 行 | `spawn/subprocess_backend.py` + 健康检查 | 中 |
+| OrchestrationDSL | ~416 行 | `templates/__init__.py` + TOML 解析 | 低 |
+| **总计** | **~1,581 行** | | |
 
 > MIT License 义务：如果直接搬运 ClawTeam 代码，需保留原始版权声明和许可声明。
 

@@ -45,21 +45,22 @@ Composite Agent = OrchestrationDSL（TOML DAG）
 
 ### 7.4 三种运行模式
 
-| 模式 | 说明 | 用途 |
-|------|------|------|
-| **MCP Standalone** | 直接作为 MCP Server 运行（`uvx agent-name`） | 外部框架（nanobot/Hermes）直接调用 |
-| **Platform Router** | 通过 Platform Router 管理（stdin/stdout JSON-lines） | Web UI、Composite Agent 编排 |
-| **CLI Standalone** | 直接命令行运行（`agent-name run`） | 开发调试、快速测试 |
+| 模式 | TOML/YAML 值 | Python Enum | 说明 | 用途 |
+|------|-------------|-------------|------|------|
+| **MCP Standalone** | `mcp` | `RunMode.MCP_STANDALONE` | 直接作为 MCP Server 运行（`uvx agent-name`） | 外部框架（nanobot/Hermes）直接调用 |
+| **Platform Router** | `local` | `RunMode.PLATFORM_ROUTER` | 通过 Platform Router 管理（stdin/stdout JSON-lines） | Web UI、Composite Agent 编排 |
+| **CLI Standalone** | `cli` | `RunMode.CLI_STANDALONE` | 直接命令行运行（`agent-name run`） | 开发调试、快速测试 |
 
 ```python
 # 双模式入口（main.py）
+# RunMode enum: MCP_STANDALONE="mcp", PLATFORM_ROUTER="local", CLI_STANDALONE="cli"
 def main():
-    mode = os.getenv("AGENT_MODE", "mcp")
+    mode = os.getenv("AGENT_MODE", RunMode.MCP_STANDALONE)
 
-    if mode == "local":
+    if mode == RunMode.PLATFORM_ROUTER:
         # Platform Router 模式：stdin/stdout JSON-lines
         asyncio.run(serve(my_pydantic_agent))
-    elif mode == "cli":
+    elif mode == RunMode.CLI_STANDALONE:
         # CLI Standalone 模式
         asyncio.run(run_cli(my_pydantic_agent))
     else:
