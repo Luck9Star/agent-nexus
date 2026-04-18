@@ -67,13 +67,6 @@ class TestInstallationStatus:
 # ---------------------------------------------------------------------------
 
 class TestSourceEntry:
-    def test_defaults(self):
-        se = SourceEntry(name="official")
-        assert se.name == "official"
-        assert se.type == "git"
-        assert se.url == ""
-        assert se.branch == "main"
-
     def test_full_construction(self):
         se = SourceEntry(
             name="private-repo",
@@ -85,7 +78,7 @@ class TestSourceEntry:
         assert se.branch == "develop"
 
     def test_frozen(self):
-        se = SourceEntry(name="official")
+        se = SourceEntry(name="official", url="https://github.com/user/repo.git")
         with pytest.raises(ValidationError):
             se.name = "changed"
 
@@ -94,6 +87,40 @@ class TestSourceEntry:
         data = se.model_dump()
         se2 = SourceEntry(**data)
         assert se2 == se
+
+
+class TestSourceEntryValidation:
+    """SourceEntry cross-field and field-level validation."""
+
+    def test_git_type_requires_url(self):
+        """Git-type source with empty URL must raise ValueError."""
+        with pytest.raises(ValidationError, match="non-empty"):
+            SourceEntry(name="official", type="git", url="")
+
+    def test_git_type_requires_non_whitespace_url(self):
+        """Git-type source with whitespace-only URL must raise ValueError."""
+        with pytest.raises(ValidationError, match="non-empty"):
+            SourceEntry(name="official", type="git", url="   ")
+
+    def test_git_type_with_url_succeeds(self):
+        se = SourceEntry(name="official", url="https://github.com/user/repo.git")
+        assert se.type == "git"
+        assert se.url == "https://github.com/user/repo.git"
+
+    def test_non_git_type_allows_empty_url(self):
+        """Non-git type with empty URL is allowed."""
+        se = SourceEntry(name="local", type="local", url="")
+        assert se.type == "local"
+
+    def test_empty_name_rejected(self):
+        """Empty name must raise ValidationError (min_length=1)."""
+        with pytest.raises(ValidationError):
+            SourceEntry(name="", url="https://github.com/user/repo.git")
+
+    def test_whitespace_name_accepted(self):
+        """Whitespace-only name passes min_length=1 (field-level check)."""
+        se = SourceEntry(name=" ", url="https://github.com/user/repo.git")
+        assert se.name == " "
 
 
 # ---------------------------------------------------------------------------

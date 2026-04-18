@@ -489,3 +489,83 @@ class TestSecurityCheckerBypass:
             assert runtime.retrieve("x") == 3
         finally:
             runtime.close()
+
+
+# ============================================================================
+# Security Checker additional blocks (breakpoint/input/importlib/pickle/socket)
+# ============================================================================
+
+
+class TestSecurityCheckerAdditionalBlocks:
+    """Verify that breakpoint(), input(), and dangerous imports are blocked."""
+
+    @pytest.mark.asyncio
+    async def test_breakpoint_blocked(self) -> None:
+        """breakpoint() drops into pdb giving unrestricted runtime access — must be blocked."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("breakpoint()")
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_input_blocked(self) -> None:
+        """input() can hang the executor or probe the environment — must be blocked."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("input('prompt')")
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_importlib_blocked(self) -> None:
+        """importlib bypasses all import restrictions — must be blocked."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("import importlib")
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_pickle_blocked(self) -> None:
+        """Deserialisation of untrusted data leads to arbitrary code execution — must be blocked."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("import pickle")
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_socket_blocked(self) -> None:
+        """socket provides raw network access — must be blocked."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("import socket")
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_safe_code_still_passes(self) -> None:
+        """Regression: normal safe code must still execute successfully."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("x = 1 + 2")
+            assert result.success is True
+            assert runtime.retrieve("x") == 3
+        finally:
+            runtime.close()

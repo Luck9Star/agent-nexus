@@ -32,6 +32,15 @@ _DEFAULT_FORBIDDEN_IMPORTS = [
     "signal",
     "ctypes",
     "multiprocessing",
+    "importlib",
+    "pickle",
+    "marshal",
+    "code",
+    "codeop",
+    "runpy",
+    "socket",
+    "http",
+    "urllib",
 ]
 
 _DEFAULT_FORBIDDEN_FUNCTIONS = [
@@ -43,6 +52,8 @@ _DEFAULT_FORBIDDEN_FUNCTIONS = [
     "globals",
     "vars",
     "locals",
+    "breakpoint",
+    "input",
 ]
 
 _DEFAULT_FORBIDDEN_ATTRIBUTES = [

@@ -105,10 +105,9 @@ class TestTokenUsage:
         tu = TokenUsage()
         tu.prompt_tokens = 100
         tu.completion_tokens = 50
-        tu.total_tokens = 150
         assert tu.prompt_tokens == 100
         assert tu.completion_tokens == 50
-        assert tu.total_tokens == 150
+        assert tu.total_tokens == 150  # auto-synced via computed_field
 
     def test_with_initial_values(self):
         tu = TokenUsage(prompt_tokens=500, completion_tokens=200)
@@ -186,7 +185,8 @@ class TestTokenUsageCheckBudget:
         assert tu.check_budget(context_window=-1) is None
 
     def test_zero_tokens(self):
-        tu = TokenUsage(total_tokens=0)
+        tu = TokenUsage(prompt_tokens=0, completion_tokens=0)
+        assert tu.total_tokens == 0
         assert tu.check_budget(context_window=10000) is None
 
 
@@ -392,14 +392,21 @@ class TestTokenUsageAlwaysSyncs:
         assert tu.total_tokens == 0
 
     def test_explicit_total_tokens_overridden(self) -> None:
-        """Explicit total_tokens is always overridden by prompt + completion."""
+        """total_tokens is always derived from prompt + completion."""
         tu = TokenUsage(prompt_tokens=100, completion_tokens=50)
         assert tu.total_tokens == 150
 
     def test_total_tokens_not_stale(self) -> None:
-        """Cannot set total_tokens independently of its components."""
-        tu = TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=999)
-        assert tu.total_tokens == 0  # must be overridden to 0
+        """total_tokens always reflects current prompt + completion."""
+        tu = TokenUsage(prompt_tokens=0, completion_tokens=0)
+        assert tu.total_tokens == 0  # derived from components
+
+    def test_total_tokens_updates_after_mutation(self) -> None:
+        """Mutating prompt/completion immediately updates total_tokens."""
+        tu = TokenUsage(prompt_tokens=10, completion_tokens=20)
+        assert tu.total_tokens == 30
+        tu.prompt_tokens = 50
+        assert tu.total_tokens == 70  # no stale value
 
     def test_nonzero_components_sync(self) -> None:
         """Non-zero components always produce correct total."""

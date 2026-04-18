@@ -47,7 +47,6 @@ class IPythonExecutor:
 
     def __init__(self, security_checker: SecurityChecker | None = None) -> None:
         self._security = security_checker or SecurityChecker()
-        self._pre_keys: set[str] = set()
         # Lazy: shell created only when execute() / inject() / get() is called.
         self._shell: Any | None = None
         # Pending injections that happened before shell creation.
@@ -130,7 +129,6 @@ class IPythonExecutor:
             # Re-add preserved internals
             self._shell.user_ns.update(internals_cache)
         self._pending_injects.clear()
-        self._pre_keys.clear()
 
     def __del__(self) -> None:
         # Safety net: release shell if close() was never called.
@@ -169,42 +167,39 @@ class IPythonExecutor:
         shell = await self._require_shell()
 
         try:
-            from IPython.utils.capture import capture_output
-
             # Snapshot namespace before execution to detect new variables
-            self._pre_keys = set(self.namespace_keys())
+            pre_keys = set(self.namespace_keys())
 
-            with capture_output() as captured:
-                transformed = shell.transform_cell(code)
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self._run_cell_sync, transformed,
-                    ),
-                    timeout=timeout,
-                )
+            transformed = shell.transform_cell(code)
+            result, stdout, stderr = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._run_cell_sync, transformed,
+                ),
+                timeout=timeout,
+            )
 
             # Collect variables created in this execution
-            vars_created = self._detect_new_variables()
+            vars_created = self._detect_new_variables(pre_keys)
 
             # Handle errors
             if result.error_before_exec:
                 return ExecutionResult(
                     success=False,
-                    output=captured.stdout or "",
+                    output=stdout or "",
                     error=str(result.error_before_exec),
                     variables_created=vars_created,
                 )
             if result.error_in_exec:
                 return ExecutionResult(
                     success=False,
-                    output=captured.stdout or "",
+                    output=stdout or "",
                     error=str(result.error_in_exec),
                     variables_created=vars_created,
                 )
 
             return ExecutionResult(
                 success=True,
-                output=captured.stdout or "",
+                output=stdout or "",
                 variables_created=vars_created,
             )
 
@@ -220,16 +215,23 @@ class IPythonExecutor:
                 error=f"Execution error: {e}",
             )
 
-    def _run_cell_sync(self, transformed: str) -> Any:
+    def _run_cell_sync(self, transformed: str) -> tuple[Any, str, str]:
         """Synchronous cell execution for use with asyncio.to_thread.
 
         Precondition: ``self._shell`` must already be initialized (guaranteed
         by ``execute()`` calling ``await _require_shell()`` before dispatching
         to ``asyncio.to_thread``).
+
+        Returns:
+            Tuple of (IPython ExecutionResult, captured stdout, captured stderr).
         """
         if self._shell is None:
             raise RuntimeError("_run_cell_sync called before shell initialization")
-        return self._shell.run_cell(transformed, store_history=False)
+        from IPython.utils.capture import capture_output
+
+        with capture_output() as captured:
+            result = self._shell.run_cell(transformed, store_history=False)
+        return result, captured.stdout, captured.stderr
 
     def inject(self, name: str, value: Any) -> None:
         """Inject a variable into the namespace.
@@ -273,7 +275,11 @@ class IPythonExecutor:
             and not k.startswith("_")
         )
 
-    def _detect_new_variables(self) -> list[str]:
-        """Detect variables created since the last execution."""
+    def _detect_new_variables(self, pre_keys: set[str]) -> list[str]:
+        """Detect variables created since the last execution.
+
+        Args:
+            pre_keys: Set of namespace keys snapshot before execution.
+        """
         current = set(self.namespace_keys())
-        return sorted(current - self._pre_keys)
+        return sorted(current - pre_keys)

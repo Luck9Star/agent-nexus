@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _utc_now = lambda: datetime.now(timezone.utc)
 
@@ -43,10 +43,20 @@ class SourceEntry(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
+    name: str = Field(min_length=1)
     type: str = "git"
     url: str = ""
     branch: str = "main"
+
+    @model_validator(mode="after")
+    def _validate_git_url(self) -> "SourceEntry":
+        """Git-type sources must have a non-empty URL."""
+        if self.type == "git" and not self.url.strip():
+            raise ValueError(
+                "Git-type source requires a non-empty 'url'. "
+                f"Source '{self.name}' has type='git' but url is empty."
+            )
+        return self
 
 
 class LockfileEntry(BaseModel):

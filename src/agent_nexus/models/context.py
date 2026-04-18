@@ -7,7 +7,7 @@ from enum import IntEnum
 
 import logging
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -105,20 +105,20 @@ class TokenUsage(BaseModel):
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
-    total_tokens: int = 0
     compaction_count: int = 0
     last_compaction_turn: int = 0
 
-    @model_validator(mode="after")
-    def _sync_total_tokens(self) -> "TokenUsage":
-        """Ensure total_tokens is derived from prompt + completion.
+    @computed_field
+    @property
+    def total_tokens(self) -> int:
+        """Derived total of prompt + completion tokens.
 
-        Always recomputes total_tokens from the two component counters
-        to prevent desynchronized state (e.g. total_tokens set to a
-        stale value while prompt/completion are both 0).
+        Always computed on access so mutations to prompt_tokens or
+        completion_tokens are immediately reflected.  Prevents stale
+        values that would cause wrong compaction decisions in
+        check_budget().
         """
-        self.total_tokens = self.prompt_tokens + self.completion_tokens
-        return self
+        return self.prompt_tokens + self.completion_tokens
 
     def check_budget(
         self,

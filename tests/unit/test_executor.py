@@ -153,13 +153,15 @@ class TestExecutorUsesToThread:
 
     @pytest.mark.asyncio
     async def test_run_cell_sync_returns_execution_result(self, shared_executor) -> None:
-        """_run_cell_sync should return an IPython ExecutionResult."""
+        """_run_cell_sync should return a tuple of (result, stdout, stderr)."""
         # Ensure shell is initialized before calling _run_cell_sync
         await shared_executor._require_shell()
-        result = shared_executor._run_cell_sync("x = 42")
+        result, stdout, stderr = shared_executor._run_cell_sync("x = 42")
         # Should be an IPython ExecutionResult-like object
         assert result is not None
         assert shared_executor.get("x") == 42
+        assert isinstance(stdout, str)
+        assert isinstance(stderr, str)
 
     @pytest.mark.asyncio
     async def test_timeout_fires_for_long_running_code(self, shared_executor) -> None:
@@ -204,3 +206,78 @@ class TestRequireShellConcurrency:
                 executor._run_cell_sync("x = 1")
         finally:
             executor.close()
+
+
+class TestCaptureOutputOnWorkerThread:
+    """Verify that print() output IS captured via capture_output on the worker thread."""
+
+    @pytest.mark.asyncio
+    async def test_print_output_is_captured(self, shared_executor) -> None:
+        """print() output should appear in result.output (was empty before fix)."""
+        result = await shared_executor.execute('print("hello from worker thread")')
+        assert result.success is True
+        assert "hello from worker thread" in result.output
+
+    @pytest.mark.asyncio
+    async def test_multiline_print_output_is_captured(self, shared_executor) -> None:
+        """Multiple print() calls should all appear in output."""
+        code = 'print("line1")\nprint("line2")\nprint("line3")'
+        result = await shared_executor.execute(code)
+        assert result.success is True
+        assert "line1" in result.output
+        assert "line2" in result.output
+        assert "line3" in result.output
+
+    @pytest.mark.asyncio
+    async def test_assignment_with_print_output(self, shared_executor) -> None:
+        """Assignment + print should both work: variable created and output captured."""
+        result = await shared_executor.execute('msg = "ok"\nprint(msg)')
+        assert result.success is True
+        assert "ok" in result.output
+        assert "msg" in result.variables_created
+
+
+class TestConcurrentExecuteVariableDetection:
+    """Verify that concurrent execute() calls produce correct variable detection."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_execute_correct_variables(self) -> None:
+        """Two concurrent execute() calls should each detect their own new variables."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            # Execute sequentially first to populate namespace baseline
+            await executor.execute("baseline = 1")
+
+            # Run two concurrent executions that each create distinct variables
+            results = await asyncio.gather(
+                executor.execute("alpha = 10"),
+                executor.execute("beta = 20"),
+            )
+
+            assert results[0].success is True
+            assert results[1].success is True
+
+            # Each result should detect only its own new variable
+            # (not the other coroutine's variable)
+            all_created_0 = set(results[0].variables_created)
+            all_created_1 = set(results[1].variables_created)
+
+            assert "alpha" in all_created_0, f"alpha missing from first result, got {all_created_0}"
+            assert "beta" in all_created_1, f"beta missing from second result, got {all_created_1}"
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_sequential_execute_correct_variables(self, shared_executor) -> None:
+        """Sequential execute() calls should each detect only their own new variables."""
+        result1 = await shared_executor.execute("seq_x = 1")
+        result2 = await shared_executor.execute("seq_y = 2")
+
+        assert result1.success is True
+        assert result2.success is True
+        assert "seq_x" in result1.variables_created
+        assert "seq_y" in result2.variables_created
+        # seq_y should NOT appear in result1's variables_created
+        assert "seq_y" not in result1.variables_created
