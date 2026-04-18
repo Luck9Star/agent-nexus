@@ -230,7 +230,7 @@ class PlatformRouter:
 
         return {
             "output": response.content or "",
-            "success": response.status != "failed",
+            "success": response.status not in (None, "failed"),
         }
 
     async def get_tools(self) -> list[dict]:
@@ -469,10 +469,10 @@ class PlatformRouter:
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 errors.append(f"Worker {i + 1} failed: {result}")
-            elif result is not None and result != "":
-                parts.append(str(result))
-            elif isinstance(result, str):
+            elif result is None or (isinstance(result, str) and not result):
                 parts.append(f"Worker {i + 1}: (no output)")
+            else:
+                parts.append(str(result))
 
         output = "\n\n---\n\n".join(parts)
         if errors:

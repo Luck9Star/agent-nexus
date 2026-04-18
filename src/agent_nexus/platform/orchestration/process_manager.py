@@ -231,14 +231,12 @@ class ProcessManager:
             except (asyncio.CancelledError, Exception):
                 pass
 
-        # Always close the IPC stream to release resources, even if dead.
-        try:
-            await handle.ipc.stream.close()
-        except Exception:
-            pass
-
         if not handle.is_alive:
-            # Already dead — just clean up.
+            # Already dead — close IPC and clean up.
+            try:
+                await handle.ipc.stream.close()
+            except Exception:
+                pass
             async with self._lock:
                 self._agents.pop(name, None)
             logger.info("Agent '%s' already exited (rc=%s)", name, process.returncode)

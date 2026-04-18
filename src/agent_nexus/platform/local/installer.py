@@ -397,6 +397,8 @@ class GitInstaller:
 
             if proc.returncode != 0:
                 logger.warning("uv pip install failed for %s: %s", agent_name, stderr.decode())
+                shutil.rmtree(venv_path, ignore_errors=True)
+                return None
 
             logger.info("Venv created: %s", venv_path)
             return venv_path

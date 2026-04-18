@@ -93,7 +93,13 @@ def _is_sensitive_path(path: str) -> bool:
     expanded = _expand_user(path)
     for pattern in SENSITIVE_PATH_PATTERNS:
         expanded_pattern = _expand_user(pattern)
-        if fnmatch.fnmatch(expanded, expanded_pattern):
+        # Handle recursive ** patterns — fnmatch doesn't support them,
+        # so use directory prefix matching instead.
+        if expanded_pattern.endswith("/**"):
+            prefix = expanded_pattern[:-3]
+            if expanded.startswith(prefix + "/") or expanded == prefix:
+                return True
+        elif fnmatch.fnmatch(expanded, expanded_pattern):
             return True
     # Also check the basename for patterns like *.env, *.pem, *.key
     basename = Path(expanded).name

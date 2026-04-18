@@ -189,11 +189,11 @@ class SourceManager:
         if not raw or "agents" not in raw:
             return None
 
+        from agent_nexus.models.agent import AgentType
+
         entries: list[IndexEntry] = []
         for item in raw["agents"]:
             try:
-                from agent_nexus.models.agent import AgentType
-
                 entries.append(IndexEntry(
                     name=item["name"],
                     version=item["version"],
