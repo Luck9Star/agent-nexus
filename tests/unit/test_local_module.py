@@ -908,6 +908,7 @@ class TestAgentSupervisor:
         lockfile = _make_mock_lockfile_mgr({"agent-1": entry})
         config = _make_mock_config_loader()
         supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path, max_restarts=3)
+        supervisor._started_agents.add("agent-1")
         restarted = await supervisor.auto_restart_dead()
         assert "agent-1" in restarted
 
@@ -934,6 +935,7 @@ class TestAgentSupervisor:
         lockfile = _make_mock_lockfile_mgr({"agent-1": entry})
         config = _make_mock_config_loader()
         supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path, max_restarts=1)
+        supervisor._started_agents.add("agent-1")
 
         # First attempt: records count=1, start fails -> not in restarted
         r1 = await supervisor.auto_restart_dead()

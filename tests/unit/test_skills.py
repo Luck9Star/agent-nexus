@@ -207,15 +207,17 @@ class TestParsedSkillTier2:
         skill = ParsedSkill(metadata=meta, body=None, resources=None, raw="")
         assert skill.tier2_section("anything") is None
 
-    def test_tier2_section_case_sensitive(self):
+    def test_tier2_section_case_insensitive(self):
         meta = SkillMetadata(name="t", agent_type="a", triggers=[], capabilities=[], model_config={})
         res = SkillResources(
             content="# Resources",
             sections={"Example Fill": "data"},
         )
         skill = ParsedSkill(metadata=meta, body=None, resources=res, raw="")
-        assert skill.tier2_section("example fill") is None
+        assert skill.tier2_section("example fill") == "data"
         assert skill.tier2_section("Example Fill") == "data"
+        assert skill.tier2_section("EXAMPLE FILL") == "data"
+        assert skill.tier2_section("nonexistent") is None
 
 
 # ---------------------------------------------------------------------------

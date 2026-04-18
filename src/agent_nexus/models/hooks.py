@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+_utc_now = lambda: datetime.now(timezone.utc)
 
 
 class HookType(StrEnum):
@@ -94,7 +96,7 @@ class HookExecution(BaseModel):
     output: str | None = None
     error: str | None = None
     duration_ms: float = 0.0
-    executed_at: datetime = Field(default_factory=datetime.now)
+    executed_at: datetime = Field(default_factory=_utc_now)
 
 
 class AggregatedHookResult(BaseModel):

@@ -110,4 +110,8 @@ class ParsedSkill:
         """
         if self.resources is None:
             return None
-        return self.resources.sections.get(section_name)
+        lower = section_name.lower()
+        for key, value in self.resources.sections.items():
+            if key.lower() == lower:
+                return value
+        return None

@@ -556,6 +556,33 @@ class TestExecutionAnalyzer:
         analyses = store.get_analyses_for_task("t5")
         assert len(analyses) == 1
 
+    def test_analyze_skills_applied_and_fell_back(self, tmp_path: Path) -> None:
+        """Judgments reflect skills_applied and skills_fell_back fields."""
+        r1 = _make_record("s1", "applied-skill")
+        r2 = _make_record("s2", "fell-back-skill")
+        store = _store_with_records(tmp_path, r1, r2)
+        analyzer = ExecutionAnalyzer(store)
+
+        ctx = EvolutionContext(
+            agent_id="agent-a",
+            task_id="t-applied",
+            task_completed=True,
+            skill_ids_used=["s1", "s2"],
+            skills_applied=["s1"],
+            skills_fell_back=["s2"],
+        )
+        result = analyzer.analyze_execution(ctx)
+
+        assert len(result.judgments) == 2
+        # s1 was applied, not fell_back
+        assert result.judgments[0]["skill_id"] == "s1"
+        assert result.judgments[0]["applied"] is True
+        assert result.judgments[0]["fell_back"] is False
+        # s2 was NOT applied, but DID fall back
+        assert result.judgments[1]["skill_id"] == "s2"
+        assert result.judgments[1]["applied"] is False
+        assert result.judgments[1]["fell_back"] is True
+
     def test_analyze_zero_selections_skipped(self, tmp_path: Path) -> None:
         r = _make_record("s1", "unused", selections=0)
         store = _store_with_records(tmp_path, r)

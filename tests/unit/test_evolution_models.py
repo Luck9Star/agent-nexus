@@ -258,6 +258,21 @@ class TestEvolutionContext:
         assert ec.execution_error is not None
         assert "Timeout" in ec.execution_error
 
+    def test_with_skills_applied(self):
+        ec = EvolutionContext(
+            agent_id="a",
+            task_id="t",
+            skills_applied=["s1", "s2"],
+            skills_fell_back=["s3"],
+        )
+        assert ec.skills_applied == ["s1", "s2"]
+        assert ec.skills_fell_back == ["s3"]
+
+    def test_defaults_empty_lists(self):
+        ec = EvolutionContext(agent_id="a", task_id="t")
+        assert ec.skills_applied == []
+        assert ec.skills_fell_back == []
+
     def test_frozen(self):
         ec = EvolutionContext(agent_id="a", task_id="t")
         with pytest.raises(ValidationError):

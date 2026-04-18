@@ -12,13 +12,12 @@ Not persistent across platform restarts -- reads lockfile on start.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from agent_nexus.models.distribution import LockfileEntry
 from agent_nexus.platform.config.loader import ConfigLoader
 from agent_nexus.platform.orchestration.process_manager import (
-    AgentHandle,
     ProcessManager,
 )
 
@@ -89,6 +88,7 @@ class AgentSupervisor:
         self._config_dir = config_dir or config_loader.config_dir
         self._max_restarts = max_restarts
         self._restart_trackers: dict[str, RestartTracker] = {}
+        self._started_agents: set[str] = set()
 
     # ------------------------------------------------------------------
     # Bulk start / stop
@@ -178,6 +178,7 @@ class AgentSupervisor:
             tracker = self._restart_trackers.get(agent_name)
             if tracker:
                 tracker.reset()
+            self._started_agents.add(agent_name)
             logger.info(
                 "Agent '%s' started (pid=%s)", agent_name, handle.pid
             )
@@ -253,6 +254,10 @@ class AgentSupervisor:
         # Check all agents in lockfile for liveness
         lockfile = self._lockfile.load()
         for agent_name in lockfile.agents:
+            # Skip agents that were never explicitly started this session
+            if agent_name not in self._started_agents:
+                continue
+
             handle = self._pm.get_agent(agent_name)
 
             # Agent is not running if no handle or process is dead
@@ -325,6 +330,12 @@ class AgentSupervisor:
                 return [str(venv_python), "-m", agent_name.replace("-", "_")]
 
         # Strategy 2: uvx
+        # Strategy 3: fallback to python3 <agent_dir>/main.py
+        agent_dir = self._resolve_agent_dir(agent_name)
+        main_py = agent_dir / "main.py"
+        if main_py.exists():
+            return ["python3", str(main_py)]
+
         return ["uvx", agent_name]
 
     def _resolve_agent_dir(self, agent_name: str) -> Path:

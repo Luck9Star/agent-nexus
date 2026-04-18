@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+_utc_now = lambda: datetime.now(timezone.utc)
 
 
 class TaskState(StrEnum):
@@ -40,8 +42,8 @@ class TaskItem(BaseModel):
     vars: dict[str, Any] = Field(default_factory=dict)
     state: TaskState = TaskState.PENDING
     result: Any | None = None
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)
 
 
 class TaskGraphSnapshot(BaseModel):

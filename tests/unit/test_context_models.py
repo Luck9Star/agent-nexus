@@ -207,7 +207,7 @@ class TestContextBudgetLogEntry:
         assert entry.layer1_tokens == 0
         assert entry.total_tokens == 0
         assert entry.compaction_triggered is False
-        assert entry.timestamp == ""
+        assert entry.timestamp.tzinfo is not None  # timezone-aware
 
     def test_full_construction(self):
         entry = ContextBudgetLogEntry(
@@ -221,7 +221,7 @@ class TestContextBudgetLogEntry:
             layer1_tokens=150,
             total_tokens=700,
             compaction_triggered=True,
-            timestamp="2026-04-18T12:00:00Z",
+            timestamp="2026-04-18T12:00:00+00:00",
         )
         assert entry.turn_number == 5
         assert entry.compaction_triggered is True

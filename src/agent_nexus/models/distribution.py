@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
+
+_utc_now = lambda: datetime.now(timezone.utc)
 
 from agent_nexus.models.agent import AgentType
 
@@ -74,7 +76,7 @@ class LockfileEntry(BaseModel):
     source: str
     commit_sha: str
     agent_type: AgentType
-    installed_at: datetime = Field(default_factory=datetime.now)
+    installed_at: datetime = Field(default_factory=_utc_now)
     venv_path: str = ""
     dependencies: list[str] = Field(default_factory=list)
 

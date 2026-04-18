@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from enum import IntEnum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+_utc_now = lambda: datetime.now(timezone.utc)
 
 
 class ContextLevel(IntEnum):
@@ -97,4 +100,4 @@ class ContextBudgetLogEntry(BaseModel):
     layer1_tokens: int = 0
     total_tokens: int = 0
     compaction_triggered: bool = False
-    timestamp: str = ""
+    timestamp: datetime = Field(default_factory=_utc_now)

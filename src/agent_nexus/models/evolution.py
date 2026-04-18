@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
+
+_utc_now = lambda: datetime.now(timezone.utc)
 
 
 class EvolutionType(StrEnum):
@@ -75,8 +77,8 @@ class SkillRecord(BaseModel):
     total_applied: int = 0
     total_completions: int = 0
     total_fallbacks: int = 0
-    first_seen: datetime = Field(default_factory=datetime.now)
-    last_updated: datetime = Field(default_factory=datetime.now)
+    first_seen: datetime = Field(default_factory=_utc_now)
+    last_updated: datetime = Field(default_factory=_utc_now)
 
 
 class EvolutionMetrics(BaseModel):

@@ -9,6 +9,7 @@ from agent_nexus.models.permission import (
     PathAccess,
     PathRule,
     PermissionConfig,
+    PermissionDecision,
     PermissionMode,
 )
 
@@ -180,3 +181,29 @@ class TestPermissionConfig:
     def test_full_auto_mode(self):
         cfg = PermissionConfig(mode=PermissionMode.FULL_AUTO)
         assert cfg.mode is PermissionMode.FULL_AUTO
+
+
+# ---------------------------------------------------------------------------
+# PermissionDecision
+# ---------------------------------------------------------------------------
+
+class TestPermissionDecision:
+    def test_allowed_decision_defaults(self):
+        pd = PermissionDecision(allowed=True)
+        assert pd.allowed is True
+        assert pd.reason == ""
+        assert pd.requires_confirmation is False
+
+    def test_denied_with_reason(self):
+        pd = PermissionDecision(
+            allowed=False,
+            reason="Path pattern *.env is denied",
+        )
+        assert pd.allowed is False
+        assert "denied" in pd.reason
+        assert pd.requires_confirmation is False
+
+    def test_frozen(self):
+        pd = PermissionDecision(allowed=True)
+        with pytest.raises(ValidationError):
+            pd.allowed = False

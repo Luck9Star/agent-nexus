@@ -49,7 +49,7 @@ DEFAULT_PROVIDERS: dict[str, dict[str, str]] = {
     "minimax": {
         "base_url": "https://api.minimax.chat/v1",
         "api_key_env": "MINIMAX_API_KEY",
-        "api": ProviderApiType.ANTHROPIC_MESSAGES,
+        "api": ProviderApiType.OPENAI_COMPATIBLE,
     },
     "qwen": {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
