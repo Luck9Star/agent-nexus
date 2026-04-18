@@ -51,7 +51,8 @@ class ContextBudget(BaseModel):
 
     @model_validator(mode="after")
     def _validate_thresholds(self) -> "ContextBudget":
-        """Ensure all threshold values are fractions in 0.0-1.0 range."""
+        """Ensure all threshold values are fractions in 0.0-1.0 range
+        and cross-field constraints hold."""
         for field_name in (
             "compaction_trigger",
             "compaction_target",
@@ -65,6 +66,23 @@ class ContextBudget(BaseModel):
                     "Thresholds must be fractions between 0.0 and 1.0 "
                     "(e.g. 0.8 for 80%)."
                 )
+
+        # compaction_trigger must be > compaction_target (compaction
+        # should shrink, not expand).
+        if self.compaction_trigger <= self.compaction_target:
+            raise ValueError(
+                f"compaction_trigger ({self.compaction_trigger}) must be "
+                f"greater than compaction_target ({self.compaction_target})"
+            )
+
+        # forced_truncate must fire before hard_ceiling.
+        if self.forced_truncate_threshold >= self.session_hard_ceiling:
+            raise ValueError(
+                f"forced_truncate_threshold ({self.forced_truncate_threshold}) "
+                f"must be less than session_hard_ceiling "
+                f"({self.session_hard_ceiling})"
+            )
+
         return self
 
 

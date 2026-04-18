@@ -289,8 +289,9 @@ class TestContextBudgetValidation:
         assert budget.session_hard_ceiling == 1.0
 
     def test_zero_value_is_accepted(self) -> None:
-        budget = ContextBudget(compaction_trigger=0.0)
-        assert budget.compaction_trigger == 0.0
+        budget = ContextBudget(compaction_trigger=0.1, compaction_target=0.0)
+        assert budget.compaction_trigger == 0.1
+        assert budget.compaction_target == 0.0
 
 
 # ============================================================================
@@ -316,9 +317,10 @@ class TestContextBudgetNegativeThresholds:
             ContextBudget(compaction_target=-0.1)
 
     def test_zero_is_accepted(self) -> None:
-        cfg = ContextBudget(compaction_trigger=0.0)
-        assert cfg.compaction_trigger == 0.0
+        cfg = ContextBudget(compaction_trigger=0.1, compaction_target=0.0)
+        assert cfg.compaction_trigger == 0.1
+        assert cfg.compaction_target == 0.0
 
     def test_one_is_accepted(self) -> None:
-        cfg = ContextBudget(session_hard_ceiling=1.0)
+        cfg = ContextBudget(session_hard_ceiling=1.0, forced_truncate_threshold=0.95)
         assert cfg.session_hard_ceiling == 1.0

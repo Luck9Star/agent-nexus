@@ -120,6 +120,24 @@ class FunctionRule(SecurityRule):
                     )
                 )
 
+            # Also catch attribute-based calls: builtins.eval(...),
+            # __builtins__.exec(...), etc.
+            if (
+                func_name in self.forbidden
+                and isinstance(node.func, ast.Attribute)
+            ):
+                violations.append(
+                    SecurityViolation(
+                        rule_type="function",
+                        node_type="AttributeCall",
+                        code_snippet=ast.unparse(node) if hasattr(ast, "unparse") else str(func_name),
+                        message=(
+                            f"Forbidden function call via attribute: "
+                            f"'{func_name}' at line {node.lineno}"
+                        ),
+                    )
+                )
+
             # Detect getattr(obj, 'eval') pattern
             if (
                 isinstance(node.func, ast.Name)

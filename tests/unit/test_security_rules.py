@@ -108,16 +108,16 @@ class TestFunctionRule:
         assert EVAL_CODE in violations[0].message
 
     def test_forbidden_method(self):
-        """obj.eval() is NOT flagged by FunctionRule.
+        """obj.eval() IS flagged by FunctionRule.
 
-        Method calls like obj.eval() are intentionally NOT caught by
-        FunctionRule to avoid false positives like re.compile().
-        AttributeRule handles dangerous attribute access instead.
+        Attribute-based calls like obj.eval() or builtins.eval() are
+        caught to prevent security bypasses via attribute access.
         """
         rule = FunctionRule(forbidden=[EVAL_CODE])
         code = "obj." + EVAL_CODE + "()"
         violations = _check_code(rule, code)
-        assert len(violations) == 0
+        assert len(violations) == 1
+        assert violations[0].node_type == "AttributeCall"
 
     def test_allowed_call(self):
         rule = FunctionRule(forbidden=[EVAL_CODE])
@@ -275,14 +275,15 @@ class TestCombinedRules:
 
 
 class TestFunctionRuleAttributeCalls:
-    """Verify FunctionRule does NOT catch method-call patterns like obj.eval().
+    """Verify FunctionRule catches both bare and attribute-based calls.
 
-    Method calls are intentionally excluded to prevent false positives
-    (e.g., re.compile()). Bare function calls like eval() are still caught.
+    Attribute-based calls like obj.eval() and builtins.eval() are caught
+    to prevent security bypasses. Safe method calls on non-forbidden names
+    are still allowed.
     """
 
-    def test_attribute_call_not_blocked(self) -> None:
-        """obj.eval() is NOT caught by FunctionRule (prevents re.compile false positive)."""
+    def test_attribute_call_now_blocked(self) -> None:
+        """obj.eval() IS caught by FunctionRule."""
         rule = FunctionRule(forbidden=["eval"])
         code = "obj.eval('1+1')"
         tree = ast.parse(code)
@@ -291,7 +292,8 @@ class TestFunctionRuleAttributeCalls:
         for node in ast.walk(tree):
             violations.extend(rule.check(node))
 
-        assert len(violations) == 0
+        assert len(violations) == 1
+        assert violations[0].node_type == "AttributeCall"
 
     def test_bare_call_still_blocked(self) -> None:
         """Bare eval('...') is still caught."""
@@ -305,8 +307,8 @@ class TestFunctionRuleAttributeCalls:
 
         assert len(violations) == 1
 
-    def test_chained_attribute_call_not_blocked(self) -> None:
-        """obj.attr.eval() is NOT caught (same rationale as obj.eval())."""
+    def test_chained_attribute_call_blocked(self) -> None:
+        """obj.attr.eval() IS caught."""
         rule = FunctionRule(forbidden=["eval"])
         code = "obj.attr.eval('code')"
         tree = ast.parse(code)
@@ -315,7 +317,8 @@ class TestFunctionRuleAttributeCalls:
         for node in ast.walk(tree):
             violations.extend(rule.check(node))
 
-        assert len(violations) == 0
+        assert len(violations) == 1
+        assert violations[0].node_type == "AttributeCall"
 
     def test_safe_method_call_not_blocked(self) -> None:
         """obj.safe_method() is not blocked when method is not forbidden."""
@@ -329,8 +332,8 @@ class TestFunctionRuleAttributeCalls:
 
         assert len(violations) == 0
 
-    def test_exec_via_attribute_not_blocked(self) -> None:
-        """obj.exec() is NOT caught by FunctionRule (bare exec() is still caught)."""
+    def test_exec_via_attribute_blocked(self) -> None:
+        """obj.exec() IS caught by FunctionRule."""
         rule = FunctionRule(forbidden=["exec"])
         code = "obj.exec('code')"
         tree = ast.parse(code)
@@ -339,7 +342,7 @@ class TestFunctionRuleAttributeCalls:
         for node in ast.walk(tree):
             violations.extend(rule.check(node))
 
-        assert len(violations) == 0
+        assert len(violations) == 1
 
 
 # ============================================================================

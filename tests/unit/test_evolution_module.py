@@ -1590,13 +1590,14 @@ class TestSuggestionDeduplication:
             f"Expected 1 deduplicated FIX, got {len(fix_suggestions)}"
         )
 
-    def test_different_evolution_types_not_deduplicated(self, tmp_path: Path) -> None:
-        """FIX and DERIVED for the same skill are both kept."""
+    def test_fix_takes_priority_over_derived_for_same_skill(self, tmp_path: Path) -> None:
+        """When FIX is triggered, DERIVED is skipped for the same skill."""
         store = EvolutionStore(tmp_path / "test.db")
         analyzer = ExecutionAnalyzer(store)
 
         # fallback_rate = 6/10 = 0.6 > 0.4 (FIX)
         # effective_rate = 3/10 = 0.3 < 0.55, applied_rate = 5/10 = 0.5 > 0.25 (DERIVED)
+        # But FIX takes priority, so only FIX should appear
         skill = self._make_skill(
             selections=10,
             fallbacks=6,
@@ -1616,7 +1617,8 @@ class TestSuggestionDeduplication:
 
         types = {s.evolution_type for s in result.suggestions}
         assert EvolutionType.FIX in types
-        assert EvolutionType.DERIVED in types
+        # DERIVED should NOT appear because FIX was triggered first
+        assert EvolutionType.DERIVED not in types
 
 
 class TestAddressedOnSuccessOnly:

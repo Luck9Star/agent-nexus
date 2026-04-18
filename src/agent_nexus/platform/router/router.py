@@ -233,7 +233,7 @@ class PlatformRouter:
 
         return {
             "output": response.content or "",
-            "success": response.status not in (None, "failed"),
+            "success": response.status == "completed",
         }
 
     async def get_tools(self) -> list[dict]:

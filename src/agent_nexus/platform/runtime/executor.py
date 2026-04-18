@@ -100,12 +100,15 @@ class IPythonExecutor:
         50-200 MB cost of re-creating it.
         """
         if self._shell is not None:
-            # Preserve IPython internals, clear everything else
-            internals = set(self._shell.user_ns.keys()) & _IPYTHON_INTERNALS
+            # Preserve IPython internals BEFORE clearing
+            internals_cache = {
+                k: v
+                for k, v in self._shell.user_ns.items()
+                if k in _IPYTHON_INTERNALS
+            }
             self._shell.user_ns.clear()
-            # Re-add minimal internals
-            for key in internals:
-                self._shell.user_ns[key] = self._shell.user_ns.get(key, None)
+            # Re-add preserved internals
+            self._shell.user_ns.update(internals_cache)
         self._pending_injects.clear()
         self._pre_keys.clear()
 

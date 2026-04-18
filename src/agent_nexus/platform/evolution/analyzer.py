@@ -214,6 +214,7 @@ class ExecutionAnalyzer:
     ) -> list[EvolutionSuggestion]:
         """Generate evolution suggestions based on health metrics."""
         suggestions: list[EvolutionSuggestion] = []
+        fix_skills: set[str] = set()  # skills already flagged for FIX
 
         for skill_id in skill_ids:
             skill = skills_by_id.get(skill_id)
@@ -245,6 +246,7 @@ class ExecutionAnalyzer:
                     ),
                     confidence=min(fallback_rate, 1.0),
                 ))
+                fix_skills.add(skill_id)
 
             if applied_rate > _HIGH_APPLIED_FOR_FIX and completion_rate < _LOW_COMPLETION_THRESHOLD:
                 suggestions.append(EvolutionSuggestion(
@@ -256,8 +258,10 @@ class ExecutionAnalyzer:
                     ),
                     confidence=min(applied_rate * (1 - completion_rate), 1.0),
                 ))
+                fix_skills.add(skill_id)
 
-            if effective_rate < _MODERATE_EFFECTIVE_THRESHOLD and applied_rate > _MIN_APPLIED_FOR_DERIVED:
+            # DERIVED is lower priority than FIX: skip if already flagged.
+            if skill_id not in fix_skills and effective_rate < _MODERATE_EFFECTIVE_THRESHOLD and applied_rate > _MIN_APPLIED_FOR_DERIVED:
                 suggestions.append(EvolutionSuggestion(
                     evolution_type=EvolutionType.DERIVED,
                     target_skill_ids=[skill_id],

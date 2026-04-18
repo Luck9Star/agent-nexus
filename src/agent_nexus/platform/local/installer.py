@@ -97,6 +97,15 @@ class GitInstaller:
         InstallationError
             Clone, validation, or venv creation failed.
         """
+        # 0. Validate agent name (prevent path traversal)
+        import re
+        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$", agent_name):
+            raise InstallationError(
+                f"Invalid agent name: '{agent_name}'. "
+                "Must start with alphanumeric and contain only "
+                "alphanumeric, dots, hyphens, and underscores."
+            )
+
         # 1. Resolve source
         if source_url:
             source = SourceEntry(
