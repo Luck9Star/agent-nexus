@@ -1,0 +1,228 @@
+# Python Runtime 执行层
+
+> Agent Nexus POC v5 — §5 Python Runtime 执行层：Runtime vs Tool Call 范式、CaveAgent 实测数据、架构核心、SecurityChecker、Runtime-First Hybrid 策略、隔离级别、与 Atomic Agent 集成
+
+## §5 Python Runtime 执行层
+
+> **参考项目**: [acodercat/cave-agent](https://github.com/acodercat/cave-agent) — MIT License
+>
+> **本地源码**: `/Users/yangyitian/Documents/dev/Agents/cave-agent/`
+>
+> **论文**: CaveAgent: Transforming LLMs into Stateful Runtime Operators (arXiv:2601.01569)
+
+### 5.1 核心范式：Runtime vs Tool Call
+
+> **参考模块**: cave-agent `src/cave_agent/runtime/runtime.py` — `Runtime` 基类, `src/cave_agent/runtime/ipython_runtime.py` — `IPythonRuntime`, `src/cave_agent/agent.py` — `CaveAgent` 执行循环
+
+**传统 Tool Call 流程：**
+
+```
+LLM → JSON tool_call {name, args} → Host 解析 → 执行函数 → JSON 结果 → LLM context
+（每轮无状态，所有数据序列化到文本，context window 膨胀）
+```
+
+**CaveAgent Runtime 流程：**
+
+```
+LLM → Python 代码 → Runtime 执行 → Python 对象持久存在 → LLM 看到结果
+（对象跨轮存在，DataFrame 留在 runtime，零序列化开销）
+```
+
+### 5.2 CaveAgent 实测数据
+
+Tau-2 benchmark（6 个 SOTA LLM）：
+
+| 模型 | 基线成功率 | CaveAgent 成功率 | 提升 |
+|------|-----------|-----------------|------|
+| GPT-4o | 31.0% | 37.0% | +6.0% |
+| Claude 3.5 Sonnet | 28.5% | 40.5% | +12.0% |
+| Gemini 2.0 Flash | 21.5% | 31.5% | +10.0% |
+| Gemini 2.5 Pro | 38.5% | 46.5% | +8.0% |
+| DeepSeek-V3 | 20.5% | 33.5% | +13.0% |
+| Qwen 2.5 72B | 19.0% | 33.0% | +14.0% |
+| **平均** | **26.5%** | **37.0%** | **+10.5%** |
+
+- Token 消耗：**-28.4%**（平均）
+- 数据密集任务 Token：**-59%**
+
+### 5.3 CaveAgent 架构核心
+
+```python
+class PythonRuntime:
+    """持久 Python 命名空间，管理 Variables / Functions / Types"""
+    _executor: PythonExecutor       # IPython InteractiveShell
+    _variables: Dict[str, Variable]  # 持久化 Python 对象
+    _functions: Dict[str, Function]  # 可调用的 Python 函数
+    _types: Dict[str, Type]          # 可用的 Python 类型（含 schema）
+
+    def inject_variable(self, variable: Variable)
+    def inject_function(self, function: Function)
+    def inject_type(self, type_obj: Type)
+    async def execute(self, code: str) -> ExecutionResult
+    def retrieve(self, name: str) -> Any
+
+    # LLM Prompt 生成
+    def describe_variables(self) -> str
+    def describe_functions(self) -> str
+    def describe_types(self) -> str
+```
+
+### 5.4 SecurityChecker（AST 级安全检查）
+
+> **参考模块**: cave-agent `src/cave_agent/security/checker.py` — `SecurityChecker` 类, `src/cave_agent/security/rules.py` — `ImportRule`, `FunctionRule`, `AttributeRule`, `RegexRule`
+
+```python
+class SecurityChecker:
+    rules: List[SecurityRule]
+    def check_code(self, code: str) -> List[SecurityViolation]
+
+# 规则类型
+ImportRule({"os", "subprocess", "sys", "socket", ...})    # 禁止模块导入
+FunctionRule({"eval", "exec", "open", "__import__", ...})  # 禁止函数调用
+AttributeRule({"__globals__", "__builtins__", ...})         # 禁止属性访问
+RegexRule("forbidden pattern", r"delete")                   # 自定义正则
+```
+
+### 5.5 Runtime-First Hybrid 策略
+
+Python Runtime 优先，MCP 用于外部通信。不可完全抛弃 Tool Call。
+
+| 场景 | Runtime | MCP | 推荐 |
+|------|---------|-----|------|
+| 数据处理 (DataFrame, 文件 IO) | ✅ 完美 | ❌ 序列化灾难 | **Runtime** |
+| 对象方法调用 (df.query()) | ✅ 直接 | ❌ 需映射 | **Runtime** |
+| Pydantic 模型验证 | ✅ 原生 | ❌ 需要 JSON schema | **Runtime** |
+| 跨进程 Agent 通信 | ❌ 命名空间隔离 | ✅ 协议无关 | **MCP** |
+| 外部 API 调用 | ⚠️ 需注入 client | ✅ 天然适配 | **MCP** |
+| Shell 命令执行 | ⚠️ 安全风险 | ✅ 可控 | **MCP** |
+| 浏览器操作 | ❌ 不适合 | ✅ Playwright MCP | **MCP** |
+| 多 Agent 共享状态 | ⚠️ 需设计 | ✅ MailboxManager | **消息** |
+| 对外暴露（非 Python 客户端） | ❌ | ✅ | **MCP** |
+
+### 5.6 隔离级别：IPythonRuntime（同进程）
+
+> **参考模块**: cave-agent `src/cave_agent/runtime/executor.py` — `IPythonExecutor` (InteractiveShell wrapper), `src/cave_agent/runtime/ipykernel_runtime.py` — `IPyKernelRuntime` (备选)
+
+选择 IPythonRuntime 而非 IPyKernelRuntime 的理由：
+
+- Agent 本身已经是子进程（ProcessManager spawn / Platform Router）
+- 无需在子进程内再做进程隔离
+- 性能最优：零拷贝，即时启动
+- 安全由 Agent 进程边界 + SecurityChecker 保证
+
+| Runtime | 隔离 | 启动 | 对象传输 | 崩溃行为 |
+|---------|------|------|---------|---------|
+| `IPythonRuntime` | 同进程 | 即时 | 直接引用（零拷贝） | 宿主死 |
+| `IPyKernelRuntime` | 独立进程(Jupyter) | ~1s | dill 序列化 | kernel 重启，宿主存活 |
+
+### 5.7 与 Atomic Agent 的集成
+
+```python
+class DocFillerAgent:
+    """每个 Atomic Agent 内部嵌入 PythonRuntime"""
+
+    runtime = PythonRuntime(
+        variables=[
+            Variable("template", docx_template, "Word 模板对象"),
+            Variable("source_data", markdown_content, "Markdown 源数据"),
+            Variable("output", None, "填充后的文档"),
+        ],
+        functions=[
+            Function(parse_markdown, "解析 Markdown 结构"),
+            Function(fill_template, "填充 Word 模板"),
+            Function(validate_output, "校验输出完整性"),
+        ],
+        types=[
+            Type(TemplateMapping, include_schema=True),
+            Type(FillResult, include_schema=True),
+        ],
+        security_checker=SecurityChecker([
+            ImportRule({"os", "subprocess", "sys", "socket"}),
+            FunctionRule({"eval", "exec", "open", "__import__"}),
+            AttributeRule({"__globals__", "__builtins__"}),
+        ]),
+    )
+
+    # MCP 只用于对外暴露和跨进程调用
+    mcp_server = FastMCP("doc-filler")
+```
+
+### 5.8 Runtime Context Tiered Loading
+
+> **参考来源**: nanobot Token 优化方案 — Type Schema 是 Runtime context 中的 token 大头
+
+#### 5.8.1 Token 开销分析
+
+`describe_types(include_schema=True)` 注入完整 JSON Schema（包含所有字段名、类型、描述、默认值、约束），是 Runtime Context 的 Token 消耗主要来源：
+
+| Agent 复杂度 | Variables | Functions | Types | Token 估算 |
+|-------------|-----------|-----------|-------|-----------|
+| 轻量 (3+3+2) | ~150 | ~200 | ~500-2,000 | **~850-2,700** |
+| 中等 (10+8+5) | ~300 | ~400 | ~1,500-6,000 | **~2,500-8,000** |
+| 重量 (20+15+10) | ~500 | ~600 | ~3,000-12,000 | **~5,000-15,000** |
+
+**Type Schema 是唯一需要分层的 Runtime 组件。** Variables 和 Functions 的 describe 仅含 name + description + 签名，开销可控。
+
+#### 5.8.2 分层策略
+
+| 组件 | L0 (每轮) | L1 (首轮) | L2 (按需) |
+|------|----------|----------|----------|
+| `describe_variables()` | 全量（仅 name + description） | — | Variable 当前值（`retrieve()`） |
+| `describe_functions()` | — | 全量（name + description + 签名） | — |
+| `describe_types()` | Type 名称 + 一句话描述 | 与当前任务相关的 Type Schema | 完整 JSON Schema（所有 Types） |
+
+```python
+class TieredRuntimeDescriber:
+    """Runtime Context 四层描述"""
+
+    def describe_layer0(self) -> str:
+        """L0 身份核心（每轮注入）"""
+        vars_desc = self.runtime.describe_variables()  # name + description only
+        type_names = [t.name for t in self.runtime._types.values()]
+        return f"Variables: {vars_desc}\nTypes: {', '.join(type_names)}"
+
+    def describe_layer1(self, task_relevant_types: list[str]) -> str:
+        """L1 执行上下文（首轮注入）"""
+        funcs_desc = self.runtime.describe_functions()
+        # 只注入与当前任务相关的 Type Schema
+        relevant_schemas = [
+            self.runtime.describe_type(t) for t in task_relevant_types
+        ]
+        return f"Functions: {funcs_desc}\nRelevant Types:\n" + "\n".join(relevant_schemas)
+
+    async def get_full_type_schema(self, type_name: str) -> str:
+        """L2 按需获取完整 Type Schema"""
+        return self.runtime.describe_type(type_name)  # include_schema=True
+
+    async def retrieve_value(self, var_name: str) -> Any:
+        """L3 运行时获取 Variable 当前值"""
+        return self.runtime.retrieve(var_name)
+```
+
+#### 5.8.3 跨 Agent 数据传递优化
+
+同进程内 `runtime.retrieve()` 是零 token 的 Python 对象引用。但跨进程（Composite Agent 中的多个 Atomic Agent）数据必须序列化，采用"引用传递 + 按需加载"策略：
+
+| 传递方式 | Token 开销 | 适用场景 |
+|---------|-----------|---------|
+| 同进程 `retrieve()` | **0** (对象引用) | Agent 内部跨轮 |
+| Mailbox 引用传递 | **~50** (ID + 摘要) | 跨 Agent 通信 |
+| Mailbox 全量传递 | 取决于数据大小 | 仅小型数据 |
+
+```python
+# Mailbox 引用消息格式（推荐）
+{
+    "type": "data_reference",
+    "ref_id": "var://template_mapping_abc123",
+    "summary": "TemplateMapping: 15 fields mapped",
+    "agent_source": "requirements-analyzer",
+    "size_hint": "~2KB"
+}
+
+# 接收方按需加载
+async def handle_data_reference(ref: DataReference) -> Any:
+    """通过 runtime.retrieve() 按需获取完整数据"""
+    return await source_agent.runtime.retrieve(ref.ref_id)
+```
+
+---
