@@ -27,6 +27,7 @@ SQLite schema:
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -34,6 +35,8 @@ from pathlib import Path
 from typing import Any, Generator
 
 from agent_nexus.models.task import TaskGraphSnapshot, TaskItem, TaskState
+
+logger = logging.getLogger(__name__)
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -451,6 +454,7 @@ class TaskGraph:
                 updated_at=datetime.fromisoformat(updated_at_str),
             )
         except Exception:
+            logger.error("Failed to parse task row: %s", exc_info=True)
             return None
 
     def _get_blocked_by_conn(

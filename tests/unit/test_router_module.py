@@ -1001,11 +1001,11 @@ class TestGetTools:
     async def test_get_tools_from_alive_agents(self) -> None:
         h1 = _make_agent_handle(name="a1")
         h1.ipc.receive_until_result = AsyncMock(
-            return_value=MagicMock(output=[{"name": "tool1"}], type=AgentToPlatformType.RESULT)
+            return_value=MagicMock(content=[{"name": "tool1"}], type=AgentToPlatformType.RESULT)
         )
         h2 = _make_agent_handle(name="a2")
         h2.ipc.receive_until_result = AsyncMock(
-            return_value=MagicMock(output=[{"name": "tool2"}], type=AgentToPlatformType.RESULT)
+            return_value=MagicMock(content=[{"name": "tool2"}], type=AgentToPlatformType.RESULT)
         )
 
         pm = _make_process_manager(agents={"a1": h1, "a2": h2}, running=["a1", "a2"])
@@ -1020,7 +1020,7 @@ class TestGetTools:
     async def test_get_tools_skips_dead_agents(self) -> None:
         alive = _make_agent_handle(name="alive", alive=True)
         alive.ipc.receive_until_result = AsyncMock(
-            return_value=MagicMock(output=[{"name": "t"}], type=AgentToPlatformType.RESULT)
+            return_value=MagicMock(content=[{"name": "t"}], type=AgentToPlatformType.RESULT)
         )
         dead = _make_agent_handle(name="dead", alive=False)
 
@@ -1051,6 +1051,54 @@ class TestGetTools:
 
         tools = await router.get_tools()
         assert tools == []
+
+    @pytest.mark.asyncio
+    async def test_get_tools_reads_content_not_output(self) -> None:
+        """get_tools should read tools from response.content, not response.output.
+
+        When response.content contains a JSON string of tools and
+        response.output is None, get_tools must still return the tools.
+        """
+        import json
+
+        tools_list = [{"name": "tool_a"}, {"name": "tool_b"}]
+        h = _make_agent_handle(name="a1")
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = json.dumps(tools_list)
+        mock_resp.output = None
+        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
+        router = PlatformRouter(process_manager=pm)
+
+        tools = await router.get_tools()
+        assert len(tools) == 2
+        assert tools[0]["name"] == "tool_a"
+        assert tools[1]["name"] == "tool_b"
+
+    @pytest.mark.asyncio
+    async def test_get_tools_content_as_list(self) -> None:
+        """get_tools should handle response.content being a list directly.
+
+        When response.content is already a list of tool dicts (not a JSON
+        string), get_tools must return them without JSON parsing.
+        """
+        tools_list = [{"name": "tool_x"}, {"name": "tool_y"}]
+        h = _make_agent_handle(name="a1")
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = tools_list
+        mock_resp.output = None
+        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
+        router = PlatformRouter(process_manager=pm)
+
+        tools = await router.get_tools()
+        assert len(tools) == 2
+        assert tools[0]["name"] == "tool_x"
+        assert tools[1]["name"] == "tool_y"
 
 
 class TestStopAll:

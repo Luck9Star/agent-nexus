@@ -201,6 +201,50 @@ class TestOrchestrationDefinition:
         )
         assert defn.get_task_depth("T4") == 2
 
+    def test_get_task_depth_cycle_no_recursion_error(self) -> None:
+        """get_task_depth does NOT raise RecursionError on cyclic deps."""
+        agents = {
+            "a1": DSLAgent(name="a1", description="Agent 1"),
+        }
+        tasks = [
+            DSLTask(id="T1", description="", agent="a1", blocked_by=["T2"]),
+            DSLTask(id="T2", description="", agent="a1", blocked_by=["T1"]),
+        ]
+        defn = OrchestrationDefinition(
+            goal="Cycle",
+            agent_name="cycle-test",
+            agents=agents,
+            tasks=tasks,
+            tool_loading=DSLToolLoading(),
+        )
+        # Should NOT raise RecursionError; returns a finite integer
+        d1 = defn.get_task_depth("T1")
+        d2 = defn.get_task_depth("T2")
+        assert isinstance(d1, int)
+        assert isinstance(d2, int)
+        assert d1 >= 0
+        assert d2 >= 0
+
+    def test_get_task_depth_self_loop_no_crash(self) -> None:
+        """Self-referencing task (T1 blocked_by T1) does not crash."""
+        agents = {
+            "a1": DSLAgent(name="a1", description="Agent 1"),
+        }
+        tasks = [
+            DSLTask(id="T1", description="", agent="a1", blocked_by=["T1"]),
+        ]
+        defn = OrchestrationDefinition(
+            goal="Self-loop",
+            agent_name="self-loop-test",
+            agents=agents,
+            tasks=tasks,
+            tool_loading=DSLToolLoading(),
+        )
+        # The visiting set returns 0 for the self-reference,
+        # so depth = 1 + max(0) = 1
+        d = defn.get_task_depth("T1")
+        assert isinstance(d, int) and d >= 0
+
 
 # ============================================================================
 # parse_string() — valid and error cases

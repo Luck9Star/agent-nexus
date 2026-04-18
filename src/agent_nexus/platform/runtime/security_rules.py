@@ -15,7 +15,6 @@ import ast
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Any
 
 from agent_nexus.models.runtime import SecurityViolation
 
@@ -106,7 +105,12 @@ class FunctionRule(SecurityRule):
 
         if isinstance(node, ast.Call):
             func_name = self._get_function_name(node.func)
-            if func_name in self.forbidden:
+            # Only check bare function calls (ast.Name) against the
+            # forbidden list.  Method calls (ast.Attribute) like
+            # ``re.compile()`` should NOT be flagged here -- the
+            # AttributeRule already covers dangerous attribute access
+            # such as ``__builtins__``.
+            if func_name in self.forbidden and isinstance(node.func, ast.Name):
                 violations.append(
                     SecurityViolation(
                         rule_type="function",

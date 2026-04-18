@@ -15,9 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from agent_nexus.models.evolution import SkillRecord
 from agent_nexus.platform.evolution.store import EvolutionStore
 
 
@@ -144,7 +142,7 @@ class AgentPromoter:
 
         # Generate manifest
         manifest_content = self._generate_manifest(candidate)
-        manifest_path = agent_dir / "agent.toml"
+        manifest_path = agent_dir / "agent-manifest.yaml"
         try:
             manifest_path.write_text(manifest_content, encoding="utf-8")
         except OSError as e:
@@ -186,21 +184,19 @@ class AgentPromoter:
     def _generate_manifest(
         self, candidate: PromotionCandidate
     ) -> str:
-        """Generate an agent.toml manifest for the promoted agent."""
+        """Generate an agent-manifest.yaml for the promoted agent."""
         return (
-            f'[agent]\n'
-            f'name = "{candidate.skill_name}"\n'
-            f'type = "atomic"\n'
-            f'description = "Auto-promoted from skill {candidate.skill_id}"\n'
-            f'version = "0.1.0"\n'
-            f'\n'
-            f'[agent.model]\n'
-            f'tier = "standard"\n'
-            f'\n'
-            f'[agent.promotion]\n'
-            f'from_skill = "{candidate.skill_id}"\n'
-            f'effective_rate = {candidate.effective_rate:.2f}\n'
-            f'total_selections = {candidate.total_selections}\n'
+            f'agent:\n'
+            f'  name: "{candidate.skill_name}"\n'
+            f'  type: "atomic"\n'
+            f'  description: "Auto-promoted from skill {candidate.skill_id}"\n'
+            f'  version: "0.1.0"\n'
+            f'  model:\n'
+            f'    tier: "standard"\n'
+            f'  promotion:\n'
+            f'    from_skill: "{candidate.skill_id}"\n'
+            f'    effective_rate: {candidate.effective_rate:.2f}\n'
+            f'    total_selections: {candidate.total_selections}\n'
         )
 
     def _generate_entry_point(

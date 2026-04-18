@@ -118,18 +118,24 @@ class OrchestrationDefinition:
         if task_id not in task_map:
             return -1
 
-        # Memoized DFS to compute max depth
+        # Memoized DFS to compute max depth (with cycle detection)
         depth_cache: dict[str, int] = {}
+        visiting: set[str] = set()
 
         def _depth(tid: str) -> int:
             if tid in depth_cache:
                 return depth_cache[tid]
+            if tid in visiting:
+                return 0  # cycle detected, treat as root
+            visiting.add(tid)
             task = task_map.get(tid)
             if task is None or not task.blocked_by:
                 depth_cache[tid] = 0
+                visiting.discard(tid)
                 return 0
             d = 1 + max(_depth(dep) for dep in task.blocked_by)
             depth_cache[tid] = d
+            visiting.discard(tid)
             return d
 
         return _depth(task_id)

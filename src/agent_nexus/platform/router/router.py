@@ -17,6 +17,7 @@ Reference: docs/06-mcp-communication.md Section 8.4
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -248,8 +249,17 @@ class PlatformRouter:
                     "__list_tools__", conversation_id="__internal__"
                 )
                 response = await handle.ipc.receive_until_result(timeout=10.0)
-                if response.output and isinstance(response.output, list):
-                    tools.extend(response.output)
+                if response.content:
+                    content = response.content
+                    if isinstance(content, str):
+                        try:
+                            parsed = json.loads(content)
+                            if isinstance(parsed, list):
+                                tools.extend(parsed)
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+                    elif isinstance(content, list):
+                        tools.extend(content)
             except Exception as exc:
                 logger.warning("Failed to get tools from agent '%s': %s", name, exc)
 
