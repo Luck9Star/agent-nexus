@@ -939,9 +939,9 @@ class TestRouteComposite:
         ):
             result = await router.route_composite(definition, "test", "conv-1")
 
-        # All phases should report "no agents available"
-        assert result.completed_phases == 4  # phases don't raise, just return text
-        assert result.success is True
+        # First phase raises RuntimeError for no agents; workflow fails
+        assert result.completed_phases == 0
+        assert result.success is False
 
 
 class TestRegisterComposite:

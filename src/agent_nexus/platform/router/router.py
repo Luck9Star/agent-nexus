@@ -312,7 +312,7 @@ class PlatformRouter:
                 phase_agents = [next(iter(definition.agents.keys()))]
 
         if not phase_agents:
-            return f"No agents available for {phase.value} phase"
+            raise RuntimeError(f"No agents available for {phase.value} phase")
 
         # Build message for this phase
         phase_message = message

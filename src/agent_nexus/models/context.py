@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import IntEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _utc_now = lambda: datetime.now(timezone.utc)
 
@@ -44,6 +44,24 @@ class ContextBudget(BaseModel):
     forced_truncate_threshold: float = 0.9  # 90% truncates earliest messages
     min_turns_between_compactions: int = 5
     consecutive_compaction_alert: int = 3
+
+    @model_validator(mode="after")
+    def _validate_thresholds(self) -> "ContextBudget":
+        """Ensure all threshold values are fractions in 0.0-1.0 range."""
+        for field_name in (
+            "compaction_trigger",
+            "compaction_target",
+            "session_hard_ceiling",
+            "forced_truncate_threshold",
+        ):
+            value = getattr(self, field_name)
+            if value > 1.0:
+                raise ValueError(
+                    f"{field_name}={value} is out of range. "
+                    "Thresholds must be fractions between 0.0 and 1.0 "
+                    "(e.g. 0.8 for 80%)."
+                )
+        return self
 
 
 class TokenUsage(BaseModel):

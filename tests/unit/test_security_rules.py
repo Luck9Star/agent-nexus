@@ -21,6 +21,8 @@ from agent_nexus.platform.runtime.security_rules import (
 
 def _check_code(rule, code):
     """Parse code into AST and apply a single rule to every node."""
+    if isinstance(rule, RegexRule):
+        return rule.check_source(code)
     tree = ast.parse(code)
     violations = []
     for node in ast.walk(tree):
