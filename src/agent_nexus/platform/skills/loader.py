@@ -212,7 +212,16 @@ class SkillLoader:
         Required fields: ``name``, ``agent_type``.
         Optional fields: ``triggers``, ``capabilities``, ``model_config``.
         Any extra fields are captured in ``extra``.
+
+        Raises:
+            ValueError: If ``name`` or ``agent_type`` is missing from frontmatter.
         """
+        missing = [k for k in ("name", "agent_type") if k not in frontmatter]
+        if missing:
+            raise ValueError(
+                f"SKILL.md frontmatter missing required field(s): {', '.join(missing)}"
+            )
+
         known_keys = {"name", "agent_type", "triggers", "capabilities", "model_config"}
         extra = {k: v for k, v in frontmatter.items() if k not in known_keys}
 

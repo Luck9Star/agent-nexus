@@ -20,6 +20,7 @@ from agent_nexus.models.agent import (
     RunMode,
     SkillDefinition,
 )
+from agent_nexus.models.hooks import HookEvent, HookType
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +340,7 @@ class TestAgentDefinition:
 
 class TestHookDef:
     def test_construction(self):
-        h = HookDef(type="command", event="pre_execution")
+        h = HookDef(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
         assert h.enabled is True
         assert h.block_on_failure is False
         assert h.timeout_seconds == 10.0

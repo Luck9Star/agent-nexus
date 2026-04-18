@@ -381,7 +381,7 @@ class TestBuildMetadata:
 
     def test_missing_name_raises(self):
         fm = {"agent_type": "atomic"}
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match="missing required field"):
             SkillLoader._build_metadata(fm)
 
 
@@ -514,7 +514,7 @@ class TestParseString:
     def test_frontmatter_without_name_raises(self):
         loader = SkillLoader()
         content = "---\nagent_type: atomic\n---\nbody"
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match="missing required field"):
             loader.parse_string(content)
 
     def test_extra_fields_captured(self):

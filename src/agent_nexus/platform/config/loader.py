@@ -176,18 +176,27 @@ class ConfigLoader:
             existing = merged.get(name)
             api_str = raw.get("api", "openai-compatible")
 
+            try:
+                api_type = ProviderApiType(api_str)
+            except ValueError:
+                valid = [e.value for e in ProviderApiType]
+                raise ValueError(
+                    f"Invalid api type '{api_str}' in provider '{name}'. "
+                    f"Valid types: {valid}"
+                ) from None
+
             if existing:
                 # Override only fields that the user explicitly provides
                 merged[name] = ProviderConfig(
                     base_url=raw.get("base_url", existing.base_url),
                     api_key_env=raw.get("api_key_env", existing.api_key_env),
-                    api=ProviderApiType(api_str),
+                    api=api_type,
                 )
             else:
                 merged[name] = ProviderConfig(
                     base_url=raw.get("base_url", ""),
                     api_key_env=raw.get("api_key_env", ""),
-                    api=ProviderApiType(api_str),
+                    api=api_type,
                 )
 
         return merged

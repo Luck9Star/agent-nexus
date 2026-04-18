@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_nexus.models.hooks import HookEvent, HookType
 from agent_nexus.models.permission import PermissionConfig, PermissionMode
 
 
@@ -156,8 +157,8 @@ class HookDef(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    type: str  # command | http | prompt | agent
-    event: str  # pre_execution | post_execution | pre_tool_use | post_tool_use | on_error | on_evolution
+    type: HookType
+    event: HookEvent
     config: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
     block_on_failure: bool = False
