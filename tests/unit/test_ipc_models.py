@@ -309,3 +309,57 @@ class TestIPCMessageDiscriminatedUnion:
         restored = IPCMessage.model_validate_json(json_str)
         assert isinstance(restored.payload, AgentToPlatform)
         assert restored.payload.progress_pct == 42.0
+
+
+# ---------------------------------------------------------------------------
+# Iteration 33 fix: progress_pct range validation (0.0-100.0)
+# ---------------------------------------------------------------------------
+
+
+class TestProgressPctRange:
+    """progress_pct is constrained to 0.0-100.0."""
+
+    def test_valid_zero(self):
+        """progress_pct=0.0 is valid."""
+        msg = AgentToPlatform(
+            type=AgentToPlatformType.PROGRESS,
+            task_id="t-1",
+            progress_pct=0.0,
+        )
+        assert msg.progress_pct == 0.0
+
+    def test_valid_hundred(self):
+        """progress_pct=100.0 is valid."""
+        msg = AgentToPlatform(
+            type=AgentToPlatformType.PROGRESS,
+            task_id="t-1",
+            progress_pct=100.0,
+        )
+        assert msg.progress_pct == 100.0
+
+    def test_negative_rejected(self):
+        """progress_pct=-1.0 is rejected."""
+        with pytest.raises(ValidationError):
+            AgentToPlatform(
+                type=AgentToPlatformType.PROGRESS,
+                task_id="t-1",
+                progress_pct=-1.0,
+            )
+
+    def test_over_hundred_rejected(self):
+        """progress_pct=100.1 is rejected."""
+        with pytest.raises(ValidationError):
+            AgentToPlatform(
+                type=AgentToPlatformType.PROGRESS,
+                task_id="t-1",
+                progress_pct=100.1,
+            )
+
+    def test_none_allowed(self):
+        """progress_pct=None is valid (optional field)."""
+        msg = AgentToPlatform(
+            type=AgentToPlatformType.PROGRESS,
+            task_id="t-1",
+            progress_pct=None,
+        )
+        assert msg.progress_pct is None

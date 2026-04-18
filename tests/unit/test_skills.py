@@ -315,6 +315,36 @@ class TestSplitBodyResources:
         assert "## Resources sub-heading" in body
         assert resources is None
 
+    def test_split_body_resources_with_duplicate_line(self):
+        """Body containing a line identical to '# Resources' inside a code block
+        must NOT trigger a split; only the real '# Resources' heading outside a
+        fence is used."""
+        content = (
+            "# Role\n"
+            "You are a helper.\n"
+            "\n"
+            "```\n"
+            "# Resources\n"
+            "```\n"
+            "\n"
+            "More body text.\n"
+            "\n"
+            "# Resources\n"
+            "\n"
+            "## Example\n"
+            "data here"
+        )
+        body, resources = SkillLoader._split_body_resources(content)
+        # The body should contain everything up to the real # Resources heading
+        assert body is not None
+        assert "# Resources\n```" in body  # the one inside the code block
+        assert "More body text." in body
+        # The resources section should start at the real heading
+        assert resources is not None
+        assert resources.startswith("# Resources")
+        assert "## Example" in resources
+        assert "data here" in resources
+
 
 # ---------------------------------------------------------------------------
 # SkillLoader — _parse_resource_sections

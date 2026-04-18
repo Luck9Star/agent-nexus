@@ -245,3 +245,24 @@ class TestSecurityViolation:
         json_str = sv.model_dump_json()
         sv2 = SecurityViolation.model_validate_json(json_str)
         assert sv2 == sv
+
+
+# ---------------------------------------------------------------------------
+# Iteration 33 fix: Runtime model name min_length=1 validation
+# ---------------------------------------------------------------------------
+
+
+class TestRuntimeNameMinLength:
+    """Runtime model name fields reject empty strings."""
+
+    def test_variable_empty_name(self):
+        with pytest.raises(ValidationError):
+            Variable(name="", type_name="str", value="x")
+
+    def test_function_empty_name(self):
+        with pytest.raises(ValidationError):
+            Function(name="", description="empty name function")
+
+    def test_runtime_type_empty_name(self):
+        with pytest.raises(ValidationError):
+            RuntimeType(name="", description="empty name type")

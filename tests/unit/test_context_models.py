@@ -324,3 +324,44 @@ class TestContextBudgetNegativeThresholds:
     def test_one_is_accepted(self) -> None:
         cfg = ContextBudget(session_hard_ceiling=1.0, forced_truncate_threshold=0.95)
         assert cfg.session_hard_ceiling == 1.0
+
+
+# ============================================================================
+# ContextBudget integer fields reject zero and negative (from iter33)
+# ============================================================================
+
+
+class TestContextBudgetFieldValidation:
+    """ContextBudget integer fields reject zero and negative values."""
+
+    def test_l0_max_zero_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudget(l0_max=0)
+
+    def test_l0_max_negative_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudget(l0_max=-1)
+
+    def test_min_turns_zero_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudget(min_turns_between_compactions=0)
+
+    def test_min_turns_negative_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudget(min_turns_between_compactions=-1)
+
+    def test_l1_max_zero_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudget(l1_max=0)
+
+    def test_bootstrap_max_zero_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudget(bootstrap_max=0)
+
+    def test_single_file_max_zero_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudget(single_file_max=0)
+
+    def test_consecutive_compaction_alert_zero_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudget(consecutive_compaction_alert=0)
