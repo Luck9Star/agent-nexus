@@ -311,7 +311,7 @@ class ProcessManager:
             try:
                 await process.wait()
             except Exception:
-                pass
+                logger.warning("Error waiting for agent '%s' after SIGKILL", name, exc_info=True)
 
             async with self._lock:
                 if self._agents.get(name) is handle:
