@@ -161,7 +161,7 @@ class TestLockfileManager:
         mgr = LockfileManager(path)
         entry = _make_entry()
         lf = Lockfile(agents={"my-agent": entry})
-        mgr.save(lf)
+        mgr._save(lf)
 
         assert path.exists()
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -171,7 +171,7 @@ class TestLockfileManager:
         """save() uses atomic write — file content is valid JSON after save."""
         path = tmp_path / "lockfile.json"
         mgr = LockfileManager(path)
-        mgr.save(Lockfile())
+        mgr._save(Lockfile())
         # File should be parseable JSON
         content = path.read_text(encoding="utf-8")
         parsed = json.loads(content)
@@ -181,7 +181,7 @@ class TestLockfileManager:
         """save() creates parent directories if they don't exist."""
         path = tmp_path / "deep" / "nested" / "lockfile.json"
         mgr = LockfileManager(path)
-        mgr.save(Lockfile())
+        mgr._save(Lockfile())
         assert path.exists()
 
     def test_get_entry_existing(self, tmp_path: Path) -> None:
@@ -189,7 +189,7 @@ class TestLockfileManager:
         path = tmp_path / "lockfile.json"
         entry = _make_entry(version="2.0.0")
         mgr = LockfileManager(path)
-        mgr.save(Lockfile(agents={"test-agent": entry}))
+        mgr._save(Lockfile(agents={"test-agent": entry}))
         result = mgr.get_entry("test-agent")
         assert result is not None
         assert result.version == "2.0.0"
@@ -2316,7 +2316,7 @@ class TestLockfileManagerGetEntryFrom:
                 "agent-b": entry2,
             }
         )
-        mgr.save(lockfile)
+        mgr._save(lockfile)
 
         # Load once, query N times without re-reading disk
         loaded = mgr.load()
@@ -2337,7 +2337,7 @@ class TestLockfileManagerGetEntryFrom:
         mgr = LockfileManager(lockfile_path)
 
         lockfile = Lockfile(agents={"existing": _make_entry()})
-        mgr.save(lockfile)
+        mgr._save(lockfile)
 
         loaded = mgr.load()
         assert mgr.get_entry_from(loaded, "nonexistent") is None
@@ -2357,7 +2357,7 @@ class TestSupervisorLockfilePassthrough:
 
         entry = _make_entry()
         lockfile = Lockfile(agents={"test-agent": entry})
-        lockfile_mgr.save(lockfile)
+        lockfile_mgr._save(lockfile)
 
         pm = MagicMock(spec=["start_agent", "stop_agent", "stop_all", "get_agent", "list_running", "health_check"])
         pm.start_agent = AsyncMock()
@@ -3008,7 +3008,7 @@ class TestLockfileManagerSaveExceptionCleanup:
 
         with patch("os.replace", side_effect=OSError("disk full")):
             with pytest.raises(OSError, match="disk full"):
-                mgr.save(Lockfile())
+                mgr._save(Lockfile())
 
         # The temp file should have been cleaned up (no stale .lockfile-*.tmp files)
         tmp_files = list(tmp_path.glob(".lockfile-*.tmp"))
@@ -3019,7 +3019,7 @@ class TestLockfileManagerSaveExceptionCleanup:
         lockfile_path = tmp_path / "lockfile.json"
         mgr = LockfileManager(lockfile_path)
         entry = _make_entry(version="1.0.0")
-        mgr.save(Lockfile(agents={"test": entry}))
+        mgr._save(Lockfile(agents={"test": entry}))
         assert lockfile_path.exists()
         assert "test" in lockfile_path.read_text(encoding="utf-8")
 
@@ -3173,7 +3173,7 @@ class TestLockfileManagerSaveCleanupOSError:
         with patch("os.replace", side_effect=OSError("replace failed")), \
              patch("os.unlink", side_effect=OSError("unlink also failed")):
             with pytest.raises(OSError, match="replace failed"):
-                mgr.save(Lockfile())
+                mgr._save(Lockfile())
 
 
 # ============================================================================

@@ -217,8 +217,11 @@ class PlatformRouter:
             ctx.close()
             # Clean up route locks for agents that are no longer running,
             # preventing unbounded growth of _route_locks dict.
+            # Snapshot keys to avoid RuntimeError if concurrent tasks
+            # mutate _route_locks during iteration (asyncio gather tasks
+            # may still be running after wait_for timeout cancellation).
             stale = [
-                name for name in self._route_locks
+                name for name in list(self._route_locks)
                 if self._pm.get_agent(name) is None
             ]
             for name in stale:

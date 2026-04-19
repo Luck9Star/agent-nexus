@@ -152,6 +152,7 @@
 | code-review-expert全量评审 iter113 | evolve_skill双重rollback→外部catch IntegrityError(P0) + executor _exec_done异常恢复(P1) + 回归test(1) = 2492 tests | 2026-04-20 | iter113 |
 | composite workflow整体超时 iter114 | route_composite phase loop添加asyncio.wait_for(1200s) + 2 regression tests = 2496 tests | 2026-04-20 | iter114 |
 | 蓝军sandbox escape type()+__bases__/__mro__ iter115 | type加入forbidden_functions + __bases__/__mro__加入forbidden_attributes + 3 regression tests = 2500 tests | 2026-04-20 | iter115 |
+| run_with_retry MemoryError retry | subtask.py MemoryError加入immediate-rethrow + 1 regression test + route_locks asyncio安全确认 + lockfile save()设计确认 = 2500 tests | 2026-04-20 | iter116 |
 
 ### 待清模式
 

@@ -81,7 +81,7 @@ class LockfileManager:
             fcntl.flock(fh, fcntl.LOCK_UN)
             fh.close()
 
-    def save(self, lockfile: Lockfile) -> None:
+    def _save(self, lockfile: Lockfile) -> None:
         """Persist *lockfile* to disk atomically.
 
         Writes to a temporary file first, then renames (``os.rename``) so
@@ -141,7 +141,7 @@ class LockfileManager:
             agents = dict(lockfile.agents)
             agents[agent_name] = entry
             updated = Lockfile(version=lockfile.version, agents=agents)
-            self.save(updated)
+            self._save(updated)
         logger.info("Lockfile updated: %s@%s", agent_name, entry.version)
 
     def remove_entry(self, agent_name: str) -> bool:
@@ -161,7 +161,7 @@ class LockfileManager:
             agents = dict(lockfile.agents)
             del agents[agent_name]
             updated = Lockfile(version=lockfile.version, agents=agents)
-            self.save(updated)
+            self._save(updated)
         logger.info("Lockfile entry removed: %s", agent_name)
         return True
 

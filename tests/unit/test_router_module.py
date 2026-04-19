@@ -1521,6 +1521,26 @@ class TestSubtaskSystemExit:
             )
         assert attempt == 1
 
+    @pytest.mark.asyncio
+    async def test_run_with_retry_propagates_memory_error(self) -> None:
+        """MemoryError propagates immediately — retrying is pointless."""
+
+        attempt = 0
+
+        async def oom_then_succeed():
+            nonlocal attempt
+            attempt += 1
+            if attempt == 1:
+                raise MemoryError("out of memory")
+            return "ok"
+
+        controller = SubtaskController()
+        with pytest.raises(MemoryError, match="out of memory"):
+            await controller.run_with_retry(
+                oom_then_succeed, max_retries=2,
+            )
+        assert attempt == 1
+
 
 # ============================================================================
 # Merged from iteration 23: WorkflowContext.close() drops task_graph

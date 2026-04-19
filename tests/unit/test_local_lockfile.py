@@ -54,19 +54,19 @@ class TestLockfileLoad:
 
 
 class TestLockfileSave:
-    """LockfileManager.save()"""
+    """LockfileManager._save()"""
 
     def test_save_creates_parent_dirs(self, tmp_path: Path) -> None:
         lockfile_path = tmp_path / "deep" / "nested" / "lockfile.json"
         lf = LockfileManager(lockfile_path)
-        lf.save(Lockfile())
+        lf._save(Lockfile())
         assert lockfile_path.exists()
 
     def test_save_and_load_roundtrip(self, tmp_path: Path) -> None:
         lockfile_path = tmp_path / "lockfile.json"
         lf = LockfileManager(lockfile_path)
         entry = _make_entry()
-        lf.save(Lockfile(agents={"agent-a": entry}))
+        lf._save(Lockfile(agents={"agent-a": entry}))
 
         loaded = lf.load()
         assert "agent-a" in loaded.agents
@@ -79,7 +79,7 @@ class TestLockfileSave:
 
         with patch("os.replace", side_effect=OSError("disk full")):
             with pytest.raises(OSError, match="disk full"):
-                lf.save(Lockfile())
+                lf._save(Lockfile())
 
         # Original file should still be intact
         raw = json.loads(lockfile_path.read_text(encoding="utf-8"))
