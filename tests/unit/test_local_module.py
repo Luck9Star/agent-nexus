@@ -3726,3 +3726,83 @@ class TestInstallRollbackCleanupFailure:
 
         # At least 2 rmtree calls: step-5 pre-copy + rollback cleanup
         assert len(rmtree_calls) >= 2
+
+
+# ---------------------------------------------------------------------------
+# iter118 regression: _rmtree_best_effort continues on individual file failure
+# ---------------------------------------------------------------------------
+
+
+class TestRmTreeBestEffort:
+    """Verify _rmtree_best_effort logs errors instead of raising."""
+
+    def test_removes_clean_directory(self, tmp_path: Path) -> None:
+        from agent_nexus.platform.local.installer import _rmtree_best_effort
+
+        d = tmp_path / "clean"
+        d.mkdir()
+        (d / "file.txt").write_text("hello")
+        _rmtree_best_effort(d, context="test")
+        assert not d.exists()
+
+    def test_continues_on_permission_error(self, tmp_path: Path) -> None:
+        """Best-effort removal should not raise even when individual files fail."""
+        from agent_nexus.platform.local.installer import _rmtree_best_effort
+
+        d = tmp_path / "partial"
+        d.mkdir()
+        (d / "a.txt").write_text("a")
+        (d / "b.txt").write_text("b")
+
+        # Make a subdirectory unreadable so rmtree encounters an error
+        protected = d / "inner"
+        protected.mkdir()
+        (protected / "secret.txt").write_text("can't touch this")
+        protected.chmod(0o000)
+
+        try:
+            # Should NOT raise — best-effort means continue on error
+            _rmtree_best_effort(d, context="permission-test")
+        finally:
+            # Restore permissions for cleanup
+            if protected.exists():
+                protected.chmod(0o755)
+
+    async def test_uninstall_continues_on_rmtree_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Uninstall should succeed even if agent dir removal hits errors."""
+        lockfile = MagicMock(spec=LockfileManager)
+        entry = _make_entry(venv_path="")
+        lockfile.get_entry = MagicMock(return_value=entry)
+        lockfile.remove_entry = MagicMock(return_value=True)
+
+        config_dir = tmp_path / "config"
+        agents_dir = config_dir / "agents"
+        agents_dir.mkdir(parents=True)
+        agent_dir = agents_dir / "partial-agent"
+        agent_dir.mkdir()
+        (agent_dir / "SKILL.md").write_text("# skill")
+
+        installer = GitInstaller(
+            MagicMock(spec=SourceManager),
+            lockfile,
+            config_dir,
+        )
+
+        # Make a subdirectory unreadable so rmtree hits an error
+        protected = agent_dir / "protected"
+        protected.mkdir()
+        (protected / "secret.txt").write_text("can't touch this")
+        protected.chmod(0o000)
+
+        try:
+            result = await installer.uninstall("partial-agent")
+            # Lockfile entry should be removed regardless
+            lockfile.remove_entry.assert_called_once_with("partial-agent")
+            # uninstall returns True (lockfile was removed)
+            assert result is True
+        finally:
+            # Restore permissions for cleanup
+            if protected.exists():
+                protected.chmod(0o755)

@@ -151,7 +151,10 @@ class EvolutionStore:
         with self._conn() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
-            conn.executescript(_SCHEMA_SQL)
+            for stmt in _SCHEMA_SQL.split(";"):
+                stmt = stmt.strip()
+                if stmt:
+                    conn.execute(stmt)
 
     @contextmanager
     def _conn(

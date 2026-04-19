@@ -154,6 +154,7 @@
 | 蓝军sandbox escape type()+__bases__/__mro__ iter115 | type加入forbidden_functions + __bases__/__mro__加入forbidden_attributes + 3 regression tests = 2500 tests | 2026-04-20 | iter115 |
 | run_with_retry MemoryError retry | subtask.py MemoryError加入immediate-rethrow + 1 regression test + route_locks asyncio安全确认 + lockfile save()设计确认 = 2500 tests | 2026-04-20 | iter116 |
 | status=None默认success + evolve_skill sqlite3.Error | tool_adapter+router status=None→success=True + 2 stale tests更新 = 2507 tests | 2026-04-20 | iter117 |
+| executescript→individual execute + rmtree best-effort | task_graph+store DDL transactional + installer uninstall onexc cleanup = 2515 tests | 2026-04-20 | iter118 |
 
 ### 待清模式
 

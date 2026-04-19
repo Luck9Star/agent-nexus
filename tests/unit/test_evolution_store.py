@@ -1786,3 +1786,38 @@ class TestJudgmentsBatchLimitClamp:
         self._seed_judgments(store, "s1", 3)
         batch = store.get_judgments_batch({"s1"}, limit_per_skill=0)
         assert len(batch["s1"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# iter118 regression: executescript → individual execute in store.py
+# ---------------------------------------------------------------------------
+
+
+class TestStoreSchemaInitTransaction:
+    """Verify store _init_db uses individual execute() calls."""
+
+    def test_init_db_creates_tables(self, tmp_path: Path) -> None:
+        """Schema init creates all required tables."""
+        store = _make_store(tmp_path)
+        # If init succeeded, save_skill_record should work
+        record = SkillRecord(
+            id="test-init",
+            name="test",
+            version="1.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.IMPORTED,
+                generation=0,
+            ),
+            directory="/tmp/test",
+        )
+        store.save_skill_record(record)
+        fetched = store.get_skill_record("test-init")
+        assert fetched is not None
+        assert fetched.id == "test-init"
+
+    def test_no_executescript_in_source(self) -> None:
+        """Verify executescript is NOT used in store.py."""
+        import inspect
+        from agent_nexus.platform.evolution.store import EvolutionStore as ES
+        source = inspect.getsource(ES)
+        assert "executescript" not in source

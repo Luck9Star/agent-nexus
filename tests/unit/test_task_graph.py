@@ -921,3 +921,39 @@ class TestCorruptTaskRow:
         # Use get_parallel_groups which calls _rows_to_tasks internally.
         with pytest.raises(ValueError, match="TOTALLY_INVALID"):
             tg.get_parallel_groups()
+
+
+# ---------------------------------------------------------------------------
+# iter118 regression: executescript → individual execute preserves transaction
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaInitTransaction:
+    """Verify that _init_db uses individual execute() calls (not executescript)
+    so the schema creation is transactional."""
+
+    def test_init_db_creates_tables(self, tmp_path: Path) -> None:
+        """Schema init creates all required tables and indexes."""
+        tg = TaskGraph(tmp_path / "test.db")
+        # If init succeeded, basic operations should work
+        tg.add_task(_make_task("t1"))
+        assert tg.get_task("t1") is not None
+        tg.close()
+
+    def test_init_db_idempotent(self, tmp_path: Path) -> None:
+        """Re-opening the same DB file does not fail (IF NOT EXISTS)."""
+        db = tmp_path / "test.db"
+        tg1 = TaskGraph(db)
+        tg1.add_task(_make_task("t1"))
+        tg1.close()
+
+        tg2 = TaskGraph(db)
+        assert tg2.get_task("t1") is not None
+        tg2.close()
+
+    def test_no_executescript_in_source(self) -> None:
+        """Verify executescript is NOT used in task_graph.py."""
+        import inspect
+        from agent_nexus.platform.orchestration.task_graph import TaskGraph as TG
+        source = inspect.getsource(TG)
+        assert "executescript" not in source

@@ -29,6 +29,18 @@ from .sources import SourceManager
 
 logger = logging.getLogger(__name__)
 
+
+def _rmtree_best_effort(path: Path, *, context: str = "") -> None:
+    """Remove a directory tree, logging individual failures instead of raising.
+
+    Used in cleanup paths (uninstall, rollback) where partial removal is
+    acceptable and the caller should not abort.
+    """
+    def _on_exc(func, p, exc):  # type: ignore[no-untyped-def]
+        logger.warning("Failed to remove %s during %s: %s", p, context, exc)
+
+    shutil.rmtree(path, onexc=_on_exc)
+
 # Valid agent name pattern: starts with alphanumeric, then alphanumeric/dot/hyphen/underscore
 _AGENT_NAME_RE = r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
 
@@ -239,7 +251,7 @@ class GitInstaller:
         # Remove agent files
         agent_dir = self._agents_dir / agent_name
         if agent_dir.exists():
-            shutil.rmtree(agent_dir)
+            _rmtree_best_effort(agent_dir, context=f"uninstall {agent_name}")
             logger.info("Removed agent files: %s", agent_dir)
 
         # Remove venv (from lockfile path or default location)
@@ -252,12 +264,12 @@ class GitInstaller:
                     venv_path,
                 )
             elif venv_path.exists():
-                shutil.rmtree(venv_path)
+                _rmtree_best_effort(venv_path, context=f"uninstall venv {agent_name}")
                 logger.info("Removed venv: %s", venv_path)
         else:
             default_venv = self._venvs_dir / agent_name
             if default_venv.exists():
-                shutil.rmtree(default_venv)
+                _rmtree_best_effort(default_venv, context=f"uninstall default venv {agent_name}")
                 logger.info("Removed venv: %s", default_venv)
 
         logger.info("Agent uninstalled: %s", agent_name)
