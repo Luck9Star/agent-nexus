@@ -2034,3 +2034,57 @@ class TestPhaseToRoleForwardCompat:
         assert PlatformRouter._phase_to_role(WorkflowPhase.synthesis) == "plan"
         assert PlatformRouter._phase_to_role(WorkflowPhase.implementation) == "worker"
         assert PlatformRouter._phase_to_role(WorkflowPhase.verification) == "verification"
+
+
+# ---------------------------------------------------------------------------
+# iter105 regression: stale route lock cleanup + topological sort cycle fallback
+# ---------------------------------------------------------------------------
+
+
+class TestStaleRouteLockCleanup:
+    """Route locks for dead agents are cleaned up in route_composite finally block."""
+
+    @pytest.mark.asyncio
+    async def test_stale_lock_cleaned_after_workflow(self) -> None:
+        pm = MagicMock()
+        # get_agent("dead-agent") must return None so the finally-block
+        # recognises it as stale and removes the lock.
+        pm.get_agent.return_value = None
+        router = PlatformRouter(process_manager=pm)
+
+        # Simulate a stale route lock: add an entry for an agent that no
+        # longer exists in ProcessManager.
+        router._route_locks["dead-agent"] = asyncio.Lock()
+
+        # Patch route_composite internals to bypass phase execution.
+        with patch.object(router, "_execute_phase", new_callable=AsyncMock, return_value="ok"):
+            with patch.object(
+                router, "_build_phase_message", return_value="msg"
+            ):
+                definition = OrchestrationDefinition(
+                    goal="test",
+                    agent_name="test-agent",
+                    agents={"a": DSLAgent(name="a", description="a", role="worker")},
+                    tasks=[DSLTask(id="t1", description="d", agent="a")],
+                    tool_loading=DSLToolLoading(),
+                )
+                await router.route_composite(definition, "do something", "conv-1")
+
+        # The stale lock for "dead-agent" should be cleaned up
+        assert "dead-agent" not in router._route_locks
+
+
+class TestTopologicalSortCycleFallback:
+    """_topological_sort_tasks appends unsorted tasks when cycle prevents full sort."""
+
+    def test_cycle_appends_remaining_tasks(self) -> None:
+        """Mutual dependency A<->B causes Kahn's algorithm to skip both;
+        the fallback appends them so add_task can detect the cycle."""
+        tasks = [
+            DSLTask(id="A", description="a", agent="ag", blocked_by=["B"]),
+            DSLTask(id="B", description="b", agent="ag", blocked_by=["A"]),
+        ]
+        result = PlatformRouter._topological_sort_tasks(tasks)
+        # Both tasks should be present (appended by fallback)
+        ids = [t.id for t in result]
+        assert set(ids) == {"A", "B"}

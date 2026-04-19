@@ -179,3 +179,33 @@ class TestStoreProperty:
         store = _make_store()
         promoter = AgentPromoter(store)
         assert promoter.store is store
+
+
+# ---------------------------------------------------------------------------
+# iter105 regression: _atomic_write failure cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestAtomicWriteFailure:
+    """_atomic_write cleans up temp file when os.replace fails."""
+
+    def test_temp_file_cleaned_on_failure(self, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        store = _make_store()
+        promoter = AgentPromoter(store)
+
+        target = tmp_path / "sub" / "dir" / "test.yaml"
+        # Make parent dir exist
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        with patch("os.replace", side_effect=PermissionError("denied")):
+            with pytest.raises(PermissionError):
+                promoter._atomic_write(target, "test content")
+
+        # The target file should NOT exist (write failed)
+        assert not target.exists()
+
+        # No stale .promo-*.tmp files left behind
+        tmp_files = list(target.parent.glob(".promo-*.tmp"))
+        assert tmp_files == []

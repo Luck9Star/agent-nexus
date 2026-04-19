@@ -878,3 +878,45 @@ class TestTaskGraphClose:
         # file-based path which will fail on ":memory:" string as a path
         with pytest.raises(Exception):
             tg.get_task("A")
+
+
+# ---------------------------------------------------------------------------
+# iter105 regression: corrupt task row detection
+# ---------------------------------------------------------------------------
+
+
+class TestCorruptTaskRow:
+    """_rows_to_tasks raises on corrupt database rows (invalid state JSON)."""
+
+    def test_corrupt_state_raises(self, tmp_path: Path) -> None:
+        tg = TaskGraph(tmp_path / "test.db")
+        tg.add_task(_make_task("good"))
+        # Manually corrupt a row: insert invalid state string
+        with tg._conn(immediate=True) as conn:
+            conn.execute(
+                "UPDATE tasks SET state = 'INVALID_STATE' WHERE id = 'good'"
+            )
+        with pytest.raises(ValueError, match="INVALID_STATE"):
+            tg.get_task("good")
+
+    def test_corrupt_vars_json_raises(self, tmp_path: Path) -> None:
+        tg = TaskGraph(tmp_path / "test.db")
+        tg.add_task(_make_task("v1"))
+        with tg._conn(immediate=True) as conn:
+            conn.execute(
+                "UPDATE tasks SET vars = 'not-json{{{}}' WHERE id = 'v1'"
+            )
+        with pytest.raises(Exception):
+            tg.get_task("v1")
+
+    def test_corrupt_state_in_batch_raises(self, tmp_path: Path) -> None:
+        """_rows_to_tasks (lines 562-566) raises on corrupt state in batch query."""
+        tg = TaskGraph(tmp_path / "test.db")
+        tg.add_task(_make_task("batch-bad"))
+        with tg._conn(immediate=True) as conn:
+            conn.execute(
+                "UPDATE tasks SET state = 'TOTALLY_INVALID' WHERE id = 'batch-bad'"
+            )
+        # get_ready_tasks uses _rows_to_tasks (batch), not _task_from_row
+        with pytest.raises(ValueError, match="TOTALLY_INVALID"):
+            tg.get_ready_tasks()

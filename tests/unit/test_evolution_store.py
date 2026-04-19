@@ -1119,3 +1119,156 @@ class TestJudgmentsBatchEvenLimit:
         batch = store.get_judgments_batch({"s1", "s2"}, limit_per_skill=5)
         assert len(batch["s1"]) == 5
         assert len(batch["s2"]) == 5
+
+
+# iter104 regression: get_ancestry_batch + get_judgments_batch empty input
+
+
+class TestGetAncestryBatch:
+    """get_ancestry_batch: batch BFS lineage traversal for multiple skills."""
+
+    def _make_record(self, skill_id: str, generation: int) -> SkillRecord:
+        return SkillRecord(
+            id=skill_id,
+            name=f"skill-{skill_id}",
+            version="1.0.0",
+            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=generation),
+            directory="skills/test",
+            is_active=True,
+            first_seen=datetime.now(timezone.utc),
+            last_updated=datetime.now(timezone.utc),
+        )
+
+    def test_empty_input_returns_empty(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        assert store.get_ancestry_batch([]) == {}
+
+    def test_single_skill_linear_lineage(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        store.save_skill_record(self._make_record("gp", 0))
+        parent = SkillRecord(
+            id="p",
+            name="skill-p",
+            version="1.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED, generation=1, parent_skill_ids=["gp"],
+            ),
+            directory="skills/test",
+            is_active=True,
+            first_seen=datetime.now(timezone.utc),
+            last_updated=datetime.now(timezone.utc),
+        )
+        child = SkillRecord(
+            id="c",
+            name="skill-c",
+            version="1.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED, generation=2, parent_skill_ids=["p"],
+            ),
+            directory="skills/test",
+            is_active=True,
+            first_seen=datetime.now(timezone.utc),
+            last_updated=datetime.now(timezone.utc),
+        )
+        store.evolve_skill(parent, parent_skill_ids=["gp"])
+        store.evolve_skill(child, parent_skill_ids=["p"])
+
+        result = store.get_ancestry_batch(["c"])
+        assert "c" in result
+        assert len(result["c"]) == 2
+        assert result["c"][0].id == "gp"
+        assert result["c"][1].id == "p"
+
+    def test_multiple_skills_shared_ancestor(self, tmp_path: Path) -> None:
+        """Two skills sharing a common grandparent get correct ancestry."""
+        store = _make_store(tmp_path)
+        store.save_skill_record(self._make_record("root", 0))
+
+        for i, child_id in enumerate("ab", start=1):
+            rec = SkillRecord(
+                id=child_id,
+                name=f"skill-{child_id}",
+                version="1.0.0",
+                lineage=SkillLineage(
+                    origin=SkillOrigin.FIXED,
+                    generation=i,
+                    parent_skill_ids=["root"],
+                ),
+                directory="skills/test",
+                is_active=True,
+                first_seen=datetime.now(timezone.utc),
+                last_updated=datetime.now(timezone.utc),
+            )
+            store.evolve_skill(rec, parent_skill_ids=["root"])
+
+        result = store.get_ancestry_batch(["a", "b"])
+        assert len(result["a"]) == 1
+        assert result["a"][0].id == "root"
+        assert len(result["b"]) == 1
+        assert result["b"][0].id == "root"
+
+    def test_orphan_skill_returns_empty_ancestry(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        store.save_skill_record(self._make_record("orphan", 0))
+        result = store.get_ancestry_batch(["orphan"])
+        assert result == {"orphan": []}
+
+    def test_nonexistent_skill_returns_empty_ancestry(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        result = store.get_ancestry_batch(["ghost"])
+        assert result == {"ghost": []}
+
+    def test_max_depth_limits_traversal(self, tmp_path: Path) -> None:
+        """max_depth stops BFS at the configured depth."""
+        store = _make_store(tmp_path)
+        prev_id = "s0"
+        store.save_skill_record(self._make_record("s0", 0))
+        for i in range(1, 4):
+            rec = SkillRecord(
+                id=f"s{i}",
+                name=f"skill-s{i}",
+                version="1.0.0",
+                lineage=SkillLineage(
+                    origin=SkillOrigin.FIXED,
+                    generation=i,
+                    parent_skill_ids=[prev_id],
+                ),
+                directory="skills/test",
+                is_active=True,
+                first_seen=datetime.now(timezone.utc),
+                last_updated=datetime.now(timezone.utc),
+            )
+            store.evolve_skill(rec, parent_skill_ids=[prev_id])
+            prev_id = f"s{i}"
+
+        result = store.get_ancestry_batch(["s3"], max_depth=1)
+        assert len(result["s3"]) == 1
+        assert result["s3"][0].id == "s2"
+
+    def test_cycle_protection(self, tmp_path: Path) -> None:
+        """Cycles in lineage do not cause infinite traversal."""
+        store = _make_store(tmp_path)
+        store.save_skill_record(self._make_record("a", 0))
+        store.save_skill_record(self._make_record("b", 1))
+        with store._conn(immediate=True) as conn:
+            conn.execute(
+                "INSERT INTO skill_lineage_parents (skill_id, parent_id) "
+                "VALUES ('a', 'b')"
+            )
+            conn.execute(
+                "INSERT INTO skill_lineage_parents (skill_id, parent_id) "
+                "VALUES ('b', 'a')"
+            )
+
+        result = store.get_ancestry_batch(["a"], max_depth=100)
+        ids = {r.id for r in result["a"]}
+        assert "b" in ids
+        assert len(result["a"]) == len(set(r.id for r in result["a"]))
+
+
+class TestGetJudgmentsBatchEmptyInput:
+    """get_judgments_batch with empty skill_ids returns empty dict."""
+
+    def test_empty_set_returns_empty(self, tmp_path: Path) -> None:
+        store = EvolutionStore(tmp_path / "evo.db")
+        assert store.get_judgments_batch(set()) == {}

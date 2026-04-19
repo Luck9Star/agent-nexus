@@ -525,6 +525,46 @@ class TestCleanupDead:
         cleaned = pm._cleanup_dead()
         assert cleaned == []
 
+    @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
+    async def test_cleanup_dead_zero_returncode(
+        self, mock_spawn: AsyncMock, pm: ProcessManager
+    ) -> None:
+        """_cleanup_dead with rc=0 hits the else debug branch (line 463)."""
+        mock_spawn.return_value = _make_mock_process(returncode=None, pid=10)
+        await pm.start_agent(name="clean-exit", command=["echo"])
+
+        # Simulate clean exit (rc=0)
+        pm._agents["clean-exit"].process.returncode = 0
+        cleaned = pm._cleanup_dead()
+        assert "clean-exit" in cleaned
+
+
+class TestProcessManagerDel:
+    """__del__ kills orphaned processes, handling ProcessLookupError (lines 481-482)."""
+
+    def test_del_kills_orphan_and_handles_process_lookup_error(self) -> None:
+        """__del__ calls kill() and catches ProcessLookupError."""
+        from agent_nexus.platform.orchestration.process_manager import AgentHandle
+
+        pm = ProcessManager()
+        mock_proc = MagicMock(spec=asyncio.subprocess.Process)
+        mock_proc.returncode = None  # still "running"
+        mock_proc.kill.side_effect = ProcessLookupError("already gone")
+        handle = AgentHandle(
+            name="orphan",
+            process=mock_proc,
+            ipc=MagicMock(),
+            start_command=["echo"],
+            start_cwd=None,
+            start_env={},
+        )
+        pm._agents["orphan"] = handle
+
+        # Trigger __del__ — should not raise
+        pm.__del__()
+        # Process was iterated (kill attempted)
+        mock_proc.kill.assert_called_once()
+
 
 # ============================================================================
 # Iteration 17 merge: TestProcessManagerLock

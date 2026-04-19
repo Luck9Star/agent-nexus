@@ -927,6 +927,22 @@ class TestMCPGatewayRegisterAgentTools:
         await gateway.register_agent(manifest, deferred=True)
         await gateway._register_agent_tools("dormant")
 
+    @pytest.mark.asyncio
+    async def test_register_tools_skips_when_already_registered_and_alive(
+        self, gateway: MCPGateway
+    ) -> None:
+        """Second _register_agent_tools call skips when agent still alive (lines 251-255)."""
+        manifest = _make_manifest("skip-agent")
+        await gateway.register_agent(manifest, deferred=True, start_command=[])
+        await gateway.registry.activate_agent("skip-agent")
+        await gateway._register_agent_tools("skip-agent")
+
+        # Second call should hit the early-return at line 255
+        await gateway._register_agent_tools("skip-agent")
+
+        # Agent should still be in registered set
+        assert "skip-agent" in gateway._registered_agents
+
 
 # ============================================================================
 # MCPGateway — _make_tool_func
@@ -3037,3 +3053,63 @@ class TestInvokeIPCExceptionToolNameCleanup:
         # Original name preserved — no _2 suffix
         assert adapter2.full_name == "mcp__ipc_retry_agent__compute"
         assert adapter2.full_name in gw._registered_tool_names
+
+
+# iter105 regression: _validate_tool_schemas edge cases
+
+
+class TestDeferredRegistryValidateToolSchemas:
+    """_validate_tool_schemas filters non-dict and missing-name schemas."""
+
+    def test_non_dict_schema_skipped(self) -> None:
+        # _validate_tool_schemas is a staticmethod — call directly
+        schemas = [
+            "not-a-dict",   # string — should be skipped
+            42,             # int — should be skipped
+            {"name": "valid_tool", "description": "OK", "inputSchema": {"type": "object"}},
+        ]
+        valid = DeferredAgentRegistry._validate_tool_schemas(schemas)
+        assert len(valid) == 1
+        assert valid[0]["name"] == "valid_tool"
+
+    def test_missing_name_schema_skipped(self) -> None:
+        schemas = [
+            {"description": "Missing name", "inputSchema": {"type": "object"}},
+            {"name": "", "description": "Empty name", "inputSchema": {"type": "object"}},
+            {"name": 123, "description": "Non-string name", "inputSchema": {"type": "object"}},
+        ]
+        valid = DeferredAgentRegistry._validate_tool_schemas(schemas)
+        assert valid == []
+
+    def test_missing_input_schema_injected_default(self) -> None:
+        schemas = [{"name": "no_schema", "description": "OK"}]
+        valid = DeferredAgentRegistry._validate_tool_schemas(schemas)
+        assert len(valid) == 1
+        assert valid[0]["inputSchema"] == {"type": "object", "properties": {}}
+
+
+# ============================================================================
+# Coverage gap tests: deferred_registry.py lines 320-324 (non-dict schema)
+# ============================================================================
+
+
+class TestDeferredRegistryNonDictSchema:
+    """_validate_tool_schemas skips non-dict entries (lines 320-324)."""
+
+    def test_skips_string_schema_entry(self) -> None:
+        """String entries in tool schema list are skipped."""
+        result = DeferredAgentRegistry._validate_tool_schemas([
+            "not a dict",
+            {"name": "valid", "inputSchema": {"type": "object"}},
+            None,
+        ])
+        assert len(result) == 1
+        assert result[0]["name"] == "valid"
+
+    def test_skips_list_schema_entry(self) -> None:
+        """List entries in tool schema list are skipped."""
+        result = DeferredAgentRegistry._validate_tool_schemas([
+            ["nested", "list"],
+            {"name": "ok", "inputSchema": {"type": "object"}},
+        ])
+        assert len(result) == 1

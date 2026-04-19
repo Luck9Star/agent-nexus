@@ -194,3 +194,19 @@ class TestMcpToolAdapterNameValidation:
     def test_valid_name_still_works(self):
         adapter = McpToolAdapter("srv", {"name": "tool"})
         assert adapter.tool_name == "tool"
+
+
+# ---------------------------------------------------------------------------
+# _get_ipc_lock — no running loop fallback (lines 67-68)
+# ---------------------------------------------------------------------------
+
+
+class TestGetIpcLockNoLoop:
+    """_get_ipc_lock falls back gracefully when no event loop is running."""
+
+    def test_no_running_loop_returns_lock(self) -> None:
+        """When called outside async context, returns a valid Lock."""
+        from agent_nexus.platform.gateway.tool_adapter import _get_ipc_lock
+
+        lock = _get_ipc_lock("test-no-loop")
+        assert isinstance(lock, asyncio.Lock)

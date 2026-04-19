@@ -3189,3 +3189,30 @@ class TestHealthCheckerDiagnoseSkillsFiltered:
 
         reports = checker.diagnose_skills(skill_ids={"nonexistent"})
         assert reports == {}
+
+
+# ============================================================================
+# Coverage gap tests: promotion.py lines 202-207 (_atomic_write cleanup)
+# ============================================================================
+
+
+class TestPromotionAtomicWriteCleanup:
+    """_atomic_write cleans up temp file on exception (lines 202-207)."""
+
+    def test_atomic_write_cleanup_on_replace_failure(self, tmp_path: Path) -> None:
+        """When os.replace raises, the temp file is cleaned up."""
+        from unittest.mock import patch
+
+        store = _store_with_records(tmp_path)
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        promoter = AgentPromoter(store, agents_root=agents_dir)
+
+        target = tmp_path / "test_output.txt"
+        with patch("os.replace", side_effect=OSError("replace failed")):
+            with pytest.raises(OSError, match="replace failed"):
+                promoter._atomic_write(target, "hello")
+
+        # Temp file should NOT remain on disk
+        tmps = list(target.parent.glob(".promo-*.tmp"))
+        assert tmps == []
