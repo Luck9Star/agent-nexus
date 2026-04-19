@@ -123,10 +123,11 @@
 | supervisor auto_restart_dead 成功/失败路径 | start成功返回name(+) + build_command失败跳过(+) = 2 tests | 2026-04-19 | iter96 |
 | 协程泄漏 — 未 close() 的跳过协程 | subtask.py _guarded coro.close() + regression test | 2026-04-19 | iter97 |
 | P3 测试缺口全量验证 | 6项中5项已有覆盖，补1项: _parse_frontmatter YAML error | 2026-04-19 | iter97 |
+| get_judgments_batch SQL LIMIT | store.py LIMIT ? + limit_per_skill 参数推入 SQL | 2026-04-19 | iter97 |
 
 ### 待清模式
 
 - P2: get_parallel_groups O(n²) → 可用 in-degree 优化（当前小图可接受）
 - P2: _would_create_cycle 全表扫描 → 可缓存 dep_map（低频调用）
-- P2: get_judgments_batch 无 SQL LIMIT → 当前数据量可接受
+- ~~P2: get_judgments_batch 无 SQL LIMIT → 当前数据量可接受~~ FIXED iter97: LIMIT pushed to SQL
 - P2: context_describer per-skill ancestry → get_ancestry 已优化，批量化为可选

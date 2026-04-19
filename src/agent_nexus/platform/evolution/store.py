@@ -519,8 +519,8 @@ class EvolutionStore:
                 f"SELECT id, analysis_id, skill_id, selected, applied, "
                 f"completed, fell_back FROM skill_judgments "
                 f"WHERE skill_id IN ({placeholders}) "
-                f"ORDER BY rowid DESC",
-                tuple(skill_ids),
+                f"ORDER BY rowid DESC LIMIT ?",
+                tuple(skill_ids) + (len(skill_ids) * limit_per_skill,),
             ).fetchall()
         result: dict[str, list[dict[str, Any]]] = {sid: [] for sid in skill_ids}
         for r in rows:
