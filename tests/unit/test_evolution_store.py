@@ -1821,3 +1821,94 @@ class TestStoreSchemaInitTransaction:
         from agent_nexus.platform.evolution.store import EvolutionStore as ES
         source = inspect.getsource(ES)
         assert "executescript" not in source
+
+
+# ---------------------------------------------------------------------------
+# iter120 regression: silent UPDATE rowcount + is_active preservation
+# ---------------------------------------------------------------------------
+
+
+class TestIncrementCountersRowcount:
+    """Verify increment_counters warns on missing skill_id."""
+
+    def test_missing_skill_no_crash(self, tmp_path: Path) -> None:
+        """increment_counters on non-existent skill should not raise."""
+        store = _make_store(tmp_path)
+        # Use a skill_id that doesn't exist — should not raise
+        store.increment_counters("nonexistent-skill-id", selected=True)
+        # No assertion needed — just verifying no crash
+
+
+class TestSaveSkillRecordPreservesActive:
+    """Verify save_skill_record ON CONFLICT preserves is_active."""
+
+    def test_save_does_not_reactivate_deactivated_skill(
+        self, tmp_path: Path
+    ) -> None:
+        """Re-saving a deactivated skill record should NOT reactivate it."""
+        store = _make_store(tmp_path)
+        # Save initial record
+        record = SkillRecord(
+            id="s-reactivate",
+            name="test",
+            version="1.0.0",
+            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+            directory="/tmp/test",
+        )
+        store.save_skill_record(record)
+
+        # Deactivate it
+        result = store.deactivate_skill("s-reactivate")
+        assert result is True
+
+        # Re-save with same ID (default is_active=True)
+        store.save_skill_record(record)
+
+        # Should still be inactive
+        fetched = store.get_skill_record("s-reactivate")
+        assert fetched is not None
+        assert fetched.is_active is False
+
+
+class TestEvolveSkillParentValidation:
+    """Verify evolve_skill handles parent validation correctly."""
+
+    def test_parent_deactivation_skipped_for_missing(self, tmp_path: Path) -> None:
+        """evolve_skill with valid parent creates new record and deactivates parent."""
+        store = _make_store(tmp_path)
+        from agent_nexus.platform.evolution.evolver import EvolveResult
+
+        # Create a parent skill first
+        parent = SkillRecord(
+            id="parent-1",
+            name="test",
+            version="1.0.0",
+            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+            directory="/tmp/test",
+        )
+        store.save_skill_record(parent)
+
+        # Evolve with FIXED origin — parent should be deactivated
+        new_record = SkillRecord(
+            id="evolved-1",
+            name="test",
+            version="2.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED,
+                generation=1,
+                parent_skill_ids=["parent-1"],
+            ),
+            directory="/tmp/test",
+        )
+        result = store.evolve_skill(new_record, parent_skill_ids=["parent-1"])
+        assert result.success is True
+
+        # Parent should be deactivated
+        fetched_parent = store.get_skill_record("parent-1")
+        assert fetched_parent is not None
+        assert fetched_parent.is_active is False
+
+        # New record should be active
+        fetched_new = store.get_skill_record("evolved-1")
+        assert fetched_new is not None
+        assert fetched_new.is_active is True

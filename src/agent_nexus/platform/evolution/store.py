@@ -220,7 +220,7 @@ class EvolutionStore:
                     lineage_content_diff = excluded.lineage_content_diff,
                     lineage_content_snapshot = excluded.lineage_content_snapshot,
                     directory = excluded.directory,
-                    is_active = excluded.is_active,
+                    is_active = is_active,
                     total_selections = total_selections,
                     total_applied = total_applied,
                     total_completions = total_completions,
@@ -380,10 +380,15 @@ class EvolutionStore:
             params.append(_now_iso())
             params.append(skill_id)
 
-            conn.execute(
+            cur = conn.execute(
                 f"UPDATE skill_records SET {', '.join(sets)} WHERE id = ?",
                 tuple(params),
             )
+            if cur.rowcount == 0:
+                logger.warning(
+                    "increment_counters: skill_id %s not found — counters not updated",
+                    skill_id,
+                )
 
     # ------------------------------------------------------------------
     # Analysis + Judgments (atomic)
@@ -486,6 +491,9 @@ class EvolutionStore:
                         f"UPDATE skill_records SET {', '.join(sets)} WHERE id = ?",
                         tuple(params),
                     )
+                    # rowcount not checked here: the judgment row is already
+                    # inserted above and the FK constraint on skill_id
+                    # guarantees the skill exists (if PRAGMA foreign_keys=ON).
 
         return analysis_id
 
@@ -653,11 +661,17 @@ class EvolutionStore:
                 # For FIX: deactivate parent(s)
                 if new_record.lineage.origin == SkillOrigin.FIXED:
                     for pid in parent_skill_ids:
-                        conn.execute(
+                        cur = conn.execute(
                             "UPDATE skill_records SET is_active = 0, updated_at = ? "
                             "WHERE id = ?",
                             (_now_iso(), pid),
                         )
+                        if cur.rowcount == 0:
+                            logger.warning(
+                                "evolve_skill: parent skill_id %s not found — "
+                                "skipped deactivation",
+                                pid,
+                            )
 
                 # Insert new record — evolved skills always have unique IDs
                 # (uuid-suffixed), so plain INSERT is sufficient.
