@@ -209,21 +209,23 @@ class AgentPromoter:
     def _generate_manifest(
         self, candidate: PromotionCandidate
     ) -> str:
-        """Generate an agent-manifest.yaml for the promoted agent."""
+        """Generate an agent-manifest.yaml for the promoted agent.
+
+        Produces a flat dict compatible with ``AgentManifest(**data)``.
+        The ``promotion`` key is extra metadata (ignored by Pydantic v2).
+        """
         manifest_data = {
-            "agent": {
-                "name": candidate.skill_name,
-                "type": "atomic",
-                "description": f"Auto-promoted from skill {candidate.skill_id}",
-                "version": "0.1.0",
-                "model": {
-                    "tier": "standard",
-                },
-                "promotion": {
-                    "from_skill": candidate.skill_id,
-                    "effective_rate": round(candidate.effective_rate, 2),
-                    "total_selections": candidate.total_selections,
-                },
+            "name": candidate.skill_name,
+            "type": "atomic",
+            "description": f"Auto-promoted from skill {candidate.skill_id}",
+            "version": "0.1.0",
+            "model_config": {
+                "recommended": "standard",
+            },
+            "promotion": {
+                "from_skill": candidate.skill_id,
+                "effective_rate": round(candidate.effective_rate, 2),
+                "total_selections": candidate.total_selections,
             },
         }
         return yaml.safe_dump(manifest_data, default_flow_style=False, sort_keys=False)

@@ -156,6 +156,32 @@ class TestGenerationHelpers:
         assert "effective_rate" in manifest
         assert "0.9" in manifest
 
+    def test_manifest_flat_compatible_with_agent_manifest(self):
+        """Regression: generated manifest must be a flat dict parseable by AgentManifest."""
+        import yaml
+
+        from agent_nexus.models.agent import AgentManifest
+
+        store = _make_store()
+        promoter = AgentPromoter(store)
+        candidate = _candidate()
+        manifest_yaml = promoter._generate_manifest(candidate)
+        manifest_dict = yaml.safe_load(manifest_yaml)
+
+        # Must NOT have the old nested "agent" wrapper
+        assert "agent" not in manifest_dict
+
+        # Must have flat top-level fields
+        assert manifest_dict["name"] == "good-skill"
+        assert manifest_dict["type"] == "atomic"
+        assert manifest_dict["version"] == "0.1.0"
+        assert "description" in manifest_dict
+
+        # Must round-trip through AgentManifest without error
+        manifest = AgentManifest(**manifest_dict)
+        assert manifest.name == "good-skill"
+        assert manifest.type.value == "atomic"
+
     def test_entry_point_contains_skill_id(self):
         store = _make_store()
         promoter = AgentPromoter(store)

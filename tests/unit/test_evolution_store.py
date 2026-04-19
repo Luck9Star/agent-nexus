@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -573,6 +574,59 @@ class TestRecordAnalysisSkipsBadSkillId:
         assert len(analyses[0]["judgments"]) == 0
 
 
+class TestSkillJudgmentFKEnforcement:
+    """Regression: skill_judgments.skill_id FK constraint prevents orphans."""
+
+    def test_nonexistent_skill_id_rejected(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+
+        with pytest.raises(sqlite3.IntegrityError):
+            store.record_analysis(
+                task_id="t-fk",
+                agent_name="tester",
+                analysis_text="check",
+                judgments=[
+                    {"skill_id": "ghost-skill", "selected": True},
+                ],
+            )
+
+        # The entire transaction should have rolled back — no analysis either
+        analyses = store.get_analyses_for_task("t-fk")
+        assert len(analyses) == 0
+
+    def test_mixed_valid_and_ghost_rejected(self, tmp_path: Path) -> None:
+        """Even one ghost skill_id in a batch rolls back the entire analysis."""
+        store = _make_store(tmp_path)
+        # Seed a valid skill
+        store.save_skill_record(
+            SkillRecord(
+                id="s-real",
+                name="real",
+                version="1.0.0",
+                lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+                directory="skills/real",
+                is_active=True,
+                first_seen=datetime.now(timezone.utc),
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            store.record_analysis(
+                task_id="t-mix",
+                agent_name="tester",
+                analysis_text="check",
+                judgments=[
+                    {"skill_id": "s-real", "selected": True},
+                    {"skill_id": "ghost", "applied": True},
+                ],
+            )
+
+        # Nothing should be persisted — atomic rollback
+        analyses = store.get_analyses_for_task("t-mix")
+        assert len(analyses) == 0
+
+
 # ============================================================================
 # evolve_skill with ID collision returns EvolveResult(success=False)
 # ============================================================================
@@ -642,6 +696,38 @@ class TestEvolveSkillIdCollision:
         # No lineage edges should exist for the colliding ID
         children = store.get_children("other-1")
         assert children == []
+
+    def test_collision_parent_not_deactivated(self, tmp_path: Path) -> None:
+        """FIX evolution: parent must stay active when new record INSERT fails.
+
+        Regression: evolve_skill used to commit the parent deactivation
+        (is_active=0) before the new-record INSERT failed with IntegrityError.
+        The _conn context manager then committed the partial state, leaving
+        the parent permanently deactivated with no replacement.
+        """
+        store = _make_store(tmp_path)
+
+        parent = self._make_record(
+            skill_id="parent-1", name="parent", origin=SkillOrigin.IMPORTED
+        )
+        store.save_skill_record(parent)
+        assert store.get_skill_record("parent-1").is_active is True
+
+        # Evolve with FIXED origin (triggers parent deactivation)
+        # but use colliding ID so INSERT fails
+        evolved = self._make_record(
+            skill_id="parent-1",  # same ID → collision
+            name="parent",
+            origin=SkillOrigin.FIXED,
+            generation=1,
+        )
+        result = store.evolve_skill(evolved, parent_skill_ids=["parent-1"])
+        assert result.success is False
+
+        # Parent must still be active — deactivation was rolled back
+        parent_record = store.get_skill_record("parent-1")
+        assert parent_record is not None
+        assert parent_record.is_active is True
 
 
 # ============================================================================

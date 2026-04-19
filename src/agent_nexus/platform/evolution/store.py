@@ -88,7 +88,8 @@ CREATE TABLE IF NOT EXISTS skill_judgments (
     applied INTEGER NOT NULL DEFAULT 0,
     completed INTEGER NOT NULL DEFAULT 0,
     fell_back INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (analysis_id) REFERENCES execution_analyses(id)
+    FOREIGN KEY (analysis_id) REFERENCES execution_analyses(id),
+    FOREIGN KEY (skill_id) REFERENCES skill_records(id)
 );
 CREATE INDEX IF NOT EXISTS idx_sj_skill ON skill_judgments(skill_id);
 CREATE INDEX IF NOT EXISTS idx_sj_analysis ON skill_judgments(analysis_id);
@@ -670,6 +671,7 @@ class EvolutionStore:
                 logger.warning(
                     "Skill ID collision during evolution: %s", new_record.id
                 )
+                conn.rollback()
                 return EvolveResult(
                     success=False,
                     error=f"Skill ID collision: {new_record.id}",
