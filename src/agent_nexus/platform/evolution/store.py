@@ -644,23 +644,24 @@ class EvolutionStore:
         For CAPTURED: no parents (parent_skill_ids empty).
         """
         from agent_nexus.platform.evolution.evolver import EvolveResult
-        with self._conn(immediate=True) as conn:
-            # For FIX: deactivate parent(s)
-            if new_record.lineage.origin == SkillOrigin.FIXED:
-                for pid in parent_skill_ids:
-                    conn.execute(
-                        "UPDATE skill_records SET is_active = 0, updated_at = ? "
-                        "WHERE id = ?",
-                        (_now_iso(), pid),
-                    )
 
-            # Insert new record — evolved skills always have unique IDs
-            # (uuid-suffixed), so plain INSERT is sufficient.
-            lin = new_record.lineage
-            snapshot_json = json.dumps(
-                lin.content_snapshot or {}, ensure_ascii=False
-            )
-            try:
+        try:
+            with self._conn(immediate=True) as conn:
+                # For FIX: deactivate parent(s)
+                if new_record.lineage.origin == SkillOrigin.FIXED:
+                    for pid in parent_skill_ids:
+                        conn.execute(
+                            "UPDATE skill_records SET is_active = 0, updated_at = ? "
+                            "WHERE id = ?",
+                            (_now_iso(), pid),
+                        )
+
+                # Insert new record — evolved skills always have unique IDs
+                # (uuid-suffixed), so plain INSERT is sufficient.
+                lin = new_record.lineage
+                snapshot_json = json.dumps(
+                    lin.content_snapshot or {}, ensure_ascii=False
+                )
                 conn.execute(
                     """
                     INSERT INTO skill_records (
@@ -691,25 +692,25 @@ class EvolutionStore:
                         new_record.last_updated.isoformat(),
                     ),
                 )
-            except sqlite3.IntegrityError:
-                logger.warning(
-                    "Skill ID collision during evolution: %s", new_record.id
-                )
-                conn.rollback()
-                return EvolveResult(
-                    success=False,
-                    error=f"Skill ID collision: {new_record.id}",
-                )
 
-            # Insert lineage parents
-            for pid in parent_skill_ids:
-                conn.execute(
-                    "INSERT INTO skill_lineage_parents "
-                    "(skill_id, parent_id) VALUES (?, ?)",
-                    (new_record.id, pid),
-                )
+                # Insert lineage parents
+                for pid in parent_skill_ids:
+                    conn.execute(
+                        "INSERT INTO skill_lineage_parents "
+                        "(skill_id, parent_id) VALUES (?, ?)",
+                        (new_record.id, pid),
+                    )
 
-            return EvolveResult(success=True, new_record=new_record)
+        except sqlite3.IntegrityError:
+            logger.warning(
+                "Skill ID collision during evolution: %s", new_record.id
+            )
+            return EvolveResult(
+                success=False,
+                error=f"Skill ID collision: {new_record.id}",
+            )
+
+        return EvolveResult(success=True, new_record=new_record)
 
     # ------------------------------------------------------------------
     # Lineage queries

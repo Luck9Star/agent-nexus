@@ -653,3 +653,30 @@ class TestResetRaceWithTimedOutThread:
 
         executor.reset()
         assert executor._timed_out is False
+
+
+class TestExecDoneRestoredOnException:
+    """iter113 regression: _exec_done must be set when pre-thread exception occurs."""
+
+    @pytest.mark.asyncio
+    async def test_exec_done_set_after_transform_failure(self) -> None:
+        """transform_cell failure clears _exec_done but except handler must restore it."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            await executor._require_shell()
+
+            def bad_transform(code):
+                raise OSError("transform failed")
+
+            executor._shell.transform_cell = bad_transform
+
+            result = await executor.execute("x = 1")
+            assert result.success is False
+            assert "transform failed" in result.error
+
+            # _exec_done must be set — not left cleared
+            assert executor._exec_done.is_set()
+        finally:
+            executor.close()

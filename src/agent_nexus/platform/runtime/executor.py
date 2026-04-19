@@ -260,6 +260,7 @@ class IPythonExecutor:
                 error=f"Execution timed out after {timeout}s",
             )
         except Exception as e:
+            self._exec_done.set()  # Thread never started — clear the gate
             logger.error("Unexpected execution error: %s", e, exc_info=True)
             return ExecutionResult(
                 success=False,
