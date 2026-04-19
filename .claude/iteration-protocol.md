@@ -125,10 +125,12 @@
 | P3 测试缺口全量验证 | 6项中5项已有覆盖，补1项: _parse_frontmatter YAML error | 2026-04-19 | iter97 |
 | get_judgments_batch SQL LIMIT | store.py LIMIT ? + limit_per_skill 参数推入 SQL | 2026-04-19 | iter97 |
 | get_parallel_groups O(n²) → O(V+E) | Kahn's algorithm with in-degree tracking | 2026-04-19 | iter97 |
+| context_describer N+1 ancestry → get_ancestry_batch | store.py batch method + context_describer single-call | 2026-04-19 | iter97 |
+| ipc.py 冗余 except (TimeoutError, Exception) | 简化为 except Exception | 2026-04-19 | iter97 |
 
 ### 待清模式
 
 - ~~P2: get_parallel_groups O(n²) → 可用 in-degree 优化~~ FIXED iter97: Kahn's algorithm with in-degree, O(V+E)
 - P2: _would_create_cycle 全表扫描 → 可缓存 dep_map（低频调用）
 - ~~P2: get_judgments_batch 无 SQL LIMIT → 当前数据量可接受~~ FIXED iter97: LIMIT pushed to SQL
-- P2: context_describer per-skill ancestry → get_ancestry 已优化，批量化为可选
+- ~~P2: context_describer per-skill ancestry~~ FIXED iter97: get_ancestry_batch single-connection batch

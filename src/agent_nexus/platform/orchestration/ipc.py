@@ -138,7 +138,7 @@ class IPCStream:
             self._stdin.close()
             try:
                 await asyncio.wait_for(self._stdin.wait_closed(), timeout=2.0)
-            except (asyncio.TimeoutError, Exception):
+            except Exception:
                 pass
         # Drain any remaining stdout to avoid BrokenPipeError on the
         # agent side.  Upper bound prevents a misbehaving agent from
@@ -149,7 +149,7 @@ class IPCStream:
                 chunk = await asyncio.wait_for(self._stdout.read(4096), timeout=1.0)
                 if not chunk:
                     break
-        except (asyncio.TimeoutError, Exception):
+        except Exception:
             pass
 
 

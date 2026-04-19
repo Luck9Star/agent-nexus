@@ -683,6 +683,71 @@ class EvolutionStore:
     # Lineage queries
     # ------------------------------------------------------------------
 
+    def get_ancestry_batch(
+        self, skill_ids: list[str], max_depth: int = 10
+    ) -> dict[str, list[SkillRecord]]:
+        """Walk up lineage trees for multiple skills in a single connection.
+
+        Returns ``{skill_id: [ancestors_oldest_first]}``.
+        """
+        if not skill_ids:
+            return {}
+        with self._conn() as conn:
+            all_parents = self._batch_load_parents(conn)  # one load
+
+            # BFS per skill to collect all ancestor IDs
+            visited_per_skill: dict[str, set[str]] = {sid: set() for sid in skill_ids}
+            frontiers: dict[str, list[str]] = {sid: [sid] for sid in skill_ids}
+
+            for _ in range(max_depth):
+                next_frontiers: dict[str, list[str]] = {sid: [] for sid in skill_ids}
+                any_progress = False
+                for sid in skill_ids:
+                    for fid in frontiers[sid]:
+                        for pid in all_parents.get(fid, []):
+                            if pid not in visited_per_skill[sid]:
+                                visited_per_skill[sid].add(pid)
+                                next_frontiers[sid].append(pid)
+                                any_progress = True
+                frontiers = next_frontiers
+                if not any_progress:
+                    break
+
+            # Collect all ancestor IDs and batch-load in one query
+            all_ancestor_ids: set[str] = set()
+            for s in visited_per_skill.values():
+                all_ancestor_ids.update(s)
+
+            if not all_ancestor_ids:
+                return {sid: [] for sid in skill_ids}
+
+            placeholders = ",".join("?" * len(all_ancestor_ids))
+            rows = conn.execute(
+                "SELECT id, name, version, lineage_origin, "
+                "lineage_generation, lineage_content_diff, "
+                "lineage_content_snapshot, directory, is_active, "
+                "total_selections, total_applied, total_completions, "
+                "total_fallbacks, created_at, updated_at "
+                f"FROM skill_records WHERE id IN ({placeholders})",
+                tuple(all_ancestor_ids),
+            ).fetchall()
+
+            records_by_id: dict[str, SkillRecord] = {}
+            for row in rows:
+                record = self._row_to_record(conn, row, all_parents)
+                records_by_id[record.id] = record
+
+            result: dict[str, list[SkillRecord]] = {}
+            for sid in skill_ids:
+                ancestors = [
+                    records_by_id[aid]
+                    for aid in visited_per_skill[sid]
+                    if aid in records_by_id
+                ]
+                ancestors.sort(key=lambda r: r.lineage.generation)
+                result[sid] = ancestors
+            return result
+
     def get_ancestry(
         self, skill_id: str, max_depth: int = 10
     ) -> list[SkillRecord]:

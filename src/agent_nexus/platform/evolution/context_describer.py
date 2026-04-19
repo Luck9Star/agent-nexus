@@ -206,13 +206,16 @@ class EvolutionContextDescriber:
         """Build a compact lineage tree representation."""
         lines: list[str] = []
 
+        # Batch-load all ancestries in a single DB connection
+        ancestry_map = self._store.get_ancestry_batch([s.id for s in skills])
+
         for skill in skills:
             lin = skill.lineage
             origin_tag = lin.origin.value
             gen = lin.generation
 
             # Build ancestry chain
-            ancestors = self._store.get_ancestry(skill.id)
+            ancestors = ancestry_map.get(skill.id, [])
             if ancestors:
                 chain = " -> ".join(
                     f"{a.name}(g{a.lineage.generation})"
