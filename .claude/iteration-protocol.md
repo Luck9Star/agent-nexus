@@ -161,6 +161,10 @@
 | API boundary input validation iter122: 9 sites | executor/ipc timeout clamp + SubtaskConfig __post_init__ + SSRF scheme + route_chat empty-string + engine min_selections + token_tracker max_tokens + loader triggers coerce + deferred_registry max_results clamp + ipc exception chain = 2562 tests | 2026-04-20 | iter122 |
 | Cross-process TOCTOU: uninstall() get_entry→remove_entry race | lockfile.py pop_entry() atomic read-remove-write + installer.py uninstall() migration + 4 lockfile tests + 3 installer test updates = 2568 tests | 2026-04-20 | iter123 |
 | P0 Dual IPC Lock: router._route_locks vs _ipc_lock_registry | router.py unified to _get_ipc_lock() + removed _route_locks dict + 3 regression tests (shared lock, mutual exclusion) = 2570 tests | 2026-04-20 | iter124 |
+| P1 search_agents max_results boundary | deferred_registry.py max(max_results,1)→max(max_results,0) + 2 test updates = 2570 tests | 2026-04-20 | iter124b |
+| P1 CancelledError in executor _execute_inner | executor.py explicit except CancelledError sets _timed_out + 3 regression tests = 2573 tests | 2026-04-20 | iter124c |
+| P1 _cleanup_dead FD leak: IPC stream + drain task | ipc.py close_sync() + process_manager.py _cleanup_dead drain cancel + stream close + 3 regression tests = 2576 tests | 2026-04-20 | iter124d |
+| 蓝军3-agent深度扫描 iter125: error_type一致性 | tool_adapter.py + router.py 6个error path补齐error_type + 7 regression tests = 2583 tests | 2026-04-20 | iter125 |
 
 ### 待清模式
 

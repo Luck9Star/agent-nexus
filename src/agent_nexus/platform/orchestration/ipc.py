@@ -151,7 +151,7 @@ class IPCStream:
             try:
                 await asyncio.wait_for(self._stdin.wait_closed(), timeout=2.0)
             except Exception:
-                pass
+                logger.debug("Failed to wait for stdin close", exc_info=True)
         # Drain any remaining stdout to avoid BrokenPipeError on the
         # agent side.  Upper bound prevents a misbehaving agent from
         # delaying close() indefinitely.
@@ -162,7 +162,7 @@ class IPCStream:
                 if not chunk:
                     break
         except Exception:
-            pass
+            logger.debug("Failed to drain stdout during close", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

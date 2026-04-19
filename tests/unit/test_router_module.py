@@ -25,6 +25,11 @@ from agent_nexus.platform.orchestration.dsl import (
     DSLToolLoading,
     OrchestrationDefinition,
 )
+from agent_nexus.platform.orchestration.ipc import (
+    IPCConnectionError,
+    IPCError,
+    IPCTimeoutError,
+)
 from agent_nexus.platform.router.router import PlatformRouter, _PHASE_ORDER
 from agent_nexus.platform.router.subtask import SubtaskConfig, SubtaskController
 from agent_nexus.platform.router.workflow import (
@@ -1342,11 +1347,15 @@ class TestGetToolsDeduplication:
 
 
 class TestExecuteSingleAgentErrorWrapping:
-    """_execute_single_agent must wrap IPC errors in RuntimeError."""
+    """_execute_single_agent exception handling.
+
+    IPC-specific errors (IPCConnectionError, IPCTimeoutError, IPCError)
+    propagate directly.  Other exceptions are wrapped as RuntimeError.
+    """
 
     @pytest.mark.asyncio
     async def test_ipc_timeout_wrapped_as_runtime_error(self) -> None:
-        """IPC timeout in _execute_single_agent raises RuntimeError."""
+        """Non-IPC timeout in _execute_single_agent raises RuntimeError."""
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
@@ -1369,7 +1378,7 @@ class TestExecuteSingleAgentErrorWrapping:
 
     @pytest.mark.asyncio
     async def test_ipc_connection_error_wrapped(self) -> None:
-        """IPC connection error in _execute_single_agent raises RuntimeError."""
+        """Non-IPC ConnectionError in _execute_single_agent raises RuntimeError."""
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
@@ -1392,7 +1401,7 @@ class TestExecuteSingleAgentErrorWrapping:
 
     @pytest.mark.asyncio
     async def test_send_chat_error_wrapped_as_runtime_error(self) -> None:
-        """send_chat failure in _execute_single_agent raises RuntimeError.
+        """Non-IPC send_chat failure raises RuntimeError.
 
         iter109 regression — send_chat was bare (unwrapped), unlike
         route_to_atomic which already wrapped it.  Now both paths are
@@ -1413,6 +1422,73 @@ class TestExecuteSingleAgentErrorWrapping:
         mock_pm.get_agent.return_value = handle
 
         with pytest.raises(RuntimeError, match="IPC send error"):
+            await router._execute_single_agent(
+                "test-agent", "hello", conversation_id="c1"
+            )
+
+    # -- iter126 regression: IPC exceptions propagate directly --
+
+    @pytest.mark.asyncio
+    async def test_ipctimeouterror_propagates_directly(self) -> None:
+        """IPCTimeoutError from receive_until_result propagates, not wrapped."""
+        mock_pm = MagicMock()
+        router = PlatformRouter.__new__(PlatformRouter)
+        router._pm = mock_pm
+
+        handle = MagicMock()
+        handle.is_alive = True
+        handle.ipc = MagicMock()
+        handle.ipc.send_chat = AsyncMock()
+        handle.ipc.receive_until_result = AsyncMock(
+            side_effect=IPCTimeoutError("agent stalled")
+        )
+
+        mock_pm.get_agent.return_value = handle
+
+        with pytest.raises(IPCTimeoutError, match="agent stalled"):
+            await router._execute_single_agent(
+                "test-agent", "hello", conversation_id="c1"
+            )
+
+    @pytest.mark.asyncio
+    async def test_ipcconnectionerror_propagates_directly(self) -> None:
+        """IPCConnectionError from receive_until_result propagates."""
+        mock_pm = MagicMock()
+        router = PlatformRouter.__new__(PlatformRouter)
+        router._pm = mock_pm
+
+        handle = MagicMock()
+        handle.is_alive = True
+        handle.ipc = MagicMock()
+        handle.ipc.send_chat = AsyncMock()
+        handle.ipc.receive_until_result = AsyncMock(
+            side_effect=IPCConnectionError("EOF")
+        )
+
+        mock_pm.get_agent.return_value = handle
+
+        with pytest.raises(IPCConnectionError, match="EOF"):
+            await router._execute_single_agent(
+                "test-agent", "hello", conversation_id="c1"
+            )
+
+    @pytest.mark.asyncio
+    async def test_ipcerror_propagates_directly_on_send(self) -> None:
+        """Generic IPCError from send_chat propagates, not wrapped."""
+        mock_pm = MagicMock()
+        router = PlatformRouter.__new__(PlatformRouter)
+        router._pm = mock_pm
+
+        handle = MagicMock()
+        handle.is_alive = True
+        handle.ipc = MagicMock()
+        handle.ipc.send_chat = AsyncMock(
+            side_effect=IPCError("bad JSON")
+        )
+
+        mock_pm.get_agent.return_value = handle
+
+        with pytest.raises(IPCError, match="bad JSON"):
             await router._execute_single_agent(
                 "test-agent", "hello", conversation_id="c1"
             )

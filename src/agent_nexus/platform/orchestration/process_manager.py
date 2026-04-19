@@ -203,7 +203,10 @@ class ProcessManager:
                 try:
                     await process.wait()
                 except Exception:
-                    pass
+                    logger.debug(
+                        "Failed to wait for orphaned agent '%s' process",
+                        name, exc_info=True,
+                    )
                 raise
 
             logger.info(

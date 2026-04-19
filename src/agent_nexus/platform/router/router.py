@@ -32,6 +32,11 @@ from agent_nexus.platform.gateway.tool_adapter import (
     remove_lock,
 )
 from agent_nexus.platform.orchestration.dsl import OrchestrationDefinition
+from agent_nexus.platform.orchestration.ipc import (
+    IPCConnectionError,
+    IPCError,
+    IPCTimeoutError,
+)
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
@@ -525,6 +530,12 @@ class PlatformRouter:
         async with lock:
             try:
                 await handle.ipc.send_chat(message, conversation_id=conversation_id)
+            except IPCConnectionError:
+                raise
+            except IPCTimeoutError:
+                raise
+            except IPCError:
+                raise
             except Exception as exc:
                 raise RuntimeError(
                     f"IPC send error for agent '{agent_name}': {exc}"
@@ -532,6 +543,12 @@ class PlatformRouter:
 
             try:
                 response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
+            except IPCConnectionError:
+                raise
+            except IPCTimeoutError:
+                raise
+            except IPCError:
+                raise
             except Exception as exc:
                 raise RuntimeError(
                     f"IPC error communicating with agent '{agent_name}': {exc}"
