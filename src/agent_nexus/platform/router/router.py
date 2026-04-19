@@ -27,6 +27,7 @@ from typing import Any
 
 from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.gateway.tool_adapter import (
+    DEFAULT_IPC_EXECUTE_TIMEOUT,
     McpToolAdapter,
     remove_lock,
 )
@@ -273,7 +274,7 @@ class PlatformRouter:
 
             # Wait for final result (progress messages are silently consumed)
             try:
-                response = await handle.ipc.receive_until_result(timeout=300.0)
+                response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
             except Exception as exc:
                 logger.warning("IPC receive error for agent '%s': %s", atomic_name, exc)
                 return {
@@ -459,7 +460,7 @@ class PlatformRouter:
                 coro_factory=lambda n=name, c=cid: self._execute_single_agent(
                     n, message, c
                 ),
-                timeout=300.0,
+                timeout=DEFAULT_IPC_EXECUTE_TIMEOUT,
             )
 
         coros = [_run_agent(name) for name in unique_names]
@@ -490,7 +491,7 @@ class PlatformRouter:
             await handle.ipc.send_chat(message, conversation_id=conversation_id)
 
             try:
-                response = await handle.ipc.receive_until_result(timeout=300.0)
+                response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
             except Exception as exc:
                 raise RuntimeError(
                     f"IPC error communicating with agent '{agent_name}': {exc}"

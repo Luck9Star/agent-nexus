@@ -23,6 +23,11 @@ from agent_nexus.platform.orchestration.process_manager import AgentHandle
 
 logger = logging.getLogger(__name__)
 
+# Default timeout (seconds) for waiting on an agent subprocess to
+# return a final result via IPC.  Used by both McpToolAdapter and
+# PlatformRouter — keep in sync via this single definition.
+DEFAULT_IPC_EXECUTE_TIMEOUT: float = 300.0
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -147,7 +152,7 @@ class McpToolAdapter:
             lock = _get_ipc_lock(self.agent_name)
             async with lock:
                 await handle.ipc.send_chat(payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__")
-                response = await handle.ipc.receive_until_result(timeout=300.0)
+                response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
         except Exception as exc:
             logger.error(
                 "IPC error executing tool '%s': %s", self.full_name, exc

@@ -1355,6 +1355,69 @@ class TestPromotionPreservesExisting:
         assert not (agents_dir / "new-skill").exists()
 
 
+class TestPromotionPathTraversalGuard:
+    """promote() must reject skill names that could escape agents_root.
+
+    Regression: promotion.py had no name validation (unlike installer.py
+    and supervisor.py which have _AGENT_NAME_RE / _SAFE_NAME_RE).
+    """
+
+    def test_rejects_dotdot_traversal(self, tmp_path: Path) -> None:
+        store = _store_with_records(tmp_path)
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        secret = tmp_path / "secret.txt"
+        secret.write_text("private", encoding="utf-8")
+        promoter = AgentPromoter(store, agents_root=agents_dir)
+
+        candidate = PromotionCandidate(
+            skill_id="s1",
+            skill_name="../escape",
+            effective_rate=0.9,
+            total_selections=100,
+            directory="skills/escape",
+            reason="traversal attempt",
+        )
+        result = promoter.promote(candidate)
+        assert not result.success
+        assert "Invalid skill name" in result.error
+        # No directory created outside agents_root
+        assert not (tmp_path / "escape").exists()
+
+    def test_rejects_slash_in_name(self, tmp_path: Path) -> None:
+        store = _store_with_records(tmp_path)
+        agents_dir = tmp_path / "agents"
+        promoter = AgentPromoter(store, agents_root=agents_dir)
+
+        candidate = PromotionCandidate(
+            skill_id="s1",
+            skill_name="sub/dir",
+            effective_rate=0.9,
+            total_selections=100,
+            directory="skills/sub",
+            reason="slash attempt",
+        )
+        result = promoter.promote(candidate)
+        assert not result.success
+        assert "Invalid skill name" in result.error
+
+    def test_accepts_valid_name(self, tmp_path: Path) -> None:
+        store = _store_with_records(tmp_path)
+        agents_dir = tmp_path / "agents"
+        promoter = AgentPromoter(store, agents_root=agents_dir)
+
+        candidate = PromotionCandidate(
+            skill_id="s1",
+            skill_name="valid-skill.v2",
+            effective_rate=0.9,
+            total_selections=100,
+            directory="skills/valid",
+            reason="valid",
+        )
+        result = promoter.promote(candidate)
+        assert result.success
+
+
 # ============================================================================
 # 6. HealthChecker
 # ============================================================================

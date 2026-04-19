@@ -113,6 +113,7 @@
 | compaction char/token 单位混淆 | compaction.py tokens_after 改为 chars//4 估计值 | 2026-04-19 | iter91 |
 | N+1 查询 store.py _row_to_record + get_ancestry | _batch_load_parents 批量加载，3个调用方+get_ancestry更新 | 2026-04-19 | iter91 |
 | N+1 查询 task_graph.py get_ready/blocked + parallel_groups | SQL NOT EXISTS + _rows_to_tasks 批量加载 | 2026-04-19 | iter91 |
+| Symlink 目录逃逸 + status 大小写敏感 | installer.py _create_venv abort + router/tool_adapter .lower() | 2026-04-19 | iter92 |
 
 ### 待清模式
 
