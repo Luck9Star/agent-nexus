@@ -120,6 +120,7 @@
 | 未覆盖错误分支回归（蓝军扫描 4 处） | executor race(4) + pip-install FD(1) + invalid SkillOrigin(3) = 8 tests | 2026-04-19 | iter94 |
 | 资源生命周期 — missing close() | TaskGraph :memory: leak(P0) + EvolutionStore API + Router已安全 = 6 tests | 2026-04-19 | iter95 |
 | installer install() rollback 回归 | venv失败清理(+) + validation失败前无copy(+) = 2 tests | 2026-04-19 | iter95b |
+| supervisor auto_restart_dead 成功/失败路径 | start成功返回name(+) + build_command失败跳过(+) = 2 tests | 2026-04-19 | iter96 |
 
 ### 待清模式
 
