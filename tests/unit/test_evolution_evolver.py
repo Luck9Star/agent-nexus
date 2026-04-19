@@ -36,6 +36,7 @@ class TestEvolveFix:
             evolution_type=EvolutionType.FIX, target_skill_ids=["sk-1"], direction="broken",
         ))
         assert result.success is True
+        assert result.new_record is not None
         assert result.new_record.lineage.origin == SkillOrigin.FIXED
 
     def test_fix_requires_exactly_one_parent(self):
@@ -60,6 +61,18 @@ class TestEvolveFix:
         ))
         assert result.success is False
 
+    def test_fix_store_write_failure(self):
+        """FIX should return failure when store.evolve_skill fails."""
+        parent = _skill()
+        store = _make_store()
+        store.get_skill_record.return_value = parent
+        store.evolve_skill.return_value = EvolveResult(success=False, error="DB write failed")
+        result = SkillEvolver(store).evolve(EvolutionSuggestion(
+            evolution_type=EvolutionType.FIX, target_skill_ids=["sk-1"], direction="broken",
+        ))
+        assert result.success is False
+        assert result.new_record is None
+
 
 class TestEvolveDerived:
     def test_derived_creates_enhanced_record(self):
@@ -70,6 +83,7 @@ class TestEvolveDerived:
             evolution_type=EvolutionType.DERIVED, target_skill_ids=["sk-1"], direction="enhance",
         ))
         assert result.success is True
+        assert result.new_record is not None
         assert "enhanced" in result.new_record.name
         assert result.new_record.lineage.origin == SkillOrigin.DERIVED
 
@@ -81,7 +95,24 @@ class TestEvolveDerived:
             evolution_type=EvolutionType.DERIVED, target_skill_ids=["a", "b"], direction="merge",
         ))
         assert result.success is True
+        assert result.new_record is not None
         assert "merged" in result.new_record.name
+
+    def test_derived_with_empty_targets_fails(self):
+        result = SkillEvolver(_make_store()).evolve(EvolutionSuggestion(
+            evolution_type=EvolutionType.DERIVED, target_skill_ids=[],
+        ))
+        assert result.success is False
+        assert "at least 1 parent" in result.error
+
+    def test_derived_parent_not_found_fails(self):
+        store = _make_store()
+        store.get_skill_record.return_value = None
+        result = SkillEvolver(store).evolve(EvolutionSuggestion(
+            evolution_type=EvolutionType.DERIVED, target_skill_ids=["missing"],
+        ))
+        assert result.success is False
+        assert "Parent skill not found" in result.error
 
 
 class TestEvolveCaptured:
@@ -92,6 +123,7 @@ class TestEvolveCaptured:
             direction="A useful pattern. First sentence.",
         ))
         assert result.success is True
+        assert result.new_record is not None
         assert result.new_record.lineage.origin == SkillOrigin.CAPTURED
 
     def test_captured_requires_direction(self):
@@ -100,6 +132,57 @@ class TestEvolveCaptured:
         ))
         assert result.success is False
         assert "direction" in result.error
+
+    def test_captured_sanitizes_special_chars_in_name(self):
+        store = _make_store()
+        result = SkillEvolver(store).evolve(EvolutionSuggestion(
+            evolution_type=EvolutionType.CAPTURED, target_skill_ids=[],
+            direction="Pattern with @#$% special chars! here",
+        ))
+        assert result.success is True
+        assert result.new_record is not None
+        # Name should only contain a-z, 0-9, hyphens
+        name = result.new_record.name
+        assert all(c.isalnum() or c == "-" for c in name)
+
+    def test_captured_with_custom_directory(self):
+        store = _make_store()
+        result = SkillEvolver(store).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.CAPTURED, target_skill_ids=[],
+                direction="Custom pattern.",
+            ),
+            capture_directory="custom/dir",
+        )
+        assert result.success is True
+        assert result.new_record is not None
+        assert result.new_record.directory == "custom/dir"
+
+    def test_captured_long_direction_truncated_name(self):
+        store = _make_store()
+        long_direction = "A" * 200 + ". rest of it"
+        result = SkillEvolver(store).evolve(EvolutionSuggestion(
+            evolution_type=EvolutionType.CAPTURED, target_skill_ids=[],
+            direction=long_direction,
+        ))
+        assert result.success is True
+        assert result.new_record is not None
+        # Name base comes from first 50 chars of direction
+        assert len(result.new_record.name) <= 50
+
+    def test_captured_with_task_id_in_snapshot(self):
+        store = _make_store()
+        result = SkillEvolver(store).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.CAPTURED, target_skill_ids=[],
+                direction="Pattern found.",
+            ),
+            task_id="task-42",
+        )
+        assert result.success is True
+        assert result.new_record is not None
+        assert result.new_record.lineage.content_snapshot is not None  # pyright: ignore[reportOptionalMemberAccess]
+        assert result.new_record.lineage.content_snapshot["source_task_id"] == "task-42"
 
 
 class TestProcessAnalysis:
@@ -116,6 +199,35 @@ class TestProcessAnalysis:
         results = SkillEvolver(store).process_analysis(analysis)
         assert len(results) == 1
         assert results[0].success is True
+
+    def test_empty_suggestions_returns_empty(self):
+        store = _make_store()
+        analysis = AnalysisResult(
+            task_id="t1", agent_name="a1", analysis_text="",
+            suggestions=[],
+        )
+        results = SkillEvolver(store).process_analysis(analysis)
+        assert results == []
+
+    def test_multiple_suggestions_each_processed(self):
+        parent = _skill()
+        store = _make_store()
+        store.get_skill_record.return_value = parent
+        analysis = AnalysisResult(
+            task_id="t1", agent_name="a1", analysis_text="",
+            suggestions=[
+                EvolutionSuggestion(
+                    evolution_type=EvolutionType.FIX, target_skill_ids=["sk-1"],
+                    direction="fix",
+                ),
+                EvolutionSuggestion(
+                    evolution_type=EvolutionType.DERIVED, target_skill_ids=["sk-1"],
+                    direction="enhance",
+                ),
+            ],
+        )
+        results = SkillEvolver(store).process_analysis(analysis)
+        assert len(results) == 2
 
 
 class TestProcessToolDegradation:
@@ -134,6 +246,57 @@ class TestProcessToolDegradation:
         store.get_skill_record.return_value = s1
         results = SkillEvolver(store).process_tool_degradation("t", "bad", {"s1"})
         assert len(results) == 1
+
+    def test_no_filter_evolves_all_active_skills(self):
+        """When affected_skill_ids is None, all active skills are considered."""
+        s1, s2 = _skill(id="s1"), _skill(id="s2")
+        store = _make_store([s1, s2])
+        store.get_skill_record.side_effect = lambda sid: {"s1": s1, "s2": s2}.get(sid)
+        results = SkillEvolver(store).process_tool_degradation("t", "bad", None)
+        assert len(results) == 2
+
+    def test_failed_evolution_not_marked_addressed(self):
+        """Only successful evolutions are added to the addressed set."""
+        skill = _skill(id="sk-1")
+        store = _make_store([skill])
+        store.get_skill_record.return_value = skill
+        # Make the evolution fail
+        store.evolve_skill.return_value = EvolveResult(success=False, error="write failed")
+        evolver = SkillEvolver(store)
+        evolver.process_tool_degradation("tool-1", "broken", {"sk-1"})
+        # Skill should NOT be in addressed set
+        assert "sk-1" not in evolver._addressed.get("tool-1", set())
+
+    def test_addressed_prevents_re_evolution_on_success(self):
+        """After a successful evolution, the skill is in addressed and skipped."""
+        skill = _skill(id="sk-1")
+        store = _make_store([skill])
+        store.get_skill_record.return_value = skill
+        evolver = SkillEvolver(store)
+        # First call succeeds
+        results1 = evolver.process_tool_degradation("tool-1", "broken", {"sk-1"})
+        assert len(results1) == 1
+        assert results1[0].success is True
+        # Second call skips because addressed
+        results2 = evolver.process_tool_degradation("tool-1", "still broken", {"sk-1"})
+        assert len(results2) == 0
+
+    def test_different_tool_keys_tracked_separately(self):
+        """Addressed sets are per-tool-key."""
+        skill = _skill(id="sk-1")
+        store = _make_store([skill])
+        store.get_skill_record.return_value = skill
+        evolver = SkillEvolver(store)
+        evolver.process_tool_degradation("tool-1", "bad", {"sk-1"})
+        # tool-2 is a different tool, should still evolve sk-1
+        results = evolver.process_tool_degradation("tool-2", "also bad", {"sk-1"})
+        assert len(results) == 1
+
+    def test_empty_active_skills_returns_empty(self):
+        store = _make_store([])
+        evolver = SkillEvolver(store)
+        results = evolver.process_tool_degradation("t", "bad", {"s1"})
+        assert results == []
 
 
 class TestProcessMetricCheck:
@@ -158,6 +321,35 @@ class TestPruneRecoveredTools:
         evolver.prune_recovered_tools({"tool-a"})
         assert "tool-a" in evolver._addressed
         assert "tool-b" not in evolver._addressed
+
+    def test_prune_with_empty_addressed_set(self):
+        """Pruning with no addressed entries is a no-op."""
+        evolver = SkillEvolver(_make_store())
+        evolver.prune_recovered_tools({"tool-a"})
+        assert evolver._addressed == {}
+
+    def test_prune_with_all_recovered(self):
+        """When all tools recover, addressed dict becomes empty."""
+        evolver = SkillEvolver(_make_store())
+        evolver._addressed = {"tool-a": {"s1"}, "tool-b": {"s2"}}
+        evolver.prune_recovered_tools(set())
+        assert evolver._addressed == {}
+
+
+class TestEvolveUnknownType:
+    def test_unknown_evolution_type_returns_error(self):
+        store = _make_store()
+        # Create a suggestion with an invalid type by patching
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.FIX,
+            target_skill_ids=["sk-1"],
+            direction="test",
+        )
+        # Mutate the type to something invalid
+        object.__setattr__(suggestion, "evolution_type", "bogus")
+        result = SkillEvolver(store).evolve(suggestion)
+        assert result.success is False
+        assert "Unknown evolution type" in result.error
 
 
 class TestDiagnoseSkillHealth:

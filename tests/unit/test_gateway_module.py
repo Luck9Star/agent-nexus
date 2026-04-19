@@ -86,7 +86,7 @@ def registry(process_manager: MagicMock) -> DeferredAgentRegistry:
 
 
 @pytest.fixture
-def router(process_manager: MagicMock) -> MagicMock:  # noqa: ARG001  # pyright: ignore[reportUnusedParameter]
+def router(process_manager: MagicMock) -> MagicMock:  # pyright: ignore[reportUnusedParameter]
     """Mock PlatformRouter."""
     router = MagicMock()
     return router
@@ -1868,7 +1868,7 @@ class TestMcpToolAdapterIPCLock:
 
         call_order: list[str] = []
 
-        async def slow_receive(timeout: float = 300.0):  # noqa: ARG001  # pyright: ignore[reportUnusedParameter]
+        async def slow_receive(timeout: float = 300.0):  # pyright: ignore[reportUnusedParameter]
             call_order.append("receive_start")
             await asyncio.sleep(0.05)
             call_order.append("receive_end")
@@ -1878,7 +1878,7 @@ class TestMcpToolAdapterIPCLock:
                 status="completed",
             )
 
-        async def fast_receive(timeout: float = 300.0):  # noqa: ARG001  # pyright: ignore[reportUnusedParameter]
+        async def fast_receive(timeout: float = 300.0):  # pyright: ignore[reportUnusedParameter]
             call_order.append("receive_start_2")
             call_order.append("receive_end_2")
             return AgentToPlatform(
@@ -2500,7 +2500,7 @@ class TestRegisterAgentToolsFastMCPError:
         # Make FastMCP.tool raise when trying to register
         original_tool = gw._mcp.tool
 
-        def failing_tool_register(_func):  # noqa: ARG001  # type: ignore[assignment]
+        def failing_tool_register(_func):  # pyright: ignore[reportUnusedParameter]  # type: ignore[assignment]
             raise ValueError("tool name already registered")
 
         gw._mcp.tool = failing_tool_register  # type: ignore[assignment]

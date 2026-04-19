@@ -120,6 +120,21 @@ class TestCheckHealth:
         # The FIX from rule2 has higher confidence
         assert fix_suggestions[0].confidence >= 0.6
 
+    def test_rule2_replaces_rule1_when_higher_confidence(self):
+        """Rule 2 FIX replaces Rule 1 FIX when its confidence is strictly higher."""
+        store = _make_store()
+        checker = HealthChecker(store)
+        # sel=10, app=8, comp=0, fb=5
+        # fallback_rate=5/10=0.5 -> Rule1 FIX (conf=0.5)
+        # applied_rate=8/10=0.8>0.4, completion_rate=0/8=0.0<0.35 -> Rule2 FIX (conf=0.8*1.0=0.8)
+        # Rule2 has higher confidence (0.8 > 0.5) so it replaces Rule1
+        sk = _skill(selections=10, applied=8, completions=0, fallbacks=5)
+        suggestions = checker.check_health(sk)
+        fix_suggestions = [s for s in suggestions if s.evolution_type == EvolutionType.FIX]
+        assert len(fix_suggestions) == 1
+        # Verify it mentions the low completion direction (Rule 2)
+        assert "completion" in fix_suggestions[0].direction.lower()
+
 
 # ---------------------------------------------------------------------------
 # HealthReport.summary
@@ -160,6 +175,38 @@ class TestHealthReport:
         assert "High fallback rate" in text
         assert "fix" in text.lower()
 
+    def test_summary_with_empty_metrics(self):
+        """HealthReport with no metrics should not crash."""
+        report = HealthReport(
+            skill_id="sk-3",
+            skill_name="empty-metrics",
+            is_healthy=True,
+            suggestions=[],
+            metrics={},
+        )
+        text = report.summary()
+        assert "[HEALTHY]" in text
+        assert "empty-metrics" in text
+
+    def test_summary_captured_with_no_target_ids(self):
+        """Suggestion with empty target_skill_ids shows '(new)'."""
+        report = HealthReport(
+            skill_id="sk-4",
+            skill_name="captured-skill",
+            is_healthy=False,
+            suggestions=[
+                EvolutionSuggestion(
+                    evolution_type=EvolutionType.CAPTURED,
+                    target_skill_ids=[],
+                    direction="New pattern found",
+                    confidence=0.5,
+                ),
+            ],
+            metrics={},
+        )
+        text = report.summary()
+        assert "(new)" in text
+
 
 # ---------------------------------------------------------------------------
 # diagnose_all / diagnose_skills
@@ -195,6 +242,35 @@ class TestDiagnoseSkills:
         reports = checker.diagnose_all()
         assert reports == {}
 
+    def test_diagnose_skills_with_empty_skill_ids_set(self):
+        """Passing an empty set should match no skills."""
+        skills = [
+            _skill(id="s1", name="a"),
+            _skill(id="s2", name="b"),
+        ]
+        store = _make_store(skills)
+        checker = HealthChecker(store)
+        reports = checker.diagnose_skills(skill_ids=set())
+        assert reports == {}
+
+    def test_diagnose_skills_with_nonexistent_id(self):
+        """IDs not in active skills produce no reports."""
+        skills = [_skill(id="s1", name="a")]
+        store = _make_store(skills)
+        checker = HealthChecker(store)
+        reports = checker.diagnose_skills(skill_ids={"nonexistent"})
+        assert reports == {}
+
+    def test_diagnose_all_includes_zero_selection_skills(self):
+        """Skills with zero selections still get reports (healthy, no metrics)."""
+        skills = [_skill(id="s1", name="zero-sel", selections=0)]
+        store = _make_store(skills)
+        checker = HealthChecker(store)
+        reports = checker.diagnose_all()
+        assert "s1" in reports
+        assert reports["s1"].is_healthy is True
+        assert reports["s1"].metrics["applied_rate"] == 0.0
+
 
 # ---------------------------------------------------------------------------
 # get_unhealthy
@@ -211,6 +287,22 @@ class TestGetUnhealthy:
         unhealthy = checker.get_unhealthy()
         assert "bad" in unhealthy
         assert "ok" not in unhealthy
+
+    def test_all_healthy_returns_empty(self):
+        """When all skills are healthy, get_unhealthy returns empty dict."""
+        skills = [
+            _skill(id="ok1", name="good-1", selections=10, applied=9, completions=8, fallbacks=1),
+            _skill(id="ok2", name="good-2", selections=10, applied=9, completions=8, fallbacks=1),
+        ]
+        store = _make_store(skills)
+        checker = HealthChecker(store)
+        unhealthy = checker.get_unhealthy()
+        assert unhealthy == {}
+
+    def test_empty_store_returns_empty(self):
+        store = _make_store([])
+        checker = HealthChecker(store)
+        assert checker.get_unhealthy() == {}
 
 
 # ---------------------------------------------------------------------------

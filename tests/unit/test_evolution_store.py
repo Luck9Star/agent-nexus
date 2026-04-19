@@ -413,7 +413,6 @@ class TestMalformedSnapshot:
 
     def _save_raw(self, store: EvolutionStore, snapshot_json: str) -> str:
         """Insert a record with raw snapshot JSON for testing."""
-        import json
         import uuid
 
         sid = str(uuid.uuid4())
@@ -505,7 +504,7 @@ class TestRecordAnalysisSkipsBadSkillId:
         store = _make_store(tmp_path)
         self._seed_skill(store, "s-valid")
 
-        analysis_id = store.record_analysis(
+        analysis_id = store.record_analysis(  # noqa: FURB118  # pyright: ignore[reportUnusedVariable]
             task_id="t1",
             agent_name="tester",
             analysis_text="check",
@@ -559,7 +558,7 @@ class TestRecordAnalysisSkipsBadSkillId:
     def test_all_invalid_skill_ids_no_judgments(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
 
-        analysis_id = store.record_analysis(
+        analysis_id = store.record_analysis(  # pyright: ignore[reportUnusedVariable]
             task_id="t4",
             agent_name="tester",
             analysis_text="check",
