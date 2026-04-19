@@ -133,6 +133,17 @@ class IPCStream:
 
     # -- close --------------------------------------------------------------
 
+    def close_sync(self) -> None:
+        """Synchronous best-effort close for dead-process cleanup.
+
+        Only closes the local StreamWriter FD; does not drain stdout
+        or await ``wait_closed()``.  Suitable for calling from sync
+        contexts (e.g. ``_cleanup_dead``) when the remote process is
+        already gone and only local FD release matters.
+        """
+        if not self._stdin.is_closing():
+            self._stdin.close()
+
     async def close(self) -> None:
         """Close stdin (signals EOF to agent), drain stdout."""
         if not self._stdin.is_closing():

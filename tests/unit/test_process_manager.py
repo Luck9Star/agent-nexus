@@ -539,6 +539,60 @@ class TestCleanupDead:
         assert "clean-exit" in cleaned
 
 
+# iter124d regression: _cleanup_dead closes IPC streams + cancels drain tasks
+class TestCleanupDeadFDLeak:
+    """_cleanup_dead must close IPC streams and cancel drain tasks for dead agents."""
+
+    @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
+    async def test_cleanup_dead_closes_ipc_stream(
+        self, mock_spawn: AsyncMock, pm: ProcessManager
+    ) -> None:
+        """_cleanup_dead calls close_sync() on IPC stream for dead agent."""
+        mock_spawn.return_value = _make_mock_process(returncode=None, pid=10)
+        await pm.start_agent(name="dead", command=["echo"])
+        pm._agents["dead"].process.returncode = 1
+
+        # Configure mock stdin so is_closing() returns False
+        pm._agents["dead"].ipc.stream._stdin.is_closing.return_value = False
+        stream = pm._agents["dead"].ipc.stream
+        cleaned = pm._cleanup_dead()
+
+        assert "dead" in cleaned
+        stream._stdin.close.assert_called_once()
+
+    @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
+    async def test_cleanup_dead_cancels_drain_task(
+        self, mock_spawn: AsyncMock, pm: ProcessManager
+    ) -> None:
+        """_cleanup_dead cancels background drain task for dead agent."""
+        mock_spawn.return_value = _make_mock_process(returncode=None, pid=10)
+        await pm.start_agent(name="dead", command=["echo"])
+        pm._agents["dead"].process.returncode = 1
+
+        # Simulate an active drain task
+        mock_drain = MagicMock()
+        mock_drain.done.return_value = False
+        pm._agents["dead"].drain_task = mock_drain
+
+        cleaned = pm._cleanup_dead()
+        assert "dead" in cleaned
+        mock_drain.cancel.assert_called_once()
+
+    @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
+    async def test_cleanup_dead_no_close_on_alive(
+        self, mock_spawn: AsyncMock, pm: ProcessManager
+    ) -> None:
+        """_cleanup_dead does NOT close IPC for alive agents."""
+        mock_spawn.return_value = _make_mock_process(returncode=None, pid=10)
+        await pm.start_agent(name="alive", command=["echo"])
+
+        pm._agents["alive"].ipc.stream._stdin.is_closing.return_value = False
+        stream = pm._agents["alive"].ipc.stream
+        cleaned = pm._cleanup_dead()
+        assert cleaned == []
+        stream._stdin.close.assert_not_called()
+
+
 class TestProcessManagerDel:
     """__del__ kills orphaned processes, handling ProcessLookupError (lines 481-482)."""
 

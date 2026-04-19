@@ -445,6 +445,9 @@ class ProcessManager:
     def _cleanup_dead(self) -> list[str]:
         """Remove handles for dead processes.
 
+        Closes IPC streams and cancels drain tasks for dead agents to
+        prevent FD leaks.
+
         Returns:
             List of agent names that were cleaned up.
         """
@@ -453,6 +456,24 @@ class ProcessManager:
             if not handle.is_alive:
                 dead.append(name)
                 self._agents.pop(name, None)
+
+                # Cancel background drain task
+                drain_task = handle.drain_task
+                if drain_task is not None and not drain_task.done():
+                    drain_task.cancel()
+
+                # Close IPC streams to release FDs.
+                # The process is already dead so the OS has closed the
+                # remote end; synchronous close is enough to release our
+                # local FDs.
+                try:
+                    handle.ipc.stream.close_sync()
+                except Exception:  # noqa: BLE001
+                    logger.debug(
+                        "Failed to close IPC stream for dead agent '%s'",
+                        name, exc_info=True,
+                    )
+
                 rc = handle.process.returncode
                 if rc is not None and rc != 0:
                     logger.warning(
