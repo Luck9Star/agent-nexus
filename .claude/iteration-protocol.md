@@ -119,6 +119,7 @@
 | 跨模块集成缺陷扫描（蓝军 2 agent） | 0 缺陷: 接口一致/性能可接受/错误传播完整 | 2026-04-19 | iter93 |
 | 未覆盖错误分支回归（蓝军扫描 4 处） | executor race(4) + pip-install FD(1) + invalid SkillOrigin(3) = 8 tests | 2026-04-19 | iter94 |
 | 资源生命周期 — missing close() | TaskGraph :memory: leak(P0) + EvolutionStore API + Router已安全 = 6 tests | 2026-04-19 | iter95 |
+| installer install() rollback 回归 | venv失败清理(+) + validation失败前无copy(+) = 2 tests | 2026-04-19 | iter95b |
 
 ### 待清模式
 
