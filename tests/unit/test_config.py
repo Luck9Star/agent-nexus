@@ -374,6 +374,62 @@ class TestModelConfigManager:
         assert provider == "openai"
         assert model == "gpt-4o"
 
+    def test_resolve_model_unknown_tier_string(self) -> None:
+        """Unknown tier string logs warning and falls back to config default."""
+        config = self._make_config(default="openai:gpt-4o")
+        mgr = ModelConfigManager(config)
+
+        result = mgr.resolve_model("test-agent", recommended_tier="super_premium")
+        assert result == "openai:gpt-4o"
+
+    def test_resolve_model_recommended_overrides_tier(self) -> None:
+        """Recommended model string takes priority over tier mapping."""
+        config = self._make_config()
+        mgr = ModelConfigManager(config)
+
+        result = mgr.resolve_model(
+            "test-agent",
+            recommended="deepseek:deepseek-chat",
+            recommended_tier=ModelTier.LIGHTWEIGHT,
+        )
+        assert result == "deepseek:deepseek-chat"
+
+    def test_resolve_api_key_provider_object_identity_lookup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Passing ProviderConfig object finds provider name by identity."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek-obj")
+        provider = ProviderConfig(api_key_env="NONEXISTENT_KEY")
+        config = self._make_config(providers={"deepseek": provider})
+        mgr = ModelConfigManager(config)
+
+        # Pass the same object (identity match) — api_key_env is set but empty,
+        # so fallback to _PROVIDER_ENV_FALLBACKS["deepseek"] kicks in
+        monkeypatch.delenv("NONEXISTENT_KEY", raising=False)
+        result = mgr.resolve_api_key(provider)
+        assert result == "sk-deepseek-obj"
+
+    def test_resolve_api_key_string_lookup_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """String lookup with no api_key_env falls back to well-known env vars."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic-fallback")
+        provider = ProviderConfig()  # no api_key_env set
+        config = self._make_config(providers={"anthropic": provider})
+        mgr = ModelConfigManager(config)
+
+        result = mgr.resolve_api_key("anthropic")
+        assert result == "sk-anthropic-fallback"
+
+    def test_resolve_api_key_object_no_match_returns_empty(self) -> None:
+        """ProviderConfig object not in registry returns empty string."""
+        orphan = ProviderConfig(api_key_env="NONEXISTENT_VAR")
+        config = self._make_config()  # no providers
+        mgr = ModelConfigManager(config)
+
+        result = mgr.resolve_api_key(orphan)
+        assert result == ""
+
 
 # ============================================================================
 # Defaults Tests
@@ -419,8 +475,8 @@ class TestDefaults:
 
 
 class TestConfigLoaderProviderApiTypeValidation:
-    def test_invalid_api_type_skips_provider(self, tmp_path: Path) -> None:
-        """An invalid api type string in config.toml should be skipped with a warning."""
+    def test_invalid_api_type_defaults_to_openai_compatible(self, tmp_path: Path) -> None:
+        """An invalid api type string defaults to openai-compatible with a warning."""
         config_dir = tmp_path / "config"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text(
@@ -430,8 +486,9 @@ class TestConfigLoaderProviderApiTypeValidation:
         )
         loader = ConfigLoader(config_dir=config_dir)
         config = loader.load_config()
-        # Invalid provider should be skipped, not crash the platform
-        assert "bad" not in config.models.providers
+        # Invalid api type should default to OPENAI_COMPATIBLE, not skip the provider
+        assert "bad" in config.models.providers
+        assert config.models.providers["bad"].api == ProviderApiType.OPENAI_COMPATIBLE
 
     def test_valid_api_types_accepted(self, tmp_path: Path) -> None:
         """All valid ProviderApiType values should be accepted."""

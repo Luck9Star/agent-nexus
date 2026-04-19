@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent_nexus.models.agent import AgentManifest, AgentType
+from agent_nexus.models.agent import AgentDependencies, AgentManifest, AgentRole, AgentType
 from agent_nexus.models.ipc import AgentToPlatform, AgentToPlatformType
 from agent_nexus.platform.gateway.deferred_registry import (
     AgentInfo,
@@ -2025,3 +2025,436 @@ class TestGetAgentInfoPriority:
         assert result is not None
         # Core entry should be returned because deferred is not activated
         assert result.manifest.description == "Core version"
+
+
+# ============================================================================
+# Coverage: _search_and_activate error path (lines 100-106)
+# ============================================================================
+
+
+class TestSearchAndActivateErrorPath:
+    """_search_and_activate logs and reports activation failures gracefully.
+
+    When _register_agent_tools raises during activation, the exception is
+    caught, logged, and a failure message is appended instead of propagating.
+    """
+
+    @pytest.mark.asyncio
+    async def test_activation_failure_reports_error(self) -> None:
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest("fail-agent", description="Agent that fails")
+        gw._registry.register_agent(manifest, deferred=True)
+
+        # activate_agent succeeds but _register_agent_tools raises
+        with patch.object(
+            gw._registry,
+            "search_agents",
+            return_value=[manifest],
+        ):
+            with patch.object(
+                gw._registry,
+                "activate_agent",
+                new_callable=AsyncMock,
+                return_value=[{"name": "t", "description": "d", "inputSchema": {}}],
+            ):
+                with patch.object(
+                    gw,
+                    "_register_agent_tools",
+                    new_callable=AsyncMock,
+                    side_effect=RuntimeError("subprocess crashed"),
+                ):
+                    result = await gw._search_and_activate("fail")
+
+        assert "fail-agent" in result
+        assert "activation failed" in result
+        assert "subprocess crashed" in result
+
+    @pytest.mark.asyncio
+    async def test_activation_mixed_success_and_failure(self) -> None:
+        """When one agent succeeds and another fails, both are reported."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest_ok = _make_manifest("ok-agent", description="Works fine")
+        manifest_bad = _make_manifest("bad-agent", description="Always breaks")
+        gw._registry.register_agent(manifest_ok, deferred=True)
+        gw._registry.register_agent(manifest_bad, deferred=True)
+
+        call_count = 0
+
+        async def activate_side_effect(name: str):
+            nonlocal call_count
+            call_count += 1
+            return [{"name": f"tool_{name}", "description": "d", "inputSchema": {}}]
+
+        async def register_side_effect(name: str):
+            if name == "bad-agent":
+                raise ConnectionError("IPC broken")
+
+        with patch.object(
+            gw._registry,
+            "search_agents",
+            return_value=[manifest_ok, manifest_bad],
+        ):
+            with patch.object(
+                gw._registry,
+                "activate_agent",
+                new_callable=AsyncMock,
+                side_effect=activate_side_effect,
+            ):
+                with patch.object(
+                    gw,
+                    "_register_agent_tools",
+                    new_callable=AsyncMock,
+                    side_effect=register_side_effect,
+                ):
+                    result = await gw._search_and_activate("agent")
+
+        assert "ok-agent" in result
+        assert "tools loaded" in result
+        assert "bad-agent" in result
+        assert "activation failed" in result
+        assert "IPC broken" in result
+
+
+# ============================================================================
+# Coverage: _list_agents "activated" tier branch (line 131)
+# ============================================================================
+
+
+class TestListAgentsActivatedTier:
+    """_list_agents shows 'activated' tier for activated deferred agents
+    that are not in the core set.
+    """
+
+    @pytest.mark.asyncio
+    async def test_activated_deferred_shows_activated_tier(self) -> None:
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        # Register as deferred, then activate (gives it tool_schemas)
+        await gw.register_agent(
+            _make_manifest("lazy", description="Lazy agent"),
+            deferred=True,
+            start_command=[],
+        )
+        await gw.registry.activate_agent("lazy")
+
+        result = await gw._list_agents()
+        assert "lazy" in result
+        assert "activated" in result
+
+
+# ============================================================================
+# Coverage: _agent_info role, dependencies, running process (lines 168, 170, 174)
+# ============================================================================
+
+
+class TestAgentInfoRoleAndDependencies:
+    """_agent_info displays role and dependencies when set in manifest,
+    and shows 'Process: running' when the agent handle is alive.
+    """
+
+    @pytest.mark.asyncio
+    async def test_agent_info_with_role(self) -> None:
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest(
+            "role-agent",
+            description="Has a role",
+            role=AgentRole.WORKER,
+        )
+        await gw.register_agent(manifest, deferred=True)
+        result = await gw._agent_info("role-agent")
+        assert "worker" in result
+
+    @pytest.mark.asyncio
+    async def test_agent_info_with_dependencies(self) -> None:
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        deps = AgentDependencies(atomic_agents=["atom-a", "atom-b"])
+        manifest = _make_manifest(
+            "comp-agent",
+            description="Composite agent",
+            agent_type=AgentType.COMPOSITE,
+            dependencies=deps,
+        )
+        await gw.register_agent(manifest, deferred=True)
+        result = await gw._agent_info("comp-agent")
+        assert "atom-a" in result
+        assert "atom-b" in result
+        assert "Dependencies" in result
+
+    @pytest.mark.asyncio
+    async def test_agent_info_running_process(self) -> None:
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest("running-agent", description="Running")
+        await gw.register_agent(manifest, deferred=False)
+
+        info = gw.registry.get_agent_info("running-agent")
+        assert info is not None
+        alive_handle = _mock_agent_handle("running-agent", alive=True)
+        info.handle = alive_handle
+
+        result = await gw._agent_info("running-agent")
+        assert "running" in result
+
+
+# ============================================================================
+# Coverage: _register_agent_tools already-registered skip (lines 240-241)
+# ============================================================================
+
+
+class TestRegisterAgentToolsAlreadyRegistered:
+    """_register_agent_tools returns early when agent tools already registered.
+    Logs debug message and skips re-registration.
+    """
+
+    @pytest.mark.asyncio
+    async def test_already_registered_skips(self) -> None:
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest("cached-agent")
+        await gw.register_agent(manifest, deferred=True, start_command=[])
+        await gw.registry.activate_agent("cached-agent")
+
+        # First registration
+        await gw._register_agent_tools("cached-agent")
+        assert "cached-agent" in gw._registered_agents
+
+        # Capture adapters before second call
+        adapters_before = list(gw.registry._tool_adapters.get("cached-agent", []))
+
+        # Second call should skip (line 240-241)
+        await gw._register_agent_tools("cached-agent")
+
+        # Adapters should be unchanged — no re-registration occurred
+        adapters_after = list(gw.registry._tool_adapters.get("cached-agent", []))
+        assert len(adapters_before) == len(adapters_after)
+
+
+# ============================================================================
+# Coverage: _register_agent_tools name collision disambiguation (lines 254-266, 270-271)
+# ============================================================================
+
+
+class TestRegisterAgentToolsCollision:
+    """_register_agent_tools disambiguates tool name collisions.
+
+    When two adapters within the same agent produce the same sanitized
+    tool full_name, the second one gets a numeric suffix appended (_2, _3, ...).
+
+    FastMCP rejects functions with **kwargs, so we mock _mcp.tool to
+    succeed, ensuring the name enters _registered_tool_names.
+    """
+
+    @pytest.mark.asyncio
+    async def test_collision_gets_numeric_suffix(self) -> None:
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        # Mock FastMCP.tool so it accepts the _invoke function
+        mcp_tool_mock = MagicMock()
+        gw._mcp.tool = mcp_tool_mock
+
+        schema = _make_tool_schema("shared_tool", "A tool")
+        adapter1 = McpToolAdapter(server_name="agent-x", tool_schema=schema)
+        adapter2 = McpToolAdapter(server_name="agent-x", tool_schema=schema)
+
+        manifest = _make_manifest("agent-x")
+        gw._registry.register_agent(manifest, deferred=False)
+        info = gw._registry.get_agent_info("agent-x")
+        assert info is not None
+        info.tool_schemas = [schema, schema]
+        gw._registry._tool_adapters["agent-x"] = [adapter1, adapter2]
+
+        await gw._register_agent_tools("agent-x")
+
+        # The second adapter should have been renamed to include a suffix
+        assert adapter2.full_name != adapter1.full_name
+        assert adapter2.full_name.endswith("_2")
+
+    @pytest.mark.asyncio
+    async def test_multiple_collisions_increment_suffix(self) -> None:
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        mcp_tool_mock = MagicMock()
+        gw._mcp.tool = mcp_tool_mock
+
+        schema = _make_tool_schema("col_tool", "Collision tool")
+        adapter1 = McpToolAdapter(server_name="cagent", tool_schema=schema)
+        adapter2 = McpToolAdapter(server_name="cagent", tool_schema=schema)
+        adapter3 = McpToolAdapter(server_name="cagent", tool_schema=schema)
+
+        manifest = _make_manifest("cagent")
+        gw._registry.register_agent(manifest, deferred=False)
+        info = gw._registry.get_agent_info("cagent")
+        assert info is not None
+        info.tool_schemas = [schema, schema, schema]
+        gw._registry._tool_adapters["cagent"] = [adapter1, adapter2, adapter3]
+
+        await gw._register_agent_tools("cagent")
+
+        # adapter1 keeps original name, adapter2 gets _2, adapter3 gets _3
+        assert adapter2.full_name.endswith("_2")
+        assert adapter3.full_name.endswith("_3")
+
+    @pytest.mark.asyncio
+    async def test_collision_with_cross_agent_names(self) -> None:
+        """Two different agents whose server names sanitize to the same value."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        mcp_tool_mock = MagicMock()
+        gw._mcp.tool = mcp_tool_mock
+
+        schema = _make_tool_schema("do_work", "Work tool")
+
+        # Register first agent and its tools
+        manifest1 = _make_manifest("my-agent")
+        gw._registry.register_agent(manifest1, deferred=False)
+        info1 = gw._registry.get_agent_info("my-agent")
+        assert info1 is not None
+        info1.tool_schemas = [schema]
+        adapter1 = McpToolAdapter(server_name="my-agent", tool_schema=schema)
+        gw._registry._tool_adapters["my-agent"] = [adapter1]
+        await gw._register_agent_tools("my-agent")
+
+        # Register second agent whose sanitized name collides: my_agent -> my_agent
+        schema2 = _make_tool_schema("do_work", "Different tool")
+        manifest2 = _make_manifest("my_agent")
+        gw._registry.register_agent(manifest2, deferred=False)
+        info2 = gw._registry.get_agent_info("my_agent")
+        assert info2 is not None
+        info2.tool_schemas = [schema2]
+        adapter2 = McpToolAdapter(server_name="my_agent", tool_schema=schema2)
+        gw._registry._tool_adapters["my_agent"] = [adapter2]
+        await gw._register_agent_tools("my_agent")
+
+        # Second adapter should have been renamed
+        assert adapter2.full_name.endswith("_2")
+
+
+# ============================================================================
+# Coverage: _invoke error path for failed execution (line 309)
+# ============================================================================
+
+
+class TestInvokeExecutionError:
+    """_invoke returns formatted error when adapter.execute returns failure."""
+
+    @pytest.mark.asyncio
+    async def test_invoke_returns_error_on_execution_failure(self) -> None:
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest("err-agent")
+        await gw.register_agent(manifest, deferred=False)
+
+        info = gw.registry.get_agent_info("err-agent")
+        assert info is not None
+        alive_handle = _mock_agent_handle("err-agent", alive=True)
+        info.handle = alive_handle
+        info.tool_schemas = [{"name": "fail_tool", "description": "Fails"}]
+
+        schema = _make_tool_schema("fail_tool", "Fails")
+        adapter = McpToolAdapter(server_name="err-agent", tool_schema=schema)
+        gw.registry._tool_adapters["err-agent"] = [adapter]
+
+        # Make execute return a failure
+        with patch.object(
+            adapter, "execute", new_callable=AsyncMock,
+            return_value={"success": False, "error": "task blew up"},
+        ):
+            func = gw._make_tool_func(adapter)
+            result = await func(x=1)
+
+        assert "Error" in result
+        assert "task blew up" in result
+
+    @pytest.mark.asyncio
+    async def test_invoke_returns_unknown_failure_when_no_error_key(self) -> None:
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest("nokey-agent")
+        await gw.register_agent(manifest, deferred=False)
+
+        info = gw.registry.get_agent_info("nokey-agent")
+        assert info is not None
+        alive_handle = _mock_agent_handle("nokey-agent", alive=True)
+        info.handle = alive_handle
+        info.tool_schemas = [{"name": "nk_tool", "description": "No key"}]
+
+        schema = _make_tool_schema("nk_tool", "No key")
+        adapter = McpToolAdapter(server_name="nokey-agent", tool_schema=schema)
+        gw.registry._tool_adapters["nokey-agent"] = [adapter]
+
+        with patch.object(
+            adapter, "execute", new_callable=AsyncMock,
+            return_value={"success": False},
+        ):
+            func = gw._make_tool_func(adapter)
+            result = await func()
+
+        assert "Error" in result
+        assert "unknown failure" in result
+
+
+# ============================================================================
+# Coverage: _register_agent_tools FastMCP registration error (lines 274-280)
+# ============================================================================
+
+
+class TestRegisterAgentToolsFastMCPError:
+    """_register_agent_tools catches FastMCP tool registration errors."""
+
+    @pytest.mark.asyncio
+    async def test_fastmcp_registration_error_handled(self) -> None:
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest("mcp-err-agent")
+        gw._registry.register_agent(manifest, deferred=False)
+        info = gw._registry.get_agent_info("mcp-err-agent")
+        assert info is not None
+        info.tool_schemas = [{"name": "tool1", "description": "T"}]
+
+        schema = _make_tool_schema("tool1", "T")
+        adapter = McpToolAdapter(server_name="mcp-err-agent", tool_schema=schema)
+        gw._registry._tool_adapters["mcp-err-agent"] = [adapter]
+
+        # Make FastMCP.tool raise when trying to register
+        original_tool = gw._mcp.tool
+
+        def failing_tool_register(func):
+            raise ValueError("tool name already registered")
+
+        gw._mcp.tool = failing_tool_register
+
+        # Should not raise — error is caught and logged
+        await gw._register_agent_tools("mcp-err-agent")
+
+        # Restore to avoid affecting other tests
+        gw._mcp.tool = original_tool

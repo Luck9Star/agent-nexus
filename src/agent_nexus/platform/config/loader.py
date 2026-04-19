@@ -203,10 +203,11 @@ class ConfigLoader:
             except ValueError:
                 valid = [e.value for e in ProviderApiType]
                 logger.warning(
-                    "Invalid api type '%s' in provider '%s'. Valid: %s. Skipping.",
+                    "Invalid api type '%s' in provider '%s'. Valid: %s. "
+                    "Defaulting to 'openai-compatible'.",
                     api_str, name, valid,
                 )
-                continue
+                api_type = ProviderApiType.OPENAI_COMPATIBLE
 
             if existing:
                 # Override only fields that the user explicitly provides

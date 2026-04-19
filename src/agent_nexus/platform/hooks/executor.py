@@ -286,6 +286,17 @@ class HookExecutor:
                 duration_ms=round(duration_ms, 2),
             )
 
+        except asyncio.CancelledError:
+            # CancelledError is BaseException, NOT caught by "except Exception".
+            # Must kill the subprocess to prevent orphans on task cancellation/shutdown.
+            if proc is not None:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    logger.debug("Failed to kill cancelled hook subprocess", exc_info=True)
+            raise
+
         except Exception as exc:
             duration_ms = (time.monotonic() - start) * 1000
             if proc is not None:
