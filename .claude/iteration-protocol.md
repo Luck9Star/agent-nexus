@@ -122,6 +122,7 @@
 | installer install() rollback 回归 | venv失败清理(+) + validation失败前无copy(+) = 2 tests | 2026-04-19 | iter95b |
 | supervisor auto_restart_dead 成功/失败路径 | start成功返回name(+) + build_command失败跳过(+) = 2 tests | 2026-04-19 | iter96 |
 | 协程泄漏 — 未 close() 的跳过协程 | subtask.py _guarded coro.close() + regression test | 2026-04-19 | iter97 |
+| P3 测试缺口全量验证 | 6项中5项已有覆盖，补1项: _parse_frontmatter YAML error | 2026-04-19 | iter97 |
 
 ### 待清模式
 

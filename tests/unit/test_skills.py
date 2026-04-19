@@ -283,6 +283,14 @@ class TestParseFrontmatter:
         assert "# Role" in remaining
         assert "some --- dashes" in remaining
 
+    # iter97 regression — YAML parse error in _parse_frontmatter
+    def test_yaml_parse_error_returns_none(self):
+        """Malformed YAML between --- delimiters returns (None, content)."""
+        content = "---\n[invalid: yaml: syntax\n---\nbody"
+        data, remaining = SkillLoader._parse_frontmatter(content)
+        assert data is None
+        assert remaining == content
+
 
 # ---------------------------------------------------------------------------
 # SkillLoader — _split_body_resources
