@@ -833,3 +833,18 @@ class TestCancelledError:
 
         # Even though kill failed, CancelledError still propagates
         mock_proc.kill.assert_called_once()
+
+
+class TestEmptyCommandAfterSplit:
+    """Cover line 261: whitespace-only command -> shlex.split returns [] -> empty args guard."""
+
+    @pytest.mark.asyncio
+    async def test_whitespace_command_returns_error(self) -> None:
+        """Whitespace-only command passes `if not hook.command` check but shlex.split returns []."""
+        hook = _cmd_hook(command="   ")
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
+
+        result = await executor.execute_event(HookEvent.PRE_EXECUTION)
+        assert len(result.results) == 1
+        assert result.results[0].passed is False
+        assert "empty command" in result.results[0].error.lower()

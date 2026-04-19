@@ -126,6 +126,17 @@ def _mock_store(
 
     store.get_ancestry.side_effect = mock_ancestry
 
+    # get_ancestry_batch(skill_ids, max_depth) — batch fetch used by
+    # _build_lineage_tree
+    def mock_ancestry_batch(
+        skill_ids: list[str], max_depth: int = 10,
+    ) -> dict[str, list[SkillRecord]]:
+        if not ancestry_map:
+            return {}
+        return {sid: ancestry_map.get(sid, []) for sid in skill_ids}
+
+    store.get_ancestry_batch.side_effect = mock_ancestry_batch
+
     # get_judgments_for_skill(skill_id, limit=N) — legacy per-skill fetch
     def mock_judgments(skill_id: str, limit: int = 50) -> list[dict]:
         return judgments_map.get(skill_id, []) if judgments_map else []
@@ -653,3 +664,28 @@ class TestL2Context:
         assert "5" in result   # fallbacks
         # Effective rate 30/50 = 0.60
         assert "0.60" in result
+
+    def test_skill_with_no_ancestors(self) -> None:
+        """_build_lineage_tree else-branch: skill with empty ancestry list."""
+        r = _make_record(
+            "s-noanc", "orphan-skill",
+            origin=SkillOrigin.IMPORTED,
+            generation=1,
+            parent_ids=[],
+        )
+        store = _mock_store(
+            active_skills=[r],
+            metrics=EvolutionMetrics(),
+            ancestry_map={"s-noanc": []},
+        )
+        with patch(
+            "agent_nexus.platform.evolution.context_describer.HealthChecker"
+        ) as hc_cls:
+            hc_cls.return_value = _mock_health_checker(
+                {"s-noanc": _make_health_report("s-noanc", "orphan-skill", True)}
+            )
+            describer = EvolutionContextDescriber(store)
+            result = describer.l2_context()
+
+        # No ancestry chain — just the name with generation and origin
+        assert "orphan-skill (g1, imported)" in result

@@ -1080,3 +1080,17 @@ class TestIPCSendDrainRuntimeError:
 
         with pytest.raises(IPCConnectionError, match="stdin closed during drain"):
             await stream.send(msg)
+
+
+class TestIPCMessageNonDictResolve:
+    """IPCMessage._resolve_payload returns values as-is when not a dict."""
+
+    def test_non_dict_values_passed_through(self) -> None:
+        from agent_nexus.models.ipc import IPCMessage
+
+        # The "before" model_validator early-returns non-dict values at line 105.
+        result = IPCMessage._resolve_payload("not-a-dict")
+        assert result == "not-a-dict"
+
+        result2 = IPCMessage._resolve_payload(42)
+        assert result2 == 42
