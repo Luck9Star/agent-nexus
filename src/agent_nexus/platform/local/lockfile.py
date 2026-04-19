@@ -7,11 +7,14 @@ installation can be reproduced or rolled back.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Generator
 
 from agent_nexus.models.distribution import Lockfile, LockfileEntry
 
@@ -52,6 +55,24 @@ class LockfileManager:
         except (json.JSONDecodeError, ValueError, KeyError, TypeError) as exc:
             logger.warning("Failed to parse lockfile %s: %s", self._path, exc)
             return Lockfile()
+
+    @contextmanager
+    def _file_lock(self) -> Generator[None, None, None]:
+        """Acquire an exclusive file lock for cross-process serialization.
+
+        Uses a separate ``.lock`` sibling file so that the lockfile
+        itself can still be read freely.  The lock is held for the
+        duration of the read-modify-write sequence.
+        """
+        lock_path = self._path.with_suffix(".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(lock_path, "w")  # noqa: SIM115
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+            fh.close()
 
     def save(self, lockfile: Lockfile) -> None:
         """Persist *lockfile* to disk atomically.
@@ -103,28 +124,37 @@ class LockfileManager:
         return lockfile.agents.get(agent_name)
 
     def add_entry_by_name(self, agent_name: str, entry: LockfileEntry) -> None:
-        """Add or update a lockfile entry keyed by *agent_name* and save."""
-        lockfile = self.load()
-        agents = dict(lockfile.agents)
-        agents[agent_name] = entry
-        updated = Lockfile(version=lockfile.version, agents=agents)
-        self.save(updated)
+        """Add or update a lockfile entry keyed by *agent_name* and save.
+
+        Uses file-level locking (``fcntl.flock``) to serialize the
+        read-modify-write sequence across concurrent CLI processes.
+        """
+        with self._file_lock():
+            lockfile = self.load()
+            agents = dict(lockfile.agents)
+            agents[agent_name] = entry
+            updated = Lockfile(version=lockfile.version, agents=agents)
+            self.save(updated)
         logger.info("Lockfile updated: %s@%s", agent_name, entry.version)
 
     def remove_entry(self, agent_name: str) -> bool:
         """Remove a lockfile entry.
 
+        Uses file-level locking to prevent TOCTOU races with concurrent
+        processes.
+
         Returns ``True`` if the entry existed (and was removed), ``False``
         otherwise.
         """
-        lockfile = self.load()
-        if agent_name not in lockfile.agents:
-            return False
+        with self._file_lock():
+            lockfile = self.load()
+            if agent_name not in lockfile.agents:
+                return False
 
-        agents = dict(lockfile.agents)
-        del agents[agent_name]
-        updated = Lockfile(version=lockfile.version, agents=agents)
-        self.save(updated)
+            agents = dict(lockfile.agents)
+            del agents[agent_name]
+            updated = Lockfile(version=lockfile.version, agents=agents)
+            self.save(updated)
         logger.info("Lockfile entry removed: %s", agent_name)
         return True
 

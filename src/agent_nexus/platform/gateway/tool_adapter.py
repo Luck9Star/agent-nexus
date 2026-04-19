@@ -13,9 +13,10 @@ Reference: docs/06-mcp-communication.md Section 8.1.1
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
-from typing import Any
+import uuid
 
 from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.orchestration.process_manager import AgentHandle
@@ -35,6 +36,59 @@ def _sanitize(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# IPC Lock Registry — event-loop-safe lock management
+# ---------------------------------------------------------------------------
+
+# Module-level registry so all McpToolAdapter instances for the same
+# agent share the same lock.  Lazily creates asyncio.Lock on first
+# access for the running event loop.  Detects event-loop restarts
+# (common in tests using multiple ``asyncio.run()`` calls) and
+# discards stale locks to prevent ``attached to a different loop``
+# errors.
+_ipc_lock_registry: dict[str, asyncio.Lock] = {}
+_ipc_lock_loop_id: int | None = None
+
+
+def _get_ipc_lock(agent_name: str) -> asyncio.Lock:
+    """Get or create an asyncio.Lock for *agent_name*.
+
+    If the current event loop differs from the one that created the
+    locks (e.g. after ``asyncio.run()`` in tests), all locks are
+    discarded and recreated.
+    """
+    global _ipc_lock_registry, _ipc_lock_loop_id
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    current_loop_id = id(loop) if loop is not None else None
+
+    if current_loop_id != _ipc_lock_loop_id:
+        _ipc_lock_registry.clear()
+        _ipc_lock_loop_id = current_loop_id
+
+    return _ipc_lock_registry.setdefault(agent_name, asyncio.Lock())
+
+
+def remove_lock(agent_name: str) -> None:
+    """Remove IPC lock for *agent_name*.
+
+    The lock dict entry is intentionally NOT deleted — popping it would
+    allow ``setdefault`` in :func:`_get_ipc_lock` to create a new lock
+    while an old reference is still held (by a coroutine inside
+    ``async with lock``), breaking IPC serialization.  Instead the lock
+    remains in the dict and will be reused if the agent restarts.
+    """
+
+
+def remove_all_locks() -> None:
+    """Remove all IPC locks (called on gateway shutdown)."""
+    global _ipc_lock_loop_id
+    _ipc_lock_registry.clear()
+    _ipc_lock_loop_id = None
+
+
+# ---------------------------------------------------------------------------
 # McpToolAdapter
 # ---------------------------------------------------------------------------
 
@@ -48,8 +102,6 @@ class McpToolAdapter:
     The adapter stores the JSON-schema input definition and delegates
     execution to the agent subprocess via IPC.
     """
-
-    _ipc_locks: dict[str, asyncio.Lock] = {}
 
     def __init__(self, server_name: str, tool_schema: dict) -> None:
         self.agent_name = server_name  # original unsanitized name for lookups
@@ -80,9 +132,6 @@ class McpToolAdapter:
         Returns:
             Dict with ``output`` and ``success`` keys.
         """
-        import json
-        import uuid
-
         if not handle.is_alive:
             return {
                 "output": "",
@@ -95,7 +144,7 @@ class McpToolAdapter:
         )
 
         try:
-            lock = self._ipc_locks.setdefault(self.agent_name, asyncio.Lock())
+            lock = _get_ipc_lock(self.agent_name)
             async with lock:
                 await handle.ipc.send_chat(payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__")
                 response = await handle.ipc.receive_until_result(timeout=300.0)
@@ -139,20 +188,6 @@ class McpToolAdapter:
         }
 
     # -- Cleanup -----------------------------------------------------------
-
-    @classmethod
-    def remove_lock(cls, agent_name: str) -> None:
-        """Remove the IPC lock for a stopped agent.
-
-        Call this when an agent process dies or is stopped to prevent
-        the class-level lock dict from growing without bound.
-        """
-        cls._ipc_locks.pop(agent_name, None)
-
-    @classmethod
-    def remove_all_locks(cls) -> None:
-        """Remove all IPC locks (called on gateway shutdown)."""
-        cls._ipc_locks.clear()
 
     def __repr__(self) -> str:
         return f"McpToolAdapter({self.full_name!r})"

@@ -294,22 +294,17 @@ class EvolutionContextDescriber:
         lines: list[str] = []
         history_limit = 5  # Per skill, to keep within budget
 
+        skill_ids = {s.id for s in skills}
+        batch = self._store.get_judgments_batch(skill_ids, history_limit)
+
         for skill in skills:
-            judgments = self._store.get_judgments_for_skill(
-                skill.id, limit=history_limit
-            )
+            judgments = batch.get(skill.id, [])
             if not judgments:
                 continue
 
-            applied_count = sum(
-                1 for j in judgments if j["applied"]
-            )
-            completed_count = sum(
-                1 for j in judgments if j["completed"]
-            )
-            fell_back_count = sum(
-                1 for j in judgments if j["fell_back"]
-            )
+            applied_count = sum(1 for j in judgments if j["applied"])
+            completed_count = sum(1 for j in judgments if j["completed"])
+            fell_back_count = sum(1 for j in judgments if j["fell_back"])
 
             lines.append(
                 f"- {skill.name} (last {len(judgments)}): "

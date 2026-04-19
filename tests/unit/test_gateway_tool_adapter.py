@@ -8,7 +8,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agent_nexus.models.ipc import AgentToPlatform, AgentToPlatformType
-from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
+from agent_nexus.platform.gateway.tool_adapter import (
+    McpToolAdapter,
+    _ipc_lock_registry,
+    remove_all_locks,
+    remove_lock,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -158,15 +163,17 @@ class TestMcpToolAdapterExecute:
 
 class TestMcpToolAdapterLocks:
     def test_remove_lock(self) -> None:
-        McpToolAdapter._ipc_locks["test-agent"] = asyncio.Lock()
-        McpToolAdapter.remove_lock("test-agent")
-        assert "test-agent" not in McpToolAdapter._ipc_locks
+        """remove_lock no longer pops from registry for serialization safety."""
+        _ipc_lock_registry["test-agent"] = asyncio.Lock()
+        remove_lock("test-agent")
+        # Lock stays in dict — only remove_all_locks clears it
+        assert "test-agent" in _ipc_lock_registry
 
     def test_remove_lock_missing_is_noop(self) -> None:
-        McpToolAdapter.remove_lock("nonexistent")  # should not raise
+        remove_lock("nonexistent")  # should not raise
 
     def test_remove_all_locks(self) -> None:
-        McpToolAdapter._ipc_locks["a"] = asyncio.Lock()
-        McpToolAdapter._ipc_locks["b"] = asyncio.Lock()
-        McpToolAdapter.remove_all_locks()
-        assert len(McpToolAdapter._ipc_locks) == 0
+        _ipc_lock_registry["a"] = asyncio.Lock()
+        _ipc_lock_registry["b"] = asyncio.Lock()
+        remove_all_locks()
+        assert len(_ipc_lock_registry) == 0

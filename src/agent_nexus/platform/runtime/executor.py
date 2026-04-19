@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from typing import Any
 
 from agent_nexus.models.runtime import ExecutionResult
@@ -55,9 +56,16 @@ class IPythonExecutor:
         # Eager creation is safe: requires-python >= 3.11, where
         # asyncio.Lock() works outside a running event loop (fixed in 3.10).
         self._shell_lock: asyncio.Lock = asyncio.Lock()
+        # Serialize concurrent execute() calls so only one thread
+        # accesses the non-thread-safe InteractiveShell at a time.
+        self._exec_lock: asyncio.Lock = asyncio.Lock()
         # Flag set when a timed-out thread execution may still be running.
         # Prevents new executions on a contaminated shell.
         self._timed_out: bool = False
+        # Signaled when the _run_cell_sync thread completes, so that
+        # reset()/close() can wait before clearing user_ns.
+        self._exec_done: threading.Event = threading.Event()
+        self._exec_done.set()  # Initially "done" (no thread running)
 
     async def _require_shell(self) -> Any:
         """Return the shell, creating it lazily if needed.
@@ -101,6 +109,14 @@ class IPythonExecutor:
 
     def close(self) -> None:
         """Release the InteractiveShell and its resources."""
+        if self._timed_out:
+            # Wait for the still-running thread to finish before clearing.
+            if not self._exec_done.wait(timeout=5.0):
+                logger.warning(
+                    "Timed-out execution thread still running during close; "
+                    "clearing namespace anyway (race possible)"
+                )
+
         if self._shell is not None:
             try:
                 self._shell.user_ns.clear()
@@ -112,6 +128,7 @@ class IPythonExecutor:
             self._shell = None
         self._pending_injects.clear()
         self._timed_out = False
+        self._exec_done.set()
 
     def reset(self) -> None:
         """Clear namespace for reuse without destroying the shell.
@@ -121,6 +138,14 @@ class IPythonExecutor:
         ``InteractiveShell`` is kept alive for reuse, avoiding the
         50-200 MB cost of re-creating it.
         """
+        if self._timed_out:
+            # Wait for the still-running thread to finish before clearing.
+            if not self._exec_done.wait(timeout=5.0):
+                logger.warning(
+                    "Timed-out execution thread still running during reset; "
+                    "clearing namespace anyway (race possible)"
+                )
+
         if self._shell is not None:
             # Preserve IPython internals BEFORE clearing
             internals_cache = {
@@ -133,6 +158,7 @@ class IPythonExecutor:
             self._shell.user_ns.update(internals_cache)
         self._pending_injects.clear()
         self._timed_out = False
+        self._exec_done.set()
 
     def __del__(self) -> None:
         # Safety net: release shell if close() was never called.
@@ -174,6 +200,13 @@ class IPythonExecutor:
             )
 
         # Step 2: Execute (shell created lazily here)
+        # Serialize: only one thread may access the non-thread-safe
+        # InteractiveShell at a time.
+        async with self._exec_lock:
+            return await self._execute_inner(code, timeout)
+
+    async def _execute_inner(self, code: str, timeout: float) -> ExecutionResult:
+        """Inner execution logic, called under _exec_lock."""
         shell = await self._require_shell()
 
         try:
@@ -181,6 +214,7 @@ class IPythonExecutor:
             pre_keys = set(self.namespace_keys())
 
             transformed = shell.transform_cell(code)
+            self._exec_done.clear()  # Thread is about to start
             result, stdout, stderr = await asyncio.wait_for(
                 asyncio.to_thread(
                     self._run_cell_sync, transformed,
@@ -246,9 +280,12 @@ class IPythonExecutor:
             raise RuntimeError("_run_cell_sync called before shell initialization")
         from IPython.utils.capture import capture_output  # pyright: ignore[reportMissingImports]
 
-        with capture_output() as captured:
-            result = self._shell.run_cell(transformed, store_history=False)
-        return result, captured.stdout, captured.stderr
+        try:
+            with capture_output() as captured:
+                result = self._shell.run_cell(transformed, store_history=False)
+            return result, captured.stdout, captured.stderr
+        finally:
+            self._exec_done.set()  # Signal thread completion
 
     def inject(self, name: str, value: Any) -> None:
         """Inject a variable into the namespace.

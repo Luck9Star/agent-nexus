@@ -1068,8 +1068,8 @@ class TestCompactionGuardReinject:
         # l1_max is 3000, so l1 should be truncated
         assert len(result) < len("id\n" + long_l1)
 
-    def test_reinject_logs_token_estimate_not_chars(self, tmp_path: Path) -> None:
-        """tokens_after should be a token estimate (chars//4), not raw char count."""
+    def test_reinject_logs_char_count_with_unit_note(self, tmp_path: Path) -> None:
+        """tokens_after stores char count (not token estimate), with unit_note."""
         import json as _json
 
         store = _store_with_records(tmp_path)
@@ -1084,12 +1084,12 @@ class TestCompactionGuardReinject:
         # details is stored as JSON string in SQLite
         details = _json.loads(log[0].get("details", "{}"))
         result_chars = details.get("result_chars", 0)
-        if result_chars > 0:
-            # Token estimate should be roughly chars//4, not chars
-            assert tokens_after < result_chars
+        # P2-1 fix: tokens_after is now the raw char count, not chars//4
+        assert tokens_after == result_chars
+        assert details.get("unit_note") == "values are chars, not tokens"
 
-    def test_compaction_empty_result_chars(self, tmp_path: Path) -> None:
-        """When result has <4 chars, tokens_after is 0 (chars//4 approximation)."""
+    def test_compaction_short_result_still_logged(self, tmp_path: Path) -> None:
+        """When result is short, tokens_after still records char count."""
         store = _store_with_records(tmp_path)
         guard = CompactionGuard(store, "agent-a")
         # l0_content is truthy but short; l1 empty -> result is "x\n" (2 chars)
@@ -1097,8 +1097,8 @@ class TestCompactionGuardReinject:
         guard.reinject_after_compaction(ctx)
         log = store.get_budget_log("agent-a")
         assert len(log) == 1
-        # "x\n" is 2 chars -> 2 // 4 = 0 tokens estimated
-        assert log[0]["tokens_after"] == 0
+        # P2-1 fix: now logs chars directly (2), not chars//4 (0)
+        assert log[0]["tokens_after"] == 2
 
 
 class TestCompactionGuardCheckAndLog:
@@ -1312,7 +1312,7 @@ class TestPromotionPreservesExisting:
         )
 
         # Force a write failure after directory creation
-        with patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
+        with patch.object(AgentPromoter, "_atomic_write", side_effect=OSError("disk full")):
             result = promoter.promote(candidate)
 
         assert not result.success
@@ -1341,7 +1341,7 @@ class TestPromotionPreservesExisting:
         # The directory does not exist yet
         assert not (agents_dir / "new-skill").exists()
 
-        with patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
+        with patch.object(AgentPromoter, "_atomic_write", side_effect=OSError("disk full")):
             result = promoter.promote(candidate)
 
         assert not result.success

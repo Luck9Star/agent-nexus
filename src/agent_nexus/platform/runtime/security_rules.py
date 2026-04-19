@@ -66,8 +66,17 @@ class ImportRule(SecurityRule):
                     )
 
         elif isinstance(node, ast.ImportFrom):
+            # Resolve the absolute module name: strip leading dots from
+            # relative imports so that "from .os import *" is checked
+            # against "os", not ".os" (which would bypass the forbidden
+            # list due to startswith(".os") != startswith("os")).
+            module_name = node.module
+            if module_name and node.level > 0:
+                # Strip relative-import prefix dots (e.g. "..os" -> "os")
+                module_name = module_name.lstrip(".")
+
             # Check module path (e.g. "from os import path")
-            if node.module and self._is_forbidden(node.module):
+            if module_name and self._is_forbidden(module_name):
                 violations.append(
                     SecurityViolation(
                         rule_type="import",

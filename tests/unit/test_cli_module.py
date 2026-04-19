@@ -976,10 +976,7 @@ class TestSearchAgents:
         """Search with no matching agents → 'No agents found' message."""
         mocks, _, sources_mock, _ = _mock_managers()
 
-        source_entry = MagicMock()
-        source_entry.name = "official"
-        sources_mock.list_sources.return_value = [source_entry]
-        sources_mock._load_source_index.return_value = []
+        sources_mock.search_agents.return_value = []
 
         with (
             patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
@@ -998,15 +995,14 @@ class TestSearchAgents:
 
         source_entry = MagicMock()
         source_entry.name = "official"
-        sources_mock.list_sources.return_value = [source_entry]
 
         index_entry = MagicMock()
         index_entry.name = "doc-filler"
         index_entry.description = "Fill documents"
-        index_entry.tags = ["docs"]
         index_entry.version = "1.0.0"
         index_entry.type = MagicMock(value="atomic")
-        sources_mock._load_source_index.return_value = [index_entry]
+
+        sources_mock.search_agents.return_value = [(source_entry, index_entry)]
 
         with (
             patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
@@ -1021,13 +1017,10 @@ class TestSearchAgents:
 
     @pytest.mark.asyncio
     async def test_source_index_none_skipped(self) -> None:
-        """Source with None index is skipped gracefully."""
+        """Source with empty results is handled gracefully."""
         mocks, _, sources_mock, _ = _mock_managers()
 
-        source_entry = MagicMock()
-        source_entry.name = "broken"
-        sources_mock.list_sources.return_value = [source_entry]
-        sources_mock._load_source_index.return_value = None
+        sources_mock.search_agents.return_value = []
 
         with (
             patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),

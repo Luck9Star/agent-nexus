@@ -19,7 +19,13 @@ from agent_nexus.platform.gateway.deferred_registry import (
     DeferredAgentRegistry,
 )
 from agent_nexus.platform.gateway.gateway import MCPGateway
-from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter, _sanitize
+from agent_nexus.platform.gateway.tool_adapter import (
+    McpToolAdapter,
+    _ipc_lock_registry,
+    _sanitize,
+    remove_all_locks,
+    remove_lock,
+)
 from agent_nexus.platform.orchestration.process_manager import (
     AgentHandle,
     ProcessManager,
@@ -1838,7 +1844,7 @@ class TestMcpToolAdapterIPCLock:
         adapter = McpToolAdapter(server_name="lock-test-agent", tool_schema=schema)
 
         # Before any execute, no lock for this agent's original name
-        assert "lock-test-agent" not in McpToolAdapter._ipc_locks
+        assert "lock-test-agent" not in _ipc_lock_registry
 
         handle = _mock_agent_handle("lock-test-agent", alive=True)
         response = AgentToPlatform(
@@ -1849,13 +1855,13 @@ class TestMcpToolAdapterIPCLock:
         handle.ipc.receive_until_result.return_value = response
 
         # Clean _ipc_locks to isolate this test
-        McpToolAdapter.remove_all_locks()
+        remove_all_locks()
         try:
             await adapter.execute(handle, {})
             # Lock is keyed by original (unsanitized) agent_name, not server_name
-            assert "lock-test-agent" in McpToolAdapter._ipc_locks
+            assert "lock-test-agent" in _ipc_lock_registry
         finally:
-            McpToolAdapter.remove_all_locks()
+            remove_all_locks()
 
     @pytest.mark.asyncio
     async def test_ipc_lock_prevents_concurrent_interleave(self) -> None:
@@ -1896,7 +1902,7 @@ class TestMcpToolAdapterIPCLock:
         handle2.ipc.send_chat = AsyncMock()
         handle2.ipc.receive_until_result = fast_receive
 
-        McpToolAdapter.remove_all_locks()
+        remove_all_locks()
         try:
             # Launch both concurrently
             results = await asyncio.gather(
@@ -1915,7 +1921,7 @@ class TestMcpToolAdapterIPCLock:
                 "receive_start_2"
             ), f"Concurrent calls interleaved: {call_order}"
         finally:
-            McpToolAdapter.remove_all_locks()
+            remove_all_locks()
 
     @pytest.mark.asyncio
     async def test_different_agents_use_different_locks(self) -> None:
@@ -1935,7 +1941,7 @@ class TestMcpToolAdapterIPCLock:
             type=AgentToPlatformType.RESULT, content="b", status="completed",
         )
 
-        McpToolAdapter.remove_all_locks()
+        remove_all_locks()
         try:
             results = await asyncio.gather(
                 adapter_a.execute(handle_a, {}),
@@ -1943,10 +1949,10 @@ class TestMcpToolAdapterIPCLock:
             )
             assert results[0]["output"] == "a"
             assert results[1]["output"] == "b"
-            assert "agent-a" in McpToolAdapter._ipc_locks
-            assert "agent-b" in McpToolAdapter._ipc_locks
+            assert "agent-a" in _ipc_lock_registry
+            assert "agent-b" in _ipc_lock_registry
         finally:
-            McpToolAdapter.remove_all_locks()
+            remove_all_locks()
 
 
 # ============================================================================
@@ -1958,29 +1964,34 @@ class TestMcpToolAdapterLockCleanup:
     """remove_lock and remove_all_locks clean up class-level locks."""
 
     def setup_method(self) -> None:
-        McpToolAdapter.remove_all_locks()
+        remove_all_locks()
 
     def teardown_method(self) -> None:
-        McpToolAdapter.remove_all_locks()
+        remove_all_locks()
 
     def test_remove_lock_clears_single_agent(self) -> None:
-        """remove_lock removes only the targeted agent's lock."""
-        McpToolAdapter._ipc_locks["agent-x"] = asyncio.Lock()
-        McpToolAdapter._ipc_locks["agent-y"] = asyncio.Lock()
-        McpToolAdapter.remove_lock("agent-x")
-        assert "agent-x" not in McpToolAdapter._ipc_locks
-        assert "agent-y" in McpToolAdapter._ipc_locks
+        """remove_lock no longer pops from _ipc_locks (lock stays for
+        serialization correctness).  The lock remains so that a
+        concurrent holder of the old lock and a new setdefault caller
+        both see the same Lock object.
+        """
+        _ipc_lock_registry["agent-x"] = asyncio.Lock()
+        _ipc_lock_registry["agent-y"] = asyncio.Lock()
+        remove_lock("agent-x")
+        # Lock is NOT removed — it stays for serialization safety
+        assert "agent-x" in _ipc_lock_registry
+        assert "agent-y" in _ipc_lock_registry
 
     def test_remove_lock_noop_for_unknown_agent(self) -> None:
         """remove_lock on a non-existent agent does not raise."""
-        McpToolAdapter.remove_lock("nonexistent")
+        remove_lock("nonexistent")
 
     def test_remove_all_locks_clears_everything(self) -> None:
         """remove_all_locks clears all entries."""
-        McpToolAdapter._ipc_locks["a"] = asyncio.Lock()
-        McpToolAdapter._ipc_locks["b"] = asyncio.Lock()
-        McpToolAdapter.remove_all_locks()
-        assert len(McpToolAdapter._ipc_locks) == 0
+        _ipc_lock_registry["a"] = asyncio.Lock()
+        _ipc_lock_registry["b"] = asyncio.Lock()
+        remove_all_locks()
+        assert len(_ipc_lock_registry) == 0
 
     @pytest.mark.asyncio
     async def test_gateway_stop_cleans_locks(self) -> None:
@@ -1988,22 +1999,27 @@ class TestMcpToolAdapterLockCleanup:
         pm = MagicMock()
         pm.stop_all = AsyncMock()
         router = MagicMock()
-        McpToolAdapter._ipc_locks["stale-agent"] = asyncio.Lock()
+        _ipc_lock_registry["stale-agent"] = asyncio.Lock()
 
         gw = MCPGateway(pm, router)
         await gw.stop()
-        assert len(McpToolAdapter._ipc_locks) == 0
+        assert len(_ipc_lock_registry) == 0
 
     @pytest.mark.asyncio
     async def test_invoke_dead_agent_removes_lock(self) -> None:
-        """_invoke removes IPC lock when it detects a dead agent."""
+        """_invoke detects dead agent and cleans up gateway registration.
+
+        Note: remove_lock no longer pops from _ipc_locks (lock stays for
+        serialization safety).  It is cleaned up by remove_all_locks on
+        gateway shutdown.
+        """
         pm = MagicMock()
         router = MagicMock()
         gw = MCPGateway(pm, router)
 
         schema = _make_tool_schema("test-tool", "desc")
         adapter = McpToolAdapter("dead-agent", schema)
-        McpToolAdapter._ipc_locks["dead-agent"] = asyncio.Lock()
+        _ipc_lock_registry["dead-agent"] = asyncio.Lock()
 
         # Register the agent info with a dead handle
         dead_handle = MagicMock()
@@ -2020,7 +2036,10 @@ class TestMcpToolAdapterLockCleanup:
         func = gw._make_tool_func(adapter)
         result = await func()
         assert "process has died" in result
-        assert "dead-agent" not in McpToolAdapter._ipc_locks
+        # Gateway registration is cleaned up
+        assert "dead-agent" not in gw._registered_agents
+        # IPC lock stays in _ipc_locks for serialization safety
+        assert "dead-agent" in _ipc_lock_registry
 
 
 # ============================================================================
@@ -2338,9 +2357,12 @@ class TestRegisterAgentToolsCollision:
 
         await gw._register_agent_tools("agent-x")
 
-        # The second adapter should have been renamed to include a suffix
-        assert adapter2.full_name != adapter1.full_name
-        assert adapter2.full_name.endswith("_2")
+        # Adapter objects are NOT mutated — collision is tracked via
+        # _registered_tool_names and the registered_name parameter.
+        assert adapter1.full_name == adapter2.full_name  # both unchanged
+        # But both names are in the registered set (one with suffix)
+        assert "mcp__agent_x__shared_tool" in gw._registered_tool_names
+        assert "mcp__agent_x__shared_tool_2" in gw._registered_tool_names
 
     @pytest.mark.asyncio
     async def test_multiple_collisions_increment_suffix(self) -> None:
@@ -2365,9 +2387,11 @@ class TestRegisterAgentToolsCollision:
 
         await gw._register_agent_tools("cagent")
 
-        # adapter1 keeps original name, adapter2 gets _2, adapter3 gets _3
-        assert adapter2.full_name.endswith("_2")
-        assert adapter3.full_name.endswith("_3")
+        # adapter objects not mutated; collision tracked in _registered_tool_names
+        base = "mcp__cagent__col_tool"
+        assert base in gw._registered_tool_names
+        assert f"{base}_2" in gw._registered_tool_names
+        assert f"{base}_3" in gw._registered_tool_names
 
     @pytest.mark.asyncio
     async def test_collision_with_cross_agent_names(self) -> None:
@@ -2402,8 +2426,8 @@ class TestRegisterAgentToolsCollision:
         gw._registry._tool_adapters["my_agent"] = [adapter2]
         await gw._register_agent_tools("my_agent")
 
-        # Second adapter should have been renamed
-        assert adapter2.full_name.endswith("_2")
+        # Second adapter not mutated; collision tracked in _registered_tool_names
+        assert "mcp__my_agent__do_work_2" in gw._registered_tool_names
 
 
 # ============================================================================
@@ -2877,3 +2901,109 @@ class TestEmptyToolListNotFalsy:
         assert len(result) == 2
         assert result[0]["name"] == "search"
         assert result[1]["name"] == "compute"
+
+
+# ============================================================================
+# Regression: _invoke IPC exception handler must clean _registered_tool_names
+# ============================================================================
+
+
+class TestInvokeIPCExceptionToolNameCleanup:
+    """Bug: _invoke exception handler cleaned _registered_agents but NOT
+    _registered_tool_names on IPC transport failure.
+
+    When adapter.execute() raises (BrokenPipeError, etc), the exception
+    handler discarded the agent from _registered_agents but left stale
+    tool names in _registered_tool_names, causing false collision suffixes
+    on re-registration.
+    """
+
+    @pytest.mark.asyncio
+    async def test_tool_names_cleaned_on_ipc_exception(self) -> None:
+        """IPC exception during execute cleans both agents and tool names."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+        gw._mcp.tool = MagicMock()
+
+        manifest = _make_manifest("ipc-fail-agent")
+        await gw.register_agent(manifest, deferred=False)
+
+        info = gw.registry.get_agent_info("ipc-fail-agent")
+        assert info is not None
+        alive_handle = _mock_agent_handle("ipc-fail-agent", alive=True)
+        info.handle = alive_handle
+        info.tool_schemas = [
+            {"name": "tool_x", "description": "X"},
+            {"name": "tool_y", "description": "Y"},
+        ]
+
+        adapter_x = McpToolAdapter("ipc-fail-agent", _make_tool_schema("tool_x", "X"))
+        adapter_y = McpToolAdapter("ipc-fail-agent", _make_tool_schema("tool_y", "Y"))
+        gw.registry._tool_adapters["ipc-fail-agent"] = [adapter_x, adapter_y]
+
+        await gw._register_agent_tools("ipc-fail-agent")
+        assert "ipc-fail-agent" in gw._registered_agents
+        assert adapter_x.full_name in gw._registered_tool_names
+        assert adapter_y.full_name in gw._registered_tool_names
+
+        # Make adapter.execute raise (simulates transport-layer failure)
+        with patch.object(
+            adapter_x, "execute", new_callable=AsyncMock,
+            side_effect=BrokenPipeError("Connection lost"),
+        ):
+            func = gw._make_tool_func(adapter_x)
+            result = await func(data="test")
+
+        assert "IPC failed" in result
+        assert "ipc-fail-agent" not in gw._registered_agents
+        # Both tool names must be cleaned, not just the one that failed
+        assert adapter_x.full_name not in gw._registered_tool_names
+        assert adapter_y.full_name not in gw._registered_tool_names
+
+    @pytest.mark.asyncio
+    async def test_reregistration_after_ipc_exception_no_suffix(self) -> None:
+        """After IPC exception cleanup, re-registration uses original names."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+        gw._mcp.tool = MagicMock()
+
+        manifest = _make_manifest("ipc-retry-agent")
+        await gw.register_agent(manifest, deferred=False)
+
+        info = gw.registry.get_agent_info("ipc-retry-agent")
+        assert info is not None
+
+        # Phase 1: register with alive handle
+        alive_handle = _mock_agent_handle("ipc-retry-agent", alive=True)
+        info.handle = alive_handle
+        info.tool_schemas = [{"name": "compute", "description": "Compute"}]
+        adapter = McpToolAdapter("ipc-retry-agent", _make_tool_schema("compute", "Compute"))
+        gw.registry._tool_adapters["ipc-retry-agent"] = [adapter]
+        await gw._register_agent_tools("ipc-retry-agent")
+
+        # Trigger IPC exception
+        with patch.object(
+            adapter, "execute", new_callable=AsyncMock,
+            side_effect=ConnectionResetError("Reset"),
+        ):
+            func = gw._make_tool_func(adapter)
+            await func(x=1)
+
+        assert "ipc-retry-agent" not in gw._registered_agents
+
+        # Phase 2: agent reconnects, re-register
+        adapter2 = McpToolAdapter("ipc-retry-agent", _make_tool_schema("compute", "Compute"))
+        alive_handle2 = _mock_agent_handle("ipc-retry-agent", alive=True)
+        alive_handle2.ipc.receive_until_result.return_value = AgentToPlatform(
+            type=AgentToPlatformType.RESULT, content="ok", status="completed",
+        )
+        info.handle = alive_handle2
+        info.tool_schemas = [{"name": "compute", "description": "Compute"}]
+        gw.registry._tool_adapters["ipc-retry-agent"] = [adapter2]
+        await gw._register_agent_tools("ipc-retry-agent")
+
+        # Original name preserved — no _2 suffix
+        assert adapter2.full_name == "mcp__ipc_retry_agent__compute"
+        assert adapter2.full_name in gw._registered_tool_names

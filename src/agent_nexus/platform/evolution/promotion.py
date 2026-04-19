@@ -13,7 +13,9 @@ Actions:
 
 from __future__ import annotations
 
+import os
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -145,17 +147,17 @@ class AgentPromoter:
             # Generate manifest
             manifest_content = self._generate_manifest(candidate)
             manifest_path = agent_dir / "agent-manifest.yaml"
-            manifest_path.write_text(manifest_content, encoding="utf-8")
+            self._atomic_write(manifest_path, manifest_content)
 
             # Generate entry point
             entry_content = self._generate_entry_point(candidate)
             entry_path = agent_dir / "agent.py"
-            entry_path.write_text(entry_content, encoding="utf-8")
+            self._atomic_write(entry_path, entry_content)
 
             # Generate skill file
             skill_content = self._generate_skill_md(candidate)
             skill_path = agent_dir / "SKILL.md"
-            skill_path.write_text(skill_content, encoding="utf-8")
+            self._atomic_write(skill_path, skill_content)
         except OSError as e:
             # Only clean up if we created the directory — never delete
             # a pre-existing directory that we didn't create.
@@ -173,6 +175,26 @@ class AgentPromoter:
             manifest_path=str(manifest_path),
             entry_point_path=str(entry_path),
         )
+
+    @staticmethod
+    def _atomic_write(path: Path, content: str) -> None:
+        """Write *content* to *path* atomically via temp file + os.replace.
+
+        Prevents corrupted files if the process crashes mid-write.
+        """
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(path.parent), prefix=".promo-", suffix=".tmp",
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            os.replace(tmp_path, str(path))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _generate_manifest(
         self, candidate: PromotionCandidate

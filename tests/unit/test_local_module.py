@@ -1343,8 +1343,7 @@ class TestCLI:
             tags=["docs"],
         )
         official = SourceEntry(name="official", type="git", url="https://example.com/r.git")
-        mock_sources.list_sources.return_value = [official]
-        mock_sources._load_source_index.return_value = [index_entry]
+        mock_sources.search_agents.return_value = [(official, index_entry)]
         mock_loader = MagicMock()
 
         with patch(

@@ -29,6 +29,9 @@ from .sources import SourceManager
 
 logger = logging.getLogger(__name__)
 
+# Valid agent name pattern: starts with alphanumeric, then alphanumeric/dot/hyphen/underscore
+_AGENT_NAME_RE = r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+
 
 class AgentNotFoundError(Exception):
     """Raised when an agent is not found in any configured source."""
@@ -99,7 +102,7 @@ class GitInstaller:
         """
         # 0. Validate agent name (prevent path traversal)
         import re
-        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$", agent_name):
+        if not re.match(_AGENT_NAME_RE, agent_name):
             raise InstallationError(
                 f"Invalid agent name: '{agent_name}'. "
                 "Must start with alphanumeric and contain only "
@@ -217,7 +220,7 @@ class GitInstaller:
         """
         # Validate agent name (prevent path traversal)
         import re
-        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$", agent_name):
+        if not re.match(_AGENT_NAME_RE, agent_name):
             raise InstallationError(
                 f"Invalid agent name: '{agent_name}'. "
                 "Must start with alphanumeric and contain only "
@@ -429,9 +432,16 @@ class GitInstaller:
         venv_path = self._venvs_dir / agent_name
         self._venvs_dir.mkdir(parents=True, exist_ok=True)
 
-        # Remove existing venv if present
+        # Remove existing venv if present (guard against symlinks escaping venvs_dir)
         if venv_path.exists():
-            shutil.rmtree(venv_path)
+            resolved = venv_path.resolve()
+            if resolved.is_relative_to(self._venvs_dir.resolve()):
+                shutil.rmtree(venv_path)
+            else:
+                logger.warning(
+                    "Skipping removal of venv_path outside allowed directory: %s",
+                    resolved,
+                )
 
         try:
             # Create venv with uv
@@ -440,21 +450,32 @@ class GitInstaller:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await proc.communicate()
+            try:
+                _, stderr = await proc.communicate()
+            except BaseException:
+                proc.kill()
+                await proc.wait()
+                raise
 
             if proc.returncode != 0:
                 logger.warning("uv venv failed for %s: %s", agent_name, stderr.decode())
                 shutil.rmtree(venv_path, ignore_errors=True)
                 return None
 
-            # Install the agent package into the venv
+            # Install the agent package into the venv (non-editable to avoid
+            # relative-path dependency breakage and cache-cleanup fragility).
             proc = await asyncio.create_subprocess_exec(
-                "uv", "pip", "install", "-e", str(agent_dir),
+                "uv", "pip", "install", str(agent_dir),
                 "--python", str(venv_path / "bin" / "python"),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await proc.communicate()
+            try:
+                _, stderr = await proc.communicate()
+            except BaseException:
+                proc.kill()
+                await proc.wait()
+                raise
 
             if proc.returncode != 0:
                 logger.warning("uv pip install failed for %s: %s", agent_name, stderr.decode())
@@ -501,7 +522,12 @@ class GitInstaller:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await proc.communicate()
+        try:
+            _, stderr = await proc.communicate()
+        except BaseException:
+            proc.kill()
+            await proc.wait()
+            raise
         if proc.returncode != 0:
             raise InstallationError(
                 f"git {' '.join(args)} failed (rc={proc.returncode}): "
@@ -517,7 +543,12 @@ class GitInstaller:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await proc.communicate()
+        except BaseException:
+            proc.kill()
+            await proc.wait()
+            raise
         if proc.returncode != 0:
             raise InstallationError(
                 f"git {' '.join(args)} failed (rc={proc.returncode}): "

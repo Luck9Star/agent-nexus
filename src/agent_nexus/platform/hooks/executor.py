@@ -42,17 +42,34 @@ class HookExecutor:
     Hooks are run sequentially for a given event. If a hook with
     ``block_on_failure=True`` fails, remaining hooks are skipped and
     the aggregated result is marked as blocked.
+
+    Security: COMMAND hooks are restricted to an allowlist of base
+    commands (the first token after shell splitting).  By default the
+    allowlist is empty, meaning all COMMAND hooks are rejected.  Pass
+    ``allowed_commands`` to permit specific commands (e.g. ``["git",
+    "npm"]``).
     """
 
-    def __init__(self, hooks: list[HookDefinition] | None = None) -> None:
+    def __init__(
+        self,
+        hooks: list[HookDefinition] | None = None,
+        *,
+        allowed_commands: list[str] | set[str] | None = None,
+    ) -> None:
         self._hooks: list[HookDefinition] = hooks or []
+        self._allowed_commands: set[str] = set(allowed_commands or [])
 
     # ------------------------------------------------------------------
     # Construction helpers
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_yaml(cls, yaml_path: Path) -> HookExecutor:
+    def from_yaml(
+        cls,
+        yaml_path: Path,
+        *,
+        allowed_commands: list[str] | set[str] | None = None,
+    ) -> HookExecutor:
         """Load hooks from a hooks.yaml file.
 
         Expected format::
@@ -70,7 +87,7 @@ class HookExecutor:
         exist or cannot be parsed.
         """
         if not yaml_path.exists():
-            return cls(hooks=[])
+            return cls(hooks=[], allowed_commands=allowed_commands or [])
 
         try:
             import yaml  # noqa: F811
@@ -112,7 +129,7 @@ class HookExecutor:
                         exc_info=True,
                     )
 
-        return cls(hooks=hooks)
+        return cls(hooks=hooks, allowed_commands=allowed_commands or [])
 
     # ------------------------------------------------------------------
     # Query helpers
@@ -226,7 +243,10 @@ class HookExecutor:
                 error="COMMAND hook missing 'command' field",
             )
 
-        stdin_data = json.dumps(context).encode("utf-8")
+        # Security: validate the base command against the allowlist.
+        # The allowlist is empty by default, which means COMMAND hooks
+        # are rejected unless the platform operator explicitly allows
+        # specific commands.
         try:
             args = shlex.split(hook.command)
         except ValueError as exc:
@@ -237,6 +257,22 @@ class HookExecutor:
                 error=f"Malformed command string: {exc}",
                 duration_ms=0.0,
             )
+        if not args:
+            return HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error="COMMAND hook has empty command after parsing",
+            )
+        if self._allowed_commands and args[0] not in self._allowed_commands:
+            return HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error=f"COMMAND hook base command '{args[0]}' not in allowlist",
+            )
+
+        stdin_data = json.dumps(context).encode("utf-8")
         timeout = hook.timeout_seconds
 
         start = time.monotonic()

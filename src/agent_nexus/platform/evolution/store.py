@@ -173,7 +173,15 @@ class EvolutionStore:
     # ------------------------------------------------------------------
 
     def save_skill_record(self, record: SkillRecord) -> None:
-        """Insert or replace a skill record."""
+        """Insert a skill record, or update its metadata on ID conflict.
+
+        On conflict (same ``id``), metadata fields (name, version,
+        lineage, directory, is_active) are updated from the new record,
+        but **quality counters** (total_selections, total_applied,
+        total_completions, total_fallbacks) are **preserved** — they
+        are managed atomically via :meth:`increment_counters` and
+        :meth:`record_analysis`.
+        """
         with self._conn(immediate=True) as conn:
             lin = record.lineage
             snapshot_json = json.dumps(
@@ -483,6 +491,39 @@ class EvolutionStore:
                 }
                 for r in rows
             ]
+
+    def get_judgments_batch(
+        self, skill_ids: set[str], limit_per_skill: int = 50
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Load recent judgments for multiple skills in one query.
+
+        Returns ``{skill_id: [judgment_dict, ...]}``.
+        """
+        if not skill_ids:
+            return {}
+        placeholders = ",".join("?" * len(skill_ids))
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT id, analysis_id, skill_id, selected, applied, "
+                f"completed, fell_back FROM skill_judgments "
+                f"WHERE skill_id IN ({placeholders}) "
+                f"ORDER BY rowid DESC",
+                tuple(skill_ids),
+            ).fetchall()
+        result: dict[str, list[dict[str, Any]]] = {sid: [] for sid in skill_ids}
+        for r in rows:
+            sid = r[2]
+            if len(result[sid]) < limit_per_skill:
+                result[sid].append({
+                    "id": r[0],
+                    "analysis_id": r[1],
+                    "skill_id": sid,
+                    "selected": bool(r[3]),
+                    "applied": bool(r[4]),
+                    "completed": bool(r[5]),
+                    "fell_back": bool(r[6]),
+                })
+        return result
 
     # ------------------------------------------------------------------
     # Context Budget Log

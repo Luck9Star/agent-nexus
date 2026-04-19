@@ -109,6 +109,12 @@ class SubtaskController:
         Returns results in the same order as input coroutines.
         Failed tasks return exceptions (don't raise) -- caller decides.
 
+        Note: tasks that have not yet started are skipped when an earlier
+        task fails, to avoid unnecessary resource consumption.  Already-
+        running tasks continue to completion since their partial results
+        may still be valuable to the caller (e.g. parallel research phase
+        in composite workflows).
+
         Args:
             coros: List of coroutines to execute.
 
@@ -122,15 +128,26 @@ class SubtaskController:
 
         semaphore = asyncio.Semaphore(self._config.max_parallel)
         results: list[Any] = [None] * len(coros)
+        failed = asyncio.Event()
 
         async def _guarded(index: int, coro: Coroutine[Any, Any, Any]) -> None:
             async with semaphore:
+                # If another task already failed, skip this one to avoid
+                # consuming IPC / subprocess resources for work that will
+                # be discarded.  Already-running tasks are NOT cancelled
+                # because their partial results may be useful.
+                if failed.is_set():
+                    results[index] = RuntimeError(
+                        "cancelled: another parallel task failed"
+                    )
+                    return
                 try:
                     results[index] = await coro
                 except BaseException as exc:
                     if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError)):
                         raise
                     results[index] = exc
+                    failed.set()
 
         await asyncio.gather(
             *(_guarded(i, c) for i, c in enumerate(coros))

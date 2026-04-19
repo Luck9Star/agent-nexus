@@ -164,7 +164,7 @@ class TestRunParallel:
 
     @pytest.mark.asyncio
     async def test_mixed_success_and_failure(self):
-        ctrl = SubtaskController(SubtaskConfig(max_parallel=2))
+        ctrl = SubtaskController(SubtaskConfig(max_parallel=3))
 
         async def ok():
             return "good"
@@ -175,7 +175,58 @@ class TestRunParallel:
         results = await ctrl.run_parallel([ok(), bad(), ok()])
         assert results[0] == "good"
         assert isinstance(results[1], ValueError)
-        assert results[2] == "good"
+        # results[2] may be "good" or RuntimeError depending on
+        # whether it started before bad() set the failed flag.
+        assert results[2] == "good" or isinstance(results[2], RuntimeError)
+
+    @pytest.mark.asyncio
+    async def test_unstarted_tasks_cancelled_on_failure(self):
+        """When max_parallel=1, tasks waiting in queue are cancelled after failure."""
+        ctrl = SubtaskController(SubtaskConfig(max_parallel=1))
+
+        async def fail():
+            raise RuntimeError("boom")
+
+        async def slow():
+            await asyncio.sleep(10)
+            return "should not reach"
+
+        results = await ctrl.run_parallel([fail(), slow()])
+        assert isinstance(results[0], RuntimeError)
+        # slow() never started because fail() set the failed flag first
+        assert isinstance(results[1], RuntimeError)
+        assert "cancelled" in str(results[1]).lower()
+
+    @pytest.mark.asyncio
+    async def test_running_tasks_not_cancelled_on_failure(self):
+        """Already-running tasks continue to completion even after another fails."""
+        ctrl = SubtaskController(SubtaskConfig(max_parallel=3))
+        started = asyncio.Event()
+        allow_finish = asyncio.Event()
+
+        async def blocker():
+            started.set()
+            await allow_finish.wait()
+            return "completed"
+
+        async def fail():
+            raise RuntimeError("boom")
+
+        async def ok():
+            return "good"
+
+        results_future = asyncio.ensure_future(
+            ctrl.run_parallel([blocker(), fail(), ok()])
+        )
+        # Wait for blocker to start
+        await started.wait()
+        # fail() may or may not have run yet; give it a chance
+        await asyncio.sleep(0.05)
+        # Let blocker finish
+        allow_finish.set()
+        results = await results_future
+        # blocker() was already running when fail() happened
+        assert results[0] == "completed"
 
     @pytest.mark.asyncio
     async def test_concurrency_limited(self):

@@ -21,11 +21,15 @@ import asyncio
 import json
 import logging
 import uuid
+from collections import deque
 from pathlib import Path
 from typing import Any
 
 from agent_nexus.models.ipc import AgentToPlatformType
-from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
+from agent_nexus.platform.gateway.tool_adapter import (
+    McpToolAdapter,
+    remove_lock,
+)
 from agent_nexus.platform.orchestration.dsl import OrchestrationDefinition
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
@@ -186,6 +190,15 @@ class PlatformRouter:
                     break
         finally:
             ctx.close()
+            # Clean up route locks for agents that are no longer running,
+            # preventing unbounded growth of _route_locks dict.
+            stale = [
+                name for name in self._route_locks
+                if self._pm.get_agent(name) is None
+            ]
+            for name in stale:
+                self._route_locks.pop(name, None)
+                remove_lock(name)
 
         # 4. Build final result
         success = completed == total
@@ -225,7 +238,7 @@ class PlatformRouter:
         handle = self._pm.get_agent(atomic_name)
         if handle is None:
             self._route_locks.pop(atomic_name, None)
-            McpToolAdapter.remove_lock(atomic_name)
+            remove_lock(atomic_name)
             return {
                 "output": "",
                 "success": False,
@@ -234,7 +247,7 @@ class PlatformRouter:
 
         if not handle.is_alive:
             self._route_locks.pop(atomic_name, None)
-            McpToolAdapter.remove_lock(atomic_name)
+            remove_lock(atomic_name)
             return {
                 "output": "",
                 "success": False,
@@ -549,27 +562,33 @@ class PlatformRouter:
         insert tasks in topological order.
 
         Uses Kahn's algorithm (BFS).  Tasks with no blocked_by are roots.
+        Time complexity: O(V + E) using deque + reverse adjacency map.
         """
         task_map = {t.id: t for t in tasks}
         in_degree: dict[str, int] = {t.id: 0 for t in tasks}
+
+        # Build reverse adjacency: dep_id -> list of task IDs that depend on it
+        dependents: dict[str, list[str]] = {t.id: [] for t in tasks}
         for t in tasks:
             for dep_id in t.blocked_by:
                 if dep_id in in_degree:
                     in_degree[t.id] += 1
+                    dependents[dep_id].append(t.id)
 
-        queue = [tid for tid, deg in in_degree.items() if deg == 0]
+        queue: deque[str] = deque(
+            tid for tid, deg in in_degree.items() if deg == 0
+        )
         sorted_tasks: list[Any] = []
 
         while queue:
-            tid = queue.pop(0)
+            tid = queue.popleft()
             task = task_map.get(tid)
             if task is not None:
                 sorted_tasks.append(task)
-            for t in tasks:
-                if tid in t.blocked_by:
-                    in_degree[t.id] -= 1
-                    if in_degree[t.id] == 0:
-                        queue.append(t.id)
+            for dependent_id in dependents[tid]:
+                in_degree[dependent_id] -= 1
+                if in_degree[dependent_id] == 0:
+                    queue.append(dependent_id)
 
         # If cycle prevents full sort, append remaining tasks so the
         # caller still gets all of them (add_task will detect the cycle).

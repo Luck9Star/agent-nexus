@@ -375,7 +375,7 @@ class AgentSupervisor:
         # Strategy 3: fallback to python3 <agent_dir>/main.py
         agent_dir = self._resolve_agent_dir(agent_name)
         main_py = agent_dir / "main.py"
-        if main_py.exists():
+        if main_py.exists() and not main_py.is_symlink():
             return ["python3", str(main_py)]
 
         return ["uvx", agent_name]

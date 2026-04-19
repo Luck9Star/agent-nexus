@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -137,9 +138,14 @@ def run_agent(
 
 
 def _get_config_dir() -> Path:
-    """Resolve the platform config directory."""
-    from agent_nexus.platform.config.defaults import DEFAULT_CONFIG_DIR
+    """Resolve the platform config directory.
 
+    Priority: ``AGENT_NEXUS_HOME`` env var > built-in default.
+    """
+    env = os.environ.get("AGENT_NEXUS_HOME")
+    if env:
+        return Path(env)
+    from agent_nexus.platform.config.defaults import DEFAULT_CONFIG_DIR
     return DEFAULT_CONFIG_DIR
 
 
@@ -267,27 +273,18 @@ async def _search(query: str) -> None:
     """
     _loader, lockfile, sources, _config_dir = _init_managers()
 
-    # Search across all source indexes
+    # Search across all source indexes using the public API
     results: list[dict] = []
-    for source in sources.list_sources():
-        index = sources._load_source_index(source)
-        if index is None:
-            continue
-        for entry in index:
-            # Match against name, description, or tags
-            searchable = " ".join(
-                [entry.name, entry.description] + entry.tags
-            ).lower()
-            if query.lower() in searchable:
-                results.append(
-                    {
-                        "name": entry.name,
-                        "version": entry.version,
-                        "type": entry.type.value,
-                        "description": entry.description,
-                        "source": source.name,
-                    }
-                )
+    for source, entry in sources.search_agents(query):
+        results.append(
+            {
+                "name": entry.name,
+                "version": entry.version,
+                "type": entry.type.value,
+                "description": entry.description,
+                "source": source.name,
+            }
+        )
 
     if not results:
         typer.echo(f"No agents found matching '{query}'.")

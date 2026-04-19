@@ -172,7 +172,8 @@ class IPCProtocol:
 
     # Maximum number of buffered messages.  Prevents unbounded memory growth
     # when an agent sends many messages that are not consumed promptly.
-    _MAX_PEEK_BUFFER_SIZE: int = 1_048_576  # ~1M messages
+    # 10K messages with ~1KB each = ~10MB ceiling.
+    _MAX_PEEK_BUFFER_SIZE: int = 10_000
 
     def __init__(self, stream: IPCStream) -> None:
         self._stream = stream

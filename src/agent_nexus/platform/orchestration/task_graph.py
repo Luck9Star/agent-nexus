@@ -480,8 +480,12 @@ class TaskGraph:
             return TaskGraphSnapshot(tasks=tasks, parallel_groups=group_ids)
 
     def clear(self) -> None:
-        """Clear all tasks (for testing)."""
-        with self._conn() as conn:
+        """Clear all tasks (for testing).
+
+        Uses ``immediate=True`` to serialize concurrent writers under
+        WAL mode and prevent stale snapshots during the delete.
+        """
+        with self._conn(immediate=True) as conn:
             conn.execute("DELETE FROM task_dependencies")
             conn.execute("DELETE FROM tasks")
 

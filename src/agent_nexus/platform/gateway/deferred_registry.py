@@ -272,7 +272,7 @@ class DeferredAgentRegistry:
             response = await handle.ipc.receive_until_result(timeout=10.0)
 
             if isinstance(response.output, list):
-                return response.output
+                return self._validate_tool_schemas(response.output)
 
             # Fallback: parse content as JSON list
             import json
@@ -281,7 +281,7 @@ class DeferredAgentRegistry:
                 try:
                     parsed = json.loads(response.content)
                     if isinstance(parsed, list):
-                        return parsed
+                        return self._validate_tool_schemas(parsed)
                 except json.JSONDecodeError:
                     logger.debug(
                         "Agent '%s' tool response not valid JSON: %.200s",
@@ -304,6 +304,36 @@ class DeferredAgentRegistry:
             info.name,
         )
         return [self._fallback_chat_tool(info)]
+
+    @staticmethod
+    def _validate_tool_schemas(schemas: list[dict]) -> list[dict]:
+        """Filter out malformed tool schema entries.
+
+        Each entry must be a dict with at least a ``name`` key and an
+        ``inputSchema`` key (or be skipped).  This prevents
+        nonsensical entries (empty dicts, strings, None) from being
+        registered as MCP tools.
+        """
+        valid: list[dict] = []
+        for schema in schemas:
+            if not isinstance(schema, dict):
+                logger.warning(
+                    "Skipping non-dict tool schema entry: %s",
+                    type(schema).__name__,
+                )
+                continue
+            name = schema.get("name")
+            if not name or not isinstance(name, str):
+                logger.warning("Skipping tool schema with missing/invalid name")
+                continue
+            if "inputSchema" not in schema:
+                logger.warning(
+                    "Tool schema '%s' missing inputSchema, injecting default",
+                    name,
+                )
+                schema["inputSchema"] = {"type": "object", "properties": {}}
+            valid.append(schema)
+        return valid
 
     @staticmethod
     def _fallback_chat_tool(info: AgentInfo) -> dict:

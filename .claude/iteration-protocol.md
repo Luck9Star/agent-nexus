@@ -1,0 +1,116 @@
+# 迭代协议
+
+本文件定义每一轮代码质量迭代的 SOP。所有迭代必须严格遵循。
+需要加载与使用Skill： 
+- /pua:p9
+- /superpowers:using-superpowers 
+- /code-review-expert
+- 在下午 14 点至 18 点之间，需要使用/orch 2技能限制并发上限，其余时间可以尝试/orch 3或者4。
+
+## 迭代方向
+
+每一轮迭代的核心流程：**研究项目缺陷 → 审核发现的问题 → 迭代修复**。
+
+### 缺陷来源
+- 代码评审（使用 /code-review-expert）
+- Bug 模式扫描（按本文件的优先级队列逐个扫描）
+- 测试失败分析（回归测试暴露的问题）
+- Pyright / 类型检查诊断
+- 安全审计（import 绕过、eval/exec 绕过、sandbox escape）
+
+### 每轮迭代目标
+1. **发现问题**：通过扫描或评审识别一类缺陷
+2. **评估问题**：分类严重程度（P0-P3），确认影响范围
+3. **修复问题**：批量修复该类别的所有命中项（不是只修当前文件）
+4. **验证修复**：全量测试 + 回归测试确认修复有效且无副作用
+
+## 退出条件（满足 ALL 即停，不需要跑满 200 轮）
+
+- [x] 全库 `grep -r "except.*:\s*pass" src/` 无静默异常（bare `pass` 无日志）
+- [x] 全库 `grep -rn "TODO\|FIXME\|HACK" src/` 清零
+- [x] POC 文档中每个 Phase 的模块实现对照无遗漏（对照 `docs/` 目录）
+- [x] `uv run pytest tests/ -x -q` 全绿
+- [x] 无 HIGH/CRITICAL Pyright 诊断
+- [x] 全库无已知安全绕过向量（import / function / attribute / regex 四规则覆盖）
+
+## 每轮迭代 SOP（严格遵守顺序）
+
+### Phase 1: 缺陷研究（按模式逐个扫描，禁止随机审计）
+
+1. 从优先级队列选一个未清的模式：
+   - P0: 安全（import 绕过、eval/exec 绕过、sandbox escape、命令注入）
+   - P1: 数据一致性（FK 约束、counter race、TOCTOU）
+   - P2: 竞态条件（lock 缺失、async race、event-loop 生命周期）
+   - P3: 静默失败（bare `except: pass`、吞错误）
+   - P4: 类型安全（Pyright 诊断、Optional 解引用）
+   - P5: 代码卫生（TODO/FIXME、dead code、unused imports、重复模式）
+   - P6: 性能（N+1 查询、O(n²) 算法、无界内存）
+   - P7: API 设计（私有方法暴露、不可测试的硬编码、缺少路径守卫）
+2. 全库 grep 该模式的所有出现位置
+3. 输出完整命中列表，标注已处理 / 待处理
+4. 评估每个命中的严重程度和影响范围
+
+### Phase 2: 批量修复
+
+5. 一次修复 ALL 命中项（不是只修当前看到的那个文件）
+6. 每个修复必须有对应回归测试
+7. 如果修改了 Pydantic model 的 field 约束（如 min_length、ge、pattern），必须 grep 所有构造该 model 的代码，确认构造参数兼容
+
+### Phase 3: 回归验证
+
+8. `uv run pytest tests/ -x -q` 全绿才能继续
+9. 如果修复引入新测试失败：
+   - 先分析失败原因
+   - 如果是修复本身有问题 → 回退修复，重新设计
+   - 如果是调用方依赖旧行为 → 更新调用方 + 加回归测试
+   - 禁止跳过失败继续下一轮
+
+### Phase 4: 标记完成
+
+10. 该模式标记为 "已清"，记录在下方进度区
+11. 下一轮选择新的未清模式
+
+## 反模式（禁止）
+
+- 修一个模块的 silent except，不 grep 其他模块的同模式
+- 给 Pydantic field 加约束（min_length、ge、pattern）但不检查所有构造该 model 的代码
+- 一轮改 5 个不相关的 bug（应该一轮只做一种模式的全库修复）
+- 修完不跑全量测试就 declare done
+- 在测试文件里按迭代编号命名（test_iter88_xxx → 禁止）
+- 重复修复同一模式而不标记已清（导致 iter80/81/83 TOCTOU 三轮重复）
+- 随机审计不相关的代码（必须按优先级队列逐个模式扫）
+
+## 测试规则
+
+- 测试文件按模块命名：`test_{module_name}.py` 或 `test_{module_name}_models.py`
+- 新增测试放在对应模块测试文件的 `# iter{N} regression` 注释块内
+- Mock read/readline 返回值必须用 `b""`，防止无限循环
+- IPython InteractiveShell 用 session-scoped fixture，不 per-test 创建
+- 测试内存限制：单测文件执行不超过 30 秒，全量测试不超过 180 秒
+- 测试时候需要注意 Python 进程内存使用量，内存占用过大可以认为有内存溢出风险。
+
+## 进度追踪
+
+在下方记录已清的模式。每清一个模式，更新日期和范围。
+
+### 已清模式
+
+| 模式 | 范围 | 清完日期 | 轮次 |
+|------|------|---------|------|
+| ImportRule 相对导入绕过 | security_rules.py | 2026-04-19 | iter88 |
+| SecurityViolation field 约束 | runtime.py + security_checker.py | 2026-04-19 | iter88 |
+| Dead-agent 工具名残留 | gateway.py | 2026-04-19 | iter88 |
+| Deferred registry 空 list falsy | deferred_registry.py | 2026-04-19 | iter88 |
+| LockfileEntry hex 大小写 | distribution.py | 2026-04-19 | iter88 |
+| silent except 全库扫描 | src/ 全部（0 命中，含multiline清理路径） | 2026-04-19 | iter89 |
+| TODO/FIXME/HACK 全库清理 | src/ 全部（0 命中） | 2026-04-19 | iter89 |
+| Pyright HIGH 诊断清零 | src/ 全部（0 errors） | 2026-04-19 | iter89 |
+| POC 文档对齐检查 | docs/09 vs src/，checkbox+项目结构同步 | 2026-04-19 | iter89 |
+| 全量代码评审修复（18项） | P0:2 + P1:6 + P2:6 + P3:4 | 2026-04-19 | code-review |
+| IPC exception handler _registered_tool_names 泄漏 | gateway.py _invoke | 2026-04-19 | iter90 |
+| subprocess FD 泄漏（4处 communicate() 无 cleanup） | installer.py _run_git/_run_git_capture/_create_venv | 2026-04-19 | iter90 |
+| P2 并发安全性分析（ipc/router/task_graph） | 确认 asyncio 单线程模型下安全，无需修复 | 2026-04-19 | iter90 |
+
+### 待清模式
+
+（全部已清）

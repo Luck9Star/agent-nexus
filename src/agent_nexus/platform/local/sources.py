@@ -120,6 +120,26 @@ class SourceManager:
             raise
         logger.debug("Sources saved to %s", self._path)
 
+    def search_agents(self, query: str) -> list[tuple[SourceEntry, IndexEntry]]:
+        """Search all source indexes for agents matching *query*.
+
+        Matches against agent name, description, and tags (case-insensitive).
+
+        Returns a list of ``(source, index_entry)`` tuples for each match.
+        """
+        results: list[tuple[SourceEntry, IndexEntry]] = []
+        for source in self.list_sources():
+            index = self._load_source_index(source)
+            if index is None:
+                continue
+            for entry in index:
+                searchable = " ".join(
+                    [entry.name, entry.description] + entry.tags
+                ).lower()
+                if query.lower() in searchable:
+                    results.append((source, entry))
+        return results
+
     def resolve_agent_source(self, agent_name: str) -> tuple[SourceEntry, str] | None:
         """Find which source contains *agent_name*.
 

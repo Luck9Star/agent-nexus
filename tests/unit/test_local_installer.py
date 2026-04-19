@@ -342,3 +342,72 @@ class TestCreateVenvCleanupOnFailure:
 
         assert result is None
         assert not venv_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Regression: subprocess FD cleanup on proc.communicate() exception
+# ---------------------------------------------------------------------------
+
+
+class TestSubprocessFDLeakFix:
+    """proc.communicate() can raise (CancelledError, transport error).
+    Without cleanup, the subprocess is orphaned (FD leak).
+
+    Fix: wrap communicate() in try/except with proc.kill() + proc.wait().
+    """
+
+    @pytest.mark.asyncio
+    async def test_run_git_kills_proc_on_communicate_error(self) -> None:
+        """_run_git kills and waits for the subprocess if communicate() raises."""
+        proc_mock = MagicMock()
+        proc_mock.communicate = AsyncMock(side_effect=asyncio.CancelledError())
+        proc_mock.kill = MagicMock()
+        proc_mock.wait = AsyncMock()
+
+        with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+            with pytest.raises(asyncio.CancelledError):
+                await GitInstaller._run_git(["status"], Path("/tmp"))
+
+        proc_mock.kill.assert_called_once()
+        proc_mock.wait.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_git_capture_kills_proc_on_communicate_error(self) -> None:
+        """_run_git_capture kills and waits for the subprocess if communicate() raises."""
+        proc_mock = MagicMock()
+        proc_mock.communicate = AsyncMock(side_effect=OSError("transport"))
+        proc_mock.kill = MagicMock()
+        proc_mock.wait = AsyncMock()
+
+        with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+            with pytest.raises(OSError, match="transport"):
+                await GitInstaller._run_git_capture(["rev-parse", "HEAD"], Path("/tmp"))
+
+        proc_mock.kill.assert_called_once()
+        proc_mock.wait.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_venv_kills_proc_on_communicate_error(self, tmp_path: Path) -> None:
+        """_create_venv kills and waits for the subprocess if communicate() raises.
+
+        CancelledError is BaseException (not Exception) so it bypasses the
+        outer except Exception in _create_venv and propagates up — but the
+        inner handler still kills the proc before re-raising.
+        """
+        inst, _, _ = _make_installer(tmp_path)
+        agent_dir = tmp_path / "agents" / "test-agent"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "pyproject.toml").write_text("[project]\nname='t'\nversion='0'\n")
+
+        proc_mock = MagicMock()
+        proc_mock.communicate = AsyncMock(side_effect=asyncio.CancelledError())
+        proc_mock.kill = MagicMock()
+        proc_mock.wait = AsyncMock()
+
+        with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+            # CancelledError bypasses outer except Exception, propagates up
+            with pytest.raises(asyncio.CancelledError):
+                await inst._create_venv("test-agent", agent_dir)
+
+        proc_mock.kill.assert_called_once()
+        proc_mock.wait.assert_called_once()

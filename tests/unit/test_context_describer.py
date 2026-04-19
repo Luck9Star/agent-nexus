@@ -126,11 +126,21 @@ def _mock_store(
 
     store.get_ancestry.side_effect = mock_ancestry
 
-    # get_judgments_for_skill(skill_id, limit=N)
+    # get_judgments_for_skill(skill_id, limit=N) — legacy per-skill fetch
     def mock_judgments(skill_id: str, limit: int = 50) -> list[dict]:
         return judgments_map.get(skill_id, []) if judgments_map else []
 
     store.get_judgments_for_skill.side_effect = mock_judgments
+
+    # get_judgments_batch(skill_ids, limit_per_skill) — batch fetch
+    def mock_judgments_batch(
+        skill_ids: set[str], limit_per_skill: int = 50,
+    ) -> dict[str, list[dict]]:
+        if not judgments_map:
+            return {}
+        return {sid: judgments_map.get(sid, []) for sid in skill_ids}
+
+    store.get_judgments_batch.side_effect = mock_judgments_batch
 
     return store
 

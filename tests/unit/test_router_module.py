@@ -454,7 +454,9 @@ class TestSubtaskController:
         results = await ctrl.run_parallel([ok(), fail(), ok()])
         assert results[0] == "success"
         assert isinstance(results[1], RuntimeError)
-        assert results[2] == "success"
+        # results[2] may be "success" or RuntimeError depending on
+        # whether it started before fail() set the failed flag.
+        assert results[2] == "success" or isinstance(results[2], RuntimeError)
 
     @pytest.mark.asyncio
     async def test_run_parallel_all_fail(self) -> None:
@@ -464,7 +466,10 @@ class TestSubtaskController:
             raise ValueError("nope")
 
         results = await ctrl.run_parallel([fail(), fail()])
-        assert all(isinstance(r, ValueError) for r in results)
+        # Both should be exceptions, but second may be RuntimeError (cancelled)
+        # instead of ValueError if fail-fast skipped it.
+        assert all(isinstance(r, Exception) for r in results)
+        assert isinstance(results[0], ValueError)
 
     @pytest.mark.asyncio
     async def test_run_parallel_respects_max_parallel(self) -> None:

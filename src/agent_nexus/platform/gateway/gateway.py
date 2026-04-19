@@ -22,7 +22,11 @@ from fastmcp import FastMCP
 
 from agent_nexus.models.agent import AgentManifest
 from agent_nexus.platform.gateway.deferred_registry import DeferredAgentRegistry
-from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
+from agent_nexus.platform.gateway.tool_adapter import (
+    McpToolAdapter,
+    remove_all_locks,
+    remove_lock,
+)
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
 
 if TYPE_CHECKING:
@@ -239,8 +243,24 @@ class MCPGateway:
         """
         async with self._reg_lock:
             if agent_name in self._registered_agents:
-                logger.debug("Agent '%s' tools already registered, skipping", agent_name)
-                return
+                # Check if the agent process is still alive.  If not,
+                # clean up stale state so we can re-register fresh tools.
+                info = self._registry.get_agent_info(agent_name)
+                if info is not None and info.handle is not None and info.handle.is_alive:
+                    logger.debug(
+                        "Agent '%s' tools already registered and process alive, skipping",
+                        agent_name,
+                    )
+                    return
+                # Stale registration — clean up old tool names
+                logger.info(
+                    "Agent '%s' registered but process dead; cleaning up for re-registration",
+                    agent_name,
+                )
+                adapters = self._registry.get_tool_adapters(agent_name)
+                for ad in adapters:
+                    self._registered_tool_names.discard(ad.full_name)
+                self._registered_agents.discard(agent_name)
 
             info = self._registry.get_agent_info(agent_name)
             if info is None or info.tool_schemas is None:
@@ -271,11 +291,12 @@ class MCPGateway:
                         agent_name,
                         disambiguated,
                     )
-                    adapter.full_name = disambiguated
                     full_name = disambiguated
 
                 try:
-                    self._mcp.tool(self._make_tool_func(adapter))
+                    self._mcp.tool(
+                        self._make_tool_func(adapter, registered_name=full_name)
+                    )
                     self._registered_tool_names.add(full_name)
                     logger.debug(
                         "Registered gateway tool: %s", full_name
@@ -290,12 +311,21 @@ class MCPGateway:
 
             self._registered_agents.add(agent_name)
 
-    def _make_tool_func(self, adapter: McpToolAdapter) -> Any:
+    def _make_tool_func(
+        self, adapter: McpToolAdapter, *, registered_name: str | None = None,
+    ) -> Any:
         """Create an async callable that the FastMCP server can invoke.
 
         The returned function delegates to the McpToolAdapter which
         sends the request to the agent subprocess via IPC.
+
+        Args:
+            adapter: Tool adapter for the agent.
+            registered_name: Override name for FastMCP registration.
+                Used when disambiguation appends a numeric suffix.
+                If ``None``, uses ``adapter.full_name``.
         """
+        display_name = registered_name or adapter.full_name
 
         async def _invoke(**kwargs: Any) -> str:
             info = self._registry.get_agent_info(adapter.agent_name)
@@ -314,7 +344,7 @@ class MCPGateway:
                 adapters = self._registry.get_tool_adapters(adapter.agent_name)
                 for ad in adapters:
                     self._registered_tool_names.discard(ad.full_name)
-                McpToolAdapter.remove_lock(adapter.agent_name)
+                remove_lock(adapter.agent_name)
                 return f"Error: agent '{adapter.agent_name}' process has died"
 
             try:
@@ -326,6 +356,11 @@ class MCPGateway:
                 # internally — reaching here means a transport-layer
                 # failure (BrokenPipeError, IncompleteReadError, etc).
                 self._registered_agents.discard(adapter.agent_name)
+                # Clean up tool names so re-registration does not
+                # trigger false collision-detection suffixes.
+                adapters = self._registry.get_tool_adapters(adapter.agent_name)
+                for ad in adapters:
+                    self._registered_tool_names.discard(ad.full_name)
                 return (
                     f"Error: IPC failed for agent "
                     f"'{adapter.agent_name}': {exc}"
@@ -335,8 +370,8 @@ class MCPGateway:
             return f"Error: {result.get('error', 'unknown failure')}"
 
         # Set function metadata for FastMCP schema generation
-        _invoke.__name__ = adapter.full_name
-        _invoke.__doc__ = adapter.description or f"Call {adapter.full_name}"
+        _invoke.__name__ = display_name
+        _invoke.__doc__ = adapter.description or f"Call {display_name}"
 
         return _invoke
 
@@ -378,7 +413,7 @@ class MCPGateway:
         """
         logger.info("Stopping MCP Gateway and all agents")
         await self._pm.stop_all()
-        McpToolAdapter.remove_all_locks()
+        remove_all_locks()
 
     # ------------------------------------------------------------------
     # Properties
