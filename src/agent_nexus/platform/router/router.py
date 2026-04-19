@@ -124,7 +124,16 @@ class PlatformRouter:
         definition = self._composite_defs.get(agent_name)
         if definition is not None:
             result = await self.route_composite(definition, message, conv_id)
-            return {"output": result.final_output, "success": result.success}
+            result_dict: dict[str, Any] = {
+                "output": result.final_output,
+                "success": result.success,
+            }
+            if not result.success:
+                if result.error:
+                    result_dict["error"] = result.error
+                if result.error_type:
+                    result_dict["error_type"] = result.error_type
+            return result_dict
 
         return await self.route_to_atomic(agent_name, message, conv_id)
 
@@ -257,10 +266,9 @@ class PlatformRouter:
             conversation_id: Conversation identifier.
 
         Returns:
-            Dict with ``output``, ``success``, and optionally ``error`` keys.
-
-        Raises:
-            KeyError: Agent not found in ProcessManager.
+            Dict with ``output``, ``success``, and optionally ``error`` and
+            ``error_type`` keys.  Agent-not-found and process-dead conditions
+            are returned as error dicts rather than raised exceptions.
         """
         handle = self._pm.get_agent(atomic_name)
         if handle is None:

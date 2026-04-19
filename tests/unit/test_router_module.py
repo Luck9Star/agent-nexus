@@ -1026,6 +1026,32 @@ class TestRegisterComposite:
         assert result["success"] is True
 
     @pytest.mark.asyncio
+    async def test_route_chat_composite_failure_forwards_error_fields(self) -> None:
+        """iter131 regression: failed composite must include error/error_type."""
+        pm = _make_process_manager()
+        router = PlatformRouter(process_manager=pm)
+        definition = _make_definition(agent_name="comp-agent")
+        router.register_composite("comp-agent", definition)
+
+        mock_result = WorkflowResult(
+            success=False,
+            final_output="",
+            error="Phase synthesis failed: timeout",
+            error_type="TimeoutError",
+            phase_results={},
+            total_phases=4,
+            completed_phases=2,
+        )
+        with patch.object(
+            router, "route_composite", new_callable=AsyncMock, return_value=mock_result
+        ):
+            result = await router.route_chat("comp-agent", "hello", conversation_id="c1")
+
+        assert result["success"] is False
+        assert result["error"] == "Phase synthesis failed: timeout"
+        assert result["error_type"] == "TimeoutError"
+
+    @pytest.mark.asyncio
     async def test_route_chat_routes_to_atomic_when_no_composite(self) -> None:
         """route_chat delegates to route_to_atomic when no composite is registered."""
         handle = _make_agent_handle(response_content="atomic response")
