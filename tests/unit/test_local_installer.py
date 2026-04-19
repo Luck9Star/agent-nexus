@@ -100,6 +100,49 @@ class TestInstallerInstall:
             assert entry is not None
             lf.add_entry_by_name.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_install_rollback_on_venv_failure(self, tmp_path: Path) -> None:
+        """When _create_venv fails after files are copied, rollback cleans up."""
+        inst, _, _ = _make_installer(tmp_path)
+        agent_dir = tmp_path / "cache" / "repos" / "abc" / "packages" / "test-agent"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        (agent_dir / "agent-manifest.yaml").write_text(
+            "name: test-agent\nversion: 1.0.0\ntype: atomic\n", encoding="utf-8"
+        )
+        (agent_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+
+        dest = inst._agents_dir / "test-agent"
+
+        with patch.object(inst, "_sparse_clone", new_callable=AsyncMock, return_value=agent_dir), \
+             patch.object(inst, "_validate_agent_package", return_value=[]), \
+             patch.object(inst, "_read_manifest", return_value=None), \
+             patch.object(inst, "_create_venv", new_callable=AsyncMock, side_effect=OSError("venv boom")), \
+             patch.object(inst, "_get_commit_sha", new_callable=AsyncMock, return_value="a" * 40):
+
+            with pytest.raises(OSError, match="venv boom"):
+                await inst.install("test-agent", source_url="https://example.com/repo.git")
+
+        # Rollback should have cleaned up the copied directory
+        assert not dest.exists(), "Rollback should remove copied agent directory"
+
+    @pytest.mark.asyncio
+    async def test_install_rollback_on_validation_failure(self, tmp_path: Path) -> None:
+        """When validation fails before copy, no files are left behind."""
+        inst, _, _ = _make_installer(tmp_path)
+        agent_dir = tmp_path / "cache" / "repos" / "abc" / "packages" / "test-agent"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+
+        dest = inst._agents_dir / "test-agent"
+
+        with patch.object(inst, "_sparse_clone", new_callable=AsyncMock, return_value=agent_dir), \
+             patch.object(inst, "_validate_agent_package", return_value=["missing SKILL.md"]):
+
+            with pytest.raises(InstallationError, match="validation failed"):
+                await inst.install("test-agent", source_url="https://example.com/repo.git")
+
+        # Validation fails before copytree, so dest should not exist
+        assert not dest.exists()
+
 
 # ---------------------------------------------------------------------------
 # uninstall
