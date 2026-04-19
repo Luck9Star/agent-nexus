@@ -477,3 +477,495 @@ class TestMalformedSnapshot:
         self._save_raw(store, "[1,2]")
         skills = store.get_active_skills()
         assert len(skills) == 3
+
+
+# ============================================================================
+# record_analysis skips judgments with None/empty skill_id
+# ============================================================================
+
+
+class TestRecordAnalysisSkipsBadSkillId:
+    """Lines 400-403: judgments with missing skill_id are silently skipped."""
+
+    def _seed_skill(self, store: EvolutionStore, skill_id: str) -> None:
+        store.save_skill_record(
+            SkillRecord(
+                id=skill_id,
+                name="test-skill",
+                version="1.0.0",
+                lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+                directory="skills/test",
+                is_active=True,
+                first_seen=datetime.now(timezone.utc),
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
+
+    def test_none_skill_id_skipped(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s-valid")
+
+        analysis_id = store.record_analysis(
+            task_id="t1",
+            agent_name="tester",
+            analysis_text="check",
+            judgments=[
+                {"skill_id": None, "selected": True},
+                {"skill_id": "s-valid", "selected": True},
+            ],
+        )
+
+        # Only the valid judgment should appear under this analysis
+        analyses = store.get_analyses_for_task("t1")
+        assert len(analyses) == 1
+        assert len(analyses[0]["judgments"]) == 1
+        assert analyses[0]["judgments"][0]["skill_id"] == "s-valid"
+
+    def test_empty_string_skill_id_skipped(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s-valid")
+
+        store.record_analysis(
+            task_id="t2",
+            agent_name="tester",
+            analysis_text="check",
+            judgments=[
+                {"skill_id": "", "selected": True},
+                {"skill_id": "s-valid", "applied": True},
+            ],
+        )
+
+        analyses = store.get_analyses_for_task("t2")
+        assert len(analyses[0]["judgments"]) == 1
+        assert analyses[0]["judgments"][0]["skill_id"] == "s-valid"
+
+    def test_missing_skill_id_key_skipped(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s-valid")
+
+        store.record_analysis(
+            task_id="t3",
+            agent_name="tester",
+            analysis_text="check",
+            judgments=[
+                {"selected": True},  # no skill_id key at all
+                {"skill_id": "s-valid", "selected": True},
+            ],
+        )
+
+        analyses = store.get_analyses_for_task("t3")
+        assert len(analyses[0]["judgments"]) == 1
+
+    def test_all_invalid_skill_ids_no_judgments(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+
+        analysis_id = store.record_analysis(
+            task_id="t4",
+            agent_name="tester",
+            analysis_text="check",
+            judgments=[
+                {"skill_id": None},
+                {"skill_id": ""},
+                {"selected": True},
+            ],
+        )
+
+        analyses = store.get_analyses_for_task("t4")
+        assert len(analyses[0]["judgments"]) == 0
+
+
+# ============================================================================
+# evolve_skill with ID collision returns EvolveResult(success=False)
+# ============================================================================
+
+
+class TestEvolveSkillIdCollision:
+    """Lines 610-617: IntegrityError on duplicate ID triggers rollback."""
+
+    def _make_record(
+        self,
+        skill_id: str,
+        name: str = "test-skill",
+        origin: SkillOrigin = SkillOrigin.IMPORTED,
+        generation: int = 0,
+    ) -> SkillRecord:
+        return SkillRecord(
+            id=skill_id,
+            name=name,
+            version="1.0.0",
+            lineage=SkillLineage(origin=origin, generation=generation),
+            directory="skills/test",
+            is_active=True,
+            first_seen=datetime.now(timezone.utc),
+            last_updated=datetime.now(timezone.utc),
+        )
+
+    def test_collision_returns_failure(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+
+        # Insert a skill with a known ID
+        existing = self._make_record(skill_id="collision-id", name="original")
+        store.save_skill_record(existing)
+
+        # Try to evolve into the same ID
+        evolved = self._make_record(
+            skill_id="collision-id",
+            name="evolved",
+            origin=SkillOrigin.FIXED,
+            generation=1,
+        )
+        result = store.evolve_skill(evolved, parent_skill_ids=["collision-id"])
+
+        assert result.success is False
+        assert "collision" in result.error
+        assert result.new_record is None
+
+    def test_collision_no_lineage_parents_created(self, tmp_path: Path) -> None:
+        """When insert fails, no lineage parents should be created."""
+        store = _make_store(tmp_path)
+
+        parent = self._make_record(skill_id="parent-1", name="parent")
+        store.save_skill_record(parent)
+
+        # Insert another skill to use as a different parent reference
+        other = self._make_record(skill_id="other-1", name="other")
+        store.save_skill_record(other)
+
+        evolved = self._make_record(
+            skill_id="parent-1",  # collision
+            name="parent",
+            origin=SkillOrigin.DERIVED,
+            generation=1,
+        )
+        result = store.evolve_skill(evolved, parent_skill_ids=["other-1"])
+        assert result.success is False
+
+        # No lineage edges should exist for the colliding ID
+        children = store.get_children("other-1")
+        assert children == []
+
+
+# ============================================================================
+# get_analyses_for_task
+# ============================================================================
+
+
+class TestGetAnalysesForTask:
+    """Lines 450-461: returns analyses with judgments joined correctly."""
+
+    def _seed_skill(self, store: EvolutionStore, skill_id: str) -> None:
+        store.save_skill_record(
+            SkillRecord(
+                id=skill_id,
+                name="test-skill",
+                version="1.0.0",
+                lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+                directory="skills/test",
+                is_active=True,
+                first_seen=datetime.now(timezone.utc),
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
+
+    def test_empty_result(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        result = store.get_analyses_for_task("nonexistent-task")
+        assert result == []
+
+    def test_single_analysis_with_judgments(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s1")
+        self._seed_skill(store, "s2")
+
+        store.record_analysis(
+            task_id="t1",
+            agent_name="agent-a",
+            analysis_text="looks good",
+            evolution_suggestions=[{"action": "fix", "skill": "s1"}],
+            judgments=[
+                {"skill_id": "s1", "selected": True, "applied": True},
+                {"skill_id": "s2", "selected": True, "applied": False},
+            ],
+        )
+
+        analyses = store.get_analyses_for_task("t1")
+        assert len(analyses) == 1
+        a = analyses[0]
+        assert a["task_id"] == "t1"
+        assert a["agent_name"] == "agent-a"
+        assert a["analysis"] == "looks good"
+        assert a["evolution_suggestions"] == [{"action": "fix", "skill": "s1"}]
+        assert len(a["judgments"]) == 2
+        assert a["judgments"][0]["selected"] is True
+        assert a["judgments"][1]["applied"] is False
+
+    def test_multiple_analyses_same_task(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+
+        store.record_analysis(
+            task_id="t1", agent_name="a1", analysis_text="first pass",
+        )
+        store.record_analysis(
+            task_id="t1", agent_name="a2", analysis_text="second pass",
+        )
+
+        analyses = store.get_analyses_for_task("t1")
+        assert len(analyses) == 2
+        texts = {a["analysis"] for a in analyses}
+        assert texts == {"first pass", "second pass"}
+
+
+# ============================================================================
+# get_judgments_for_skill
+# ============================================================================
+
+
+class TestGetJudgmentsForSkill:
+    """Lines 463-485: limit, ordering (most recent first), boolean conversion."""
+
+    def _seed_skill(self, store: EvolutionStore, skill_id: str) -> None:
+        store.save_skill_record(
+            SkillRecord(
+                id=skill_id,
+                name="test-skill",
+                version="1.0.0",
+                lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+                directory="skills/test",
+                is_active=True,
+                first_seen=datetime.now(timezone.utc),
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
+
+    def test_empty_result(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        result = store.get_judgments_for_skill("no-such-skill")
+        assert result == []
+
+    def test_returns_judgments_for_correct_skill(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s1")
+        self._seed_skill(store, "s2")
+
+        store.record_analysis(
+            task_id="t1",
+            agent_name="tester",
+            analysis_text="check",
+            judgments=[
+                {"skill_id": "s1", "selected": True},
+                {"skill_id": "s2", "selected": True},
+            ],
+        )
+
+        judgments = store.get_judgments_for_skill("s1")
+        assert len(judgments) == 1
+        assert judgments[0]["skill_id"] == "s1"
+
+    def test_limit_parameter(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s1")
+
+        # Create 5 judgments via 5 analyses
+        for i in range(5):
+            store.record_analysis(
+                task_id=f"t{i}",
+                agent_name="tester",
+                analysis_text=f"analysis {i}",
+                judgments=[{"skill_id": "s1", "selected": True}],
+            )
+
+        judgments = store.get_judgments_for_skill("s1", limit=3)
+        assert len(judgments) == 3
+
+    def test_boolean_conversion(self, tmp_path: Path) -> None:
+        """SQLite stores booleans as 0/1; output must be Python bools."""
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s1")
+
+        store.record_analysis(
+            task_id="t1",
+            agent_name="tester",
+            analysis_text="check",
+            judgments=[
+                {
+                    "skill_id": "s1",
+                    "selected": True,
+                    "applied": True,
+                    "completed": False,
+                    "fell_back": False,
+                },
+            ],
+        )
+
+        j = store.get_judgments_for_skill("s1")
+        assert len(j) == 1
+        assert j[0]["selected"] is True
+        assert j[0]["applied"] is True
+        assert j[0]["completed"] is False
+        assert j[0]["fell_back"] is False
+
+    def test_ordering_most_recent_first(self, tmp_path: Path) -> None:
+        """Judgments should be returned in reverse insertion order (rowid DESC)."""
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s1")
+
+        # Record two analyses with judgments for the same skill
+        store.record_analysis(
+            task_id="t1",
+            agent_name="tester",
+            analysis_text="first",
+            judgments=[{"skill_id": "s1", "selected": True}],
+        )
+        store.record_analysis(
+            task_id="t2",
+            agent_name="tester",
+            analysis_text="second",
+            judgments=[{"skill_id": "s1", "selected": True}],
+        )
+
+        judgments = store.get_judgments_for_skill("s1")
+        assert len(judgments) == 2
+        # The most recent judgment (from t2) should be first
+        first_analysis_id = judgments[0]["analysis_id"]
+        second_analysis_id = judgments[1]["analysis_id"]
+        assert first_analysis_id != second_analysis_id
+
+
+# ============================================================================
+# get_ancestry with max_depth and cycle protection
+# ============================================================================
+
+
+class TestGetAncestry:
+    """Lines 633-673: max_depth limiting and cycle protection."""
+
+    def _make_record(self, skill_id: str, generation: int) -> SkillRecord:
+        return SkillRecord(
+            id=skill_id,
+            name=f"skill-{skill_id}",
+            version="1.0.0",
+            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=generation),
+            directory="skills/test",
+            is_active=True,
+            first_seen=datetime.now(timezone.utc),
+            last_updated=datetime.now(timezone.utc),
+        )
+
+    def test_linear_ancestry(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+
+        grandparent = self._make_record("gp", generation=0)
+        parent = SkillRecord(
+            id="p",
+            name="skill-p",
+            version="1.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED,
+                generation=1,
+                parent_skill_ids=["gp"],
+            ),
+            directory="skills/test",
+            is_active=True,
+            first_seen=datetime.now(timezone.utc),
+            last_updated=datetime.now(timezone.utc),
+        )
+        child = SkillRecord(
+            id="c",
+            name="skill-c",
+            version="1.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED,
+                generation=2,
+                parent_skill_ids=["p"],
+            ),
+            directory="skills/test",
+            is_active=True,
+            first_seen=datetime.now(timezone.utc),
+            last_updated=datetime.now(timezone.utc),
+        )
+
+        store.save_skill_record(grandparent)
+        store.evolve_skill(parent, parent_skill_ids=["gp"])
+        store.evolve_skill(child, parent_skill_ids=["p"])
+
+        ancestors = store.get_ancestry("c", max_depth=10)
+        assert len(ancestors) == 2
+        # Sorted by generation ascending (oldest first)
+        assert ancestors[0].id == "gp"
+        assert ancestors[1].id == "p"
+
+    def test_max_depth_limits_traversal(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+
+        # Build a chain: s0 <- s1 <- s2 <- s3 (s3 is the leaf)
+        prev_id = "s0"
+        store.save_skill_record(self._make_record("s0", generation=0))
+
+        for i in range(1, 4):
+            rec = SkillRecord(
+                id=f"s{i}",
+                name=f"skill-s{i}",
+                version="1.0.0",
+                lineage=SkillLineage(
+                    origin=SkillOrigin.FIXED,
+                    generation=i,
+                    parent_skill_ids=[prev_id],
+                ),
+                directory="skills/test",
+                is_active=True,
+                first_seen=datetime.now(timezone.utc),
+                last_updated=datetime.now(timezone.utc),
+            )
+            store.evolve_skill(rec, parent_skill_ids=[prev_id])
+            prev_id = f"s{i}"
+
+        # With max_depth=1, we should only get the immediate parent (s2)
+        ancestors = store.get_ancestry("s3", max_depth=1)
+        assert len(ancestors) == 1
+        assert ancestors[0].id == "s2"
+
+        # With max_depth=2, we should get s2 and s1
+        ancestors = store.get_ancestry("s3", max_depth=2)
+        assert len(ancestors) == 2
+        assert ancestors[0].id == "s1"
+        assert ancestors[1].id == "s2"
+
+    def test_cycle_does_not_infinite_loop(self, tmp_path: Path) -> None:
+        """A cycle in lineage must not cause infinite traversal."""
+        store = _make_store(tmp_path)
+
+        # Insert two skills
+        rec_a = self._make_record("a", generation=0)
+        rec_b = self._make_record("b", generation=1)
+        store.save_skill_record(rec_a)
+        store.save_skill_record(rec_b)
+
+        # Manually create a cycle: a -> b, b -> a in lineage parents
+        with store._conn(immediate=True) as conn:
+            conn.execute(
+                "INSERT INTO skill_lineage_parents (skill_id, parent_id) "
+                "VALUES ('a', 'b')"
+            )
+            conn.execute(
+                "INSERT INTO skill_lineage_parents (skill_id, parent_id) "
+                "VALUES ('b', 'a')"
+            )
+
+        # Should terminate and return exactly the two records
+        ancestors = store.get_ancestry("a", max_depth=100)
+        ids = {anc.id for anc in ancestors}
+        assert "b" in ids
+        # Should not hang or return duplicates
+        assert len(ancestors) == len(set(a.id for a in ancestors))
+
+    def test_no_ancestry_returns_empty(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        store.save_skill_record(self._make_record("orphan", generation=0))
+
+        ancestors = store.get_ancestry("orphan")
+        assert ancestors == []
+
+    def test_nonexistent_skill_returns_empty(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        ancestors = store.get_ancestry("no-such-id")
+        assert ancestors == []

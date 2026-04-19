@@ -14,11 +14,14 @@ Design decisions (from docs/04):
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 import re
 from enum import StrEnum
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from agent_nexus.models.evolution import (
     EvolutionType,
@@ -148,17 +151,13 @@ class SkillEvolver:
         Anti-loop: tracks which skills have already been evolved for each
         degraded tool.  Skips already-addressed skills.
         """
-        import logging as _logging
-
-        _logger = _logging.getLogger(__name__)
-
         addressed = self._addressed.get(tool_key, set())
         active_skills = self._store.get_active_skills()
 
         if affected_skill_ids is not None:
             active_skills = [s for s in active_skills if s.id in affected_skill_ids]
         else:
-            _logger.warning("Evolving all skills for tool degradation (no filter)")
+            logger.warning("Evolving all skills for tool degradation (no filter)")
 
         results: list[EvolveResult] = []
         for skill in active_skills:

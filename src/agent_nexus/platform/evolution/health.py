@@ -10,6 +10,10 @@ Rule-engine pre-filter, LLM does final confirmation (in SkillEvolver).
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from dataclasses import dataclass
 from typing import Any
 
