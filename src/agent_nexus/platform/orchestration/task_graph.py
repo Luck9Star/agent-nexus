@@ -308,34 +308,36 @@ class TaskGraph:
         2. ALL blocked_by tasks are 'completed'
         """
         with self._conn() as conn:
+            # Single query: pending tasks with zero unresolved blockers
             rows = conn.execute(
-                "SELECT id FROM tasks WHERE state = ?",
-                (TaskState.PENDING.value,),
+                "SELECT t.id, t.description, t.agent, t.state, t.vars, "
+                "t.created_at, t.updated_at "
+                "FROM tasks t "
+                "WHERE t.state = ? "
+                "AND NOT EXISTS ("
+                "  SELECT 1 FROM task_dependencies td "
+                "  JOIN tasks bt ON td.blocked_by_id = bt.id "
+                "  WHERE td.task_id = t.id AND bt.state != ?"
+                ") ORDER BY t.created_at",
+                (TaskState.PENDING.value, TaskState.COMPLETED.value),
             ).fetchall()
-            ready = []
-            for (tid,) in rows:
-                unresolved = self._get_unresolved_blockers(conn, tid)
-                if not unresolved:
-                    task = self._get_task_conn(conn, tid)
-                    if task is not None:
-                        ready.append(task)
-            return ready
+            return self._rows_to_tasks(conn, rows)
 
     def get_blocked_tasks(self) -> list[TaskItem]:
         """Get all tasks that are pending but have unresolved dependencies."""
         with self._conn() as conn:
+            # Single query: pending tasks with at least one unresolved blocker
             rows = conn.execute(
-                "SELECT id FROM tasks WHERE state = ?",
-                (TaskState.PENDING.value,),
+                "SELECT DISTINCT t.id, t.description, t.agent, t.state, t.vars, "
+                "t.created_at, t.updated_at "
+                "FROM tasks t "
+                "JOIN task_dependencies td ON td.task_id = t.id "
+                "JOIN tasks bt ON td.blocked_by_id = bt.id "
+                "WHERE t.state = ? AND bt.state != ? "
+                "ORDER BY t.created_at",
+                (TaskState.PENDING.value, TaskState.COMPLETED.value),
             ).fetchall()
-            blocked = []
-            for (tid,) in rows:
-                unresolved = self._get_unresolved_blockers(conn, tid)
-                if unresolved:
-                    task = self._get_task_conn(conn, tid)
-                    if task is not None:
-                        blocked.append(task)
-            return blocked
+            return self._rows_to_tasks(conn, rows)
 
     def get_parallel_groups(
         self, conn: Any | None = None,
@@ -404,11 +406,14 @@ class TaskGraph:
                     unassigned,
                 )
                 break
-            group_tasks = []
-            for tid in group_ids:
-                task = self._get_task_conn(conn, tid)
-                if task is not None:
-                    group_tasks.append(task)
+            # Batch-load group tasks in one pass instead of per-task queries
+            placeholders = ",".join("?" for _ in group_ids)
+            group_rows = conn.execute(
+                "SELECT id, description, agent, state, vars, created_at, updated_at "
+                f"FROM tasks WHERE id IN ({placeholders})",
+                group_ids,
+            ).fetchall()
+            group_tasks = self._rows_to_tasks(conn, group_rows)
             groups.append(group_tasks)
             assigned.update(group_ids)
 
@@ -492,6 +497,47 @@ class TaskGraph:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _batch_load_blocked_by(conn: sqlite3.Connection) -> dict[str, list[str]]:
+        """Load all task_dependencies in one query, keyed by task_id."""
+        deps: dict[str, list[str]] = {}
+        for task_id, blocked_by_id in conn.execute(
+            "SELECT task_id, blocked_by_id FROM task_dependencies"
+        ).fetchall():
+            deps.setdefault(task_id, []).append(blocked_by_id)
+        return deps
+
+    def _rows_to_tasks(
+        self,
+        conn: sqlite3.Connection,
+        rows: list[tuple[Any, ...]],
+    ) -> list[TaskItem]:
+        """Convert multiple task rows to TaskItems with batch-loaded deps.
+
+        Uses a single query for ALL blocked_by lists instead of one per row.
+        """
+        blocked_map = self._batch_load_blocked_by(conn)
+        results: list[TaskItem] = []
+        for row in rows:
+            try:
+                task_id, description, agent, state_str, vars_json, created_at_str, updated_at_str = row
+                results.append(TaskItem(
+                    id=task_id,
+                    description=description,
+                    agent=agent,
+                    state=TaskState(state_str),
+                    vars=json.loads(vars_json) if vars_json else {},
+                    blocked_by=blocked_map.get(task_id, []),
+                    created_at=datetime.fromisoformat(created_at_str),
+                    updated_at=datetime.fromisoformat(updated_at_str),
+                ))
+            except (ValueError, KeyError, json.JSONDecodeError, TypeError) as exc:
+                logger.error(
+                    "Corrupt task row (id=%s): %s", row[0] if row else "?", exc
+                )
+                raise
+        return results
 
     def _task_from_row(
         self,

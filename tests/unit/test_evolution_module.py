@@ -1068,8 +1068,12 @@ class TestCompactionGuardReinject:
         # l1_max is 3000, so l1 should be truncated
         assert len(result) < len("id\n" + long_l1)
 
-    def test_reinject_logs_char_count_with_unit_note(self, tmp_path: Path) -> None:
-        """tokens_after stores char count (not token estimate), with unit_note."""
+    def test_reinject_logs_estimated_tokens_not_chars(self, tmp_path: Path) -> None:
+        """tokens_after stores estimated token count (~chars//4), not raw chars.
+
+        Previously this stored raw char count which silently corrupted
+        budget analytics (tokens_before was real tokens, tokens_after was chars).
+        """
         import json as _json
 
         store = _store_with_records(tmp_path)
@@ -1081,15 +1085,17 @@ class TestCompactionGuardReinject:
         log = store.get_budget_log("agent-a")
         assert len(log) == 1
         tokens_after = log[0]["tokens_after"]
-        # details is stored as JSON string in SQLite
         details = _json.loads(log[0].get("details", "{}"))
         result_chars = details.get("result_chars", 0)
-        # P2-1 fix: tokens_after is now the raw char count, not chars//4
-        assert tokens_after == result_chars
-        assert details.get("unit_note") == "values are chars, not tokens"
+        # tokens_after is estimated tokens (chars//4), NOT raw chars
+        assert tokens_after == result_chars // 4
+        assert tokens_after < result_chars
+        # Char count is preserved in details for full fidelity
+        assert details.get("result_chars") == result_chars
+        assert "result_tokens_estimated" in details
 
     def test_compaction_short_result_still_logged(self, tmp_path: Path) -> None:
-        """When result is short, tokens_after still records char count."""
+        """When result is short, tokens_after records estimated tokens."""
         store = _store_with_records(tmp_path)
         guard = CompactionGuard(store, "agent-a")
         # l0_content is truthy but short; l1 empty -> result is "x\n" (2 chars)
@@ -1097,8 +1103,8 @@ class TestCompactionGuardReinject:
         guard.reinject_after_compaction(ctx)
         log = store.get_budget_log("agent-a")
         assert len(log) == 1
-        # P2-1 fix: now logs chars directly (2), not chars//4 (0)
-        assert log[0]["tokens_after"] == 2
+        # 2 chars // 4 = 0 estimated tokens (floor division)
+        assert log[0]["tokens_after"] == 0
 
 
 class TestCompactionGuardCheckAndLog:

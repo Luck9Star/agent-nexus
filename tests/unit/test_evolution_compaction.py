@@ -142,6 +142,26 @@ class TestReinjectAfterCompaction:
         call_kwargs = store.log_budget_event.call_args
         assert call_kwargs.kwargs["event_type"] == "compaction"
 
+    def test_tokens_after_is_estimated_not_raw_chars(self):
+        """Regression: tokens_after must be an estimated token count,
+        not the raw character count.  Before the fix, tokens_after stored
+        len(result) (chars) while tokens_before was real tokens, causing
+        silent data corruption in budget analytics."""
+        store = _make_store()
+        guard = CompactionGuard(store=store, agent_id="a1")
+        ctx = _make_ctx(l0="x" * 100, l1="y" * 200)
+        guard.reinject_after_compaction(ctx)
+        call_kwargs = store.log_budget_event.call_args.kwargs
+        result = guard.reinject_after_compaction(ctx)
+        result_chars = len(result)
+        # tokens_after should be roughly chars//4, NOT chars
+        tokens_after = call_kwargs["tokens_after"]
+        assert tokens_after < result_chars, (
+            f"tokens_after ({tokens_after}) should be much less than "
+            f"result chars ({result_chars}) — expected ~chars//4 estimate"
+        )
+        assert tokens_after == result_chars // 4
+
     def test_fallback_l0_when_empty(self):
         guard = CompactionGuard(store=_make_store(), agent_id="a1")
         ctx = _make_ctx(l0="")

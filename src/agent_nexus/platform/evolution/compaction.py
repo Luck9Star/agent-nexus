@@ -135,19 +135,21 @@ class CompactionGuard:
 
         # Log the compaction event
         result_chars = len(result)
-        # Note: l1_max is a character budget, not a token budget.
-        # Token counting would require a tokenizer (~4 chars/token).
+        # Estimate token count from characters (~4 chars/token average).
+        # Without a tokenizer this is approximate but puts both
+        # tokens_before and tokens_after in the same unit system.
+        estimated_tokens = result_chars // 4
         self._store.log_budget_event(
             agent_name=self._agent_id,
             event_type="compaction",
             tokens_before=ctx.token_usage.total_tokens,
-            tokens_after=result_chars,  # chars, not tokens
+            tokens_after=estimated_tokens,
             details={
                 "consecutive_compactions": self._consecutive_compactions,
                 "l0_chars": len(l0),
                 "l1_chars": len(l1),
                 "result_chars": result_chars,
-                "unit_note": "values are chars, not tokens",
+                "result_tokens_estimated": estimated_tokens,
             },
         )
 

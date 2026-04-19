@@ -269,7 +269,8 @@ class EvolutionStore:
                 "total_fallbacks, created_at, updated_at "
                 "FROM skill_records WHERE is_active = 1"
             ).fetchall()
-            return [self._row_to_record(conn, r) for r in rows]
+            parents = self._batch_load_parents(conn)
+            return [self._row_to_record(conn, r, parents) for r in rows]
 
     def get_all_skills(self) -> list[SkillRecord]:
         """Load all skill records (including inactive)."""
@@ -281,7 +282,8 @@ class EvolutionStore:
                 "total_fallbacks, created_at, updated_at "
                 "FROM skill_records"
             ).fetchall()
-            return [self._row_to_record(conn, r) for r in rows]
+            parents = self._batch_load_parents(conn)
+            return [self._row_to_record(conn, r, parents) for r in rows]
 
     def deactivate_skill(self, skill_id: str) -> bool:
         """Set is_active = False for a skill record."""
@@ -305,7 +307,8 @@ class EvolutionStore:
                 "ORDER BY lineage_generation ASC",
                 (name,),
             ).fetchall()
-            return [self._row_to_record(conn, r) for r in rows]
+            parents = self._batch_load_parents(conn)
+            return [self._row_to_record(conn, r, parents) for r in rows]
 
     # ------------------------------------------------------------------
     # Atomic counter increments
@@ -679,16 +682,13 @@ class EvolutionStore:
             visited: set[str] = set()
             ancestors: list[SkillRecord] = []
             frontier = [skill_id]
+            # Batch-load all lineage edges and parent records once
+            all_parents = self._batch_load_parents(conn)
 
             for _ in range(max_depth):
                 next_frontier: list[str] = []
                 for sid in frontier:
-                    rows = conn.execute(
-                        "SELECT parent_id FROM skill_lineage_parents "
-                        "WHERE skill_id = ?",
-                        (sid,),
-                    ).fetchall()
-                    for (pid,) in rows:
+                    for pid in all_parents.get(sid, []):
                         if pid in visited:
                             continue
                         visited.add(pid)
@@ -703,7 +703,7 @@ class EvolutionStore:
                         ).fetchone()
                         if row:
                             ancestors.append(
-                                self._row_to_record(conn, row)
+                                self._row_to_record(conn, row, all_parents)
                             )
                             next_frontier.append(pid)
                 frontier = next_frontier
@@ -905,12 +905,30 @@ class EvolutionStore:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _batch_load_parents(conn: sqlite3.Connection) -> dict[str, list[str]]:
+        """Load all skill_lineage_parents in one query, keyed by skill_id."""
+        parents: dict[str, list[str]] = {}
+        for skill_id, parent_id in conn.execute(
+            "SELECT skill_id, parent_id FROM skill_lineage_parents"
+        ).fetchall():
+            parents.setdefault(skill_id, []).append(parent_id)
+        return parents
+
     def _row_to_record(
         self,
         conn: sqlite3.Connection,
         row: tuple[Any, ...],
+        parents_by_id: dict[str, list[str]] | None = None,
     ) -> SkillRecord:
-        """Convert a skill_records row to a SkillRecord model."""
+        """Convert a skill_records row to a SkillRecord model.
+
+        Args:
+            conn: Database connection (used for fallback parent lookup).
+            row: Tuple from skill_records query.
+            parents_by_id: Pre-loaded parent IDs keyed by skill_id.
+                If None, parents are queried per-row (N+1 fallback).
+        """
         (
             skill_id,
             name,
@@ -929,12 +947,15 @@ class EvolutionStore:
             updated_at,
         ) = row
 
-        # Load lineage parents
-        parent_rows = conn.execute(
-            "SELECT parent_id FROM skill_lineage_parents WHERE skill_id = ?",
-            (skill_id,),
-        ).fetchall()
-        parent_ids = [r[0] for r in parent_rows]
+        # Load lineage parents (batch or per-row)
+        if parents_by_id is not None:
+            parent_ids = parents_by_id.get(skill_id, [])
+        else:
+            parent_rows = conn.execute(
+                "SELECT parent_id FROM skill_lineage_parents WHERE skill_id = ?",
+                (skill_id,),
+            ).fetchall()
+            parent_ids = [r[0] for r in parent_rows]
 
         # Parse snapshot
         snapshot: dict[str, str] = {}
