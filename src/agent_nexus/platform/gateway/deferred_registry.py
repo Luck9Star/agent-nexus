@@ -531,4 +531,6 @@ class DeferredAgentRegistry:
                 scored.append((score, manifest))
 
         scored.sort(key=lambda x: -x[0])
-        return [m for _, m in scored[:max(max_results, 1)]]
+        # Clamp to non-negative; 0 means "return nothing".
+        effective = max(max_results, 0)
+        return [m for _, m in scored[:effective]]

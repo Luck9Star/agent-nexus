@@ -803,25 +803,25 @@ class TestDeferredRegistrySearch:
         results = registry.search_agents("Shared", max_results=3)
         assert len(results) == 3
 
-    def test_search_max_results_zero_clamped(self, registry: DeferredAgentRegistry) -> None:
-        """max_results=0 is clamped to 1, returns at least 1 result."""
+    def test_search_max_results_zero_returns_empty(self, registry: DeferredAgentRegistry) -> None:
+        """max_results=0 returns no results — caller explicitly asked for zero."""
         for i in range(5):
             registry.register_agent(
                 _make_manifest(f"agent-z{i}", description="Common keyword"),
                 deferred=True,
             )
         results = registry.search_agents("Common", max_results=0)
-        assert len(results) == 1
+        assert results == []
 
-    def test_search_max_results_negative_clamped(self, registry: DeferredAgentRegistry) -> None:
-        """max_results=-5 is clamped to 1."""
+    def test_search_max_results_negative_returns_empty(self, registry: DeferredAgentRegistry) -> None:
+        """max_results=-5 is clamped to 0, returns no results."""
         for i in range(5):
             registry.register_agent(
                 _make_manifest(f"agent-n{i}", description="Another keyword"),
                 deferred=True,
             )
         results = registry.search_agents("Another", max_results=-5)
-        assert len(results) == 1
+        assert results == []
 
     def test_search_multi_word_query(self, registry: DeferredAgentRegistry) -> None:
         registry.register_agent(
