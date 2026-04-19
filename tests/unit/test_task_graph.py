@@ -822,3 +822,38 @@ class TestTaskGraphInMemoryForeignKeys:
                 "INSERT INTO task_dependencies (task_id, blocked_by_id) "
                 "VALUES ('nonexistent_task', 'A')"
             )
+
+
+# ============================================================================
+# TaskGraph.close() — resource lifecycle regression
+# ============================================================================
+
+
+class TestTaskGraphClose:
+    """TaskGraph.close() must release the in-memory SQLite connection."""
+
+    def test_close_memory_db_releases_conn(self) -> None:
+        tg = TaskGraph(Path(":memory:"))
+        assert tg._mem_conn is not None
+        tg.close()
+        assert tg._mem_conn is None
+
+    def test_close_idempotent(self) -> None:
+        tg = TaskGraph(Path(":memory:"))
+        tg.close()
+        tg.close()  # second call is a no-op, should not raise
+
+    def test_close_file_db_is_noop(self, tmp_path: Path) -> None:
+        tg = TaskGraph(tmp_path / "test.db")
+        assert tg._mem_conn is None
+        tg.close()  # no-op for file-based DBs
+        assert tg._mem_conn is None
+
+    def test_operations_after_close_raise(self) -> None:
+        tg = TaskGraph(Path(":memory:"))
+        tg.add_task(_make_task("A"))
+        tg.close()
+        # After close, _mem_conn is None so _conn() falls through to
+        # file-based path which will fail on ":memory:" string as a path
+        with pytest.raises(Exception):
+            tg.get_task("A")

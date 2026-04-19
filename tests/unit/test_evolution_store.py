@@ -1023,3 +1023,21 @@ class TestInvalidLineageOrigin:
         record = store.get_skill_record(sid)
         assert record is not None
         assert record.lineage.origin == SkillOrigin.CAPTURED
+
+
+# ============================================================================
+# EvolutionStore.close() — resource lifecycle regression
+# ============================================================================
+
+
+class TestEvolutionStoreClose:
+    """EvolutionStore.close() is a no-op for file-based DBs but must exist."""
+
+    def test_close_is_noop_for_file_db(self, tmp_path: Path) -> None:
+        store = EvolutionStore(tmp_path / "evo.db")
+        store.close()  # should not raise
+
+    def test_close_idempotent(self, tmp_path: Path) -> None:
+        store = EvolutionStore(tmp_path / "evo.db")
+        store.close()
+        store.close()  # second call is fine

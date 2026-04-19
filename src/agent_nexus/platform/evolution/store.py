@@ -137,6 +137,15 @@ class EvolutionStore:
         self._db_path = db_path
         self._init_db()
 
+    def close(self) -> None:
+        """Release persistent resources.
+
+        File-based connections are already closed per-operation by
+        ``_conn()``, so this is currently a no-op.  Provided for API
+        consistency with :class:`TaskGraph` and for future in-memory
+        database support.
+        """
+
     def _init_db(self) -> None:
         with self._conn() as conn:
             conn.execute("PRAGMA journal_mode=WAL")

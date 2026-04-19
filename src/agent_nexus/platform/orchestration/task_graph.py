@@ -90,6 +90,17 @@ class TaskGraph:
             conn.execute("PRAGMA foreign_keys=ON")
             conn.executescript(_SCHEMA_SQL)
 
+    def close(self) -> None:
+        """Release persistent resources.
+
+        Closes the in-memory SQLite connection (if any).  File-based
+        databases are already closed per-operation by ``_conn()`` so
+        this is a no-op for them.
+        """
+        if self._mem_conn is not None:
+            self._mem_conn.close()
+            self._mem_conn = None
+
     @contextmanager
     def _conn(
         self, immediate: bool = False,
