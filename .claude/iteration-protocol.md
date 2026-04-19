@@ -160,6 +160,7 @@
 | 蓝军P1修复 iter121: Semaphore(0) + duplicate blocked_by | subtask.py Semaphore(max(n,1)) + task_graph.py dict.fromkeys() dedup + 4 regression tests = 2526 tests | 2026-04-20 | iter121 |
 | API boundary input validation iter122: 9 sites | executor/ipc timeout clamp + SubtaskConfig __post_init__ + SSRF scheme + route_chat empty-string + engine min_selections + token_tracker max_tokens + loader triggers coerce + deferred_registry max_results clamp + ipc exception chain = 2562 tests | 2026-04-20 | iter122 |
 | Cross-process TOCTOU: uninstall() get_entry→remove_entry race | lockfile.py pop_entry() atomic read-remove-write + installer.py uninstall() migration + 4 lockfile tests + 3 installer test updates = 2568 tests | 2026-04-20 | iter123 |
+| P0 Dual IPC Lock: router._route_locks vs _ipc_lock_registry | router.py unified to _get_ipc_lock() + removed _route_locks dict + 3 regression tests (shared lock, mutual exclusion) = 2570 tests | 2026-04-20 | iter124 |
 
 ### 待清模式
 

@@ -28,6 +28,7 @@ from typing import Any
 from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.gateway.tool_adapter import (
     DEFAULT_IPC_EXECUTE_TIMEOUT,
+    _get_ipc_lock,
     remove_lock,
 )
 from agent_nexus.platform.orchestration.dsl import OrchestrationDefinition
@@ -72,7 +73,6 @@ class PlatformRouter:
         self._composite_defs: dict[str, OrchestrationDefinition] = (
             composite_definitions or {}
         )
-        self._route_locks: dict[str, asyncio.Lock] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -220,18 +220,6 @@ class PlatformRouter:
                 logger.error(last_error)
         finally:
             ctx.close()
-            # Clean up route locks for agents that are no longer running,
-            # preventing unbounded growth of _route_locks dict.
-            # Snapshot keys to avoid RuntimeError if concurrent tasks
-            # mutate _route_locks during iteration (asyncio gather tasks
-            # may still be running after wait_for timeout cancellation).
-            stale = [
-                name for name in list(self._route_locks)
-                if self._pm.get_agent(name) is None
-            ]
-            for name in stale:
-                self._route_locks.pop(name, None)
-                remove_lock(name)
 
         # 4. Build final result
         success = completed == total
@@ -271,7 +259,6 @@ class PlatformRouter:
         """
         handle = self._pm.get_agent(atomic_name)
         if handle is None:
-            self._route_locks.pop(atomic_name, None)
             remove_lock(atomic_name)
             return {
                 "output": "",
@@ -280,7 +267,6 @@ class PlatformRouter:
             }
 
         if not handle.is_alive:
-            self._route_locks.pop(atomic_name, None)
             remove_lock(atomic_name)
             return {
                 "output": "",
@@ -290,7 +276,7 @@ class PlatformRouter:
 
         # Serialize send+receive per agent to prevent concurrent IPC
         # calls from interleaving responses on the same handle.
-        lock = self._route_locks.setdefault(atomic_name, asyncio.Lock())
+        lock = _get_ipc_lock(atomic_name)
         async with lock:
             # Send chat message via IPC
             try:
@@ -532,7 +518,7 @@ class PlatformRouter:
         # calls from interleaving responses on the same handle.
         # Uses the same lock as route_to_atomic so both code paths
         # are mutually exclusive for a given agent.
-        lock = self._route_locks.setdefault(agent_name, asyncio.Lock())
+        lock = _get_ipc_lock(agent_name)
         async with lock:
             try:
                 await handle.ipc.send_chat(message, conversation_id=conversation_id)

@@ -1196,8 +1196,6 @@ class TestRouterParallelConversationId:
         router._process_manager = mock_pm  # type: ignore[attr-defined]
         router._task_graph = MagicMock()  # type: ignore[attr-defined]
         router._subtask = MagicMock()
-        router._route_locks = {}
-
         async def mock_run_with_retry(coro_factory, timeout):  # pyright: ignore[reportUnusedParameter]
             return await coro_factory()
 
@@ -1272,7 +1270,6 @@ class TestGetToolsDeduplication:
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
-        router._route_locks = {}
 
         tool_a = {"name": "search", "description": "Agent A search"}
         tool_b = {"name": "search", "description": "Agent B search"}
@@ -1318,8 +1315,6 @@ class TestGetToolsDeduplication:
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
-        router._route_locks = {}
-
         tools_list = [
             {"name": "search", "description": "search tool"},
             {"name": "analyze", "description": "analyze tool"},
@@ -1355,7 +1350,7 @@ class TestExecuteSingleAgentErrorWrapping:
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
-        router._route_locks = {}
+
 
         handle = MagicMock()
         handle.is_alive = True
@@ -1378,7 +1373,7 @@ class TestExecuteSingleAgentErrorWrapping:
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
-        router._route_locks = {}
+
 
         handle = MagicMock()
         handle.is_alive = True
@@ -1406,7 +1401,7 @@ class TestExecuteSingleAgentErrorWrapping:
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
-        router._route_locks = {}
+
 
         handle = MagicMock()
         handle.is_alive = True
@@ -1928,7 +1923,7 @@ class TestGetToolsRegistryPath:
         router._pm = mock_pm
         router._composite_defs = {}
         router._subtask = SubtaskController()
-        router._route_locks = {}
+
 
         mock_registry = MagicMock()
         mock_registry.get_tools_for_llm.return_value = [
@@ -2099,7 +2094,7 @@ class TestExecuteSingleAgentHandleNotFound:
         mock_pm.get_agent.return_value = None
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
-        router._route_locks = {}
+
 
         with pytest.raises(RuntimeError, match="not found or not alive"):
             await router._execute_single_agent(
@@ -2114,7 +2109,7 @@ class TestExecuteSingleAgentHandleNotFound:
         mock_pm.get_agent.return_value = handle
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
-        router._route_locks = {}
+
 
         with pytest.raises(RuntimeError, match="not found or not alive"):
             await router._execute_single_agent(
@@ -2298,41 +2293,8 @@ class TestCompositeOverallTimeout:
 
 
 # ---------------------------------------------------------------------------
-# iter105 regression: stale route lock cleanup + topological sort cycle fallback
+# iter105 regression: topological sort cycle fallback
 # ---------------------------------------------------------------------------
-
-
-class TestStaleRouteLockCleanup:
-    """Route locks for dead agents are cleaned up in route_composite finally block."""
-
-    @pytest.mark.asyncio
-    async def test_stale_lock_cleaned_after_workflow(self) -> None:
-        pm = MagicMock()
-        # get_agent("dead-agent") must return None so the finally-block
-        # recognises it as stale and removes the lock.
-        pm.get_agent.return_value = None
-        router = PlatformRouter(process_manager=pm)
-
-        # Simulate a stale route lock: add an entry for an agent that no
-        # longer exists in ProcessManager.
-        router._route_locks["dead-agent"] = asyncio.Lock()
-
-        # Patch route_composite internals to bypass phase execution.
-        with patch.object(router, "_execute_phase", new_callable=AsyncMock, return_value="ok"):
-            with patch.object(
-                router, "_build_phase_message", return_value="msg"
-            ):
-                definition = OrchestrationDefinition(
-                    goal="test",
-                    agent_name="test-agent",
-                    agents={"a": DSLAgent(name="a", description="a", role="worker")},
-                    tasks=[DSLTask(id="t1", description="d", agent="a")],
-                    tool_loading=DSLToolLoading(),
-                )
-                await router.route_composite(definition, "do something", "conv-1")
-
-        # The stale lock for "dead-agent" should be cleaned up
-        assert "dead-agent" not in router._route_locks
 
 
 class TestTopologicalSortCycleFallback:
@@ -2389,3 +2351,121 @@ class TestRouteChatEmptyStringGuard:
         result = await router.route_chat("a", "   ")
         assert result["success"] is False
         assert "message" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# iter124 regression: unified IPC lock — router & tool_adapter share lock
+# ---------------------------------------------------------------------------
+
+
+class TestUnifiedIpcLock:
+    """Verify router and tool_adapter use the SAME lock for an agent.
+
+    P0 bug: router.py had its own _route_locks dict (instance-level) while
+    tool_adapter.py had _ipc_lock_registry (module-level).  Both serialize
+    IPC for the same agent but used different lock objects — concurrent
+    route_to_atomic() and McpToolAdapter.execute() calls could interleave.
+    Now both use _get_ipc_lock() from tool_adapter.
+    """
+
+    @pytest.mark.asyncio
+    async def test_route_to_atomic_uses_shared_lock(self) -> None:
+        """route_to_atomic acquires the same lock as McpToolAdapter."""
+        from agent_nexus.platform.gateway.tool_adapter import (
+            _get_ipc_lock,
+            remove_all_locks,
+        )
+
+        remove_all_locks()
+        handle = _make_agent_handle(response_content="hello back")
+        pm = _make_process_manager(agents={"agent-a": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        shared_lock = _get_ipc_lock("agent-a")
+        assert shared_lock.locked() is False
+
+        # route_to_atomic should acquire and release the shared lock
+        result = await router.route_to_atomic("agent-a", "hello", "conv-1")
+        assert result["success"] is True
+        assert shared_lock.locked() is False  # released after call
+        remove_all_locks()
+
+    @pytest.mark.asyncio
+    async def test_execute_single_agent_uses_shared_lock(self) -> None:
+        """_execute_single_agent acquires the same lock as McpToolAdapter."""
+        from agent_nexus.platform.gateway.tool_adapter import (
+            _get_ipc_lock,
+            remove_all_locks,
+        )
+
+        remove_all_locks()
+        handle = _make_agent_handle(response_content="result")
+        pm = _make_process_manager(agents={"agent-a": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        shared_lock = _get_ipc_lock("agent-a")
+
+        result = await router._execute_single_agent("agent-a", "hello", "c1")
+        assert result == "result"
+        assert shared_lock.locked() is False
+        remove_all_locks()
+
+    @pytest.mark.asyncio
+    async def test_both_paths_mutually_exclusive(self) -> None:
+        """route_to_atomic and McpToolAdapter.execute are serialized for the
+        same agent — one must wait for the other to finish."""
+        from agent_nexus.platform.gateway.tool_adapter import (
+            McpToolAdapter,
+            _get_ipc_lock,
+            remove_all_locks,
+        )
+
+        remove_all_locks()
+
+        # Make send_chat block until we signal it to continue
+        proceed = asyncio.Event()
+        call_order: list[str] = []
+
+        async def slow_send_chat(msg, *, conversation_id=None):
+            call_order.append("started")
+            await proceed.wait()
+            call_order.append("finished")
+
+        handle = _make_agent_handle(response_content="ok")
+        handle.ipc.send_chat = slow_send_chat
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = "done"
+        mock_resp.status = "completed"
+        handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"shared-agent": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        adapter = McpToolAdapter("shared-agent", {"name": "test-tool"})
+
+        # Start route_to_atomic (will block on send_chat)
+        task1 = asyncio.create_task(
+            router.route_to_atomic("shared-agent", "msg1", "c1")
+        )
+        # Give it time to acquire the lock and enter send_chat
+        await asyncio.sleep(0.05)
+        assert call_order == ["started"]
+
+        # Start adapter.execute — it should NOT enter send_chat yet
+        # because route_to_atomic holds the shared lock
+        task2 = asyncio.create_task(adapter.execute(handle, {"x": 1}))
+        await asyncio.sleep(0.05)
+        assert call_order == ["started"]  # task2 is still waiting for lock
+
+        # Release the first call
+        proceed.set()
+        await asyncio.sleep(0.05)
+
+        # Both should complete now
+        r1 = await task1
+        r2 = await task2
+        assert r1["success"] is True
+        assert r2["success"] is True
+        assert "finished" in call_order
+        remove_all_locks()
