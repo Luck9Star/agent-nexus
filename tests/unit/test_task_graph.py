@@ -917,6 +917,7 @@ class TestCorruptTaskRow:
             conn.execute(
                 "UPDATE tasks SET state = 'TOTALLY_INVALID' WHERE id = 'batch-bad'"
             )
-        # get_ready_tasks uses _rows_to_tasks (batch), not _task_from_row
+        # get_snapshot uses _task_from_row (single), not _rows_to_tasks.
+        # Use get_parallel_groups which calls _rows_to_tasks internally.
         with pytest.raises(ValueError, match="TOTALLY_INVALID"):
-            tg.get_ready_tasks()
+            tg.get_parallel_groups()
