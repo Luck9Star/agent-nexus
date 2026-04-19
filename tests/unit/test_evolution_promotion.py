@@ -1,16 +1,14 @@
 """Unit tests for agent_nexus.platform.evolution.promotion module."""
 
-import shutil
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
+import pytest  # pyright: ignore[reportMissingImports]
 
 from agent_nexus.models.evolution import SkillRecord
 from agent_nexus.platform.evolution.promotion import (
     AgentPromoter,
     PromotionCandidate,
-    PromotionResult,
 )
 
 
@@ -54,7 +52,7 @@ def _candidate(**overrides) -> PromotionCandidate:
         reason="high performance",
     )
     defaults.update(overrides)
-    return PromotionCandidate(**defaults)
+    return PromotionCandidate(**defaults)  # pyright: ignore[reportArgumentType]
 
 
 # ---------------------------------------------------------------------------

@@ -188,8 +188,8 @@ class ConfigLoader:
         # Start with built-in defaults
         for name, preset in DEFAULT_PROVIDERS.items():
             merged[name] = ProviderConfig(
-                base_url=preset.get("base_url", ""),
-                api_key_env=preset.get("api_key_env", ""),
+                base_url=str(preset.get("base_url", "")),
+                api_key_env=str(preset.get("api_key_env", "")),
                 api=ProviderApiType(preset.get("api", "openai-compatible")),
             )
 

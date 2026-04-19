@@ -9,7 +9,6 @@ from agent_nexus.models.evolution import (
 )
 from agent_nexus.platform.evolution.analyzer import (
     AnalysisResult,
-    EvolutionSuggestion,
     ExecutionAnalyzer,
     _edit_distance,
     _correct_skill_ids,
@@ -36,7 +35,7 @@ def _make_ctx(**overrides) -> EvolutionContext:
         skills_applied=["sk-1"],
     )
     defaults.update(overrides)
-    return EvolutionContext(**defaults)
+    return EvolutionContext(**defaults)  # pyright: ignore[reportArgumentType]
 
 
 # ---------------------------------------------------------------------------

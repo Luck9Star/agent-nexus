@@ -1003,11 +1003,11 @@ class TestGetTools:
     async def test_get_tools_from_alive_agents(self) -> None:
         h1 = _make_agent_handle(name="a1")
         h1.ipc.receive_until_result = AsyncMock(
-            return_value=MagicMock(content=[{"name": "tool1"}], type=AgentToPlatformType.RESULT)
+            return_value=MagicMock(content='[{"name": "tool1"}]', type=AgentToPlatformType.RESULT)
         )
         h2 = _make_agent_handle(name="a2")
         h2.ipc.receive_until_result = AsyncMock(
-            return_value=MagicMock(content=[{"name": "tool2"}], type=AgentToPlatformType.RESULT)
+            return_value=MagicMock(content='[{"name": "tool2"}]', type=AgentToPlatformType.RESULT)
         )
 
         pm = _make_process_manager(agents={"a1": h1, "a2": h2}, running=["a1", "a2"])
@@ -1022,7 +1022,7 @@ class TestGetTools:
     async def test_get_tools_skips_dead_agents(self) -> None:
         alive = _make_agent_handle(name="alive", alive=True)
         alive.ipc.receive_until_result = AsyncMock(
-            return_value=MagicMock(content=[{"name": "t"}], type=AgentToPlatformType.RESULT)
+            return_value=MagicMock(content='[{"name": "t"}]', type=AgentToPlatformType.RESULT)
         )
         dead = _make_agent_handle(name="dead", alive=False)
 
@@ -1078,29 +1078,6 @@ class TestGetTools:
         assert len(tools) == 2
         assert tools[0]["name"] == "tool_a"
         assert tools[1]["name"] == "tool_b"
-
-    @pytest.mark.asyncio
-    async def test_get_tools_content_as_list(self) -> None:
-        """get_tools should handle response.content being a list directly.
-
-        When response.content is already a list of tool dicts (not a JSON
-        string), get_tools must return them without JSON parsing.
-        """
-        tools_list = [{"name": "tool_x"}, {"name": "tool_y"}]
-        h = _make_agent_handle(name="a1")
-        mock_resp = MagicMock()
-        mock_resp.type = AgentToPlatformType.RESULT
-        mock_resp.content = tools_list
-        mock_resp.output = None
-        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
-
-        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
-        router = PlatformRouter(process_manager=pm)
-
-        tools = await router.get_tools()
-        assert len(tools) == 2
-        assert tools[0]["name"] == "tool_x"
-        assert tools[1]["name"] == "tool_y"
 
 
 class TestStopAll:
@@ -1617,30 +1594,15 @@ class TestGetToolsSkipsNamelessTools:
         assert tools[0]["name"] == "valid-tool"
 
     @pytest.mark.asyncio
-    async def test_nameless_tool_skipped_list_path(self) -> None:
-        """Tool dict without 'name' key is skipped (list path)."""
-        tools_list = [{"description": "no name"}, {"name": "ok-tool"}]
-        h = _make_agent_handle(name="a1")
-        mock_resp = MagicMock()
-        mock_resp.type = AgentToPlatformType.RESULT
-        mock_resp.content = tools_list
-        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
-
-        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
-        router = PlatformRouter(process_manager=pm)
-
-        tools = await router.get_tools()
-        assert len(tools) == 1
-        assert tools[0]["name"] == "ok-tool"
-
-    @pytest.mark.asyncio
     async def test_empty_name_tool_skipped(self) -> None:
         """Tool with name='' is skipped."""
+        import json
+
         tools_list = [{"name": ""}, {"name": "real-tool"}]
         h = _make_agent_handle(name="a1")
         mock_resp = MagicMock()
         mock_resp.type = AgentToPlatformType.RESULT
-        mock_resp.content = tools_list
+        mock_resp.content = json.dumps(tools_list)
         h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
 
         pm = _make_process_manager(agents={"a1": h}, running=["a1"])
@@ -1801,76 +1763,6 @@ class TestGetToolsJSONDecodeError:
 
         tools = await router.get_tools()
         assert tools == []
-
-
-class TestGetToolsListPathNameCollision:
-    """get_tools list-path deduplicates tools with same name."""
-
-    @pytest.mark.asyncio
-    async def test_list_path_dedup(self) -> None:
-        """List path: second tool with same name is skipped."""
-        tools_list = [
-            {"name": "shared_tool", "desc": "from agent A"},
-            {"name": "unique_tool"},
-        ]
-        h1 = _make_agent_handle(name="a1")
-        mock_resp1 = MagicMock()
-        mock_resp1.type = AgentToPlatformType.RESULT
-        mock_resp1.content = tools_list
-        h1.ipc.receive_until_result = AsyncMock(return_value=mock_resp1)
-
-        tools_list2 = [
-            {"name": "shared_tool", "desc": "from agent B"},
-        ]
-        h2 = _make_agent_handle(name="a2")
-        mock_resp2 = MagicMock()
-        mock_resp2.type = AgentToPlatformType.RESULT
-        mock_resp2.content = tools_list2
-        h2.ipc.receive_until_result = AsyncMock(return_value=mock_resp2)
-
-        pm = _make_process_manager(
-            agents={"a1": h1, "a2": h2}, running=["a1", "a2"]
-        )
-        router = PlatformRouter(process_manager=pm)
-
-        tools = await router.get_tools()
-        assert len(tools) == 2
-        names = [t["name"] for t in tools]
-        assert names.count("shared_tool") == 1
-
-    @pytest.mark.asyncio
-    async def test_list_path_nameless_tool_skipped(self) -> None:
-        """List path: tool without name key is skipped."""
-        tools_list = [{"description": "no name"}, {"name": "valid"}]
-        h = _make_agent_handle(name="a1")
-        mock_resp = MagicMock()
-        mock_resp.type = AgentToPlatformType.RESULT
-        mock_resp.content = tools_list
-        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
-
-        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
-        router = PlatformRouter(process_manager=pm)
-
-        tools = await router.get_tools()
-        assert len(tools) == 1
-        assert tools[0]["name"] == "valid"
-
-    @pytest.mark.asyncio
-    async def test_list_path_empty_name_skipped(self) -> None:
-        """List path: tool with empty name is skipped."""
-        tools_list = [{"name": ""}, {"name": "real"}]
-        h = _make_agent_handle(name="a1")
-        mock_resp = MagicMock()
-        mock_resp.type = AgentToPlatformType.RESULT
-        mock_resp.content = tools_list
-        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
-
-        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
-        router = PlatformRouter(process_manager=pm)
-
-        tools = await router.get_tools()
-        assert len(tools) == 1
-        assert tools[0]["name"] == "real"
 
 
 class TestGetToolsFallbackHandleNone:

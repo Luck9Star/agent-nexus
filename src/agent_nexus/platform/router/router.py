@@ -334,25 +334,6 @@ class PlatformRouter:
                                     tools.append(tool)
                         except (json.JSONDecodeError, ValueError):
                             pass
-                    elif isinstance(content, list):
-                        for tool in content:
-                            tool_name = tool.get("name", "")
-                            if not tool_name:
-                                logger.warning(
-                                    "Tool from agent '%s' has no "
-                                    "'name' key, skipping",
-                                    name,
-                                )
-                                continue
-                            if tool_name in seen_names:
-                                logger.warning(
-                                    "Tool name collision: '%s' from agent '%s' "
-                                    "already registered, skipping",
-                                    tool_name, name,
-                                )
-                                continue
-                            seen_names.add(tool_name)
-                            tools.append(tool)
             except Exception as exc:
                 logger.warning("Failed to get tools from agent '%s': %s", name, exc)
 

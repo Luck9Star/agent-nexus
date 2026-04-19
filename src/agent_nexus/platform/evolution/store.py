@@ -30,6 +30,10 @@ from agent_nexus.models.evolution import (
     SkillOrigin,
     SkillRecord,
 )
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent_nexus.platform.evolution.evolver import EvolveResult
 
 
 logger = logging.getLogger(__name__)

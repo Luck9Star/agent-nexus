@@ -1,14 +1,13 @@
 """Unit tests for agent_nexus.platform.evolution.engine module."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from agent_nexus.models.evolution import EvolutionContext, SkillRecord
-from agent_nexus.platform.evolution.analyzer import AnalysisResult, EvolutionSuggestion
+from agent_nexus.platform.evolution.analyzer import AnalysisResult
 from agent_nexus.platform.evolution.compaction import AgentContext
 from agent_nexus.platform.evolution.engine import EvolutionEngine
 from agent_nexus.platform.evolution.evolver import EvolveResult
-from agent_nexus.platform.evolution.health import HealthReport
 from agent_nexus.platform.evolution.promotion import PromotionCandidate, PromotionResult
 from agent_nexus.models.evolution import EvolutionType
 
@@ -35,7 +34,7 @@ def _make_ctx(**overrides) -> EvolutionContext:
         skills_applied=["sk-1"],
     )
     defaults.update(overrides)
-    return EvolutionContext(**defaults)
+    return EvolutionContext(**defaults)  # pyright: ignore[reportArgumentType]
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +91,7 @@ class TestEvolvePostAnalysis:
     def test_post_analysis_requires_ctx(self):
         store = _make_store()
         engine = EvolutionEngine(store)
-        import pytest
+        import pytest  # pyright: ignore[reportMissingImports]
         with pytest.raises(ValueError, match="ctx"):
             engine.evolve(trigger="post_analysis")
 
@@ -110,7 +109,7 @@ class TestEvolveToolDegradation:
     def test_tool_degradation_requires_tool_key(self):
         store = _make_store()
         engine = EvolutionEngine(store)
-        import pytest
+        import pytest  # pyright: ignore[reportMissingImports]
         with pytest.raises(ValueError, match="tool_key"):
             engine.evolve(trigger="tool_degradation")
 
@@ -127,7 +126,7 @@ class TestEvolveUnknownTrigger:
     def test_raises_on_unknown_trigger(self):
         store = _make_store()
         engine = EvolutionEngine(store)
-        import pytest
+        import pytest  # pyright: ignore[reportMissingImports]
         with pytest.raises(ValueError, match="Unknown trigger"):
             engine.evolve(trigger="bogus")
 
@@ -150,7 +149,7 @@ class TestCheckHealth:
         store = _make_store()
         store.get_skill_record.return_value = None
         engine = EvolutionEngine(store)
-        import pytest
+        import pytest  # pyright: ignore[reportMissingImports]
         with pytest.raises(ValueError, match="Skill not found"):
             engine.check_health("missing")
 
@@ -185,7 +184,7 @@ class TestShouldCompact:
     def test_delegates_to_compaction_guard(self):
         store = _make_store()
         engine = EvolutionEngine(store)
-        from agent_nexus.models.context import TokenUsage, ContextBudget
+        from agent_nexus.models.context import TokenUsage
         ctx = AgentContext(
             agent_id="a1", session_id="s1",
             token_usage=TokenUsage(prompt_tokens=10, completion_tokens=10),
