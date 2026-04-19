@@ -2015,14 +2015,17 @@ class TestEditDistanceScaling:
         assert result == ["x__abef"]  # not corrected
 
     def test_medium_suffix_moderate_threshold(self) -> None:
-        """Suffix 5-8 chars: max_dist=2, matches at distance < 2 (i.e. 0 or 1)."""
+        """Suffix 5-8 chars: max_dist=2, matches at distance <= 2."""
         known = {"x__abcdefgh"}
-        # Distance 2 -> NOT matched (needs strict < max_dist)
+        # Distance 2 -> matched (within max_dist=2)
         result = _correct_skill_ids(["x__abcdefXY"], known)
-        assert result == ["x__abcdefXY"]
+        assert result == ["x__abcdefgh"]
         # Distance 1 -> matched
         result2 = _correct_skill_ids(["x__abcdefXh"], known)
         assert result2 == ["x__abcdefgh"]
+        # Distance 3, suffix len=8, max_dist=2 -> too far, not matched
+        result3 = _correct_skill_ids(["x__abcdeXYZ"], known)
+        assert result3 == ["x__abcdeXYZ"]
 
     def test_long_suffix_relaxed_threshold(self) -> None:
         """Suffix > 8 chars should match at distance <= 3."""

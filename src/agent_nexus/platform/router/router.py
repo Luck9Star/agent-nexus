@@ -144,11 +144,16 @@ class PlatformRouter:
         total = len(_PHASE_ORDER)
         last_error: str | None = None
 
-        # 2. Create in-memory TaskGraph and populate from definition
+        # 2. Create in-memory TaskGraph and populate from definition.
+        #    Tasks must be added in dependency order (deps before dependents)
+        #    so that add_task can validate blocked_by references.  The DSL
+        #    validate() method checks that all blocked_by IDs exist in the
+        #    task set but does NOT enforce topological ordering of the list.
         db_path = Path(f":memory:")
         ctx.task_graph = TaskGraph(db_path)
         try:
-            for dsl_task in definition.tasks:
+            sorted_tasks = self._topological_sort_tasks(definition.tasks)
+            for dsl_task in sorted_tasks:
                 ctx.task_graph.add_task(dsl_task.to_task_item())
         except Exception as exc:
             last_error = f"TaskGraph setup failed: {exc}"
@@ -533,6 +538,48 @@ class PlatformRouter:
                 + "\n\nVerify the above implementation is correct and complete."
             )
         return phase_result
+
+    @staticmethod
+    def _topological_sort_tasks(tasks: list[Any]) -> list[Any]:
+        """Sort tasks so that dependencies appear before dependents.
+
+        DSL validation ensures all ``blocked_by`` references exist but does
+        not guarantee list ordering.  TaskGraph.add_task validates that
+        blocked_by targets are already present in the graph, so we must
+        insert tasks in topological order.
+
+        Uses Kahn's algorithm (BFS).  Tasks with no blocked_by are roots.
+        """
+        task_map = {t.id: t for t in tasks}
+        in_degree: dict[str, int] = {t.id: 0 for t in tasks}
+        for t in tasks:
+            for dep_id in t.blocked_by:
+                if dep_id in in_degree:
+                    in_degree[t.id] += 1
+
+        queue = [tid for tid, deg in in_degree.items() if deg == 0]
+        sorted_tasks: list[Any] = []
+
+        while queue:
+            tid = queue.pop(0)
+            task = task_map.get(tid)
+            if task is not None:
+                sorted_tasks.append(task)
+            for t in tasks:
+                if tid in t.blocked_by:
+                    in_degree[t.id] -= 1
+                    if in_degree[t.id] == 0:
+                        queue.append(t.id)
+
+        # If cycle prevents full sort, append remaining tasks so the
+        # caller still gets all of them (add_task will detect the cycle).
+        if len(sorted_tasks) < len(tasks):
+            sorted_ids = {t.id for t in sorted_tasks}
+            for t in tasks:
+                if t.id not in sorted_ids:
+                    sorted_tasks.append(t)
+
+        return sorted_tasks
 
     @staticmethod
     def _aggregate_results(results: list[Any], phase: WorkflowPhase) -> str:

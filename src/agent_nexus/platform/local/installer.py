@@ -157,7 +157,12 @@ class GitInstaller:
 
             # 6. Read manifest for metadata
             manifest_dict = self._read_manifest(dest)
-            manifest = AgentManifest(**manifest_dict) if manifest_dict else None
+            try:
+                manifest = AgentManifest(**manifest_dict) if manifest_dict else None
+            except Exception as exc:
+                raise InstallationError(
+                    f"Agent '{agent_name}' has invalid manifest data: {exc}"
+                ) from exc
             agent_type = manifest.type if manifest else AgentType.ATOMIC
             manifest_version = manifest.version if manifest else (version or "0.0.0")
 
@@ -439,6 +444,7 @@ class GitInstaller:
 
             if proc.returncode != 0:
                 logger.warning("uv venv failed for %s: %s", agent_name, stderr.decode())
+                shutil.rmtree(venv_path, ignore_errors=True)
                 return None
 
             # Install the agent package into the venv
@@ -459,6 +465,7 @@ class GitInstaller:
             return venv_path
 
         except FileNotFoundError:
+            shutil.rmtree(venv_path, ignore_errors=True)
             logger.warning(
                 "uv not found -- skipping venv creation for %s. "
                 "Install uv for automatic venv management.",
@@ -466,6 +473,7 @@ class GitInstaller:
             )
             return None
         except Exception:
+            shutil.rmtree(venv_path, ignore_errors=True)
             logger.exception("Unexpected error creating venv for %s", agent_name)
             return None
 

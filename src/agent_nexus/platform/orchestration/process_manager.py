@@ -378,17 +378,30 @@ class ProcessManager:
             if not handle.is_alive:
                 return False
 
-            try:
-                ok = await handle.ipc.send_heartbeat()
-            except (IPCError, OSError) as exc:
-                logger.debug(
-                    "Health check IPC failed for agent '%s': %s", name, exc
-                )
-                return False
+        # IPC heartbeat runs outside _lock to avoid blocking all
+        # ProcessManager operations for up to _HEARTBEAT_TIMEOUT seconds.
+        # The handle reference remains valid even without the lock because:
+        # - If stop_agent removes it, send_heartbeat will fail (IPCError/OSError)
+        #   which we catch and return False.
+        # - The handle object itself is not freed until all references drop.
+        try:
+            ok = await handle.ipc.send_heartbeat()
+        except (IPCError, OSError) as exc:
+            logger.debug(
+                "Health check IPC failed for agent '%s': %s", name, exc
+            )
+            return False
 
-            if ok:
+        if not ok:
+            return False
+
+        async with self._lock:
+            # Re-fetch handle — it may have been removed or replaced
+            # while the lock was released during IPC.
+            h = self._agents.get(name)
+            if h is handle:
                 handle.last_heartbeat = datetime.now(timezone.utc)
-            return ok
+        return True
 
     # ------------------------------------------------------------------
     # Query helpers

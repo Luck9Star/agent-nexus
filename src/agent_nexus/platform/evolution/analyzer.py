@@ -115,7 +115,7 @@ def _correct_skill_ids(
         else:
             max_dist = 3
         best: str | None = None
-        best_dist = max_dist
+        best_dist = max_dist + 1
         ambiguous = False
 
         for cand in candidates:

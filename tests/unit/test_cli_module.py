@@ -1284,3 +1284,92 @@ class TestUpdateCLICommand:
             assert mock_update.called
             call_args = mock_update.call_args[0]
             assert call_args[1] is True
+
+
+class TestRunFinallyStopsAgent:
+    """Regression: _run uses finally to stop agent even on unexpected exceptions."""
+
+    @pytest.mark.asyncio
+    async def test_mcp_mode_stops_agent_on_unexpected_error(self) -> None:
+        """MCP mode stops agent even when _wait_forever raises RuntimeError."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        supervisor_mock = MagicMock()
+        supervisor_mock.start_agent = AsyncMock(return_value=True)
+        supervisor_mock.stop_agent = AsyncMock()
+        pm_mock = MagicMock()
+        handle_mock = MagicMock()
+        handle_mock.pid = 12345
+        pm_mock.get_agent.return_value = handle_mock
+
+        async def _raise_runtime():
+            raise RuntimeError("unexpected crash")
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
+            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.local.cli._wait_forever", side_effect=_raise_runtime),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
+        ):
+            from agent_nexus.platform.local.cli import _run
+            with pytest.raises(RuntimeError, match="unexpected crash"):
+                await _run("test-agent", "mcp", "stdio")
+
+        supervisor_mock.stop_agent.assert_called_once_with("test-agent")
+
+    @pytest.mark.asyncio
+    async def test_router_mode_stops_gateway_on_unexpected_error(self) -> None:
+        """Router mode stops gateway even when run_sse raises RuntimeError."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        supervisor_mock = MagicMock()
+        supervisor_mock.start_agent = AsyncMock(return_value=True)
+        pm_mock = MagicMock()
+
+        gateway_mock = MagicMock()
+        gateway_mock.run_sse = AsyncMock(side_effect=RuntimeError("network error"))
+        gateway_mock.stop = AsyncMock()
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
+            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.gateway.gateway.MCPGateway", return_value=gateway_mock),
+            patch("agent_nexus.platform.router.router.PlatformRouter", return_value=MagicMock()),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
+        ):
+            from agent_nexus.platform.local.cli import _run
+            with pytest.raises(RuntimeError, match="network error"):
+                await _run("test-agent", "router", "sse")
+
+        gateway_mock.stop.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cli_mode_stops_agent_on_unexpected_error(self) -> None:
+        """CLI mode stops agent even when _wait_forever raises RuntimeError."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        supervisor_mock = MagicMock()
+        supervisor_mock.start_agent = AsyncMock(return_value=True)
+        supervisor_mock.stop_agent = AsyncMock()
+        pm_mock = MagicMock()
+
+        async def _raise_runtime():
+            raise RuntimeError("unexpected crash")
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
+            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.local.cli._wait_forever", side_effect=_raise_runtime),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
+        ):
+            from agent_nexus.platform.local.cli import _run
+            with pytest.raises(RuntimeError, match="unexpected crash"):
+                await _run("test-agent", "cli", "stdio")
+
+        supervisor_mock.stop_agent.assert_called_once_with("test-agent")

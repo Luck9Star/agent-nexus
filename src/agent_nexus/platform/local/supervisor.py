@@ -350,7 +350,14 @@ class AgentSupervisor:
         # Strategy 1: venv python
         if entry.venv_path:
             venv_python = Path(entry.venv_path).resolve() / "bin" / "python"
-            if venv_python.exists():
+            if not venv_python.exists():
+                logger.warning(
+                    "Configured venv for '%s' not found at %s, "
+                    "falling back to system python/uvx",
+                    agent_name,
+                    venv_python,
+                )
+            else:
                 allowed = self._config_dir.resolve()
                 if not venv_python.is_relative_to(allowed):
                     logger.warning(

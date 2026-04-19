@@ -455,6 +455,7 @@ async def _run(name: str, mode: str, transport: str) -> None:
             await _wait_forever()
         except (KeyboardInterrupt, asyncio.CancelledError):
             typer.echo("\nStopping agent...")
+        finally:
             await supervisor.stop_agent(name)
 
     elif mode == "router":
@@ -494,6 +495,7 @@ async def _run(name: str, mode: str, transport: str) -> None:
                 await gateway.run_stdio()
         except (KeyboardInterrupt, asyncio.CancelledError):
             typer.echo("\nShutting down...")
+        finally:
             await gateway.stop()
 
     elif mode == "cli":
@@ -518,6 +520,7 @@ async def _run(name: str, mode: str, transport: str) -> None:
             await _wait_forever()
         except (KeyboardInterrupt, asyncio.CancelledError):
             typer.echo("\nStopping agent...")
+        finally:
             await supervisor.stop_agent(name)
 
     else:

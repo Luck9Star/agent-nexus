@@ -177,6 +177,50 @@ class TestInstallerGetVersion:
 
 
 # ---------------------------------------------------------------------------
+# install — manifest validation
+# ---------------------------------------------------------------------------
+
+class TestInstallerManifestValidation:
+    """Regression: invalid manifest data raises InstallationError, not ValidationError."""
+
+    @pytest.mark.asyncio
+    async def test_invalid_manifest_raises_installation_error(self, tmp_path: Path) -> None:
+        inst, _, lf = _make_installer(tmp_path)
+
+        agent_dir = tmp_path / "cache" / "repos" / "abc" / "packages" / "bad-manifest"
+        agent_dir.mkdir(parents=True)
+        # Valid YAML structure but invalid name (contains spaces)
+        (agent_dir / "agent-manifest.yaml").write_text(
+            "name: 'has spaces'\nversion: 1.0.0\ntype: atomic\ndescription: test\n",
+            encoding="utf-8",
+        )
+        (agent_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+
+        # Also write the manifest to the agents dir (where _read_manifest reads from)
+        dest = tmp_path / "agents" / "bad-manifest"
+        dest.mkdir(parents=True)
+        (dest / "agent-manifest.yaml").write_text(
+            "name: 'has spaces'\nversion: 1.0.0\ntype: atomic\ndescription: test\n",
+            encoding="utf-8",
+        )
+
+        with patch.object(inst, "_sparse_clone", new_callable=AsyncMock, return_value=agent_dir), \
+             patch.object(inst, "_validate_agent_package", return_value=[]), \
+             patch.object(inst, "_create_venv", new_callable=AsyncMock, return_value=None), \
+             patch.object(inst, "_get_commit_sha", new_callable=AsyncMock, return_value="a" * 40), \
+             patch("shutil.copytree"), \
+             patch("shutil.rmtree"):
+
+            # _read_manifest reads from dest, returns dict with name="has spaces"
+            # AgentManifest(**dict) fails validation, wrapped in InstallationError
+            with pytest.raises(InstallationError, match="invalid manifest data"):
+                await inst.install(
+                    "bad-manifest",
+                    source_url="https://example.com/repo.git",
+                )
+
+
+# ---------------------------------------------------------------------------
 # validation
 # ---------------------------------------------------------------------------
 
@@ -256,3 +300,45 @@ class TestCreateVenvBroadExcept:
             result = await inst._create_venv("test-agent", agent_dir)
 
         assert result is None
+
+
+class TestCreateVenvCleanupOnFailure:
+    """Regression: _create_venv cleans up orphan venv directory on all failure paths."""
+
+    @pytest.mark.asyncio
+    async def test_venv_cleanup_on_uv_venv_failure(self, tmp_path: Path) -> None:
+        """Orphan venv directory is cleaned up when 'uv venv' returns non-zero."""
+        inst, _, _ = _make_installer(tmp_path)
+        agent_dir = tmp_path / "agents" / "test-agent"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "pyproject.toml").write_text("[project]\nname='t'\nversion='0'\n")
+
+        venv_path = tmp_path / "venvs" / "test-agent"
+
+        proc_mock = MagicMock()
+        proc_mock.returncode = 1
+        proc_mock.communicate = AsyncMock(return_value=(b"", b"error"))
+
+        with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+            result = await inst._create_venv("test-agent", agent_dir)
+
+        assert result is None
+        assert not venv_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_venv_cleanup_on_file_not_found(self, tmp_path: Path) -> None:
+        """Orphan venv directory is cleaned up when uv is not found."""
+        inst, _, _ = _make_installer(tmp_path)
+        agent_dir = tmp_path / "agents" / "test-agent"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "pyproject.toml").write_text("[project]\nname='t'\nversion='0'\n")
+
+        venv_path = tmp_path / "venvs" / "test-agent"
+        # Simulate uv creating a partial venv directory before the FileNotFoundError
+        venv_path.mkdir(parents=True)
+
+        with patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError("no uv")):
+            result = await inst._create_venv("test-agent", agent_dir)
+
+        assert result is None
+        assert not venv_path.exists()

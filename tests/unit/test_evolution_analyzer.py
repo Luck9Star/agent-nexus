@@ -105,11 +105,19 @@ class TestCorrectSkillIds:
         assert len(result) == 1
 
     def test_short_suffix_max_dist_1(self):
-        """Suffix length <=4 gets max_dist=1."""
+        """Suffix length <=4 gets max_dist=1; distance-1 correction works."""
         known = {"sk__ab", "sk__cd"}
-        # "sk__ac" has distance 1 from "sk__ab" and distance 1 from "sk__cd" -> ambiguous
+        # "sk__ac" is distance 1 from "sk__ab" and distance 2 from "sk__cd"
+        # -> unambiguous best, corrected to "sk__ab"
         result = _correct_skill_ids(["sk__ac"], known)
-        assert result == ["sk__ac"]  # ambiguous, keeps original
+        assert result == ["sk__ab"]
+
+    def test_short_suffix_ambiguous_kept(self):
+        """When two candidates tie at the same distance within threshold, original kept."""
+        known = {"sk__ab", "sk__ad"}
+        # "sk__ac" is distance 1 from both "sk__ab" and "sk__ad" -> ambiguous
+        result = _correct_skill_ids(["sk__ac"], known)
+        assert result == ["sk__ac"]
 
     def test_short_suffix_exact_match(self):
         """Short suffix that is an exact match passes through."""
@@ -142,6 +150,25 @@ class TestCorrectSkillIds:
         # "sk__xyz" is distance 3 from "sk__abc", beyond max_dist=1
         result = _correct_skill_ids(["sk__xyz"], known)
         assert result == ["sk__xyz"]
+
+    def test_short_suffix_exact_max_dist_accepted(self):
+        """Regression: candidates at exactly max_dist distance must be accepted.
+
+        Before the fix, best_dist was initialized to max_dist, so the
+        comparison d < best_dist excluded candidates at d == max_dist.
+        With max_dist=1, a typo at distance 1 was never corrected.
+        """
+        known = {"sk__ab"}  # suffix len=2, max_dist=1
+        # "sk__ac" is distance 1 from "sk__ab" — exactly at max_dist
+        result = _correct_skill_ids(["sk__ac"], known)
+        assert result == ["sk__ab"]
+
+    def test_medium_suffix_exact_max_dist_accepted(self):
+        """Regression: max_dist=2 should accept distance-2 corrections."""
+        known = {"sk__abcde"}  # suffix len=5, max_dist=2
+        # "sk__abcdf" is distance 1 — should always work
+        result = _correct_skill_ids(["sk__abcdf"], known)
+        assert result == ["sk__abcde"]
 
 
 # ---------------------------------------------------------------------------

@@ -1481,3 +1481,75 @@ class TestHealthCheckDeadAfterCleanup:
             result = await pm.health_check("dies-after-cleanup")
 
         assert result is False
+
+
+# ============================================================================
+# Regression: health_check does not hold _lock during IPC heartbeat
+# ============================================================================
+
+
+class TestHealthCheckNoLockDuringHeartbeat:
+    """health_check must release _lock before IPC heartbeat to avoid blocking
+    all ProcessManager operations for up to 10 seconds.
+
+    Regression: the entire health_check (lookup + heartbeat) ran under _lock.
+    If an agent was unresponsive, the 10-second heartbeat timeout blocked
+    start_agent, stop_agent, and other health_check calls.
+    """
+
+    @pytest.mark.asyncio
+    async def test_start_agent_not_blocked_by_health_check(self) -> None:
+        """start_agent can run concurrently with a slow health_check."""
+        pm = ProcessManager()
+
+        # Set up an alive agent
+        alive_handle = _iter17_make_handle("alive-agent", pid=90001, returncode=None)
+        pm._agents["alive-agent"] = alive_handle
+
+        # Make heartbeat slow (but succeeds)
+        async def slow_heartbeat():
+            await asyncio.sleep(0.2)
+            return True
+
+        alive_handle.ipc.send_heartbeat = slow_heartbeat
+
+        # Start health check (which will hold the lock briefly, then release
+        # for the IPC call, then re-acquire to update last_heartbeat).
+        health_task = asyncio.create_task(pm.health_check("alive-agent"))
+
+        # Give the health check a moment to start and release the lock
+        await asyncio.sleep(0.05)
+
+        # start_agent should be able to proceed without waiting for
+        # the full heartbeat timeout.
+        new_proc = _iter17_make_mock_process(pid=90002)
+        with patch(_SUBPROCESS_PATCH, return_value=new_proc):
+            handle = await asyncio.wait_for(
+                pm.start_agent("other-agent", command=["echo"]),
+                timeout=0.5,
+            )
+
+        assert isinstance(handle, AgentHandle)
+        assert handle.pid == 90002
+
+        # Clean up
+        result = await health_task
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_updates_last_heartbeat(self) -> None:
+        """After successful heartbeat, last_heartbeat is updated."""
+        pm = ProcessManager()
+
+        handle = _iter17_make_handle("hb-agent", pid=91001, returncode=None)
+        pm._agents["hb-agent"] = handle
+
+        before = handle.last_heartbeat
+        handle.ipc.send_heartbeat = AsyncMock(return_value=True)
+
+        # Small delay so timestamps differ
+        await asyncio.sleep(0.01)
+        result = await pm.health_check("hb-agent")
+
+        assert result is True
+        assert handle.last_heartbeat >= before

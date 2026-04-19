@@ -1895,3 +1895,92 @@ class TestExecuteSingleAgentHandleNotFound:
             await router._execute_single_agent(
                 "dead-agent", "hello", conversation_id="c1"
             )
+
+
+class TestTopologicalSortTasks:
+    """_topological_sort_tasks reorders tasks so deps appear before dependents.
+
+    Regression: route_composite added tasks to TaskGraph sequentially.  If a
+    task B (listed first) had blocked_by=[A] (listed later), add_task would
+    raise "blocked_by references non-existent tasks" because A was not yet
+    in the graph.  DSL validation checks that all blocked_by IDs exist in
+    the task set but does NOT enforce ordering.
+    """
+
+    @pytest.mark.asyncio
+    async def test_forward_blocked_by_succeeds(self) -> None:
+        """Task B (first) blocked_by A (second) does not crash route_composite.
+
+        DSL definition has tasks in wrong order: [B(blocked_by=[A]), A].
+        Without topological sort this raises ValueError.  With the sort,
+        tasks are reordered to [A, B] and add_task succeeds.
+        """
+        agents = {
+            "explorer": _make_agent_handle(name="explorer", response_content="data"),
+            "planner": _make_agent_handle(name="planner", response_content="plan"),
+            "worker1": _make_agent_handle(name="worker1", response_content="impl"),
+            "verifier": _make_agent_handle(name="verifier", response_content="ok"),
+        }
+        pm = _make_process_manager(agents=agents)
+        router = PlatformRouter(process_manager=pm)
+
+        # Tasks listed in reverse dependency order:
+        # t2 blocked_by t1, but t2 appears BEFORE t1 in the list.
+        definition = OrchestrationDefinition(
+            goal="test forward deps",
+            agent_name="test-agent",
+            agents={
+                "explorer": DSLAgent(name="explorer", description="Explore", role="explore"),
+                "planner": DSLAgent(name="planner", description="Plan", role="plan"),
+                "worker1": DSLAgent(name="worker1", description="Work", role="worker"),
+                "verifier": DSLAgent(name="verifier", description="Verify", role="verification"),
+            },
+            tasks=[
+                DSLTask(id="t2", description="Plan", agent="planner", blocked_by=["t1"]),
+                DSLTask(id="t1", description="Explore", agent="explorer"),
+                DSLTask(id="t3", description="Work", agent="worker1"),
+                DSLTask(id="t4", description="Verify", agent="verifier"),
+            ],
+            tool_loading=DSLToolLoading(),
+        )
+
+        # This should NOT raise — tasks are topologically sorted internally
+        result = await router.route_composite(definition, "test", "conv-1")
+        assert result.success is True
+        assert result.completed_phases == 4
+
+    def test_topological_sort_preserves_dag_order(self) -> None:
+        """Already-sorted tasks come out in the same order."""
+        tasks = [
+            DSLTask(id="A", description="a", agent="ag"),
+            DSLTask(id="B", description="b", agent="ag", blocked_by=["A"]),
+            DSLTask(id="C", description="c", agent="ag", blocked_by=["B"]),
+        ]
+        result = PlatformRouter._topological_sort_tasks(tasks)
+        assert [t.id for t in result] == ["A", "B", "C"]
+
+    def test_topological_sort_reorders_reverse(self) -> None:
+        """Reverse-ordered tasks are sorted into correct dependency order."""
+        tasks = [
+            DSLTask(id="C", description="c", agent="ag", blocked_by=["B"]),
+            DSLTask(id="B", description="b", agent="ag", blocked_by=["A"]),
+            DSLTask(id="A", description="a", agent="ag"),
+        ]
+        result = PlatformRouter._topological_sort_tasks(tasks)
+        ids = [t.id for t in result]
+        assert ids.index("A") < ids.index("B") < ids.index("C")
+
+    def test_topological_sort_diamond(self) -> None:
+        """Diamond dependency: A -> B,C -> D.  B and C can be in any order."""
+        tasks = [
+            DSLTask(id="D", description="d", agent="ag", blocked_by=["B", "C"]),
+            DSLTask(id="C", description="c", agent="ag", blocked_by=["A"]),
+            DSLTask(id="B", description="b", agent="ag", blocked_by=["A"]),
+            DSLTask(id="A", description="a", agent="ag"),
+        ]
+        result = PlatformRouter._topological_sort_tasks(tasks)
+        ids = [t.id for t in result]
+        assert ids.index("A") < ids.index("B")
+        assert ids.index("A") < ids.index("C")
+        assert ids.index("B") < ids.index("D")
+        assert ids.index("C") < ids.index("D")

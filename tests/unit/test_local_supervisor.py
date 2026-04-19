@@ -216,3 +216,23 @@ class TestSupervisorBuildEnv:
         cfg.load_config.side_effect = RuntimeError("broken")
         env = sup._build_env("test", _make_entry())
         assert env == {}
+
+
+class TestSupervisorBuildCommandVenvFallback:
+    """Regression: _build_command logs warning when configured venv is missing."""
+
+    def test_logs_warning_when_venv_missing(self, tmp_path: Path) -> None:
+        sup, _, lf, _ = _make_supervisor(tmp_path)
+        entry = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="a" * 40,
+            agent_type=AgentType.ATOMIC,
+            venv_path="/nonexistent/venv/path",
+        )
+
+        with patch.object(Path, "exists", return_value=False):
+            cmd = sup._build_command("test-agent", entry)
+
+        # Should fall through to uvx/python3 fallback, not return None
+        assert cmd is not None
