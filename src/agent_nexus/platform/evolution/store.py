@@ -146,6 +146,7 @@ class EvolutionStore:
             yield conn
             conn.commit()
         except Exception:
+            logger.exception("DB commit failed in evolution store context")
             conn.rollback()
             raise
         finally:

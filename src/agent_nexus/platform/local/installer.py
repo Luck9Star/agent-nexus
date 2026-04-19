@@ -350,6 +350,7 @@ class GitInstaller:
             )
             return result.strip()
         except Exception:
+            logger.debug("rev-parse HEAD failed for %s, returning 'latest'", repo_path, exc_info=True)
             return "latest"
 
     # ------------------------------------------------------------------

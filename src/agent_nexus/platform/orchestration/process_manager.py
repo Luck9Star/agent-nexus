@@ -195,6 +195,7 @@ class ProcessManager:
                 self._agents[name] = handle
             except Exception:
                 # Kill orphaned process to prevent resource leak
+                logger.exception("Agent '%s' spawn failed", name)
                 try:
                     process.kill()
                 except ProcessLookupError:
@@ -258,7 +259,7 @@ class ProcessManager:
                 try:
                     await handle.ipc.stream.close()
                 except Exception:
-                    pass
+                    logger.debug("Failed to close IPC stream for dead agent '%s'", name, exc_info=True)
                 async with self._lock:
                     if self._agents.get(name) is handle:
                         self._agents.pop(name, None)
@@ -269,7 +270,7 @@ class ProcessManager:
             try:
                 await handle.ipc.stream.close()
             except Exception:
-                pass
+                logger.debug("Failed to close IPC stdin for agent '%s'", name, exc_info=True)
 
             try:
                 await asyncio.wait_for(process.wait(), timeout=timeout)

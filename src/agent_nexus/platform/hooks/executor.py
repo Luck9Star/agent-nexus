@@ -277,7 +277,7 @@ class HookExecutor:
                     proc.kill()
                     await proc.wait()
             except Exception:
-                pass
+                logger.debug("Failed to kill timed-out hook subprocess", exc_info=True)
             return HookExecution(
                 hook=hook,
                 passed=False,
