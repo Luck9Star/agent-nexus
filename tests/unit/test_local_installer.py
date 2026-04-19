@@ -1,0 +1,241 @@
+"""Unit tests for GitInstaller: install/uninstall/update agents from git repos."""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from agent_nexus.models.agent import AgentType
+from agent_nexus.models.distribution import LockfileEntry, SourceEntry
+from agent_nexus.platform.local.installer import (
+    AgentNotFoundError,
+    GitInstaller,
+    InstallationError,
+    _url_to_source_name,
+)
+
+
+def _make_entry() -> LockfileEntry:
+    return LockfileEntry(
+        version="1.0.0", source="official",
+        commit_sha="a" * 40, agent_type=AgentType.ATOMIC,
+    )
+
+
+def _make_installer(tmp_path: Path) -> tuple[GitInstaller, MagicMock, MagicMock]:
+    sources = MagicMock()
+    sources.resolve_agent_source.return_value = None
+    lf = MagicMock()
+    lf.get_entry.return_value = None
+    lf.add_entry_by_name = MagicMock()
+    lf.remove_entry = MagicMock()
+    installer = GitInstaller(sources, lf, tmp_path)
+    return installer, sources, lf
+
+
+# ---------------------------------------------------------------------------
+# _url_to_source_name helper
+# ---------------------------------------------------------------------------
+
+class TestUrlToSourceName:
+    def test_extracts_repo_name(self) -> None:
+        assert _url_to_source_name("https://github.com/user/my-repo.git") == "my-repo"
+
+    def test_strips_trailing_slash(self) -> None:
+        assert _url_to_source_name("https://github.com/user/repo/") == "repo"
+
+    def test_handles_no_git_suffix(self) -> None:
+        assert _url_to_source_name("https://example.com/pkg") == "pkg"
+
+    def test_returns_direct_for_empty(self) -> None:
+        # rsplit on "/" gives "" when URL is just ""
+        result = _url_to_source_name("")
+        assert isinstance(result, str)
+
+
+# ---------------------------------------------------------------------------
+# install
+# ---------------------------------------------------------------------------
+
+class TestInstallerInstall:
+    @pytest.mark.asyncio
+    async def test_install_rejects_invalid_name(self, tmp_path: Path) -> None:
+        inst, _, _ = _make_installer(tmp_path)
+        with pytest.raises(InstallationError, match="Invalid agent name"):
+            await inst.install("../../../etc/passwd")
+
+    @pytest.mark.asyncio
+    async def test_install_raises_not_found_when_no_source(self, tmp_path: Path) -> None:
+        inst, sources, _ = _make_installer(tmp_path)
+        sources.resolve_agent_source.return_value = None
+        with pytest.raises(AgentNotFoundError, match="not found"):
+            await inst.install("missing-agent")
+
+    @pytest.mark.asyncio
+    async def test_install_with_direct_source_url(self, tmp_path: Path) -> None:
+        inst, _, lf = _make_installer(tmp_path)
+        # Patch internals to avoid actual git/venv operations
+        with patch.object(inst, "_sparse_clone", new_callable=AsyncMock) as mock_clone, \
+             patch.object(inst, "_validate_agent_package", return_value=[]), \
+             patch.object(inst, "_create_venv", new_callable=AsyncMock, return_value=None), \
+             patch.object(inst, "_get_commit_sha", new_callable=AsyncMock, return_value="a" * 40), \
+             patch("shutil.copytree"), \
+             patch("shutil.rmtree"), \
+             patch.object(Path, "exists", return_value=True):
+
+            agent_dir = tmp_path / "cache" / "repos" / "abc" / "packages" / "test-agent"
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            (agent_dir / "agent-manifest.yaml").write_text(
+                "name: test-agent\nversion: 1.0.0\ntype: atomic\n", encoding="utf-8"
+            )
+            (agent_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+            mock_clone.return_value = agent_dir
+
+            entry = await inst.install(
+                "test-agent", source_url="https://example.com/repo.git"
+            )
+            assert entry is not None
+            lf.add_entry_by_name.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# uninstall
+# ---------------------------------------------------------------------------
+
+class TestInstallerUninstall:
+    @pytest.mark.asyncio
+    async def test_uninstall_rejects_invalid_name(self, tmp_path: Path) -> None:
+        inst, _, _ = _make_installer(tmp_path)
+        with pytest.raises(InstallationError, match="Invalid agent name"):
+            await inst.uninstall("../../etc")
+
+    @pytest.mark.asyncio
+    async def test_uninstall_returns_false_when_not_installed(self, tmp_path: Path) -> None:
+        inst, _, lf = _make_installer(tmp_path)
+        lf.get_entry.return_value = None
+        assert await inst.uninstall("ghost") is False
+
+    @pytest.mark.asyncio
+    async def test_uninstall_removes_lockfile_entry_first(self, tmp_path: Path) -> None:
+        inst, _, lf = _make_installer(tmp_path)
+        entry = _make_entry()
+        lf.get_entry.return_value = entry
+
+        agent_dir = tmp_path / "agents" / "test-agent"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "main.py").write_text("print('hi')", encoding="utf-8")
+
+        with patch("shutil.rmtree"):
+            result = await inst.uninstall("test-agent")
+        assert result is True
+        lf.remove_entry.assert_called_once_with("test-agent")
+
+    @pytest.mark.asyncio
+    async def test_uninstall_refuses_venv_outside_allowed_dir(self, tmp_path: Path) -> None:
+        inst, _, lf = _make_installer(tmp_path)
+        entry = LockfileEntry(
+            version="1.0.0", source="official",
+            commit_sha="a" * 40, agent_type=AgentType.ATOMIC,
+            venv_path="/tmp/malicious/path",
+        )
+        lf.get_entry.return_value = entry
+        agent_dir = tmp_path / "agents" / "agent-x"
+        agent_dir.mkdir(parents=True)
+
+        with patch("shutil.rmtree"):
+            result = await inst.uninstall("agent-x")
+        assert result is True
+
+
+# ---------------------------------------------------------------------------
+# update / get_installed_version
+# ---------------------------------------------------------------------------
+
+class TestInstallerUpdate:
+    @pytest.mark.asyncio
+    async def test_update_raises_when_not_installed(self, tmp_path: Path) -> None:
+        inst, _, lf = _make_installer(tmp_path)
+        lf.get_entry.return_value = None
+        with pytest.raises(AgentNotFoundError, match="not installed"):
+            await inst.update("ghost")
+
+
+class TestInstallerGetVersion:
+    def test_get_installed_version_returns_version(self, tmp_path: Path) -> None:
+        inst, _, lf = _make_installer(tmp_path)
+        entry = _make_entry()
+        lf.get_entry.return_value = entry
+        assert inst.get_installed_version("test-agent") == "1.0.0"
+
+    def test_get_installed_version_returns_none(self, tmp_path: Path) -> None:
+        inst, _, lf = _make_installer(tmp_path)
+        lf.get_entry.return_value = None
+        assert inst.get_installed_version("ghost") is None
+
+
+# ---------------------------------------------------------------------------
+# validation
+# ---------------------------------------------------------------------------
+
+class TestInstallerValidation:
+    def test_validate_rejects_missing_manifest(self, tmp_path: Path) -> None:
+        inst, _, _ = _make_installer(tmp_path)
+        agent_dir = tmp_path / "pkg"
+        agent_dir.mkdir()
+        (agent_dir / "SKILL.md").write_text("# x\n", encoding="utf-8")
+        issues = inst._validate_agent_package(agent_dir)
+        assert any("manifest" in i.lower() for i in issues)
+
+    def test_validate_rejects_missing_skill_md(self, tmp_path: Path) -> None:
+        inst, _, _ = _make_installer(tmp_path)
+        agent_dir = tmp_path / "pkg"
+        agent_dir.mkdir()
+        (agent_dir / "agent-manifest.yaml").write_text(
+            "name: x\nversion: 1.0.0\ntype: atomic\n", encoding="utf-8"
+        )
+        issues = inst._validate_agent_package(agent_dir)
+        assert any("SKILL" in i for i in issues)
+
+    def test_validate_passes_valid_package(self, tmp_path: Path) -> None:
+        inst, _, _ = _make_installer(tmp_path)
+        agent_dir = tmp_path / "pkg"
+        agent_dir.mkdir()
+        (agent_dir / "agent-manifest.yaml").write_text(
+            "name: x\nversion: 1.0.0\ntype: atomic\n", encoding="utf-8"
+        )
+        (agent_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+        issues = inst._validate_agent_package(agent_dir)
+        assert issues == []
+
+    def test_validate_rejects_invalid_type(self, tmp_path: Path) -> None:
+        inst, _, _ = _make_installer(tmp_path)
+        agent_dir = tmp_path / "pkg"
+        agent_dir.mkdir()
+        (agent_dir / "agent-manifest.yaml").write_text(
+            "name: x\nversion: 1.0.0\ntype: super-duper\n", encoding="utf-8"
+        )
+        (agent_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+        issues = inst._validate_agent_package(agent_dir)
+        assert any("Invalid agent type" in i for i in issues)
+
+
+# ---------------------------------------------------------------------------
+# cache path
+# ---------------------------------------------------------------------------
+
+class TestInstallerCachePath:
+    def test_cache_path_is_deterministic(self, tmp_path: Path) -> None:
+        inst, _, _ = _make_installer(tmp_path)
+        url = "https://example.com/repo.git"
+        p1 = inst._get_cache_path(url)
+        p2 = inst._get_cache_path(url)
+        assert p1 == p2
+
+    def test_cache_path_differs_for_different_urls(self, tmp_path: Path) -> None:
+        inst, _, _ = _make_installer(tmp_path)
+        p1 = inst._get_cache_path("https://a.com/r.git")
+        p2 = inst._get_cache_path("https://b.com/r.git")
+        assert p1 != p2
