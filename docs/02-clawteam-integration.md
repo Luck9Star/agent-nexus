@@ -186,7 +186,7 @@ value = "feature-delivery-pipeline"
 [[agents]]
 name = "requirements-analyzer"
 description = "需求分析专家"
-role = "coordinator"
+role = "plan"
 
 [[agents]]
 name = "api-doc-generator"

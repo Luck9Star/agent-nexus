@@ -2577,3 +2577,192 @@ class TestGetMetricsPreciseLikeMatching:
 
         metrics = store.get_metrics(agent_name="code")
         assert metrics.total_selections == 15
+
+
+# ============================================================================
+# Coverage gap tests: evolver addressed-skip, metric-check healthy skip,
+# fix multi-parent error, store.evolve_skill failure, derived missing parent,
+# captured long name truncation, captured empty name fallback
+# ============================================================================
+
+
+class TestProcessToolDegradationAddressedSkip:
+    """Already-addressed skills are skipped during tool degradation."""
+
+    def test_addressed_skill_skipped(self, tmp_path: Path) -> None:
+        """Skill in the _addressed set is not evolved again."""
+        s1 = _make_record("s1", "a")
+        store = _store_with_records(tmp_path, s1)
+        evolver = SkillEvolver(store)
+
+        # Manually mark s1 as already addressed for tool-x
+        evolver._addressed = {"tool-x": {"s1"}}
+
+        results = evolver.process_tool_degradation("tool-x", "API broken")
+        assert len(results) == 0
+
+
+class TestProcessMetricCheckHealthySkip:
+    """process_metric_check skips skills that diagnose as healthy."""
+
+    def test_healthy_skill_produces_no_evolution(self, tmp_path: Path) -> None:
+        """Skill with good metrics is skipped (diagnose returns None)."""
+        r = _make_record(
+            "s1", "good",
+            selections=100, applied=80, completions=70, fallbacks=5,
+        )
+        store = _store_with_records(tmp_path, r)
+        evolver = SkillEvolver(store)
+
+        results = evolver.process_metric_check(min_selections=5)
+        assert len(results) == 0
+
+
+class TestEvolveFixMultipleParents:
+    """FIX evolution requires exactly 1 parent."""
+
+    def test_fix_with_two_parents_returns_error(self, tmp_path: Path) -> None:
+        """FIX with multiple parents returns error, not crash."""
+        store = _store_with_records(tmp_path)
+        evolver = SkillEvolver(store)
+
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.FIX,
+            target_skill_ids=["p1", "p2"],
+            direction="Fix multiple",
+        )
+        result = evolver.evolve(suggestion)
+        assert not result.success
+        assert "exactly 1 parent, got 2" in result.error
+
+
+class TestEvolveFixStoreFailure:
+    """FIX evolution handles store.evolve_skill failure."""
+
+    def test_store_evolve_failure_returns_error(self, tmp_path: Path) -> None:
+        """When store.evolve_skill fails, FIX returns error result."""
+        from unittest.mock import patch
+
+        parent = _make_record("p1", "skill", directory="skills/s")
+        store = _store_with_records(tmp_path, parent)
+        evolver = SkillEvolver(store)
+
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.FIX,
+            target_skill_ids=["p1"],
+            direction="Fix it",
+        )
+
+        fail_result = EvolveResult(success=False, error="DB locked")
+        with patch.object(store, "evolve_skill", return_value=fail_result):
+            result = evolver.evolve(suggestion)
+
+        assert not result.success
+        assert result.error == "DB locked"
+
+
+class TestEvolveDerivedMissingParent:
+    """DERIVED evolution handles missing parent skill."""
+
+    def test_derived_missing_parent_returns_error(self, tmp_path: Path) -> None:
+        """DERIVED with a nonexistent parent ID returns error."""
+        store = _store_with_records(tmp_path)
+        evolver = SkillEvolver(store)
+
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.DERIVED,
+            target_skill_ids=["ghost_parent"],
+            direction="Enhance it",
+        )
+        result = evolver.evolve(suggestion)
+        assert not result.success
+        assert "not found" in result.error
+
+
+class TestEvolveDerivedStoreFailure:
+    """DERIVED evolution handles store.evolve_skill failure."""
+
+    def test_store_evolve_failure_returns_error(self, tmp_path: Path) -> None:
+        """When store.evolve_skill fails, DERIVED returns error result."""
+        from unittest.mock import patch
+
+        parent = _make_record("p1", "base", directory="skills/base")
+        store = _store_with_records(tmp_path, parent)
+        evolver = SkillEvolver(store)
+
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.DERIVED,
+            target_skill_ids=["p1"],
+            direction="Enhance",
+        )
+
+        fail_result = EvolveResult(success=False, error="collision")
+        with patch.object(store, "evolve_skill", return_value=fail_result):
+            result = evolver.evolve(suggestion)
+
+        assert not result.success
+        assert result.error == "collision"
+
+
+class TestEvolveCapturedLongName:
+    """CAPTURED evolution truncates long direction text for name."""
+
+    def test_long_direction_truncated(self, tmp_path: Path) -> None:
+        """Direction longer than 50 chars is truncated for name generation."""
+        store = _store_with_records(tmp_path)
+        evolver = SkillEvolver(store)
+
+        long_direction = "A" * 80 + ". And more text"
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.CAPTURED,
+            direction=long_direction,
+        )
+        result = evolver.evolve(suggestion)
+        assert result.success
+        assert result.new_record is not None
+        # Name should be based on first 50 chars, lowercased, hyphens
+        assert len(result.new_record.name) <= 50 + 10  # some slack for suffixes
+
+
+class TestEvolveCapturedEmptyName:
+    """CAPTURED evolution generates fallback name when direction sanitizes to empty."""
+
+    def test_special_chars_direction_uses_fallback_name(
+        self, tmp_path: Path,
+    ) -> None:
+        """Direction with only special chars produces a 'captured_' fallback name."""
+        store = _store_with_records(tmp_path)
+        evolver = SkillEvolver(store)
+
+        # Direction that will sanitize to empty after removing non-alnum
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.CAPTURED,
+            direction="!!!???...",
+        )
+        result = evolver.evolve(suggestion)
+        assert result.success
+        assert result.new_record is not None
+        assert result.new_record.name.startswith("captured_")
+
+
+class TestEvolveCapturedStoreFailure:
+    """CAPTURED evolution handles store.evolve_skill failure."""
+
+    def test_store_evolve_failure_returns_error(self, tmp_path: Path) -> None:
+        """When store.evolve_skill fails, CAPTURED returns error result."""
+        from unittest.mock import patch
+
+        store = _store_with_records(tmp_path)
+        evolver = SkillEvolver(store)
+
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.CAPTURED,
+            direction="Some novel pattern",
+        )
+
+        fail_result = EvolveResult(success=False, error="write error")
+        with patch.object(store, "evolve_skill", return_value=fail_result):
+            result = evolver.evolve(suggestion)
+
+        assert not result.success
+        assert result.error == "write error"

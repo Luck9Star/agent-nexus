@@ -513,3 +513,197 @@ class TestTaskGraphInMemory:
 
         # No cycles initially
         assert tg.detect_cycles() == []
+
+
+
+# ============================================================================
+# Coverage gap tests: fail_task not-found, parallel groups non-existent dep
+# warning, cyclic break branch, _get_task_conn_required raise,
+# in-memory rollback, _would_create_cycle DFS internals
+# ============================================================================
+
+
+class TestFailTaskNotFound:
+    """fail_task raises ValueError for non-existent task."""
+
+    def test_fail_not_found(self, task_graph: TaskGraph) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            task_graph.fail_task("nonexistent_task")
+
+
+class TestParallelGroupsNonExistentDep:
+    """Parallel groups with a dependency on a non-existent task logs warning."""
+
+    def test_nonexistent_dep_ignored(self, task_graph: TaskGraph) -> None:
+        """Task depending on a non-existent task ID is still grouped."""
+        import sqlite3
+
+        task_graph.add_task(_make_task("A"))
+        task_graph.add_task(_make_task("B", blocked_by=["A"]))
+
+        # Manually insert a dep pointing to a non-existent task
+        conn = sqlite3.connect(str(task_graph._db_path))
+        conn.execute(
+            "INSERT INTO task_dependencies (task_id, blocked_by_id) "
+            "VALUES ('B', 'ghost_task')"
+        )
+        conn.commit()
+        conn.close()
+
+        # B depends on A (real) and ghost_task (fake).
+        # ghost_task is not in task_id_set so it is logged but ignored.
+        # A has no deps -> group 0. B depends on A only -> group 1.
+        groups = task_graph.get_parallel_groups()
+        assert len(groups) == 2
+        assert {t.id for t in groups[0]} == {"A"}
+        assert {t.id for t in groups[1]} == {"B"}
+
+
+class TestParallelGroupsCyclicBreak:
+    """Parallel groups with unresolvable deps triggers break branch."""
+
+    def test_cyclic_deps_break(self, task_graph: TaskGraph) -> None:
+        """Cyclic deps cause _get_parallel_groups_conn to break early."""
+        import sqlite3
+
+        task_graph.add_task(_make_task("X"))
+        task_graph.add_task(_make_task("Y"))
+
+        # Create cycle: X->Y->X via raw SQL
+        conn = sqlite3.connect(str(task_graph._db_path))
+        conn.execute(
+            "INSERT INTO task_dependencies (task_id, blocked_by_id) "
+            "VALUES ('X', 'Y')"
+        )
+        conn.execute(
+            "INSERT INTO task_dependencies (task_id, blocked_by_id) "
+            "VALUES ('Y', 'X')"
+        )
+        conn.commit()
+        conn.close()
+
+        # Neither X nor Y can be scheduled -- both have unresolvable deps
+        groups = task_graph.get_parallel_groups()
+        assert len(groups) == 0
+
+
+
+class TestGetTaskConnRequiredRaises:
+    """_get_task_conn_required raises when task row is absent."""
+
+    def test_direct_call_on_missing_task(self) -> None:
+        """Calling _get_task_conn_required with a missing ID raises ValueError."""
+        tg = TaskGraph(Path(":memory:"))
+
+        with pytest.raises(ValueError, match="disappeared"):
+            tg._get_task_conn_required(tg._mem_conn, "nonexistent_id")
+
+    def test_raised_after_concurrent_delete(self) -> None:
+        """Task exists at start of mutation but is deleted before re-read.
+
+        Uses a patched _get_task_conn to bypass the initial existence check,
+        allowing the code to reach _get_task_conn_required after UPDATE.
+        """
+        import json
+        from unittest.mock import patch
+
+        tg = TaskGraph(Path(":memory:"))
+        tg.add_task(_make_task("V1"))
+        tg.start_task("V1")
+
+        # Patch _get_task_conn to return a fake task for the initial check
+        # but delete the real row so _get_task_conn_required fails
+        original_get = tg._get_task_conn
+
+        def fake_get(conn, task_id):
+            result = original_get(conn, task_id)
+            if result is not None and task_id == "V1":
+                # Delete the row so _get_task_conn_required can't find it
+                conn.execute("DELETE FROM tasks WHERE id = 'V1'")
+            return result
+
+        with patch.object(tg, "_get_task_conn", side_effect=fake_get):
+            with pytest.raises(ValueError, match="disappeared"):
+                tg.complete_task("V1")
+
+
+class TestInMemoryRollback:
+    """In-memory DB rollback path when commit fails."""
+
+    def test_rollback_on_corrupt_data(self) -> None:
+        """Invalid state causes rollback in _conn, not unhandled crash."""
+        tg = TaskGraph(Path(":memory:"))
+        tg.add_task(_make_task("R1"))
+        tg.start_task("R1")
+
+        # Corrupt the state so the read-back in _get_task_conn_required fails
+        tg._mem_conn.execute(
+            "UPDATE tasks SET state = 'invalid_state' WHERE id = 'R1'"
+        )
+        tg._mem_conn.commit()
+
+        with pytest.raises(ValueError, match="invalid_state"):
+            tg.complete_task("R1")
+
+        # After rollback the UPDATE to 'completed' was rolled back
+        row = tg._mem_conn.execute(
+            "SELECT state FROM tasks WHERE id = 'R1'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "invalid_state"
+
+
+class TestWouldCreateCycleDFS:
+    """_would_create_cycle DFS internals: visited set, _can_reach, self-loop."""
+
+    def test_self_loop_detected_directly(self, task_graph: TaskGraph) -> None:
+        """_would_create_cycle catches start_id == task_id (self-loop branch)."""
+        import sqlite3
+
+        task_graph.add_task(_make_task("A"))
+
+        conn = sqlite3.connect(str(task_graph._db_path))
+        # new_id "X" blocked_by "X" -> start_id == task_id -> True
+        result = task_graph._would_create_cycle(conn, "X", ["X"])
+        assert result is True
+        conn.close()
+
+    def test_can_reach_target_through_chain(
+        self, task_graph: TaskGraph,
+    ) -> None:
+        """_can_reach follows dep chain and returns True when target found."""
+        import sqlite3
+
+        task_graph.add_task(_make_task("A"))
+        task_graph.add_task(_make_task("B", blocked_by=["A"]))
+        task_graph.add_task(_make_task("C", blocked_by=["B"]))
+
+        conn = sqlite3.connect(str(task_graph._db_path))
+        # Add dep from A to "fake_target" manually
+        conn.execute(
+            "INSERT INTO task_dependencies (task_id, blocked_by_id) "
+            "VALUES ('A', 'fake_target')"
+        )
+        conn.commit()
+
+        # Would adding "fake_target" blocked_by C create a cycle?
+        # Walk from C: C->B->A->fake_target. fake_target == task_id -> True!
+        result = task_graph._would_create_cycle(conn, "fake_target", ["C"])
+        assert result is True
+        conn.close()
+
+    def test_visited_set_prevents_revisit(self, task_graph: TaskGraph) -> None:
+        """Diamond pattern: visited set prevents revisiting nodes."""
+        import sqlite3
+
+        # Diamond: A->B, A->C, B->D, C->D
+        task_graph.add_task(_make_task("A"))
+        task_graph.add_task(_make_task("B", blocked_by=["A"]))
+        task_graph.add_task(_make_task("C", blocked_by=["A"]))
+        task_graph.add_task(_make_task("D", blocked_by=["B", "C"]))
+
+        conn = sqlite3.connect(str(task_graph._db_path))
+        # E blocked_by D: walk from D -> B -> A, D -> C -> A. No E -> False.
+        result = task_graph._would_create_cycle(conn, "E", ["D"])
+        assert result is False
+        conn.close()

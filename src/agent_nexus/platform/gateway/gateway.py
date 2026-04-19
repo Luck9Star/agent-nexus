@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
 
@@ -24,7 +24,9 @@ from agent_nexus.models.agent import AgentManifest
 from agent_nexus.platform.gateway.deferred_registry import DeferredAgentRegistry
 from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
-from agent_nexus.platform.router.router import PlatformRouter
+
+if TYPE_CHECKING:
+    from agent_nexus.platform.router.router import PlatformRouter
 
 logger = logging.getLogger(__name__)
 

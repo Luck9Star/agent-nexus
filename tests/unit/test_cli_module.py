@@ -1018,3 +1018,249 @@ class TestSearchAgents:
 
         calls = _echo_calls(echo_mock)
         assert any("No agents found" in c for c in calls)
+
+
+# ============================================================================
+# _get_config_dir tests
+# ============================================================================
+
+
+class TestGetConfigDir:
+    """Cover cli.py lines 141-143: _get_config_dir deferred import."""
+
+    def test_returns_default_config_dir(self) -> None:
+        """_get_config_dir() returns DEFAULT_CONFIG_DIR from config.defaults."""
+        from agent_nexus.platform.config.defaults import DEFAULT_CONFIG_DIR
+        from agent_nexus.platform.local.cli import _get_config_dir
+
+        result = _get_config_dir()
+        assert result == DEFAULT_CONFIG_DIR
+
+
+# ============================================================================
+# _init_managers tests
+# ============================================================================
+
+
+class TestInitManagers:
+    """Cover cli.py lines 153-164: _init_managers full body."""
+
+    def test_with_explicit_config_dir(self, tmp_path: Path) -> None:
+        """_init_managers with explicit config_dir returns the expected tuple."""
+        from agent_nexus.platform.local.cli import _init_managers
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        loader, lockfile, sources, returned_dir = _init_managers(config_dir)
+
+        assert returned_dir == config_dir
+        assert lockfile is not None
+        assert sources is not None
+
+    def test_uses_default_config_dir_when_none(self) -> None:
+        """_init_managers with None config_dir falls back to _get_config_dir."""
+        from agent_nexus.platform.config.defaults import DEFAULT_CONFIG_DIR
+        from agent_nexus.platform.local.cli import _init_managers
+
+        with patch(
+            "agent_nexus.platform.local.cli._get_config_dir",
+            return_value=DEFAULT_CONFIG_DIR,
+        ):
+            _, _, _, returned_dir = _init_managers(None)
+
+        assert returned_dir == DEFAULT_CONFIG_DIR
+
+    def test_creates_config_dir_if_missing(self, tmp_path: Path) -> None:
+        """_init_managers calls ensure_config_dir on the loader."""
+        from agent_nexus.platform.local.cli import _init_managers
+
+        config_dir = tmp_path / "new_config"
+        config_dir.mkdir()
+
+        with patch(
+            "agent_nexus.platform.config.loader.ConfigLoader"
+        ) as MockLoader:
+            mock_loader_instance = MagicMock()
+            MockLoader.return_value = mock_loader_instance
+
+            _init_managers(config_dir)
+
+            mock_loader_instance.ensure_config_dir.assert_called_once()
+
+
+# ============================================================================
+# _update else branch (lines 221-222)
+# ============================================================================
+
+
+class TestUpdateElseBranch:
+    """Cover cli.py lines 221-222: _update with name=None, all_agents=False."""
+
+    @pytest.mark.asyncio
+    async def test_update_no_name_no_all_flag(self) -> None:
+        """_update with name=None and all_agents=False prints error and exits."""
+        mocks, _, _, _ = _mock_managers()
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.installer.GitInstaller"),
+            patch("agent_nexus.platform.local.installer.AgentNotFoundError", RuntimeError),
+            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+        ):
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _update(None, all_agents=False)
+
+        assert exc_info.value.exit_code == 1
+        calls = _echo_calls(echo_mock)
+        assert any("Specify an agent name or use --all" in c for c in calls)
+
+
+# ============================================================================
+# _info manifest exception and SKILL.md paths
+# ============================================================================
+
+
+class TestInfoManifestExceptionAndSkillMd:
+    """Cover cli.py lines 345-346, 351-358: manifest parse failure + SKILL.md preview."""
+
+    @pytest.mark.asyncio
+    async def test_info_manifest_parse_exception_handled(self) -> None:
+        """When manifest YAML parsing raises, _info logs debug and continues."""
+        entry = _make_entry(version="1.0.0")
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = entry
+
+        manifest_content = "description: valid\nrun_modes:\n  - mcp\n"
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("pathlib.Path.exists") as exists_mock,
+            patch("pathlib.Path.read_text", return_value=manifest_content),
+            patch("yaml.safe_load", side_effect=RuntimeError("yaml broke")),
+        ):
+            exists_mock.side_effect = [True, False]
+            await _info("my-agent")
+
+        calls = _echo_calls(echo_mock)
+        assert any("Agent: my-agent" in c for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_info_skill_md_preview(self) -> None:
+        """When SKILL.md exists, _info shows first 5 lines preview."""
+        entry = _make_entry(version="1.0.0")
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = entry
+
+        skill_content = "# My Agent\n\nDoes things.\n\nMore info."
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("pathlib.Path.exists") as exists_mock,
+            patch("pathlib.Path.read_text", return_value=skill_content),
+        ):
+            exists_mock.side_effect = [False, True]
+            await _info("my-agent")
+
+        calls = _echo_calls(echo_mock)
+        assert any("SKILL.md preview" in c for c in calls)
+        assert any("My Agent" in c for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_info_skill_md_read_exception_handled(self) -> None:
+        """When SKILL.md read fails, _info logs debug and continues."""
+        entry = _make_entry(version="1.0.0")
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = entry
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("pathlib.Path.exists") as exists_mock,
+            patch("pathlib.Path.read_text", side_effect=OSError("read error")),
+        ):
+            exists_mock.side_effect = [False, True]
+            await _info("my-agent")
+
+        calls = _echo_calls(echo_mock)
+        assert any("Agent: my-agent" in c for c in calls)
+        assert not any("SKILL.md" in c for c in calls)
+
+
+# ============================================================================
+# _run router mode ImportError
+# ============================================================================
+
+
+class TestRunRouterModeImportError:
+    """Cover cli.py lines 465-470: router mode ImportError path."""
+
+    @pytest.mark.asyncio
+    async def test_router_mode_import_error(self) -> None:
+        """Router mode with missing gateway/router modules prints error and exits."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        original_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else builtins.__import__
+
+        def blocking_import(name, *args, **kwargs):
+            if name == "agent_nexus.platform.gateway.gateway":
+                raise ImportError("no module")
+            return original_import(name, *args, **kwargs)
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("builtins.__import__", side_effect=blocking_import),
+            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+        ):
+            from agent_nexus.platform.local.cli import _run
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _run("test-agent", "router", "stdio")
+
+        assert exc_info.value.exit_code == 1
+        calls = _echo_calls(echo_mock)
+        assert any("Router mode requires" in c for c in calls)
+
+
+
+# ============================================================================
+# uninstall CLI command (line 57)
+# ============================================================================
+
+
+class TestUninstallCLICommand:
+    """Cover cli.py line 57: uninstall CLI command via CliRunner."""
+
+    def test_uninstall_command_invokes_async(self) -> None:
+        """The uninstall CLI command calls _uninstall via asyncio.run."""
+        with patch("agent_nexus.platform.local.cli._uninstall", new_callable=AsyncMock) as mock_uninstall:
+            result = runner.invoke(app, ["install", "uninstall", "my-agent"])
+            assert mock_uninstall.called
+            assert mock_uninstall.call_args[0][0] == "my-agent"
+
+
+# ============================================================================
+# update CLI command (line 71)
+# ============================================================================
+
+
+class TestUpdateCLICommand:
+    """Cover cli.py line 71: update CLI command via CliRunner with valid args."""
+
+    def test_update_command_invokes_async(self) -> None:
+        """The update CLI command calls _update via asyncio.run with a name."""
+        with patch("agent_nexus.platform.local.cli._update", new_callable=AsyncMock) as mock_update:
+            result = runner.invoke(app, ["install", "update", "my-agent"])
+            assert mock_update.called
+            call_args = mock_update.call_args[0]
+            assert call_args[0] == "my-agent"
+            assert call_args[1] is False
+
+    def test_update_all_command_invokes_async(self) -> None:
+        """The update --all CLI command calls _update with all_agents=True."""
+        with patch("agent_nexus.platform.local.cli._update", new_callable=AsyncMock) as mock_update:
+            result = runner.invoke(app, ["install", "update", "--all"])
+            assert mock_update.called
+            call_args = mock_update.call_args[0]
+            assert call_args[1] is True

@@ -1055,3 +1055,429 @@ class TestStartAgentStoppingGuard:
                 name="priority-agent",
                 command=["echo", "hello"],
             )
+
+
+# ============================================================================
+# Coverage gap: _drain_stderr logs stderr content
+# ============================================================================
+
+
+class TestDrainStderrLogging:
+    """_drain_stderr logs debug messages when stderr has content (line 114)."""
+
+    @pytest.mark.asyncio
+    async def test_drain_stderr_logs_content(self, caplog) -> None:
+        """_drain_stderr logs each stderr line before EOF."""
+        import logging
+
+        pm = ProcessManager()
+        mock_proc = MagicMock()
+        mock_stderr = AsyncMock()
+        # First readline returns content, second returns b"" (EOF)
+        mock_stderr.readline.side_effect = [b"error: something failed\n", b""]
+        mock_proc.stderr = mock_stderr
+
+        with caplog.at_level(logging.DEBUG, logger="agent_nexus.platform.orchestration.process_manager"):
+            await pm._drain_stderr(mock_proc, "test-agent")
+
+        assert any("error: something failed" in r.message for r in caplog.records)
+
+
+# ============================================================================
+# Coverage gap: start_agent orphan cleanup edge cases
+# ============================================================================
+
+
+class TestStartAgentOrphanCleanup:
+    """start_agent handles edge cases during post-creation failure cleanup."""
+
+    @pytest.mark.asyncio
+    async def test_orphan_kill_process_lookup_error(self) -> None:
+        """If process.kill() raises ProcessLookupError during cleanup, it is caught (lines 201-202)."""
+        pm = ProcessManager()
+
+        mock_proc = _make_mock_process()
+        mock_proc.stdin = None  # Triggers assertion failure
+        mock_proc.kill.side_effect = ProcessLookupError("already dead")
+        mock_proc.wait = AsyncMock()
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            with pytest.raises(AssertionError):
+                await pm.start_agent(name="orphan-pl", command=["echo"])
+
+        mock_proc.kill.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_orphan_wait_raises_exception(self) -> None:
+        """If process.wait() raises after kill during cleanup, it is caught (lines 205-206)."""
+        pm = ProcessManager()
+
+        mock_proc = _make_mock_process()
+        mock_proc.stdin = None  # Triggers assertion failure
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock(side_effect=RuntimeError("wait failed"))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            with pytest.raises(AssertionError):
+                await pm.start_agent(name="orphan-wait", command=["echo"])
+
+        mock_proc.wait.assert_awaited_once()
+
+
+# ============================================================================
+# Coverage gap: stop_agent concurrent stop detection
+# ============================================================================
+
+
+class TestStopAgentConcurrentStop:
+    """stop_agent returns early when agent name is already in _stopping (line 240)."""
+
+    @pytest.mark.asyncio
+    async def test_stop_while_already_stopping(self) -> None:
+        """stop_agent returns immediately if agent name is in _stopping set."""
+        pm = ProcessManager()
+        mock_proc = _make_mock_process(returncode=None)
+        stream = MagicMock(spec=IPCStream)
+        stream.close = AsyncMock()
+        ipc = MagicMock(spec=IPCProtocol)
+        ipc.stream = stream
+        handle = AgentHandle(
+            name="stopping-agent",
+            process=mock_proc,
+            ipc=ipc,
+            drain_task=None,
+            start_command=["test"],
+            start_cwd="/tmp",
+            start_env={},
+        )
+        pm._agents["stopping-agent"] = handle
+
+        # Simulate another stop in progress
+        pm._stopping.add("stopping-agent")
+
+        # Should return immediately without closing IPC
+        await pm.stop_agent("stopping-agent")
+
+        # IPC close should NOT have been called (early return)
+        stream.close.assert_not_called()
+
+
+# ============================================================================
+# Coverage gap: stop_agent IPC close exception paths
+# ============================================================================
+
+
+class TestStopAgentIPCCloseExceptions:
+    """stop_agent handles exceptions from IPC stream close (lines 261-262, 272-273)."""
+
+    @pytest.mark.asyncio
+    async def test_stop_dead_agent_close_raises(self) -> None:
+        """stop_agent logs and continues when IPC close fails on dead agent (lines 261-262)."""
+        pm = ProcessManager()
+        mock_proc = _make_mock_process(returncode=1)
+        stream = MagicMock(spec=IPCStream)
+        stream.close = AsyncMock(side_effect=OSError("pipe broken"))
+        ipc = MagicMock(spec=IPCProtocol)
+        ipc.stream = stream
+        handle = AgentHandle(
+            name="dead-close-fail",
+            process=mock_proc,
+            ipc=ipc,
+            drain_task=None,
+            start_command=["test"],
+            start_cwd="/tmp",
+            start_env={},
+        )
+        pm._agents["dead-close-fail"] = handle
+
+        await pm.stop_agent("dead-close-fail")
+        assert pm.get_agent("dead-close-fail") is None
+
+    @pytest.mark.asyncio
+    async def test_stop_live_agent_close_raises(self) -> None:
+        """stop_agent logs and continues when IPC close fails on live agent (lines 272-273)."""
+        pm = ProcessManager()
+        mock_proc = _make_mock_process(returncode=None)
+        stream = MagicMock(spec=IPCStream)
+        stream.close = AsyncMock(side_effect=OSError("pipe broken"))
+        ipc = MagicMock(spec=IPCProtocol)
+        ipc.stream = stream
+        handle = AgentHandle(
+            name="live-close-fail",
+            process=mock_proc,
+            ipc=ipc,
+            drain_task=None,
+            start_command=["test"],
+            start_cwd="/tmp",
+            start_env={},
+        )
+        pm._agents["live-close-fail"] = handle
+
+        # process.wait returns immediately (simulates clean exit after failed IPC close)
+        mock_proc.wait = AsyncMock(return_value=None)
+
+        await pm.stop_agent("live-close-fail")
+        assert pm.get_agent("live-close-fail") is None
+
+
+# ============================================================================
+# Coverage gap: stop_agent SIGTERM success path with logging
+# ============================================================================
+
+
+class TestStopAgentSigtermSuccess:
+    """stop_agent SIGTERM stage: process exits and is logged (lines 297-301)."""
+
+    @pytest.mark.asyncio
+    async def test_stop_sigterm_then_clean_exit(self) -> None:
+        """Process exits cleanly after SIGTERM, removed from registry."""
+        pm = ProcessManager()
+        mock_proc = _make_mock_process(returncode=None)
+        stream = MagicMock(spec=IPCStream)
+        stream.close = AsyncMock()
+        ipc = MagicMock(spec=IPCProtocol)
+        ipc.stream = stream
+        handle = AgentHandle(
+            name="sigterm-exit",
+            process=mock_proc,
+            ipc=ipc,
+            drain_task=None,
+            start_command=["test"],
+            start_cwd="/tmp",
+            start_env={},
+        )
+        pm._agents["sigterm-exit"] = handle
+
+        call_count = 0
+
+        async def _fake_wait_for(coro, timeout=None):
+            nonlocal call_count
+            call_count += 1
+            coro.close()
+            if call_count <= 2:
+                # call 1: IPCStream.close() drain
+                # call 2: stage 1 process.wait timeout
+                raise asyncio.TimeoutError()
+            # call 3: stage 2 process.wait succeeds after SIGTERM
+            mock_proc.returncode = -signal.SIGTERM
+
+        with patch(
+            "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
+            side_effect=_fake_wait_for,
+        ):
+            await pm.stop_agent("sigterm-exit", timeout=1.0)
+
+        mock_proc.send_signal.assert_called_with(signal.SIGTERM)
+        assert pm.get_agent("sigterm-exit") is None
+
+
+# ============================================================================
+# Coverage gap: stop_agent SIGKILL edge cases
+# ============================================================================
+
+
+class TestStopAgentSigkillEdgeCases:
+    """stop_agent handles ProcessLookupError on kill and exception on wait (lines 309-315)."""
+
+    @pytest.mark.asyncio
+    async def test_sigkill_process_lookup_error(self) -> None:
+        """SIGKILL raises ProcessLookupError (process already dead), handled gracefully (lines 309-310)."""
+        pm = ProcessManager()
+        mock_proc = _make_mock_process(returncode=None)
+        stream = MagicMock(spec=IPCStream)
+        stream.close = AsyncMock()
+        ipc = MagicMock(spec=IPCProtocol)
+        ipc.stream = stream
+        handle = AgentHandle(
+            name="kill-pl",
+            process=mock_proc,
+            ipc=ipc,
+            drain_task=None,
+            start_command=["test"],
+            start_cwd="/tmp",
+            start_env={},
+        )
+        pm._agents["kill-pl"] = handle
+        mock_proc.kill.side_effect = ProcessLookupError("already gone")
+
+        async def _always_timeout(coro, timeout=None):
+            coro.close()
+            raise asyncio.TimeoutError()
+
+        with patch(
+            "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
+            side_effect=_always_timeout,
+        ):
+            await pm.stop_agent("kill-pl", timeout=1.0)
+
+        mock_proc.kill.assert_called_once()
+        assert pm.get_agent("kill-pl") is None
+
+    @pytest.mark.asyncio
+    async def test_sigkill_wait_raises_exception(self) -> None:
+        """process.wait() after SIGKILL raises exception, handled gracefully (lines 314-315)."""
+        pm = ProcessManager()
+        mock_proc = _make_mock_process(returncode=None)
+        stream = MagicMock(spec=IPCStream)
+        stream.close = AsyncMock()
+        ipc = MagicMock(spec=IPCProtocol)
+        ipc.stream = stream
+        handle = AgentHandle(
+            name="kill-wait-fail",
+            process=mock_proc,
+            ipc=ipc,
+            drain_task=None,
+            start_command=["test"],
+            start_cwd="/tmp",
+            start_env={},
+        )
+        pm._agents["kill-wait-fail"] = handle
+        mock_proc.wait = AsyncMock(side_effect=RuntimeError("wait exploded"))
+
+        async def _always_timeout(coro, timeout=None):
+            coro.close()
+            raise asyncio.TimeoutError()
+
+        with patch(
+            "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
+            side_effect=_always_timeout,
+        ):
+            await pm.stop_agent("kill-wait-fail", timeout=1.0)
+
+        assert pm.get_agent("kill-wait-fail") is None
+
+
+# ============================================================================
+# Coverage gap: health_check returns False for alive-but-unresponsive agent
+# ============================================================================
+
+
+class TestHealthCheckAliveButUnresponsive:
+    """health_check returns False when process is alive but heartbeat fails (line 379)."""
+
+    @pytest.mark.asyncio
+    async def test_health_check_ipc_returns_false(self) -> None:
+        """health_check returns False when send_heartbeat returns False (not an exception)."""
+        pm = ProcessManager()
+        mock_proc = _make_mock_process(returncode=None)
+        stream = MagicMock(spec=IPCStream)
+        stream.close = AsyncMock()
+        ipc = MagicMock(spec=IPCProtocol)
+        ipc.stream = stream
+        ipc.send_heartbeat = AsyncMock(return_value=False)
+        handle = AgentHandle(
+            name="unresponsive",
+            process=mock_proc,
+            ipc=ipc,
+            drain_task=None,
+            start_command=["test"],
+            start_cwd="/tmp",
+            start_env={},
+        )
+        pm._agents["unresponsive"] = handle
+
+        result = await pm.health_check("unresponsive")
+        assert result is False
+        # Agent should still be registered (not cleaned up — it's alive, just unresponsive)
+        assert pm.get_agent("unresponsive") is handle
+
+
+# ============================================================================
+# Coverage gap: SIGTERM success path with real wait (not patched wait_for)
+# ============================================================================
+
+
+class TestStopAgentSigtermRealWait:
+    """SIGTERM success path using real process.wait() (lines 297-301)."""
+
+    @pytest.mark.asyncio
+    async def test_sigterm_real_wait_succeeds(self) -> None:
+        """Process exits after SIGTERM — uses real process.wait, not mocked wait_for."""
+        pm = ProcessManager()
+        mock_proc = _make_mock_process(returncode=None)
+        stream = MagicMock(spec=IPCStream)
+        stream.close = AsyncMock()
+        ipc = MagicMock(spec=IPCProtocol)
+        ipc.stream = stream
+        handle = AgentHandle(
+            name="sigterm-real",
+            process=mock_proc,
+            ipc=ipc,
+            drain_task=None,
+            start_command=["test"],
+            start_cwd="/tmp",
+            start_env={},
+        )
+        pm._agents["sigterm-real"] = handle
+
+        wait_call_count = 0
+
+        async def _mock_wait():
+            nonlocal wait_call_count
+            wait_call_count += 1
+            # First wait (stage 1): simulate timeout by not setting returncode
+            if wait_call_count == 1:
+                raise asyncio.TimeoutError()
+            # Second wait (stage 2 after SIGTERM): success
+            mock_proc.returncode = -signal.SIGTERM
+
+        mock_proc.wait = _mock_wait
+
+        # Patch wait_for to just await the coroutine (no real timeout logic)
+        async def _passthrough_wait_for(coro, timeout=None):
+            return await coro
+
+        with patch(
+            "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
+            side_effect=_passthrough_wait_for,
+        ):
+            await pm.stop_agent("sigterm-real", timeout=1.0)
+
+        mock_proc.send_signal.assert_called_with(signal.SIGTERM)
+        assert pm.get_agent("sigterm-real") is None
+
+
+# ============================================================================
+# Coverage gap: health_check alive-but-dead-after-cleanup race
+# ============================================================================
+
+
+class TestHealthCheckDeadAfterCleanup:
+    """health_check returns False when process dies between _cleanup_dead and is_alive check (line 379)."""
+
+    @pytest.mark.asyncio
+    async def test_process_dead_after_cleanup(self) -> None:
+        """Process is alive during cleanup but dead at is_alive check."""
+        pm = ProcessManager()
+        mock_proc = _make_mock_process(returncode=None)
+        stream = MagicMock(spec=IPCStream)
+        stream.close = AsyncMock()
+        ipc = MagicMock(spec=IPCProtocol)
+        ipc.stream = stream
+        handle = AgentHandle(
+            name="dies-after-cleanup",
+            process=mock_proc,
+            ipc=ipc,
+            drain_task=None,
+            start_command=["test"],
+            start_cwd="/tmp",
+            start_env={},
+        )
+        pm._agents["dies-after-cleanup"] = handle
+
+        # The process is alive during _cleanup_dead (returncode=None),
+        # but then becomes dead when is_alive is checked.
+        # We simulate this by setting returncode to a dead value
+        # after _cleanup_dead runs.
+        original_cleanup = pm._cleanup_dead
+
+        def _cleanup_then_kill():
+            result = original_cleanup()
+            # Now simulate the process dying right after cleanup
+            mock_proc.returncode = 1
+            return result
+
+        with patch.object(pm, "_cleanup_dead", side_effect=_cleanup_then_kill):
+            result = await pm.health_check("dies-after-cleanup")
+
+        assert result is False

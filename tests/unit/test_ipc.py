@@ -766,3 +766,277 @@ class TestIPCContentMaxLength:
         """Empty string is within the limit and remains valid."""
         msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="")
         assert msg.content == ""
+
+
+# ============================================================================
+# Coverage gap: IPCStream.close() wait_closed timeout
+# ============================================================================
+
+
+class TestIPCCloseWaitClosedTimeout:
+    """close() handles timeout/exception from wait_closed() (lines 141-142)."""
+
+    @pytest.mark.asyncio
+    async def test_close_handles_wait_closed_timeout(self) -> None:
+        """close() does not raise when wait_closed times out."""
+        mock_stdin = MagicMock()
+        mock_stdin.is_closing.return_value = False
+        mock_stdin.close = MagicMock()
+        mock_stdin.wait_closed = AsyncMock(side_effect=asyncio.TimeoutError)
+        mock_stdout = MagicMock()
+        mock_stdout.read = AsyncMock(return_value=b"")
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        await stream.close()
+
+        mock_stdin.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_close_handles_wait_closed_exception(self) -> None:
+        """close() does not raise when wait_closed raises a generic exception."""
+        mock_stdin = MagicMock()
+        mock_stdin.is_closing.return_value = False
+        mock_stdin.close = MagicMock()
+        mock_stdin.wait_closed = AsyncMock(side_effect=OSError("pipe broken"))
+        mock_stdout = MagicMock()
+        mock_stdout.read = AsyncMock(return_value=b"")
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        await stream.close()
+
+        mock_stdin.close.assert_called_once()
+
+
+# ============================================================================
+# Coverage gap: IPCProtocol._buffer_message() eviction at max capacity
+# ============================================================================
+
+
+class TestIPCBufferEviction:
+    """_buffer_message discards oldest when buffer reaches max size (lines 195-199)."""
+
+    @pytest.mark.asyncio
+    async def test_buffer_evicts_oldest_at_max_capacity(self) -> None:
+        """When peek buffer reaches max size, the oldest message is discarded."""
+        mock_stdin = MagicMock()
+        mock_stdout = MagicMock()
+        stream = IPCStream(mock_stdin, mock_stdout)
+        protocol = IPCProtocol(stream)
+
+        max_size = protocol._MAX_PEEK_BUFFER_SIZE
+
+        old_msg = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="old message",
+            task_id="t-old",
+        )
+        new_msg = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="new message",
+            task_id="t-new",
+        )
+
+        # Fill buffer to max capacity
+        for i in range(max_size):
+            protocol._peek_buffer.append(
+                AgentToPlatform(
+                    type=AgentToPlatformType.RESULT,
+                    content=f"msg-{i}",
+                    task_id=f"t-{i}",
+                )
+            )
+
+        assert len(protocol._peek_buffer) == max_size
+
+        # Buffer a new message — should evict the oldest
+        protocol._buffer_message(new_msg)
+
+        assert len(protocol._peek_buffer) == max_size
+        # Oldest ("msg-0") should be gone
+        assert protocol._peek_buffer[0].content == "msg-1"
+        # Newest should be "new message"
+        assert protocol._peek_buffer[-1] is new_msg
+
+
+# ============================================================================
+# Coverage gap: IPCProtocol.receive_until_result() total timeout
+# ============================================================================
+
+
+class TestIPCReceiveUntilResultTimeout:
+    """receive_until_result raises IPCTimeoutError when total time expires (line 283)."""
+
+    @pytest.mark.asyncio
+    async def test_receive_until_result_total_timeout(self) -> None:
+        """receive_until_result raises IPCTimeoutError when deadline passes."""
+        mock_stdin = MagicMock()
+        mock_stdout = MagicMock()
+        stream = IPCStream(mock_stdin, mock_stdout)
+        protocol = IPCProtocol(stream)
+
+        # Mock get_running_loop().time() to simulate time passing
+        with patch(
+            "agent_nexus.platform.orchestration.ipc.asyncio.get_running_loop"
+        ) as mock_get_loop:
+            mock_loop = MagicMock()
+            mock_get_loop.return_value = mock_loop
+            # time() is called multiple times:
+            # First call (deadline calc): returns 1000
+            # Second call (remaining check): returns 2000 → remaining = -1000 <= 0 → timeout
+            mock_loop.time.side_effect = [1000.0, 2000.0]
+
+            with pytest.raises(IPCTimeoutError, match="Timed out after"):
+                await protocol.receive_until_result(timeout=5.0)
+
+
+# ============================================================================
+# Coverage gap: IPCProtocol.receive_until_result() progress with callback
+# ============================================================================
+
+
+class TestIPCReceiveUntilResultProgressCallback:
+    """receive_until_result invokes progress_callback on PROGRESS messages (lines 301-303)."""
+
+    @pytest.mark.asyncio
+    async def test_progress_callback_invoked(self) -> None:
+        """Progress messages are forwarded to the callback before continuing the loop."""
+        mock_stdin = MagicMock()
+        mock_stdout = MagicMock()
+        stream = IPCStream(mock_stdin, mock_stdout)
+        protocol = IPCProtocol(stream)
+
+        progress_msg = AgentToPlatform(
+            type=AgentToPlatformType.PROGRESS,
+            content="50% done",
+            task_id="t1",
+        )
+        result_msg = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="final",
+            task_id="t1",
+        )
+
+        call_count = 0
+
+        async def fake_receive(timeout=30.0):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return progress_msg
+            return result_msg
+
+        callback_messages = []
+
+        async def progress_callback(msg):
+            callback_messages.append(msg)
+
+        with patch.object(protocol, "receive_result", side_effect=fake_receive):
+            result = await protocol.receive_until_result(
+                timeout=10.0,
+                progress_callback=progress_callback,
+            )
+
+        assert result.type == AgentToPlatformType.RESULT
+        assert result.content == "final"
+        assert len(callback_messages) == 1
+        assert callback_messages[0].content == "50% done"
+
+
+# ============================================================================
+# Coverage gap: IPCProtocol.send_heartbeat() outer exception catch
+# ============================================================================
+
+
+class TestIPCSendHeartbeatOuterException:
+    """send_heartbeat() returns False when outer IPCError/TimeoutError occurs (lines 343-344)."""
+
+    @pytest.mark.asyncio
+    async def test_send_heartbeat_outer_ipc_error(self) -> None:
+        """send_heartbeat returns False when send_chat raises IPCError."""
+        mock_stdin = MagicMock()
+        mock_stdout = MagicMock()
+        stream = IPCStream(mock_stdin, mock_stdout)
+        protocol = IPCProtocol(stream)
+
+        with patch.object(
+            protocol, "send_chat", new_callable=AsyncMock, side_effect=IPCError("broken")
+        ):
+            result = await protocol.send_heartbeat()
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_send_heartbeat_outer_timeout_error(self) -> None:
+        """send_heartbeat returns False when send_chat raises asyncio.TimeoutError."""
+        mock_stdin = MagicMock()
+        mock_stdout = MagicMock()
+        stream = IPCStream(mock_stdin, mock_stdout)
+        protocol = IPCProtocol(stream)
+
+        with patch.object(
+            protocol,
+            "send_chat",
+            new_callable=AsyncMock,
+            side_effect=asyncio.TimeoutError(),
+        ):
+            result = await protocol.send_heartbeat()
+
+        assert result is False
+
+
+# ============================================================================
+# Coverage gap: IPCStream.close() stdout drain exception handler
+# ============================================================================
+
+
+class TestIPCCloseDrainException:
+    """close() handles exception during stdout drain loop (lines 152-153)."""
+
+    @pytest.mark.asyncio
+    async def test_close_handles_stdout_read_timeout(self) -> None:
+        """close() does not raise when stdout.read times out during drain."""
+        mock_stdin = MagicMock()
+        mock_stdin.is_closing.return_value = False
+        mock_stdin.close = MagicMock()
+        mock_stdin.wait_closed = AsyncMock()
+        mock_stdout = MagicMock()
+        mock_stdout.read = AsyncMock(side_effect=asyncio.TimeoutError)
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        await stream.close()
+
+        mock_stdin.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_close_handles_stdout_read_exception(self) -> None:
+        """close() does not raise when stdout.read raises generic exception during drain."""
+        mock_stdin = MagicMock()
+        mock_stdin.is_closing.return_value = False
+        mock_stdin.close = MagicMock()
+        mock_stdin.wait_closed = AsyncMock()
+        mock_stdout = MagicMock()
+        mock_stdout.read = AsyncMock(side_effect=OSError("pipe error"))
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        await stream.close()
+
+        mock_stdin.close.assert_called_once()
+
+
+# ============================================================================
+# Coverage gap: IPCProtocol.stream property
+# ============================================================================
+
+
+class TestIPCProtocolStreamProperty:
+    """IPCProtocol.stream property returns the underlying stream (line 184)."""
+
+    @pytest.mark.asyncio
+    async def test_stream_property_returns_underlying_stream(self) -> None:
+        """stream property exposes the IPCStream instance."""
+        mock_stdin = MagicMock()
+        mock_stdout = MagicMock()
+        stream = IPCStream(mock_stdin, mock_stdout)
+        protocol = IPCProtocol(stream)
+
+        assert protocol.stream is stream

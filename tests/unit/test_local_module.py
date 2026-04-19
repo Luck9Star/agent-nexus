@@ -2979,3 +2979,205 @@ class TestGitInstallerRunGitCapture:
         ):
             with pytest.raises(InstallationError, match="git.*failed"):
                 await GitInstaller._run_git_capture(["bad-cmd"], tmp_path)
+
+
+# ============================================================================
+# LockfileManager save() exception cleanup
+# ============================================================================
+
+
+class TestLockfileManagerSaveExceptionCleanup:
+    """Cover lockfile.py lines 77-83: save() BaseException cleanup path."""
+
+    def test_save_removes_tempfile_on_write_failure(self, tmp_path: Path) -> None:
+        """When os.replace fails, save() cleans up the temp file and re-raises."""
+        lockfile_path = tmp_path / "lockfile.json"
+        mgr = LockfileManager(lockfile_path)
+
+        with patch("os.replace", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                mgr.save(Lockfile())
+
+        # The temp file should have been cleaned up (no stale .lockfile-*.tmp files)
+        tmp_files = list(tmp_path.glob(".lockfile-*.tmp"))
+        assert len(tmp_files) == 0
+
+    def test_save_succeeds_normally(self, tmp_path: Path) -> None:
+        """Normal save path works without triggering exception cleanup."""
+        lockfile_path = tmp_path / "lockfile.json"
+        mgr = LockfileManager(lockfile_path)
+        entry = _make_entry(version="1.0.0")
+        mgr.save(Lockfile(agents={"test": entry}))
+        assert lockfile_path.exists()
+        assert "test" in lockfile_path.read_text(encoding="utf-8")
+
+
+# ============================================================================
+# SourceManager save() exception cleanup
+# ============================================================================
+
+
+class TestSourceManagerSaveExceptionCleanup:
+    """Cover sources.py lines 114-120: save() BaseException cleanup path."""
+
+    def test_save_removes_tempfile_on_replace_failure(self, tmp_path: Path) -> None:
+        """When os.replace fails during save, temp file is cleaned up."""
+        path = tmp_path / "sources.yaml"
+        mgr = SourceManager(path)
+
+        with patch("os.replace", side_effect=OSError("permission denied")):
+            with pytest.raises(OSError, match="permission denied"):
+                mgr.save()
+
+        # No stale .sources-*.yaml.tmp files left behind
+        tmp_files = list(tmp_path.glob(".sources-*.yaml.tmp"))
+        assert len(tmp_files) == 0
+
+
+# ============================================================================
+# SourceManager _load() invalid source entries
+# ============================================================================
+
+
+class TestSourceManagerLoadInvalidEntries:
+    """Cover sources.py lines 194-195: SourceEntry construction exception."""
+
+    def test_load_skips_entry_with_empty_name(self, tmp_path: Path) -> None:
+        """A source entry with an empty name is skipped (SourceEntry requires min_length=1)."""
+        path = tmp_path / "sources.yaml"
+        _write_yaml(path, {
+            "sources": [
+                {"name": "", "type": "git", "url": "https://example.com/repo.git"},
+                {"name": "valid", "type": "git", "url": "https://example.com/valid.git"},
+            ]
+        })
+        mgr = SourceManager(path)
+        sources = mgr.list_sources()
+        names = [s.name for s in sources]
+        assert "valid" in names
+        assert "" not in names
+
+    def test_load_skips_git_source_with_empty_url(self, tmp_path: Path) -> None:
+        """A git source with empty url fails validation and is skipped."""
+        path = tmp_path / "sources.yaml"
+        _write_yaml(path, {
+            "sources": [
+                {"name": "bad-git", "type": "git", "url": ""},
+                {"name": "good", "type": "git", "url": "https://example.com/good.git"},
+            ]
+        })
+        mgr = SourceManager(path)
+        names = [s.name for s in mgr.list_sources()]
+        assert "good" in names
+        assert "bad-git" not in names
+
+
+# ============================================================================
+# SourceManager _load_source_index() exception paths
+# ============================================================================
+
+
+class TestSourceManagerLoadSourceIndexExceptions:
+    """Cover sources.py lines 219-221 and 247-248: parse and entry exceptions."""
+
+    def test_load_source_index_unparseable_yaml(self, tmp_path: Path) -> None:
+        """_load_source_index returns None when index.yaml has invalid YAML."""
+        import hashlib
+
+        path = tmp_path / "sources.yaml"
+        mgr = SourceManager(path)
+
+        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
+        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
+        cache_dir = tmp_path / "cache" / "repos" / url_hash
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "index.yaml").write_text("{{{{invalid yaml content", encoding="utf-8")
+
+        result = mgr._load_source_index(mgr.list_sources()[0])
+        assert result is None
+
+    def test_load_source_index_invalid_agent_type(self, tmp_path: Path) -> None:
+        """_load_source_index skips entries with invalid AgentType."""
+        import hashlib
+
+        path = tmp_path / "sources.yaml"
+        mgr = SourceManager(path)
+
+        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
+        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
+        cache_dir = tmp_path / "cache" / "repos" / url_hash
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        index_data = {
+            "agents": [
+                {"name": "bad-agent", "version": "1.0.0", "type": "not_a_real_type"},
+                {"name": "good-agent", "version": "1.0.0", "type": "atomic"},
+            ]
+        }
+        _write_yaml(cache_dir / "index.yaml", index_data)
+
+        result = mgr._load_source_index(mgr.list_sources()[0])
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].name == "good-agent"
+
+    def test_load_source_index_missing_required_fields(self, tmp_path: Path) -> None:
+        """_load_source_index skips entries missing required fields like version."""
+        import hashlib
+
+        path = tmp_path / "sources.yaml"
+        mgr = SourceManager(path)
+
+        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
+        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
+        cache_dir = tmp_path / "cache" / "repos" / url_hash
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        index_data = {
+            "agents": [
+                {"name": "no-version", "type": "atomic"},
+                {"name": "valid", "version": "1.0.0", "type": "atomic"},
+            ]
+        }
+        _write_yaml(cache_dir / "index.yaml", index_data)
+
+        result = mgr._load_source_index(mgr.list_sources()[0])
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].name == "valid"
+
+
+# ============================================================================
+# LockfileManager save() nested OSError in cleanup
+# ============================================================================
+
+
+class TestLockfileManagerSaveCleanupOSError:
+    """Cover lockfile.py lines 81-82: os.unlink fails during cleanup."""
+
+    def test_save_cleanup_oserror_is_silenced(self, tmp_path: Path) -> None:
+        """When both os.replace and os.unlink fail, the OSError from unlink is silenced."""
+        lockfile_path = tmp_path / "lockfile.json"
+        mgr = LockfileManager(lockfile_path)
+
+        with patch("os.replace", side_effect=OSError("replace failed")), \
+             patch("os.unlink", side_effect=OSError("unlink also failed")):
+            with pytest.raises(OSError, match="replace failed"):
+                mgr.save(Lockfile())
+
+
+# ============================================================================
+# SourceManager save() nested OSError in cleanup
+# ============================================================================
+
+
+class TestSourceManagerSaveCleanupOSError:
+    """Cover sources.py lines 118-119: os.unlink fails during cleanup."""
+
+    def test_save_cleanup_oserror_is_silenced(self, tmp_path: Path) -> None:
+        """When both os.replace and os.unlink fail, the OSError from unlink is silenced."""
+        path = tmp_path / "sources.yaml"
+        mgr = SourceManager(path)
+
+        with patch("os.replace", side_effect=OSError("replace failed")), \
+             patch("os.unlink", side_effect=OSError("unlink also failed")):
+            with pytest.raises(OSError, match="replace failed"):
+                mgr.save()

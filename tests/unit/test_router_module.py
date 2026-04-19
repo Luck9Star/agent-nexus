@@ -1746,3 +1746,258 @@ class TestExecuteSingleAgentReturnTypeSafety:
         result = await router._execute_single_agent("a1", "hi", "c1")
         assert isinstance(result, str)
         assert result == "42"
+
+
+# ============================================================================
+# Coverage gap tests: get_tools registry path, JSON decode error,
+# list-path name collision, _execute_phase TaskGraph None, fallback agent,
+# _execute_single_agent handle not found
+# ============================================================================
+
+
+class TestGetToolsRegistryPath:
+    """get_tools uses registry when _registry attribute is set."""
+
+    @pytest.mark.asyncio
+    async def test_registry_returns_tools(self) -> None:
+        """When _registry is set, get_tools returns registry.get_tools_for_llm()."""
+        mock_pm = MagicMock()
+        router = PlatformRouter.__new__(PlatformRouter)
+        router._pm = mock_pm
+        router._composite_defs = {}
+        router._subtask = SubtaskController()
+        router._route_locks = {}
+
+        mock_registry = MagicMock()
+        mock_registry.get_tools_for_llm.return_value = [
+            {"name": "mcp__agent__tool_a"},
+            {"name": "mcp__agent__tool_b"},
+        ]
+        router._registry = mock_registry
+
+        tools = await router.get_tools()
+        assert len(tools) == 2
+        assert tools[0]["name"] == "mcp__agent__tool_a"
+        mock_registry.get_tools_for_llm.assert_called_once()
+
+
+class TestGetToolsJSONDecodeError:
+    """get_tools handles JSONDecodeError from agent response."""
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_skipped(self) -> None:
+        """Agent returning invalid JSON is skipped without error."""
+        h = _make_agent_handle(name="a1")
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = "not valid json {{{"
+        mock_resp.output = None
+        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
+        router = PlatformRouter(process_manager=pm)
+
+        tools = await router.get_tools()
+        assert tools == []
+
+
+class TestGetToolsListPathNameCollision:
+    """get_tools list-path deduplicates tools with same name."""
+
+    @pytest.mark.asyncio
+    async def test_list_path_dedup(self) -> None:
+        """List path: second tool with same name is skipped."""
+        tools_list = [
+            {"name": "shared_tool", "desc": "from agent A"},
+            {"name": "unique_tool"},
+        ]
+        h1 = _make_agent_handle(name="a1")
+        mock_resp1 = MagicMock()
+        mock_resp1.type = AgentToPlatformType.RESULT
+        mock_resp1.content = tools_list
+        h1.ipc.receive_until_result = AsyncMock(return_value=mock_resp1)
+
+        tools_list2 = [
+            {"name": "shared_tool", "desc": "from agent B"},
+        ]
+        h2 = _make_agent_handle(name="a2")
+        mock_resp2 = MagicMock()
+        mock_resp2.type = AgentToPlatformType.RESULT
+        mock_resp2.content = tools_list2
+        h2.ipc.receive_until_result = AsyncMock(return_value=mock_resp2)
+
+        pm = _make_process_manager(
+            agents={"a1": h1, "a2": h2}, running=["a1", "a2"]
+        )
+        router = PlatformRouter(process_manager=pm)
+
+        tools = await router.get_tools()
+        assert len(tools) == 2
+        names = [t["name"] for t in tools]
+        assert names.count("shared_tool") == 1
+
+    @pytest.mark.asyncio
+    async def test_list_path_nameless_tool_skipped(self) -> None:
+        """List path: tool without name key is skipped."""
+        tools_list = [{"description": "no name"}, {"name": "valid"}]
+        h = _make_agent_handle(name="a1")
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = tools_list
+        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
+        router = PlatformRouter(process_manager=pm)
+
+        tools = await router.get_tools()
+        assert len(tools) == 1
+        assert tools[0]["name"] == "valid"
+
+    @pytest.mark.asyncio
+    async def test_list_path_empty_name_skipped(self) -> None:
+        """List path: tool with empty name is skipped."""
+        tools_list = [{"name": ""}, {"name": "real"}]
+        h = _make_agent_handle(name="a1")
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.RESULT
+        mock_resp.content = tools_list
+        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
+        router = PlatformRouter(process_manager=pm)
+
+        tools = await router.get_tools()
+        assert len(tools) == 1
+        assert tools[0]["name"] == "real"
+
+
+class TestGetToolsFallbackHandleNone:
+    """get_tools skips agents where get_agent returns None."""
+
+    @pytest.mark.asyncio
+    async def test_none_handle_skipped(self) -> None:
+        """Agent listed as running but get_agent returns None is skipped."""
+        pm = _make_process_manager(agents={}, running=["ghost"])
+        router = PlatformRouter(process_manager=pm)
+
+        tools = await router.get_tools()
+        assert tools == []
+
+
+class TestExecutePhaseTaskGraphNone:
+    """_execute_phase raises RuntimeError when TaskGraph is not initialized."""
+
+    @pytest.mark.asyncio
+    async def test_none_task_graph_raises(self) -> None:
+        pm = MagicMock()
+        router = PlatformRouter(process_manager=pm)
+        definition = _make_definition()
+
+        mock_ctx = MagicMock()
+        mock_ctx.task_graph = None
+
+        with pytest.raises(RuntimeError, match="TaskGraph not initialized"):
+            await router._execute_phase(
+                mock_ctx, WorkflowPhase.research, definition, "test"
+            )
+
+
+class TestExecutePhaseFallbackAgent:
+    """_execute_phase uses fallback agents when no role-matched agents exist."""
+
+    @pytest.mark.asyncio
+    async def test_fallback_first_agent_for_synthesis(self) -> None:
+        """When no 'plan' role agent exists, first available agent is used."""
+        agents = {
+            "worker1": _make_agent_handle(
+                name="worker1", response_content="fallback plan"
+            ),
+        }
+        pm = _make_process_manager(agents=agents)
+        router = PlatformRouter(process_manager=pm)
+
+        # Definition has only 'explore' role, no 'plan' agent
+        definition = OrchestrationDefinition(
+            goal="test",
+            agent_name="test-agent",
+            agents={
+                "worker1": DSLAgent(
+                    name="worker1", description="Explore", role="explore"
+                ),
+            },
+            tasks=[DSLTask(id="t1", description="Explore", agent="worker1")],
+            tool_loading=DSLToolLoading(),
+        )
+
+        mock_ctx = MagicMock()
+        mock_ctx.task_graph = MagicMock()
+
+        # Synthesis phase -- no 'plan' role agent, falls back to first
+        result = await router._execute_phase(
+            mock_ctx, WorkflowPhase.synthesis, definition, "test message"
+        )
+        assert result == "fallback plan"
+
+    @pytest.mark.asyncio
+    async def test_fallback_root_task_agents_for_research(self) -> None:
+        """Research phase with no 'explore' agents uses root task agents."""
+        handle = _make_agent_handle(
+            name="only-agent", response_content="research done"
+        )
+        pm = _make_process_manager(agents={"only-agent": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        # Definition has only 'plan' role, no 'explore'
+        task_item = DSLTask(id="t1", description="Do stuff", agent="only-agent")
+        definition = OrchestrationDefinition(
+            goal="test",
+            agent_name="test-agent",
+            agents={
+                "only-agent": DSLAgent(
+                    name="only-agent", description="Plan", role="plan"
+                ),
+            },
+            tasks=[task_item],
+            tool_loading=DSLToolLoading(),
+        )
+
+        mock_ctx = MagicMock()
+        mock_ctx.task_graph = MagicMock()
+
+        # Research phase -- no 'explore' agents, falls back to root task agents
+        result = await router._execute_phase(
+            mock_ctx, WorkflowPhase.research, definition, "test"
+        )
+        assert "research done" in result
+
+
+class TestExecuteSingleAgentHandleNotFound:
+    """_execute_single_agent raises RuntimeError when handle is None."""
+
+    @pytest.mark.asyncio
+    async def test_none_handle_raises(self) -> None:
+        mock_pm = MagicMock()
+        mock_pm.get_agent.return_value = None
+        router = PlatformRouter.__new__(PlatformRouter)
+        router._pm = mock_pm
+        router._route_locks = {}
+
+        with pytest.raises(RuntimeError, match="not found or not alive"):
+            await router._execute_single_agent(
+                "ghost-agent", "hello", conversation_id="c1"
+            )
+
+    @pytest.mark.asyncio
+    async def test_dead_handle_raises(self) -> None:
+        handle = MagicMock()
+        handle.is_alive = False
+        mock_pm = MagicMock()
+        mock_pm.get_agent.return_value = handle
+        router = PlatformRouter.__new__(PlatformRouter)
+        router._pm = mock_pm
+        router._route_locks = {}
+
+        with pytest.raises(RuntimeError, match="not found or not alive"):
+            await router._execute_single_agent(
+                "dead-agent", "hello", conversation_id="c1"
+            )
