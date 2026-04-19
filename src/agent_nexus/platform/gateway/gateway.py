@@ -110,7 +110,8 @@ class MCPGateway:
                     exc,
                 )
                 activated.append(
-                    f"- {manifest.name}: activation failed ({exc})"
+                    f"- {manifest.name}: activation failed "
+                    f"[{type(exc).__name__}] {exc}"
                 )
 
         header = "Found and activated the following agents "
@@ -363,7 +364,7 @@ class MCPGateway:
                     self._registered_tool_names.discard(ad.full_name)
                 return (
                     f"Error: IPC failed for agent "
-                    f"'{adapter.agent_name}': {exc}"
+                    f"'{adapter.agent_name}' [{type(exc).__name__}]: {exc}"
                 )
             if result["success"]:
                 return result["output"]

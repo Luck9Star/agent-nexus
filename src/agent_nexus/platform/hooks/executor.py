@@ -349,6 +349,7 @@ class HookExecutor:
                 passed=False,
                 blocked=hook.block_on_failure,
                 error=str(exc),
+                error_type=type(exc).__name__,
                 duration_ms=round(duration_ms, 2),
             )
 
@@ -401,6 +402,7 @@ class HookExecutor:
                 passed=False,
                 blocked=hook.block_on_failure,
                 error=str(exc),
+                error_type=type(exc).__name__,
                 duration_ms=round(duration_ms, 2),
             )
 

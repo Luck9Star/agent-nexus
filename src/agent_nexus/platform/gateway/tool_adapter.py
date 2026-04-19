@@ -161,6 +161,7 @@ class McpToolAdapter:
                 "output": "",
                 "success": False,
                 "error": f"IPC error: {exc}",
+                "error_type": type(exc).__name__,
             }
 
         if response.type == AgentToPlatformType.ERROR:

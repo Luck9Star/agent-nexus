@@ -74,3 +74,4 @@ class WorkflowResult:
     total_phases: int
     completed_phases: int
     error: str | None = None
+    error_type: str | None = None

@@ -121,7 +121,8 @@ class AgentSupervisor:
                     started.append(agent_name)
             except Exception as exc:
                 logger.error(
-                    "Failed to start agent '%s': %s", agent_name, exc
+                    "Failed to start agent '%s' [%s]: %s",
+                    agent_name, type(exc).__name__, exc,
                 )
 
         logger.info(

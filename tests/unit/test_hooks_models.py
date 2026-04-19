@@ -388,3 +388,23 @@ class TestHookExecutionSemanticValidation:
         hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
         exe = HookExecution(hook=hook, passed=False, blocked=True)
         assert exe.blocked and not exe.passed
+
+
+class TestHookExecutionErrorType:
+    """iter101 regression: error_type carries exception class name."""
+
+    def test_error_type_on_failure(self):
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        he = HookExecution(
+            hook=hook,
+            passed=False,
+            blocked=True,
+            error="Command exited with code 1",
+            error_type="CalledProcessError",
+        )
+        assert he.error_type == "CalledProcessError"
+
+    def test_error_type_defaults_none(self):
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        he = HookExecution(hook=hook, passed=True)
+        assert he.error_type is None

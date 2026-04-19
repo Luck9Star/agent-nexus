@@ -151,6 +151,7 @@ class TestWorkflowResult:
             completed_phases=4,
         )
         assert result.error is None
+        assert result.error_type is None
 
     def test_empty_phase_results(self):
         result = WorkflowResult(
@@ -162,3 +163,30 @@ class TestWorkflowResult:
             error="immediate failure",
         )
         assert result.phase_results == {}
+
+
+class TestWorkflowResultErrorType:
+    """iter101 regression: error_type carries exception class name."""
+
+    def test_error_type_on_failure(self):
+        result = WorkflowResult(
+            success=False,
+            final_output="",
+            phase_results={},
+            total_phases=4,
+            completed_phases=0,
+            error="something failed",
+            error_type="ValueError",
+        )
+        assert result.error_type == "ValueError"
+
+    def test_error_type_defaults_none(self):
+        result = WorkflowResult(
+            success=True,
+            final_output="ok",
+            phase_results={},
+            total_phases=1,
+            completed_phases=1,
+            error=None,
+        )
+        assert result.error_type is None

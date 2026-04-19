@@ -148,6 +148,7 @@ class PlatformRouter:
         completed = 0
         total = len(_PHASE_ORDER)
         last_error: str | None = None
+        last_error_type: str | None = None
 
         # 2. Create in-memory TaskGraph and populate from definition.
         #    Tasks must be added in dependency order (deps before dependents)
@@ -162,6 +163,7 @@ class PlatformRouter:
                 ctx.task_graph.add_task(dsl_task.to_task_item())
         except Exception as exc:
             last_error = f"TaskGraph setup failed: {exc}"
+            last_error_type = type(exc).__name__
             logger.error(last_error, exc_info=exc)
             ctx.close()
             return WorkflowResult(
@@ -171,6 +173,7 @@ class PlatformRouter:
                 total_phases=total,
                 completed_phases=completed,
                 error=last_error,
+                error_type=type(exc).__name__,
             )
 
         # 3. Execute phases
@@ -187,6 +190,7 @@ class PlatformRouter:
 
                 except Exception as exc:
                     last_error = f"Phase {phase.value} failed: {exc}"
+                    last_error_type = type(exc).__name__
                     logger.error(last_error, exc_info=exc)
                     break
         finally:
@@ -215,6 +219,7 @@ class PlatformRouter:
             total_phases=total,
             completed_phases=completed,
             error=last_error,
+            error_type=last_error_type,
         )
 
     async def route_to_atomic(
@@ -270,6 +275,7 @@ class PlatformRouter:
                     "output": "",
                     "success": False,
                     "error": f"IPC send error: {exc}",
+                    "error_type": type(exc).__name__,
                 }
 
             # Wait for final result (progress messages are silently consumed)
@@ -281,6 +287,7 @@ class PlatformRouter:
                     "output": "",
                     "success": False,
                     "error": f"IPC error: {exc}",
+                    "error_type": type(exc).__name__,
                 }
 
             # Parse response

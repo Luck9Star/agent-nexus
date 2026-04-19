@@ -135,6 +135,7 @@
 | _read_manifest 静默返回 {} | installer.py raise InstallationError + 1 test update | 2026-04-19 | iter99 |
 | _file_lock FD 泄漏（flock 异常时） | lockfile.py try/except 关闭 FD + 2 regression tests | 2026-04-19 | iter99 |
 | P7 API 前向兼容性（3处） | router mapping.get + health CAPTURED branch + TaskState.BLOCKED 移除 + 5 tests | 2026-04-19 | iter100 |
+| 异常上下文丢失（7 P1 + 2 P2 sites） | WorkflowResult/HookExecution 新增 error_type 字段 + 9 sites 传 type(exc).__name__ + 4 tests | 2026-04-19 | iter101 |
 
 ### 待清模式
 

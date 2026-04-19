@@ -95,6 +95,7 @@ class HookExecution(BaseModel):
     blocked: bool = False
     output: str | None = None
     error: str | None = None
+    error_type: str | None = None
     duration_ms: float = Field(default=0.0, ge=0)
     executed_at: datetime = Field(default_factory=_utc_now)
 
