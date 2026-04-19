@@ -193,6 +193,11 @@ class ModelConfigManager:
             if key:
                 return key
 
+        logger.warning(
+            "No API key found for provider '%s' (checked env: %s)",
+            provider_name,
+            [provider_cfg.api_key_env] + _PROVIDER_ENV_FALLBACKS.get(provider_name.lower(), []),
+        )
         return ""
 
     def parse_model_string(self, model_string: str) -> tuple[str, str]:

@@ -69,7 +69,7 @@ class ConfigLoader:
         except FileNotFoundError:
             logger.debug("Config file not found at %s, using defaults", config_path)
         except toml.TomlDecodeError as exc:
-            logger.warning("Failed to parse config file %s: %s", config_path, exc)
+            logger.error("Failed to parse config file %s: %s", config_path, exc)
 
         # --- Runtime section ---
         runtime_raw = raw.get("runtime", {})

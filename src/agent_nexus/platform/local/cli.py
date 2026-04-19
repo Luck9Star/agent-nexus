@@ -477,7 +477,10 @@ async def _run(name: str, mode: str, transport: str) -> None:
             config_dir=config_dir,
         )
 
-        await supervisor.start_agent(name)
+        ok = await supervisor.start_agent(name)
+        if not ok:
+            typer.echo(f"Failed to start agent '{name}'", err=True)
+            raise typer.Exit(code=1)
 
         router = PlatformRouter(pm)
         gateway = MCPGateway(pm, router)

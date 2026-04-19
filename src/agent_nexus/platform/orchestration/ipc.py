@@ -84,7 +84,7 @@ class IPCStream:
             await asyncio.wait_for(self._stdin.drain(), timeout=5.0)
         except asyncio.TimeoutError as exc:
             raise IPCTimeoutError("Timed out draining stdin to agent") from exc
-        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+        except (BrokenPipeError, ConnectionResetError, OSError, RuntimeError) as exc:
             raise IPCConnectionError(f"Agent stdin closed during drain: {exc}") from exc
         logger.debug("IPC send: %s", payload)
 

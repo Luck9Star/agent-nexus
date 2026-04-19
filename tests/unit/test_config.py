@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -223,6 +224,29 @@ class TestConfigLoader:
         assert sources[1].branch == "develop"
 
 
+class TestConfigLoaderTomlDecodeErrorLogLevel:
+    """Iteration 85: TomlDecodeError is logged at ERROR level, not WARNING."""
+
+    def test_broken_toml_logs_error(self, tmp_path: Path) -> None:
+        """Broken TOML content triggers logger.error, not logger.warning."""
+        import logging
+
+        _write_config(tmp_path, "[section\nkey = value\n")
+        loader = ConfigLoader(config_dir=tmp_path)
+
+        with patch.object(
+            logging.getLogger("agent_nexus.platform.config.loader"),
+            "error",
+        ) as mock_error:
+            config = loader.load_config()
+
+        # Config should still return defaults (no crash)
+        assert config.models.default == DEFAULT_MODEL_STRING
+        # logger.error should have been called with the parse failure
+        mock_error.assert_called_once()
+        assert "Failed to parse config file" in mock_error.call_args[0][0]
+
+
 # ============================================================================
 # ModelConfigManager Tests
 # ============================================================================
@@ -429,6 +453,23 @@ class TestModelConfigManager:
 
         result = mgr.resolve_api_key(orphan)
         assert result == ""
+
+    def test_resolve_api_key_empty_string_logs_warning(self) -> None:
+        """Iteration 85: resolve_api_key logs warning when returning empty string."""
+        import logging
+
+        config = self._make_config()
+        mgr = ModelConfigManager(config)
+
+        with patch.object(
+            logging.getLogger("agent_nexus.platform.config.model_config"),
+            "warning",
+        ) as mock_warning:
+            result = mgr.resolve_api_key("nonexistent")
+
+        assert result == ""
+        mock_warning.assert_called_once()
+        assert "No API key found" in mock_warning.call_args[0][0]
 
 
 # ============================================================================

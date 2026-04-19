@@ -1055,3 +1055,28 @@ class TestIPCProtocolStreamProperty:
         protocol = IPCProtocol(stream)
 
         assert protocol.stream is stream
+
+
+# ============================================================================
+# Iteration 85: IPC RuntimeError catch during drain
+# ============================================================================
+
+
+class TestIPCSendDrainRuntimeError:
+    """send() catches RuntimeError during drain and raises IPCConnectionError."""
+
+    @pytest.mark.asyncio
+    async def test_drain_runtime_error_raises_ipc_connection_error(self) -> None:
+        """RuntimeError('Transport is closing') during drain is wrapped as IPCConnectionError."""
+        mock_stdin = MagicMock()
+        mock_stdin.write = MagicMock()
+        mock_stdin.drain = AsyncMock(
+            side_effect=RuntimeError("Transport is closing")
+        )
+        mock_stdout = MagicMock()
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
+
+        with pytest.raises(IPCConnectionError, match="stdin closed during drain"):
+            await stream.send(msg)

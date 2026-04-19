@@ -303,7 +303,6 @@ class GitInstaller:
             # Only create parent directory; git clone creates the target itself
             cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-        git_dir = cache_path / ".git"
         if not git_dir.exists():
             # Initial clone: no checkout + blobless partial clone + sparse
             await self._run_git(
@@ -465,6 +464,9 @@ class GitInstaller:
                 "Install uv for automatic venv management.",
                 agent_name,
             )
+            return None
+        except Exception:
+            logger.exception("Unexpected error creating venv for %s", agent_name)
             return None
 
     # ------------------------------------------------------------------

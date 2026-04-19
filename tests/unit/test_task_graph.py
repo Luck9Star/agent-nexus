@@ -797,3 +797,28 @@ class TestAddTaskCycleCheckWithBlockedBy:
         # Walk from R: R has dep Q and NEW. NEW == task_id -> cycle!
         with pytest.raises(ValueError, match="cycle"):
             task_graph.add_task(_make_task("NEW", blocked_by=["R"]))
+
+
+# ============================================================================
+# Iteration 85: In-memory DB PRAGMA foreign_keys=ON
+# ============================================================================
+
+
+class TestTaskGraphInMemoryForeignKeys:
+    """In-memory SQLite enforces PRAGMA foreign_keys=ON."""
+
+    def test_foreign_key_violation_raises_integrity_error(self) -> None:
+        """Inserting a dependency with non-existent task_id raises IntegrityError."""
+        import sqlite3
+
+        tg = TaskGraph(Path(":memory:"))
+        # Insert one valid task so the schema is populated
+        tg.add_task(_make_task("A"))
+
+        # Directly insert a dependency referencing a non-existent task.
+        # With foreign_keys=ON this should raise IntegrityError.
+        with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+            tg._mem_conn.execute(
+                "INSERT INTO task_dependencies (task_id, blocked_by_id) "
+                "VALUES ('nonexistent_task', 'A')"
+            )

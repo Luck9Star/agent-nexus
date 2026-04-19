@@ -112,6 +112,7 @@ class TaskGraph:
         # In-memory DB: reuse the persistent connection created in __init__.
         if self._mem_conn is not None:
             conn = self._mem_conn
+            conn.execute("PRAGMA foreign_keys=ON")
             if immediate:
                 if not conn.in_transaction:
                     conn.execute("BEGIN IMMEDIATE")
