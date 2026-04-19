@@ -870,6 +870,26 @@ class TestRunRouterMode:
 
         gateway_mock.run_stdio.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_router_start_agent_failure_exits(self) -> None:
+        """Router mode exits with code 1 when start_agent returns False."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        supervisor_mock = MagicMock()
+        supervisor_mock.start_agent = AsyncMock(return_value=False)
+        pm_mock = MagicMock()
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
+            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
+        ):
+            from agent_nexus.platform.local.cli import _run
+            with pytest.raises(click.exceptions.Exit):
+                await _run("test-agent", "router", "stdio")
+
 
 class TestRunCliMode:
     """Tests for _run(mode='cli')."""

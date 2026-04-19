@@ -227,3 +227,34 @@ class TestParseModelString:
         provider, model = mgr.parse_model_string("ollama:llama3:8b")
         assert provider == "ollama"
         assert model == "llama3:8b"
+
+
+# ============================================================================
+# resolve_api_key empty string logging (iter85 fix)
+# ============================================================================
+
+
+class TestResolveApiKeyLogging:
+    """resolve_api_key logs warning when returning empty string."""
+
+    def test_empty_api_key_logs_warning(self) -> None:
+        """When no API key is found, a warning is logged before returning ''."""
+        import logging
+        from unittest.mock import patch
+
+        config = _make_config()
+        mgr = ModelConfigManager(config)
+
+        with patch.dict("os.environ", {}, clear=True):
+            with patch.object(
+                logging.getLogger("agent_nexus.platform.config.model_config"),
+                "warning",
+            ) as mock_warn:
+                result = mgr.resolve_api_key("openai")
+
+        assert result == ""
+        # Check that our new "No API key found" warning was logged
+        assert any(
+            "No API key found" in str(call)
+            for call in mock_warn.call_args_list
+        )

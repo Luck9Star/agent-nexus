@@ -910,8 +910,17 @@ class EvolutionStore:
                     skill_id, exc,
                 )
 
+        try:
+            origin = SkillOrigin(lineage_origin)
+        except ValueError:
+            logger.warning(
+                "Invalid lineage_origin '%s' for skill '%s', defaulting to CAPTURED",
+                lineage_origin, skill_id,
+            )
+            origin = SkillOrigin.CAPTURED
+
         lineage = SkillLineage(
-            origin=SkillOrigin(lineage_origin),
+            origin=origin,
             generation=lineage_generation,
             parent_skill_ids=parent_ids,
             content_diff=lineage_content_diff,

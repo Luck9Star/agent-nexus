@@ -468,8 +468,11 @@ class TestModelConfigManager:
             result = mgr.resolve_api_key("nonexistent")
 
         assert result == ""
-        mock_warning.assert_called_once()
-        assert "No API key found" in mock_warning.call_args[0][0]
+        # Two warnings expected: "Provider not found" + "No API key found"
+        assert any(
+            "No API key found" in str(call)
+            for call in mock_warning.call_args_list
+        )
 
 
 # ============================================================================

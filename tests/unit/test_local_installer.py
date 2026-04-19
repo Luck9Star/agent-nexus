@@ -239,3 +239,20 @@ class TestInstallerCachePath:
         p1 = inst._get_cache_path("https://a.com/r.git")
         p2 = inst._get_cache_path("https://b.com/r.git")
         assert p1 != p2
+
+
+class TestCreateVenvBroadExcept:
+    """_create_venv catches all exceptions, not just FileNotFoundError."""
+
+    @pytest.mark.asyncio
+    async def test_permission_error_returns_none(self, tmp_path: Path) -> None:
+        """PermissionError during venv creation returns None instead of crashing."""
+        inst, sources, lockfile = _make_installer(tmp_path)
+        agent_dir = tmp_path / "agents" / "test-agent"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "pyproject.toml").write_text("[project]\nname='t'\nversion='0'\n")
+
+        with patch("asyncio.create_subprocess_exec", side_effect=PermissionError("denied")):
+            result = await inst._create_venv("test-agent", agent_dir)
+
+        assert result is None
