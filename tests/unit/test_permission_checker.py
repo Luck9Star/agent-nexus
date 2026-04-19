@@ -544,3 +544,107 @@ class TestPathRuleRecursiveGlob:
         ))
         d = checker.check_path("file_read", "/home/user/file.txt")
         assert d.allowed
+
+
+# ============================================================================
+# Coverage gap tests — lines 109-136, 266, 347
+# ============================================================================
+
+
+class TestFnmatchRecursiveSuffixBranches:
+    """Lines 109-136: _fnmatch_recursive complex **/suffix matching branches."""
+
+    def test_glob_star_suffix_matches_nested(self) -> None:
+        """Pattern /tmp/**/*.txt matches deeply nested .txt files."""
+        assert _fnmatch_recursive("/tmp/a/b/c.txt", "/tmp/**/*.txt")
+
+    def test_glob_star_suffix_matches_direct_child(self) -> None:
+        """Pattern /tmp/**/*.txt matches direct child .txt files."""
+        assert _fnmatch_recursive("/tmp/file.txt", "/tmp/**/*.txt")
+
+    def test_glob_star_suffix_no_match_wrong_ext(self) -> None:
+        """Pattern /tmp/**/*.txt does not match .log files."""
+        assert not _fnmatch_recursive("/tmp/a/b/c.log", "/tmp/**/*.txt")
+
+    def test_glob_star_suffix_no_match_wrong_prefix(self) -> None:
+        """Pattern /tmp/**/*.txt does not match paths under /home."""
+        assert not _fnmatch_recursive("/home/a/b/c.txt", "/tmp/**/*.txt")
+
+    def test_glob_star_middle_pattern(self) -> None:
+        """Pattern /tmp/**/bar/* matches paths with intermediate 'bar' directory."""
+        assert _fnmatch_recursive("/tmp/a/bar/file.txt", "/tmp/**/bar/*")
+
+    def test_glob_star_middle_pattern_deep(self) -> None:
+        """Pattern /tmp/**/bar/* matches deeply nested bar paths."""
+        assert _fnmatch_recursive("/tmp/a/b/c/bar/file.txt", "/tmp/**/bar/*")
+
+    def test_glob_star_middle_no_match_no_bar(self) -> None:
+        """Pattern /tmp/**/bar/* does not match when no bar directory."""
+        assert not _fnmatch_recursive("/tmp/a/baz/file.txt", "/tmp/**/bar/*")
+
+    def test_value_equals_prefix_with_suffix(self) -> None:
+        """When value == prefix but there's a suffix remainder, no match."""
+        # /tmp == /tmp prefix but remainder /*.txt won't match empty tail
+        assert not _fnmatch_recursive("/tmp", "/tmp/**/*.txt")
+
+    def test_double_star_star_chained(self) -> None:
+        """Chained ** patterns: /tmp/**/bar/** matches multi-segment paths."""
+        # This exercises the recursive call at line 136
+        assert _fnmatch_recursive("/tmp/a/bar/b/c.txt", "/tmp/**/bar/**")
+
+    def test_double_star_star_chained_direct(self) -> None:
+        """Pattern /tmp/**/bar/** matches /tmp/bar (zero segments both sides)."""
+        assert _fnmatch_recursive("/tmp/bar", "/tmp/**/bar/**")
+
+    def test_double_star_star_chained_nested(self) -> None:
+        """Pattern /tmp/**/bar/** matches /tmp/bar/x/y."""
+        assert _fnmatch_recursive("/tmp/bar/x/y", "/tmp/**/bar/**")
+
+
+class TestCheckCommandEmpty:
+    """Line 266: empty command rejection."""
+
+    def test_empty_command_denied(self) -> None:
+        """Empty string command is denied."""
+        checker = _checker(mode=PermissionMode.FULL_AUTO)
+        d = checker.check_command("")
+        assert not d.allowed
+        assert "Empty command" in d.reason
+
+    def test_whitespace_command_denied(self) -> None:
+        """Whitespace-only command is denied."""
+        checker = _checker(mode=PermissionMode.FULL_AUTO)
+        d = checker.check_command("   ")
+        assert not d.allowed
+        assert "Empty command" in d.reason
+
+
+class TestApplyPathAccessFallback:
+    """Line 347: unknown PathAccess value returns denial fallback."""
+
+    def test_unknown_path_access_denied(self) -> None:
+        """An unrecognized PathAccess value falls through to the denial."""
+        checker = _checker(
+            mode=PermissionMode.FULL_AUTO,
+            path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.READ)],
+        )
+        # Use _apply_path_access directly with a mock PathAccess
+        from agent_nexus.models.permission import PathAccess as PA
+
+        # Create a mock PathAccess that is not in the known set
+        class FakeAccess:
+            """Fake enum value that won't match any real PathAccess."""
+            def __eq__(self, other):
+                # Never equals any real PathAccess
+                return False
+
+            def __hash__(self):
+                return hash("fake")
+
+            @property
+            def value(self):
+                return "fake"
+
+        result = checker._apply_path_access(FakeAccess(), "file_read", "/tmp/test")
+        assert not result.allowed
+        assert "Unknown path access" in result.reason

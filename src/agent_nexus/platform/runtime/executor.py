@@ -52,13 +52,11 @@ class IPythonExecutor:
         # Pending injections that happened before shell creation.
         self._pending_injects: dict[str, Any] = {}
         # Lock to prevent concurrent shell creation in _require_shell.
-        self._shell_lock: asyncio.Lock | None = None
-
-    def _get_lock(self) -> asyncio.Lock:
-        """Return the lock, creating it lazily (asyncio.Lock needs a running loop)."""
-        if self._shell_lock is None:
-            self._shell_lock = asyncio.Lock()
-        return self._shell_lock
+        # Created eagerly — asyncio.Lock() works without a running loop in 3.10+.
+        self._shell_lock: asyncio.Lock = asyncio.Lock()
+        # Flag set when a timed-out thread execution may still be running.
+        # Prevents new executions on a contaminated shell.
+        self._timed_out: bool = False
 
     async def _require_shell(self) -> Any:
         """Return the shell, creating it lazily if needed.
@@ -70,7 +68,7 @@ class IPythonExecutor:
         if self._shell is not None:
             return self._shell
 
-        async with self._get_lock():
+        async with self._shell_lock:
             # Double-check after acquiring the lock
             if self._shell is not None:
                 return self._shell
@@ -106,9 +104,13 @@ class IPythonExecutor:
             try:
                 self._shell.user_ns.clear()
             except Exception:  # noqa: BLE001
-                pass
+                logger.warning(
+                    "Failed to clear IPython user namespace during close",
+                    exc_info=True,
+                )
             self._shell = None
         self._pending_injects.clear()
+        self._timed_out = False
 
     def reset(self) -> None:
         """Clear namespace for reuse without destroying the shell.
@@ -129,6 +131,7 @@ class IPythonExecutor:
             # Re-add preserved internals
             self._shell.user_ns.update(internals_cache)
         self._pending_injects.clear()
+        self._timed_out = False
 
     def __del__(self) -> None:
         # Safety net: release shell if close() was never called.
@@ -155,6 +158,12 @@ class IPythonExecutor:
             ExecutionResult with success status, output, and error info.
         """
         # Step 1: Security check (no shell needed)
+        if self._timed_out:
+            return ExecutionResult(
+                success=False,
+                error="Shell is contaminated by a previous timed-out execution; "
+                "call reset() or close() to recover",
+            )
         violations = self._security.check_code(code)
         if violations:
             details = "\n".join(f"  - [{v.rule_type}] {v.message}" for v in violations)
@@ -204,6 +213,7 @@ class IPythonExecutor:
             )
 
         except asyncio.TimeoutError:
+            self._timed_out = True
             return ExecutionResult(
                 success=False,
                 error=f"Execution timed out after {timeout}s",

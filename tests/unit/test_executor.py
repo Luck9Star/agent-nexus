@@ -281,3 +281,285 @@ class TestConcurrentExecuteVariableDetection:
         assert "seq_y" in result2.variables_created
         # seq_y should NOT appear in result1's variables_created
         assert "seq_y" not in result1.variables_created
+
+
+# ============================================================================
+# Coverage gap tests — lines 76, 98-99, 108-109, 136-140, 186, 211-213, 245
+# ============================================================================
+
+
+class TestPendingInjectsAppliedOnShellCreation:
+    """Lines 98-99: pending injects are applied when the shell is first created."""
+
+    @pytest.mark.asyncio
+    async def test_inject_before_shell_creation_applied(self) -> None:
+        """Variables injected before shell init should be available after execute."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            # Inject BEFORE the shell is created (shell is None)
+            assert executor._shell is None
+            executor.inject("my_val", 999)
+            assert "my_val" in executor._pending_injects
+
+            # Now trigger shell creation via execute
+            result = await executor.execute("result = my_val + 1")
+            assert result.success is True
+            # Pending injects should be cleared
+            assert executor._pending_injects == {}
+            # The variable should be accessible
+            assert executor.get("my_val") == 999
+            assert executor.get("result") == 1000
+        finally:
+            executor.close()
+
+
+class TestCloseExceptionHandling:
+    """Lines 108-109: close() handles exceptions from user_ns.clear()."""
+
+    def test_close_handles_user_ns_clear_exception(self) -> None:
+        """close() should not raise even if user_ns.clear() fails."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        # Manually set up a shell mock that raises on clear
+        mock_ns = {"x": 1}
+
+        class BadNamespace(dict):
+            def clear(self):
+                raise RuntimeError("simulated clear failure")
+
+        executor._shell = type("FakeShell", (), {"user_ns": BadNamespace()})()
+        # Should not raise
+        executor.close()
+        assert executor._shell is None
+
+
+class TestDelMethod:
+    """Lines 139-143: __del__ releases shell if close() was never called."""
+
+    def test_del_releases_shell(self) -> None:
+        """__del__ should clear user_ns and set _shell to None."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        # Create a shell-like object with a clearable namespace
+        executor._shell = type("FakeShell", (), {"user_ns": {"a": 1}})()
+        # Call __del__ directly (GC calls this implicitly)
+        executor.__del__()
+        assert executor._shell is None
+
+    def test_del_no_shell_is_noop(self) -> None:
+        """__del__ with no shell should be a no-op."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        assert executor._shell is None
+        # Should not raise
+        executor.__del__()
+        assert executor._shell is None
+
+    def test_del_handles_clear_exception(self) -> None:
+        """__del__ should not raise even if user_ns.clear() fails."""
+
+        class BadNamespace(dict):
+            def clear(self):
+                raise RuntimeError("simulated clear failure")
+
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        executor._shell = type("FakeShell", (), {"user_ns": BadNamespace()})()
+        # Should not raise
+        executor.__del__()
+        assert executor._shell is None
+
+
+class TestErrorBeforeExec:
+    """Line 195: error_before_exec path in execute()."""
+
+    @pytest.mark.asyncio
+    async def test_error_before_exec_path(self, shared_executor) -> None:
+        """Code that fails during transformation triggers error_before_exec."""
+        # IPython magic that doesn't exist triggers error_before_exec
+        # Using a cell magic without proper setup should trigger error_before_exec
+        # Actually, let's use a syntax that IPython rejects at transform time
+        result = await shared_executor.execute("???")
+        assert result.success is False
+        # The error should be captured either through error_before_exec or error_in_exec
+        assert result.error is not None
+
+
+class TestTimedOutFlag:
+    """Line 162: _timed_out flag blocks execution after a timeout."""
+
+    @pytest.mark.asyncio
+    async def test_timed_out_flag_blocks_subsequent_execution(self) -> None:
+        """After timeout, subsequent execute() returns error without running code."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            # Manually set the flag to simulate a timed-out state
+            executor._timed_out = True
+            result = await executor.execute("x = 1", timeout=5)
+            assert result.success is False
+            assert "contaminated" in result.error
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_timeout_sets_flag(self) -> None:
+        """A real timeout sets _timed_out to True."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            # Execute code that will timeout
+            result = await executor.execute(
+                "import time; time.sleep(10)", timeout=0.3
+            )
+            assert result.success is False
+            assert executor._timed_out is True
+
+            # Subsequent execution should also fail with contaminated message
+            result2 = await executor.execute("x = 1", timeout=5)
+            assert result2.success is False
+            assert "contaminated" in result2.error
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_reset_clears_timed_out_flag(self) -> None:
+        """reset() clears the _timed_out flag."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            executor._timed_out = True
+            executor.reset()
+            assert executor._timed_out is False
+        finally:
+            executor.close()
+
+
+class TestExecuteGeneralException:
+    """Lines 211-213: general exception handler in execute()."""
+
+    @pytest.mark.asyncio
+    async def test_unexpected_exception_returns_error(self) -> None:
+        """Unexpected exceptions during execute are caught and returned."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            # Mock transform_cell to raise an unexpected exception after shell init
+            await executor._require_shell()
+            original_transform = executor._shell.transform_cell
+
+            def bad_transform(code):
+                raise OSError("simulated unexpected error")
+
+            executor._shell.transform_cell = bad_transform
+
+            result = await executor.execute("x = 1", timeout=5)
+            assert result.success is False
+            assert "Execution error" in result.error
+            assert "simulated unexpected error" in result.error
+
+            # Restore to avoid breaking close()
+            executor._shell.transform_cell = original_transform
+        finally:
+            executor.close()
+
+
+class TestInjectPendingQueue:
+    """Line 245: inject() queues to _pending_injects when shell is not created."""
+
+    def test_inject_queues_when_no_shell(self) -> None:
+        """inject() stores in _pending_injects when _shell is None."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            assert executor._shell is None
+            executor.inject("queued_var", 42)
+            assert executor._pending_injects["queued_var"] == 42
+            # get() should return from pending_injects
+            assert executor.get("queued_var") == 42
+        finally:
+            executor.close()
+
+
+class TestDoubleCheckAfterLock:
+    """Line 74: double-check after acquiring lock in _require_shell."""
+
+    @pytest.mark.asyncio
+    async def test_double_check_prevents_duplicate_shell(self) -> None:
+        """Second caller to _require_shell sees shell created by first."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            # Create shell with first call
+            shell1 = await executor._require_shell()
+            assert executor._shell is not None
+
+            # Second call should hit line 74 (double-check after lock)
+            # and return the same shell without creating a new one
+            shell2 = await executor._require_shell()
+            assert shell2 is shell1
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_double_check_inside_lock_body(self) -> None:
+        """Exercise the double-check path inside the lock body (line 74)."""
+        from unittest.mock import MagicMock
+
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            original_lock = executor._shell_lock
+
+            class ShellSettingLock:
+                """A lock that pre-creates the shell when acquired."""
+                def __init__(self, real_lock, executor_ref):
+                    self._real_lock = real_lock
+                    self._executor = executor_ref
+
+                async def __aenter__(self):
+                    await self._real_lock.__aenter__()
+                    # Before the body runs, set a shell so the double-check hits
+                    if self._executor._shell is None:
+                        self._executor._shell = MagicMock()
+                    return self
+
+                async def __aexit__(self, *args):
+                    return await self._real_lock.__aexit__(*args)
+
+            # First call will see shell=None at line 68, acquire the lock,
+            # and our ShellSettingLock will set a mock shell,
+            # so line 74 double-check returns it
+            executor._shell_lock = ShellSettingLock(original_lock, executor)
+            shell = await executor._require_shell()
+            assert shell is not None
+        finally:
+            executor._shell_lock = original_lock
+            executor.close()
+
+
+class TestErrorBeforeExecPath:
+    """Line 195: error_before_exec branch in execute()."""
+
+    @pytest.mark.asyncio
+    async def test_return_outside_function_triggers_error_before_exec(
+        self, shared_executor,
+    ) -> None:
+        """'return' outside function passes security check but triggers error_before_exec."""
+        result = await shared_executor.execute("return 42")
+        assert result.success is False
+        assert result.error is not None
+        assert "return" in result.error or "outside" in result.error

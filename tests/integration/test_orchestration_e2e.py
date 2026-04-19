@@ -443,8 +443,8 @@ async def test_dsl_validation_clean() -> None:
     dsl = OrchestrationDSL()
     definition = dsl.parse_string(SEQUENTIAL_TOML)
     # Re-validate explicitly (parse already validates, but let's be thorough)
-    warnings = dsl.validate(definition)
-    assert len(warnings) == 0
+    result = dsl.validate(definition)
+    assert result.is_valid
 
 
 # ---------------------------------------------------------------------------

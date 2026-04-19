@@ -720,3 +720,301 @@ class TestSources:
         assert exc_info.value.exit_code == 1
         calls = _echo_calls(echo_mock)
         assert any("Unknown action" in c for c in calls)
+
+
+# ---------------------------------------------------------------------------
+# _run() tests — MCP / router / CLI modes
+# ---------------------------------------------------------------------------
+
+
+def _make_lockfile_entry(name: str = "test-agent") -> LockfileEntry:
+    """Build a valid LockfileEntry for _run tests."""
+    return LockfileEntry(
+        name=name,
+        agent_type=AgentType.ATOMIC,
+        source="official",
+        commit_sha="a" * 40,
+        version="1.0.0",
+        installed_at=datetime(2025, 1, 1),
+        venv_path="/fake/venv",
+    )
+
+
+class TestRunMcpMode:
+    """Tests for _run(mode='mcp')."""
+
+    @pytest.mark.asyncio
+    async def test_agent_not_installed(self) -> None:
+        """Agent not in lockfile → error exit."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = None
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
+        ):
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                from agent_nexus.platform.local.cli import _run
+                await _run("missing-agent", "mcp", "stdio")
+
+        assert exc_info.value.exit_code == 1
+
+    @pytest.mark.asyncio
+    async def test_start_agent_fails(self) -> None:
+        """supervisor.start_agent returns False → error exit."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        supervisor_mock = MagicMock()
+        supervisor_mock.start_agent = AsyncMock(return_value=False)
+        pm_mock = MagicMock()
+        pm_mock.get_agent.return_value = None
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
+            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
+        ):
+            from agent_nexus.platform.local.cli import _run
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _run("test-agent", "mcp", "stdio")
+
+        assert exc_info.value.exit_code == 1
+
+    @pytest.mark.asyncio
+    async def test_mcp_start_success_cancelled(self) -> None:
+        """Successful MCP start → _wait_forever runs → CancelledError stops cleanly."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        supervisor_mock = MagicMock()
+        supervisor_mock.start_agent = AsyncMock(return_value=True)
+        supervisor_mock.stop_agent = AsyncMock()
+        pm_mock = MagicMock()
+        handle_mock = MagicMock()
+        handle_mock.pid = 12345
+        pm_mock.get_agent.return_value = handle_mock
+
+        async def _cancel_wait():
+            raise asyncio.CancelledError()
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
+            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.local.cli._wait_forever", side_effect=_cancel_wait),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
+        ):
+            from agent_nexus.platform.local.cli import _run
+            await _run("test-agent", "mcp", "stdio")
+
+        supervisor_mock.stop_agent.assert_called_once_with("test-agent")
+
+
+class TestRunRouterMode:
+    """Tests for _run(mode='router')."""
+
+    @pytest.mark.asyncio
+    async def test_router_sse_transport(self) -> None:
+        """Router mode with SSE transport calls gateway.run_sse."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        supervisor_mock = MagicMock()
+        supervisor_mock.start_agent = AsyncMock(return_value=True)
+        pm_mock = MagicMock()
+
+        gateway_mock = MagicMock()
+        gateway_mock.run_sse = AsyncMock(side_effect=asyncio.CancelledError())
+        gateway_mock.stop = AsyncMock()
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
+            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.gateway.gateway.MCPGateway", return_value=gateway_mock),
+            patch("agent_nexus.platform.router.router.PlatformRouter", return_value=MagicMock()),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
+        ):
+            from agent_nexus.platform.local.cli import _run
+            await _run("test-agent", "router", "sse")
+
+        gateway_mock.run_sse.assert_called_once()
+        gateway_mock.stop.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_router_stdio_transport(self) -> None:
+        """Router mode with stdio transport calls gateway.run_stdio."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        supervisor_mock = MagicMock()
+        supervisor_mock.start_agent = AsyncMock(return_value=True)
+        pm_mock = MagicMock()
+
+        gateway_mock = MagicMock()
+        gateway_mock.run_stdio = AsyncMock(side_effect=asyncio.CancelledError())
+        gateway_mock.stop = AsyncMock()
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
+            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.gateway.gateway.MCPGateway", return_value=gateway_mock),
+            patch("agent_nexus.platform.router.router.PlatformRouter", return_value=MagicMock()),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
+        ):
+            from agent_nexus.platform.local.cli import _run
+            await _run("test-agent", "router", "stdio")
+
+        gateway_mock.run_stdio.assert_called_once()
+
+
+class TestRunCliMode:
+    """Tests for _run(mode='cli')."""
+
+    @pytest.mark.asyncio
+    async def test_cli_start_success_cancelled(self) -> None:
+        """CLI mode starts agent, waits, then stops on cancel."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        supervisor_mock = MagicMock()
+        supervisor_mock.start_agent = AsyncMock(return_value=True)
+        supervisor_mock.stop_agent = AsyncMock()
+        pm_mock = MagicMock()
+
+        async def _cancel_wait():
+            raise asyncio.CancelledError()
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
+            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.local.cli._wait_forever", side_effect=_cancel_wait),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
+        ):
+            from agent_nexus.platform.local.cli import _run
+            await _run("test-agent", "cli", "stdio")
+
+        supervisor_mock.stop_agent.assert_called_once_with("test-agent")
+
+    @pytest.mark.asyncio
+    async def test_cli_start_fails(self) -> None:
+        """CLI mode start fails → error exit."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        supervisor_mock = MagicMock()
+        supervisor_mock.start_agent = AsyncMock(return_value=False)
+        pm_mock = MagicMock()
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
+            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
+        ):
+            from agent_nexus.platform.local.cli import _run
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _run("test-agent", "cli", "stdio")
+
+        assert exc_info.value.exit_code == 1
+
+
+class TestRunUnknownMode:
+    """Tests for _run with invalid mode."""
+
+    @pytest.mark.asyncio
+    async def test_unknown_mode_rejected(self) -> None:
+        """Unknown mode string → error exit."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
+        ):
+            from agent_nexus.platform.local.cli import _run
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _run("test-agent", "bogus", "stdio")
+
+        assert exc_info.value.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# _search() tests
+# ---------------------------------------------------------------------------
+
+
+class TestSearchAgents:
+    """Tests for _search async function."""
+
+    @pytest.mark.asyncio
+    async def test_no_results(self) -> None:
+        """Search with no matching agents → 'No agents found' message."""
+        mocks, _, sources_mock, _ = _mock_managers()
+
+        source_entry = MagicMock()
+        source_entry.name = "official"
+        sources_mock.list_sources.return_value = [source_entry]
+        sources_mock._load_source_index.return_value = []
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+        ):
+            from agent_nexus.platform.local.cli import _search
+            await _search("nonexistent")
+
+        calls = _echo_calls(echo_mock)
+        assert any("No agents found" in c for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_matching_results(self) -> None:
+        """Search finds matching agent → displays name, type, version."""
+        mocks, _, sources_mock, _ = _mock_managers()
+
+        source_entry = MagicMock()
+        source_entry.name = "official"
+        sources_mock.list_sources.return_value = [source_entry]
+
+        index_entry = MagicMock()
+        index_entry.name = "doc-filler"
+        index_entry.description = "Fill documents"
+        index_entry.tags = ["docs"]
+        index_entry.version = "1.0.0"
+        index_entry.type = MagicMock(value="atomic")
+        sources_mock._load_source_index.return_value = [index_entry]
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+        ):
+            from agent_nexus.platform.local.cli import _search
+            await _search("doc")
+
+        calls = _echo_calls(echo_mock)
+        assert any("doc-filler" in c for c in calls)
+        assert any("Search results" in c for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_source_index_none_skipped(self) -> None:
+        """Source with None index is skipped gracefully."""
+        mocks, _, sources_mock, _ = _mock_managers()
+
+        source_entry = MagicMock()
+        source_entry.name = "broken"
+        sources_mock.list_sources.return_value = [source_entry]
+        sources_mock._load_source_index.return_value = None
+
+        with (
+            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+        ):
+            from agent_nexus.platform.local.cli import _search
+            await _search("anything")
+
+        calls = _echo_calls(echo_mock)
+        assert any("No agents found" in c for c in calls)

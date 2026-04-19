@@ -29,6 +29,22 @@ _VALID_ROLES = frozenset({"explore", "plan", "worker", "verification"})
 _VALID_TOOL_LOADING = frozenset({"eager", "lazy", "manifest_only"})
 
 
+@dataclass
+class ValidationResult:
+    """Structured result from DSL validation.
+
+    Separates fatal errors (cycles, unknown refs) from informational
+    warnings (unused agents), avoiding fragile substring matching.
+    """
+
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def is_valid(self) -> bool:
+        return len(self.errors) == 0
+
+
 @dataclass(frozen=True)
 class DSLAgent:
     """Agent declaration within an orchestration."""
@@ -217,8 +233,8 @@ class OrchestrationDSL:
             raise DSLSyntaxError(f"Invalid TOML: {exc}") from exc
         return self._parse(raw)
 
-    def validate(self, definition: OrchestrationDefinition) -> list[str]:
-        """Validate the definition, return list of warnings (empty = valid).
+    def validate(self, definition: OrchestrationDefinition) -> ValidationResult:
+        """Validate the definition.
 
         Checks:
         1. All task.agent references exist in agents dict
@@ -226,7 +242,11 @@ class OrchestrationDSL:
         3. No cycles in the dependency graph
         4. All agents have at least one task (warning)
         5. Global preload_agents reference valid agent names
+
+        Returns:
+            ValidationResult with separate errors and warnings lists.
         """
+        errors: list[str] = []
         warnings: list[str] = []
         task_ids = {t.id for t in definition.tasks}
         agent_names = set(definition.agents.keys())
@@ -234,7 +254,7 @@ class OrchestrationDSL:
         # 1. task.agent references
         for task in definition.tasks:
             if task.agent not in agent_names:
-                warnings.append(
+                errors.append(
                     f"Task '{task.id}' references unknown agent '{task.agent}'"
                 )
 
@@ -242,7 +262,7 @@ class OrchestrationDSL:
         for task in definition.tasks:
             for dep_id in task.blocked_by:
                 if dep_id not in task_ids:
-                    warnings.append(
+                    errors.append(
                         f"Task '{task.id}' blocked_by unknown task '{dep_id}'"
                     )
 
@@ -250,7 +270,7 @@ class OrchestrationDSL:
         task_map = {t.id: t for t in definition.tasks}
         cycles = self._detect_cycles(task_map)
         for cycle in cycles:
-            warnings.append(f"Dependency cycle detected: {' -> '.join(cycle)}")
+            errors.append(f"Dependency cycle detected: {' -> '.join(cycle)}")
 
         # 4. Agents with no tasks (warning only)
         tasked_agents = {t.agent for t in definition.tasks}
@@ -261,11 +281,11 @@ class OrchestrationDSL:
         # 5. Global preload_agents references
         for agent_name in definition.tool_loading.preload_agents:
             if agent_name not in agent_names:
-                warnings.append(
+                errors.append(
                     f"preload_agents references unknown agent '{agent_name}'"
                 )
 
-        return warnings
+        return ValidationResult(errors=errors, warnings=warnings)
 
     # -- internal -----------------------------------------------------------
 
@@ -394,11 +414,10 @@ class OrchestrationDSL:
         )
 
         # Run validation, raise on errors (cycles, bad refs)
-        warnings = self.validate(definition)
-        errors = [w for w in warnings if "cycle" in w.lower() or "unknown" in w.lower()]
-        if errors:
+        result = self.validate(definition)
+        if result.errors:
             raise DSLValidationError(
-                "DSL validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+                "DSL validation failed:\n" + "\n".join(f"  - {e}" for e in result.errors)
             )
 
         return definition

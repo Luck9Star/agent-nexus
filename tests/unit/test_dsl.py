@@ -6,6 +6,9 @@ helpers, parsing, and validation including cycle detection.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from agent_nexus.models.task import TaskState
@@ -429,9 +432,9 @@ class TestValidate:
             tasks=[DSLTask(id="T1", description="", agent="nonexistent")],
         )
         dsl = OrchestrationDSL()
-        warnings = dsl.validate(defn)
+        result = dsl.validate(defn)
 
-        assert any("unknown agent" in w for w in warnings)
+        assert any("unknown agent" in w for w in result.errors)
 
     def test_validate_unknown_blocked_by(self) -> None:
         """Warning for task referencing unknown blocked_by."""
@@ -441,17 +444,17 @@ class TestValidate:
             ],
         )
         dsl = OrchestrationDSL()
-        warnings = dsl.validate(defn)
+        result = dsl.validate(defn)
 
-        assert any("unknown task" in w for w in warnings)
+        assert any("unknown task" in w for w in result.errors)
 
     def test_validate_clean(self) -> None:
         """No warnings for valid definition."""
         defn = self._make_definition_with_warnings()
         dsl = OrchestrationDSL()
-        warnings = dsl.validate(defn)
+        result = dsl.validate(defn)
 
-        assert warnings == []
+        assert result.is_valid
 
     def test_validate_unused_agent(self) -> None:
         """Warning for agent with no tasks assigned."""
@@ -463,9 +466,9 @@ class TestValidate:
             tasks=[DSLTask(id="T1", description="", agent="a1")],
         )
         dsl = OrchestrationDSL()
-        warnings = dsl.validate(defn)
+        result = dsl.validate(defn)
 
-        assert any("no tasks" in w for w in warnings)
+        assert any("no tasks" in w for w in result.warnings)
 
     def test_validate_cycle(self) -> None:
         """Warning for dependency cycle."""
@@ -476,9 +479,9 @@ class TestValidate:
             ],
         )
         dsl = OrchestrationDSL()
-        warnings = dsl.validate(defn)
+        result = dsl.validate(defn)
 
-        assert any("cycle" in w.lower() for w in warnings)
+        assert any("cycle" in e.lower() for e in result.errors)
 
 
 # ============================================================================
@@ -515,3 +518,678 @@ class TestDetectCycles:
         }
         cycles = OrchestrationDSL._detect_cycles(task_map)
         assert len(cycles) == 0
+
+
+# ============================================================================
+# parse_file() -- file-based parsing
+# ============================================================================
+
+
+class TestParseFile:
+    def test_parse_file_not_found(self, tmp_path: Any) -> None:
+        """parse_file raises DSLSyntaxError for non-existent file."""
+        from pathlib import Path
+
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match="TOML file not found"):
+            dsl.parse_file(tmp_path / "nonexistent.toml")
+
+    def test_parse_file_invalid_toml(self, tmp_path: Any) -> None:
+        """parse_file raises DSLSyntaxError for invalid TOML content."""
+        bad_file = tmp_path / "bad.toml"
+        bad_file.write_text("this is not valid toml {{{", encoding="utf-8")
+
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match="Invalid TOML"):
+            dsl.parse_file(bad_file)
+
+    def test_parse_file_valid(self, tmp_path: Any) -> None:
+        """parse_file returns OrchestrationDefinition for valid TOML file."""
+        toml_file = tmp_path / "valid.toml"
+        toml_file.write_text(_MINIMAL_VALID_TOML, encoding="utf-8")
+
+        dsl = OrchestrationDSL()
+        defn = dsl.parse_file(toml_file)
+
+        assert defn.goal == "Build feature X"
+        assert defn.agent_name == "feature-pipeline"
+        assert len(defn.agents) == 2
+        assert len(defn.tasks) == 2
+
+
+# ============================================================================
+# TOML parsing edge cases -- missing fields, invalid types
+# ============================================================================
+
+
+# Helper: wrap partial TOML with required boilerplate to avoid early-exit errors.
+def _wrap_toml(partial: str) -> str:
+    """Wrap partial TOML content with the required boilerplate sections.
+
+    Only includes boilerplate that is NOT already present in *partial*.
+    """
+    has_goal = "[goal]" in partial
+    has_agent_name = "[agent_name]" in partial
+    has_agents = "[[agents]]" in partial
+    has_tasks = "[[tasks]]" in partial
+
+    pieces: list[str] = []
+    if not has_goal:
+        pieces.append('[goal]\ndescription = "Test goal"')
+    if not has_agent_name:
+        pieces.append('[agent_name]\nvalue = "test-composite"')
+    if not has_agents:
+        pieces.append('[[agents]]\nname = "a"\ndescription = "Agent A"')
+    if not has_tasks:
+        pieces.append('[[tasks]]\nid = "T1"\ndescription = "Task"\nagent = "a"')
+
+    return partial + "\n\n" + "\n\n".join(pieces) + "\n"
+
+
+class TestParseStringEdgeCases:
+    """Tests for uncovered error paths in _parse()."""
+
+    # -- [goal] section edge cases (lines 284) --
+
+    def test_goal_description_empty_string(self) -> None:
+        """Empty [goal].description raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\[goal\]\.description must be a non-empty"):
+            dsl.parse_string(_wrap_toml("[goal]\ndescription = ''"))
+
+    def test_goal_description_wrong_type(self) -> None:
+        """[goal].description as integer raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\[goal\]\.description must be a non-empty"):
+            dsl.parse_string(_wrap_toml("[goal]\ndescription = 42"))
+
+    # -- [agent_name] section edge cases (line 292) --
+
+    def test_agent_name_value_empty(self) -> None:
+        """Empty [agent_name].value raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\[agent_name\]\.value must be a non-empty"):
+            dsl.parse_string(_wrap_toml('[agent_name]\nvalue = ""'))
+
+    def test_agent_name_value_wrong_type(self) -> None:
+        """[agent_name].value as integer raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\[agent_name\]\.value must be a non-empty"):
+            dsl.parse_string(_wrap_toml("[agent_name]\nvalue = 123"))
+
+    # -- [[agents]] section edge cases (lines 297, 301, 304, 317-318) --
+
+    def test_agents_not_a_list(self) -> None:
+        """[[agents]] as a single table (not array) raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\[\[agents\]\] must be an array"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[agents]
+name = "a"
+description = "Agent A"
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+""")
+
+    def test_agent_entry_not_a_dict(self) -> None:
+        """Agent entry that is a scalar (not table) raises DSLSyntaxError."""
+        import toml as toml_lib
+
+        dsl = OrchestrationDSL()
+        # Build raw dict directly to bypass TOML's structural constraints.
+        raw = toml_lib.loads("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+""")
+        raw["agents"] = ["not-a-table"]
+
+        with pytest.raises(DSLSyntaxError, match=r"agents\[0\] must be a table"):
+            dsl._parse(raw)
+
+    def test_agent_name_missing_or_empty(self) -> None:
+        """Agent with missing name raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"agents\[0\]\.name must be a non-empty"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+description = "No name here"
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+""")
+
+    def test_agent_invalid_role_in_toml(self) -> None:
+        """Agent with invalid role raises DSLSyntaxError from ValueError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match="Invalid agent role"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+role = "superhero"
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+""")
+
+    def test_agent_invalid_tool_loading_in_toml(self) -> None:
+        """Agent with invalid tool_loading raises DSLSyntaxError from ValueError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match="Invalid tool_loading"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+tool_loading = "always"
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+""")
+
+    # -- [[tasks]] section edge cases (lines 323, 328, 331, 338, 343, 348, 353, 359) --
+
+    def test_tasks_not_a_list(self) -> None:
+        """[[tasks]] as a single table (not array) raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\[\[tasks\]\] must be an array"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[tasks]
+id = "T1"
+description = "Task"
+agent = "a"
+""")
+
+    def test_task_entry_not_a_dict(self) -> None:
+        """Task entry that is a scalar raises DSLSyntaxError."""
+        import toml as toml_lib
+
+        dsl = OrchestrationDSL()
+        raw = toml_lib.loads("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+""")
+        raw["tasks"] = ["not-a-table"]
+
+        with pytest.raises(DSLSyntaxError, match=r"tasks\[0\] must be a table"):
+            dsl._parse(raw)
+
+    def test_task_id_missing(self) -> None:
+        """Task with missing id raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"tasks\[0\]\.id must be a non-empty"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+description = "No id"
+agent = "a"
+""")
+
+    def test_task_id_empty_string(self) -> None:
+        """Task with empty id string raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"tasks\[0\]\.id must be a non-empty"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = ""
+description = "Empty id"
+agent = "a"
+""")
+
+    def test_task_description_empty(self) -> None:
+        """Task with empty description raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\.description must be a non-empty"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = ""
+agent = "a"
+""")
+
+    def test_task_description_wrong_type(self) -> None:
+        """Task description as integer raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\.description must be a non-empty"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = 123
+agent = "a"
+""")
+
+    def test_task_agent_missing(self) -> None:
+        """Task with missing agent raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\.agent must be a non-empty"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = "No agent"
+""")
+
+    def test_task_blocked_by_not_a_list(self) -> None:
+        """Task with blocked_by as string raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\.blocked_by must be a list"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+blocked_by = "not-a-list"
+""")
+
+    def test_task_blocked_by_empty_entry(self) -> None:
+        """Task with empty string in blocked_by raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\.blocked_by\[0\] must be a non-empty"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+blocked_by = [""]
+""")
+
+    def test_task_blocked_by_non_string_entry(self) -> None:
+        """Task with integer in blocked_by raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\.blocked_by\[0\] must be a non-empty"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+blocked_by = [42]
+""")
+
+    def test_task_vars_not_a_dict(self) -> None:
+        """Task with vars as list raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"\.vars must be a table"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+vars = ["not", "a", "dict"]
+""")
+
+    # -- [tool_loading] section edge cases (lines 375, 379, 385-386) --
+
+    def test_tool_loading_not_a_dict(self) -> None:
+        """[tool_loading] as a scalar raises DSLSyntaxError."""
+        import toml as toml_lib
+
+        dsl = OrchestrationDSL()
+        raw = toml_lib.loads("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+""")
+        raw["tool_loading"] = "lazy"
+
+        with pytest.raises(DSLSyntaxError, match=r"\[tool_loading\] must be a table"):
+            dsl._parse(raw)
+
+    def test_tool_loading_preload_agents_not_a_list(self) -> None:
+        """preload_agents as string raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match="preload_agents must be a list"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+
+[tool_loading]
+strategy = "lazy"
+preload_agents = "not-a-list"
+""")
+
+    def test_tool_loading_invalid_strategy(self) -> None:
+        """Invalid tool_loading strategy raises DSLSyntaxError from ValueError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match="Invalid tool_loading strategy"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+
+[tool_loading]
+strategy = "preload_everything"
+""")
+
+
+# ============================================================================
+# validate() edge cases -- preload_agents unknown ref (lines 263-264)
+# ============================================================================
+
+
+class TestValidatePreloadAgents:
+    def test_validate_preload_unknown_agent(self) -> None:
+        """Warning when preload_agents references unknown agent."""
+        defn = OrchestrationDefinition(
+            goal="Test",
+            agent_name="test",
+            agents={"a1": DSLAgent(name="a1", description="Agent")},
+            tasks=[DSLTask(id="T1", description="", agent="a1")],
+            tool_loading=DSLToolLoading(strategy="lazy", preload_agents=["ghost"]),
+        )
+        dsl = OrchestrationDSL()
+        result = dsl.validate(defn)
+
+        assert any("preload_agents references unknown agent 'ghost'" in e for e in result.errors)
+
+
+# ============================================================================
+# DSLValidationError from _parse -- cycles and unknown refs raise during parse
+# ============================================================================
+
+
+class TestParseValidationErrors:
+    def test_parse_raises_on_cycle(self) -> None:
+        """Parsing TOML with a cycle raises DSLValidationError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLValidationError, match="DSL validation failed"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = "Task 1"
+agent = "a"
+blocked_by = ["T2"]
+
+[[tasks]]
+id = "T2"
+description = "Task 2"
+agent = "a"
+blocked_by = ["T1"]
+""")
+
+    def test_parse_raises_on_unknown_agent_ref(self) -> None:
+        """Parsing TOML referencing unknown agent raises DSLValidationError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLValidationError, match="DSL validation failed"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "nonexistent"
+""")
+
+    def test_parse_raises_on_unknown_blocked_by_ref(self) -> None:
+        """Parsing TOML with unknown blocked_by task raises DSLValidationError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLValidationError, match="DSL validation failed"):
+            dsl.parse_string("""
+[goal]
+description = "Test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = ""
+
+[[tasks]]
+id = "T1"
+description = "Task"
+agent = "a"
+blocked_by = ["ghost_task"]
+""")
+
+
+# ============================================================================
+# get_task_depth -- cache hit path (line 127)
+# ============================================================================
+
+
+class TestGetTaskDepthCacheHit:
+    def test_depth_cache_hit_on_repeated_call(self) -> None:
+        """Second call for same task hits cache (line 127)."""
+        agents = {
+            "a1": DSLAgent(name="a1", description="Agent 1"),
+        }
+        tasks = [
+            DSLTask(id="T1", description="Root", agent="a1"),
+            DSLTask(id="T2", description="Child", agent="a1", blocked_by=["T1"]),
+            DSLTask(id="T3", description="Grandchild", agent="a1", blocked_by=["T2"]),
+        ]
+        defn = OrchestrationDefinition(
+            goal="Cache test",
+            agent_name="test",
+            agents=agents,
+            tasks=tasks,
+            tool_loading=DSLToolLoading(),
+        )
+
+        # First call computes and caches T2 -> depth 1
+        assert defn.get_task_depth("T2") == 1
+        # Second call should hit cache (line 127) and return same value
+        assert defn.get_task_depth("T2") == 1
+
+    def test_depth_shared_cache_across_siblings(self) -> None:
+        """Cache populated for shared dependency used by multiple tasks."""
+        agents = {
+            "a1": DSLAgent(name="a1", description="Agent 1"),
+        }
+        tasks = [
+            DSLTask(id="T1", description="Root", agent="a1"),
+            DSLTask(id="T2", description="Child A", agent="a1", blocked_by=["T1"]),
+            DSLTask(id="T3", description="Child B", agent="a1", blocked_by=["T1"]),
+            DSLTask(id="T4", description="Grandchild", agent="a1", blocked_by=["T2", "T3"]),
+        ]
+        defn = OrchestrationDefinition(
+            goal="Cache siblings",
+            agent_name="test",
+            agents=agents,
+            tasks=tasks,
+            tool_loading=DSLToolLoading(),
+        )
+
+        # Computing T4 depth also caches T1, T2, T3
+        assert defn.get_task_depth("T4") == 2
+        # These should now be cache hits
+        assert defn.get_task_depth("T1") == 0
+        assert defn.get_task_depth("T2") == 1
+        assert defn.get_task_depth("T3") == 1
