@@ -987,8 +987,28 @@ class TestMCPGatewayMakeToolFunc:
         result = await func(x=1)
         assert result == "tool output"
 
+    @pytest.mark.asyncio
+    async def test_func_handles_ipc_failure_gracefully(
+        self, gateway: MCPGateway
+    ) -> None:
+        """IPC error between is_alive check and execute returns error string."""
+        manifest = _make_manifest("crash_agent")
+        await gateway.register_agent(manifest, deferred=False)
+        info = gateway.registry.get_agent_info("crash_agent")
+        assert info is not None
+        mock_handle = _mock_agent_handle("crash_agent", alive=True)
+        info.handle = mock_handle
 
-# ============================================================================
+        schema = _make_tool_schema("tool")
+        adapter = McpToolAdapter(server_name="crash_agent", tool_schema=schema)
+        # Make execute raise directly so gateway's own except block is tested
+        adapter.execute = AsyncMock(side_effect=ConnectionError("pipe closed"))  # type: ignore[method-assign]
+        gateway.registry._tool_adapters["crash_agent"] = [adapter]
+
+        func = gateway._make_tool_func(adapter)
+        result = await func(x=1)
+        assert "Error" in result
+        assert "IPC failed" in result# ============================================================================
 # MCPGateway — core tools (_search_and_activate, _list_agents, _agent_info)
 # ============================================================================
 

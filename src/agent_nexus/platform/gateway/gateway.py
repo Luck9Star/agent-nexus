@@ -312,7 +312,16 @@ class MCPGateway:
                 McpToolAdapter.remove_lock(adapter.agent_name)
                 return f"Error: agent '{adapter.agent_name}' process has died"
 
-            result = await adapter.execute(info.handle, kwargs)
+            try:
+                result = await adapter.execute(info.handle, kwargs)
+            except (OSError, ConnectionError) as exc:
+                # Handle race: process may have died between is_alive
+                # check and IPC send.
+                self._registered_agents.discard(adapter.agent_name)
+                return (
+                    f"Error: IPC failed for agent "
+                    f"'{adapter.agent_name}': {exc}"
+                )
             if result["success"]:
                 return result["output"]
             return f"Error: {result.get('error', 'unknown failure')}"
