@@ -165,6 +165,7 @@
 | P1 CancelledError in executor _execute_inner | executor.py explicit except CancelledError sets _timed_out + 3 regression tests = 2573 tests | 2026-04-20 | iter124c |
 | P1 _cleanup_dead FD leak: IPC stream + drain task | ipc.py close_sync() + process_manager.py _cleanup_dead drain cancel + stream close + 3 regression tests = 2576 tests | 2026-04-20 | iter124d |
 | 蓝军3-agent深度扫描 iter125: error_type一致性 | tool_adapter.py + router.py 6个error path补齐error_type + 7 regression tests = 2583 tests | 2026-04-20 | iter125 |
+| IPC exception type preservation + close() logging | router.py _execute_single_agent IPC异常直传 + ipc.py close() logging + process_manager _cleanup_dead FD leak + 3 tests = 2586 tests | 2026-04-20 | iter126 |
 
 ### 待清模式
 
