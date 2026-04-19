@@ -204,8 +204,11 @@ class SourceManager:
                 logger.warning("Skipping non-mapping source entry: %r", item)
                 continue
             try:
+                raw_name = item.get("name")
+                if not raw_name:
+                    raise ValueError("Source entry missing required 'name' field")
                 entry = SourceEntry(
-                    name=item["name"],
+                    name=raw_name,
                     type=item.get("type", "git"),
                     url=item.get("url", ""),
                     branch=item.get("branch", "main"),
@@ -255,10 +258,19 @@ class SourceManager:
                 logger.warning("Skipping non-mapping index entry: %r", item)
                 continue
             try:
+                raw_name = item.get("name")
+                raw_version = item.get("version")
+                raw_type = item.get("type")
+                if not raw_name:
+                    raise ValueError("Index entry missing required 'name' field")
+                if not raw_version:
+                    raise ValueError("Index entry missing required 'version' field")
+                if not raw_type:
+                    raise ValueError("Index entry missing required 'type' field")
                 entries.append(IndexEntry(
-                    name=item["name"],
-                    version=item["version"],
-                    type=AgentType(item["type"]),
+                    name=raw_name,
+                    version=raw_version,
+                    type=AgentType(raw_type),
                     description=item.get("description", ""),
                     tags=item.get("tags", []),
                     dependencies=item.get("dependencies", []),

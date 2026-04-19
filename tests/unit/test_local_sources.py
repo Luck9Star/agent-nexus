@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import hashlib
+
 import yaml
 
 from agent_nexus.models.distribution import IndexEntry, SourceEntry
@@ -181,3 +183,46 @@ class TestSourceGetOfficial:
         ])
         sm = SourceManager(path)
         assert sm.get_official_source() is None
+
+
+# ---------------------------------------------------------------------------
+# iter102 regression: bare dict subscript → .get() with validation
+# ---------------------------------------------------------------------------
+
+class TestSourceEntryValidation:
+    """Source entries with missing required fields produce clear errors."""
+
+    def test_source_entry_missing_name_skipped(self, tmp_path: Path) -> None:
+        path = tmp_path / "sources.yaml"
+        _write_sources(path, [{"type": "git", "url": "https://example.com/r.git"}])
+        sm = SourceManager(path)
+        # Falls back to official when no valid entries
+        assert len(sm._sources) == 1
+        assert sm._sources[0].name == "official"
+
+    def _write_index(self, tmp_path: Path, url: str, agents: list[dict]) -> tuple[Path, SourceEntry]:
+        """Write index.yaml at the correct cache path for a given URL."""
+        src = SourceEntry(name="test", type="git", url=url, branch="main")
+        digest = hashlib.sha256(url.encode()).hexdigest()[:12]
+        cache_dir = tmp_path / "cache" / "repos" / digest
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "index.yaml").write_text(yaml.dump({"agents": agents}))
+        return tmp_path, src
+
+    def test_index_entry_missing_name_skipped(self, tmp_path: Path) -> None:
+        sm = SourceManager(tmp_path / "sources.yaml")
+        _, src = self._write_index(tmp_path, "https://example.com/r.git", [
+            {"version": "1.0", "type": "atomic"},
+        ])
+        entries = sm._load_source_index(src)
+        assert entries is not None
+        assert len(entries) == 0
+
+    def test_index_entry_missing_version_skipped(self, tmp_path: Path) -> None:
+        sm = SourceManager(tmp_path / "sources.yaml")
+        _, src = self._write_index(tmp_path, "https://example.com/r2.git", [
+            {"name": "test", "type": "atomic"},
+        ])
+        entries = sm._load_source_index(src)
+        assert entries is not None
+        assert len(entries) == 0

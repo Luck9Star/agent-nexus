@@ -177,3 +177,20 @@ class TestMcpToolAdapterLocks:
         _ipc_lock_registry["b"] = asyncio.Lock()
         remove_all_locks()
         assert len(_ipc_lock_registry) == 0
+
+# ---------------------------------------------------------------------------
+# iter102 regression: tool_schema missing 'name' key
+# ---------------------------------------------------------------------------
+
+class TestMcpToolAdapterNameValidation:
+    def test_missing_name_raises_value_error(self):
+        with pytest.raises(ValueError, match="missing required 'name'"):
+            McpToolAdapter("srv", {"description": "no name"})
+
+    def test_empty_name_raises_value_error(self):
+        with pytest.raises(ValueError, match="missing required 'name'"):
+            McpToolAdapter("srv", {"name": ""})
+
+    def test_valid_name_still_works(self):
+        adapter = McpToolAdapter("srv", {"name": "tool"})
+        assert adapter.tool_name == "tool"

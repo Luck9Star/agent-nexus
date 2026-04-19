@@ -111,8 +111,11 @@ class McpToolAdapter:
     def __init__(self, server_name: str, tool_schema: dict) -> None:
         self.agent_name = server_name  # original unsanitized name for lookups
         self.server_name = _sanitize(server_name)
-        self.tool_name = _sanitize(tool_schema["name"])
-        self._original_tool_name = tool_schema["name"]  # unsanitized for IPC
+        raw_name = tool_schema.get("name")
+        if not raw_name:
+            raise ValueError("Tool schema missing required 'name' key")
+        self.tool_name = _sanitize(raw_name)
+        self._original_tool_name = raw_name  # unsanitized for IPC
         self.full_name = f"mcp__{self.server_name}__{self.tool_name}"
         self.description = tool_schema.get("description", "")
         self._input_schema = tool_schema.get("inputSchema", {})
