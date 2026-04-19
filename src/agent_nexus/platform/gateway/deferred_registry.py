@@ -18,11 +18,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from typing import Any
-
 from agent_nexus.models.agent import AgentManifest
 from agent_nexus.platform.orchestration.process_manager import (
     AgentHandle,
@@ -331,7 +326,7 @@ class DeferredAgentRegistry:
                 pass
 
         # Activated deferred agents (skip duplicates)
-        for _name, adapters in self._tool_adapters.items():
+        for _, adapters in self._tool_adapters.items():
             for adapter in adapters:
                 if adapter.full_name not in seen:
                     tools.append(adapter.get_tool_definition())

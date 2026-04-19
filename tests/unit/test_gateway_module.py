@@ -38,14 +38,13 @@ def _make_manifest(
     **overrides,
 ) -> AgentManifest:
     """Build an AgentManifest with sensible defaults."""
-    data = dict(
+    return AgentManifest(
         name=name,
         version="0.1.0",
         type=agent_type,
         description=description,
+        **overrides,  # type: ignore[arg-type]
     )
-    data.update(overrides)
-    return AgentManifest(**data)
 
 
 def _make_tool_schema(
@@ -54,7 +53,7 @@ def _make_tool_schema(
     input_schema: dict | None = None,
 ) -> dict:
     """Build a tool schema dict matching MCP format."""
-    schema = {"name": name, "description": description}
+    schema: dict[str, object] = {"name": name, "description": description}
     if input_schema is not None:
         schema["inputSchema"] = input_schema
     return schema
@@ -87,7 +86,7 @@ def registry(process_manager: MagicMock) -> DeferredAgentRegistry:
 
 
 @pytest.fixture
-def router(process_manager: MagicMock) -> MagicMock:
+def router(process_manager: MagicMock) -> MagicMock:  # noqa: ARG001  # pyright: ignore[reportUnusedParameter]
     """Mock PlatformRouter."""
     router = MagicMock()
     return router
@@ -589,6 +588,7 @@ class TestDeferredRegistryActivate:
         manifest = _make_manifest("core-ok")
         registry.register_agent(manifest, deferred=False)
         info = registry.get_agent_info("core-ok")
+        assert info is not None
         info.tool_schemas = [{"name": "tool1"}]
         schemas = await registry.activate_agent("core-ok")
         assert schemas == [{"name": "tool1"}]
@@ -611,6 +611,7 @@ class TestDeferredRegistryGetToolsForLLM:
         manifest = _make_manifest("core-agent")
         registry.register_agent(manifest, deferred=False)
         info = registry.get_agent_info("core-agent")
+        assert info is not None
         info.tool_schemas = [{"name": "tool1"}, {"name": "tool2"}]
         tools = registry.get_tools_for_llm()
         assert len(tools) == 2
@@ -621,6 +622,7 @@ class TestDeferredRegistryGetToolsForLLM:
         manifest = _make_manifest("empty-core")
         registry.register_agent(manifest, deferred=False)
         info = registry.get_agent_info("empty-core")
+        assert info is not None
         # Not running, no tools
         assert info.tool_schemas is None
         tools = registry.get_tools_for_llm()
@@ -688,6 +690,7 @@ class TestDeferredRegistryBuildManifest:
         manifest = _make_manifest("core-agent", description="Does core stuff")
         registry.register_agent(manifest, deferred=False)
         info = registry.get_agent_info("core-agent")
+        assert info is not None
         info.tool_schemas = [{"name": "t1"}, {"name": "t2"}]
         text = registry.build_manifest()
         assert "core-agent" in text
@@ -882,6 +885,7 @@ class TestMCPGatewayRegisterAgent:
             start_command=["uvx", "cmd-agent"],
         )
         info = gateway.registry.get_agent_info("cmd-agent")
+        assert info is not None
         assert info.start_command == ["uvx", "cmd-agent"]
 
 
@@ -963,6 +967,7 @@ class TestMCPGatewayMakeToolFunc:
         manifest = _make_manifest("run_agent")
         await gateway.register_agent(manifest, deferred=False)
         info = gateway.registry.get_agent_info("run_agent")
+        assert info is not None
         mock_handle = _mock_agent_handle("run_agent", alive=True)
         response = AgentToPlatform(
             type=AgentToPlatformType.RESULT,
@@ -971,6 +976,7 @@ class TestMCPGatewayMakeToolFunc:
         )
         mock_handle.ipc.receive_until_result.return_value = response
         info.handle = mock_handle
+
 
         schema = _make_tool_schema("tool")
         adapter = McpToolAdapter(server_name="run_agent", tool_schema=schema)
@@ -1206,11 +1212,11 @@ class TestCoreAgentToolRegistration:
         registered_agents = []
         original_register = gateway._register_agent_tools
 
-        async def tracking_register(name: str) -> None:
-            registered_agents.append(name)
-            await original_register(name)
+        async def tracking_register(agent_name: str) -> None:
+            registered_agents.append(agent_name)
+            await original_register(agent_name)
 
-        gateway._register_agent_tools = tracking_register
+        gateway._register_agent_tools = tracking_register  # type: ignore[assignment]
 
         manifest = _make_manifest("core-agent")
         await gateway.register_agent(manifest, deferred=False)
@@ -1226,11 +1232,11 @@ class TestCoreAgentToolRegistration:
         registered_agents = []
         original_register = gateway._register_agent_tools
 
-        async def tracking_register(name: str) -> None:
-            registered_agents.append(name)
-            await original_register(name)
+        async def tracking_register(agent_name: str) -> None:
+            registered_agents.append(agent_name)
+            await original_register(agent_name)
 
-        gateway._register_agent_tools = tracking_register
+        gateway._register_agent_tools = tracking_register  # type: ignore[assignment]
 
         manifest = _make_manifest("lazy-agent")
         await gateway.register_agent(manifest, deferred=True)
@@ -1571,7 +1577,7 @@ class TestLazyAsyncioLock:
         import asyncio
 
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()  # check if loop exists
             # If we're inside a test with a running loop, just verify
             # the lock is eagerly created
             gw = MCPGateway(pm, router)
@@ -1816,7 +1822,7 @@ class TestMcpToolAdapterIPCLock:
 
         call_order: list[str] = []
 
-        async def slow_receive(timeout: float = 300.0):
+        async def slow_receive(timeout: float = 300.0):  # pyright: ignore[reportUnusedParameter]
             call_order.append("receive_start")
             await asyncio.sleep(0.05)
             call_order.append("receive_end")
@@ -1826,7 +1832,7 @@ class TestMcpToolAdapterIPCLock:
                 status="completed",
             )
 
-        async def fast_receive(timeout: float = 300.0):
+        async def fast_receive(timeout: float = 300.0):  # pyright: ignore[reportUnusedParameter]
             call_order.append("receive_start_2")
             call_order.append("receive_end_2")
             return AgentToPlatform(
@@ -2448,10 +2454,10 @@ class TestRegisterAgentToolsFastMCPError:
         # Make FastMCP.tool raise when trying to register
         original_tool = gw._mcp.tool
 
-        def failing_tool_register(func):
+        def failing_tool_register(_func):  # type: ignore[assignment]
             raise ValueError("tool name already registered")
 
-        gw._mcp.tool = failing_tool_register
+        gw._mcp.tool = failing_tool_register  # type: ignore[assignment]
 
         # Should not raise — error is caught and logged
         await gw._register_agent_tools("mcp-err-agent")
