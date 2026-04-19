@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -255,6 +254,7 @@ class TestWorkflowResult:
         )
         assert result.success is False
         assert result.completed_phases == 2
+        assert result.error is not None
         assert "synthesis" in result.error
 
     def test_partial_result_with_synthesis(self) -> None:
@@ -706,7 +706,7 @@ class TestRouteChat:
         pm = _make_process_manager(agents={"a": handle})
         router = PlatformRouter(process_manager=pm)
 
-        result = await router.route_chat("a", "hi", conversation_id="fixed-id")
+        await router.route_chat("a", "hi", conversation_id="fixed-id")
         handle.ipc.send_chat.assert_awaited_once_with(
             "hi", conversation_id="fixed-id"
         )
@@ -889,6 +889,7 @@ class TestRouteComposite:
 
         assert result.success is False
         assert result.completed_phases == 3  # research + synthesis + implementation
+        assert result.error is not None
         assert "verification" in result.error
         # Synthesis output used as partial result since verification failed
         assert "partial plan" in result.final_output
@@ -1170,7 +1171,7 @@ class TestRouterParallelConversationId:
         """Verify that _execute_parallel_agents generates unique conversation IDs."""
         captured_cids: list[str] = []
 
-        async def mock_execute(agent_name, message, conversation_id):
+        async def mock_execute(agent_name, message, conversation_id):  # pyright: ignore[reportUnusedParameter]
             captured_cids.append(conversation_id)
             return f"result from {agent_name}"
 
@@ -1178,12 +1179,12 @@ class TestRouterParallelConversationId:
         mock_pm.get_agent = MagicMock(return_value=None)
 
         router = PlatformRouter.__new__(PlatformRouter)
-        router._process_manager = mock_pm
-        router._task_graph = MagicMock()
+        router._process_manager = mock_pm  # type: ignore[attr-defined]
+        router._task_graph = MagicMock()  # type: ignore[attr-defined]
         router._subtask = MagicMock()
         router._route_locks = {}
 
-        async def mock_run_with_retry(coro_factory, timeout):
+        async def mock_run_with_retry(coro_factory, timeout):  # pyright: ignore[reportUnusedParameter]
             return await coro_factory()
 
         async def mock_run_parallel(coros):
@@ -1194,9 +1195,9 @@ class TestRouterParallelConversationId:
 
         router._subtask.run_with_retry = mock_run_with_retry
         router._subtask.run_parallel = mock_run_parallel
-        router._execute_single_agent = mock_execute
+        router._execute_single_agent = mock_execute  # type: ignore[assignment]
 
-        result = asyncio.run(
+        _result = asyncio.run(
             router._execute_parallel_agents(
                 ["agent-a", "agent-b", "agent-c"],
                 "test message",
@@ -1774,7 +1775,7 @@ class TestGetToolsRegistryPath:
             {"name": "mcp__agent__tool_a"},
             {"name": "mcp__agent__tool_b"},
         ]
-        router._registry = mock_registry
+        router._registry = mock_registry  # type: ignore[attr-defined]
 
         tools = await router.get_tools()
         assert len(tools) == 2
