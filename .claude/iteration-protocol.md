@@ -114,6 +114,10 @@
 | N+1 查询 store.py _row_to_record + get_ancestry | _batch_load_parents 批量加载，3个调用方+get_ancestry更新 | 2026-04-19 | iter91 |
 | N+1 查询 task_graph.py get_ready/blocked + parallel_groups | SQL NOT EXISTS + _rows_to_tasks 批量加载 | 2026-04-19 | iter91 |
 | Symlink 目录逃逸 + status 大小写敏感 | installer.py _create_venv abort + router/tool_adapter .lower() | 2026-04-19 | iter92 |
+| 路径遍历 promotion.py + IPC 超时提取 | _AGENT_NAME_RE 校验 + DEFAULT_IPC_EXECUTE_TIMEOUT 常量 | 2026-04-19 | iter93 |
+| P7 API 设计全量扫描（蓝军 2 agent） | 13 命中: P1:2 已修, P2:6(路径修1+其余可接受), P3:3 | 2026-04-19 | iter93 |
+| 跨模块集成缺陷扫描（蓝军 2 agent） | 0 缺陷: 接口一致/性能可接受/错误传播完整 | 2026-04-19 | iter93 |
+| 未覆盖错误分支回归（蓝军扫描 4 处） | executor race(4) + pip-install FD(1) + invalid SkillOrigin(3) = 8 tests | 2026-04-19 | iter94 |
 
 ### 待清模式
 
