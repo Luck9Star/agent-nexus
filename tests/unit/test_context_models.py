@@ -441,3 +441,23 @@ class TestContextBudgetBootstrapValidation:
         """Default values (800 + 3000 = 3800 < 5000) pass validation."""
         cb = ContextBudget()
         assert cb.l0_max + cb.l1_max <= cb.bootstrap_max
+
+
+class TestContextBudgetThresholdOrdering:
+    """ContextBudget rejects trigger <= target and truncate >= ceiling."""
+
+    def test_rejects_trigger_equal_target(self) -> None:
+        with pytest.raises(ValidationError, match="compaction_trigger"):
+            ContextBudget(compaction_trigger=0.5, compaction_target=0.5)
+
+    def test_rejects_trigger_below_target(self) -> None:
+        with pytest.raises(ValidationError, match="compaction_trigger"):
+            ContextBudget(compaction_trigger=0.3, compaction_target=0.6)
+
+    def test_rejects_truncate_above_ceiling(self) -> None:
+        with pytest.raises(ValidationError, match="forced_truncate_threshold"):
+            ContextBudget(forced_truncate_threshold=0.95, session_hard_ceiling=0.9)
+
+    def test_rejects_truncate_equal_ceiling(self) -> None:
+        with pytest.raises(ValidationError, match="forced_truncate_threshold"):
+            ContextBudget(forced_truncate_threshold=0.9, session_hard_ceiling=0.9)

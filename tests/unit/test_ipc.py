@@ -375,7 +375,7 @@ class TestIPCPeekBufferPreservation:
 
         call_count = 0
 
-        async def fake_receive(timeout=30.0):
+        async def fake_receive(timeout=30.0):  # pyright: ignore[reportUnusedParameter]
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -413,7 +413,7 @@ class TestIPCPeekBufferPreservation:
 
         call_count = 0
 
-        async def fake_receive(timeout=30.0):
+        async def fake_receive(timeout=30.0):  # pyright: ignore[reportUnusedParameter]
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -697,7 +697,6 @@ class TestIPCModelRoundtrip:
 
         a2p = AgentToPlatform(
             type=AgentToPlatformType.RESULT,
-            conversation_id="conv-1",
             content="task done",
             output={"result": 42},
         )
@@ -742,6 +741,7 @@ class TestIPCContentMaxLength:
         msg = AgentToPlatform(
             type=AgentToPlatformType.PROGRESS, message="x" * 65536
         )
+        assert msg.message is not None
         assert len(msg.message) == 65536
 
     def test_agent_to_platform_message_exceeds_limit(self):
@@ -754,6 +754,7 @@ class TestIPCContentMaxLength:
         msg = AgentToPlatform(
             type=AgentToPlatformType.ERROR, error="x" * 65536
         )
+        assert msg.error is not None
         assert len(msg.error) == 65536
 
     def test_agent_to_platform_error_exceeds_limit(self):
@@ -766,6 +767,20 @@ class TestIPCContentMaxLength:
         """Empty string is within the limit and remains valid."""
         msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="")
         assert msg.content == ""
+
+    def test_output_oversized_rejected(self):
+        """AgentToPlatform output field rejects serialized size > 65536."""
+        large_dict = {"data": "x" * 65530}
+        with pytest.raises(ValidationError, match="output exceeds maximum serialized size"):
+            AgentToPlatform(type=AgentToPlatformType.RESULT, output=large_dict)
+
+    def test_output_none_accepted(self):
+        msg = AgentToPlatform(type=AgentToPlatformType.RESULT, output=None)
+        assert msg.output is None
+
+    def test_output_small_dict_accepted(self):
+        msg = AgentToPlatform(type=AgentToPlatformType.RESULT, output={"key": "value"})
+        assert msg.output == {"key": "value"}
 
 
 # ============================================================================
@@ -918,7 +933,7 @@ class TestIPCReceiveUntilResultProgressCallback:
 
         call_count = 0
 
-        async def fake_receive(timeout=30.0):
+        async def fake_receive(timeout=30.0):  # pyright: ignore[reportUnusedParameter]
             nonlocal call_count
             call_count += 1
             if call_count == 1:

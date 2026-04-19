@@ -221,6 +221,22 @@ class TestEvolutionMetrics:
         em2 = EvolutionMetrics.model_validate_json(json_str)
         assert em2 == em
 
+    def test_rejects_completions_exceeding_applied(self):
+        with pytest.raises(ValidationError, match="total_completions cannot exceed total_applied"):
+            EvolutionMetrics(total_selections=10, total_applied=5, total_completions=8)
+
+    def test_rejects_fallbacks_exceeding_applied(self):
+        with pytest.raises(ValidationError, match="total_fallbacks cannot exceed total_applied"):
+            EvolutionMetrics(total_selections=10, total_applied=3, total_fallbacks=5)
+
+    def test_rejects_applied_exceeding_selections(self):
+        with pytest.raises(ValidationError, match="total_applied cannot exceed total_selections"):
+            EvolutionMetrics(total_selections=5, total_applied=10)
+
+    def test_rejects_nonzero_applied_with_zero_selections(self):
+        with pytest.raises(ValidationError, match="counter invariant"):
+            EvolutionMetrics(total_selections=0, total_applied=1)
+
 
 # ---------------------------------------------------------------------------
 # EvolutionContext

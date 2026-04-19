@@ -451,3 +451,18 @@ class TestIndexEntry:
     def test_path_default_empty(self):
         ie = IndexEntry(name="test", version="1.0.0", type=AgentType.ATOMIC)
         assert ie.path == ""
+
+    def test_rejects_path_traversal(self):
+        """IndexEntry.path must not contain '..'."""
+        with pytest.raises(ValidationError, match=r"\.\."):
+            IndexEntry(
+                name="test",
+                version="1.0.0",
+                type=AgentType.ATOMIC,
+                path="../../etc/passwd",
+            )
+
+    def test_accepts_empty_path(self):
+        """Empty path (default layout) is valid."""
+        ie = IndexEntry(name="test", version="1.0.0", type=AgentType.ATOMIC, path="")
+        assert ie.path == ""
