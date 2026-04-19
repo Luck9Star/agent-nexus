@@ -615,12 +615,13 @@ class TestRouteToAtomic:
         assert result["success"] is True
 
     @pytest.mark.asyncio
-    async def test_agent_not_found_raises(self) -> None:
+    async def test_agent_not_found_returns_error(self) -> None:
         pm = _make_process_manager(agents={})
         router = PlatformRouter(process_manager=pm)
 
-        with pytest.raises(KeyError, match="not found"):
-            await router.route_to_atomic("missing", "hello", "conv-1")
+        result = await router.route_to_atomic("missing", "hello", "conv-1")
+        assert result["success"] is False
+        assert "not found" in result["error"]
 
     @pytest.mark.asyncio
     async def test_agent_not_alive(self) -> None:

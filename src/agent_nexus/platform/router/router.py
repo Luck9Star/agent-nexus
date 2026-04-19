@@ -221,7 +221,11 @@ class PlatformRouter:
         if handle is None:
             self._route_locks.pop(atomic_name, None)
             McpToolAdapter.remove_lock(atomic_name)
-            raise KeyError(f"Agent '{atomic_name}' not found")
+            return {
+                "output": "",
+                "success": False,
+                "error": f"Agent '{atomic_name}' not found",
+            }
 
         if not handle.is_alive:
             self._route_locks.pop(atomic_name, None)

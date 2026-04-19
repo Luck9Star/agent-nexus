@@ -1317,6 +1317,7 @@ def _make_bare_adapter() -> McpToolAdapter:
     adapter.agent_name = "test-agent"
     adapter.server_name = "test_agent"
     adapter.tool_name = "my_tool"
+    adapter._original_tool_name = "my_tool"
     adapter.full_name = "mcp__test_agent__my_tool"
     adapter.description = "test tool"
     adapter._input_schema = {}

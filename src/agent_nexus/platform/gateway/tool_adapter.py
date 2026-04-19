@@ -55,6 +55,7 @@ class McpToolAdapter:
         self.agent_name = server_name  # original unsanitized name for lookups
         self.server_name = _sanitize(server_name)
         self.tool_name = _sanitize(tool_schema["name"])
+        self._original_tool_name = tool_schema["name"]  # unsanitized for IPC
         self.full_name = f"mcp__{self.server_name}__{self.tool_name}"
         self.description = tool_schema.get("description", "")
         self._input_schema = tool_schema.get("inputSchema", {})
@@ -90,7 +91,7 @@ class McpToolAdapter:
             }
 
         payload = json.dumps(
-            {"tool": self.tool_name, "arguments": arguments}
+            {"tool": self._original_tool_name, "arguments": arguments}
         )
 
         try:
