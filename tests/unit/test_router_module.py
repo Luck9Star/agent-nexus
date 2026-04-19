@@ -1610,6 +1610,76 @@ class TestRouteCompositeTaskGraphSetupFailure:
         assert result.final_output == ""
 
 
+class TestRouteCompositeOverallTimeout:
+    """iter114: route_composite has an overall timeout wrapping all phases.
+
+    Without this timeout, a composite workflow with 4 phases, each using
+    max_retries=2 and timeout=300s, could hang for 2400+ seconds.
+    The asyncio.wait_for wrapper caps the total execution time.
+    """
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_failed_result(self) -> None:
+        """When the overall composite timeout fires, a failed result is returned."""
+        agents = {
+            "explorer": _make_agent_handle(name="explorer", response_content="data"),
+            "planner": _make_agent_handle(name="planner", response_content="plan"),
+            "worker1": _make_agent_handle(name="worker1", response_content="impl"),
+            "verifier": _make_agent_handle(name="verifier", response_content="ok"),
+        }
+        pm = _make_process_manager(agents=agents)
+        router = PlatformRouter(process_manager=pm)
+        definition = _make_definition()
+
+        mock_tg = MagicMock()
+        with (
+            patch(
+                "agent_nexus.platform.router.router.TaskGraph",
+                return_value=mock_tg,
+            ),
+            patch(
+                "agent_nexus.platform.router.router._DEFAULT_COMPOSITE_TIMEOUT",
+                0.0,  # instant timeout
+            ),
+        ):
+            result = await router.route_composite(
+                definition, "test timeout", "conv-1"
+            )
+
+        assert result.success is False
+        assert result.error is not None
+        assert "timed out" in result.error
+        assert result.error_type == "TimeoutError"
+        assert result.completed_phases < 4
+
+    @pytest.mark.asyncio
+    async def test_timeout_still_cleans_up_context(self) -> None:
+        """Timeout triggers finally block which calls ctx.close()."""
+        agents = {
+            "explorer": _make_agent_handle(name="explorer", response_content="data"),
+        }
+        pm = _make_process_manager(agents=agents)
+        router = PlatformRouter(process_manager=pm)
+        definition = _make_definition()
+
+        mock_tg = MagicMock()
+        with (
+            patch(
+                "agent_nexus.platform.router.router.TaskGraph",
+                return_value=mock_tg,
+            ),
+            patch(
+                "agent_nexus.platform.router.router._DEFAULT_COMPOSITE_TIMEOUT",
+                0.0,
+            ),
+        ):
+            result = await router.route_composite(definition, "test", "conv-1")
+
+        # The result should be a proper WorkflowResult (not an exception)
+        assert isinstance(result, WorkflowResult)
+        assert result.success is False
+
+
 class TestRouteToAtomicSendChatError:
     """route_to_atomic must handle send_chat exceptions.
 
@@ -2133,6 +2203,67 @@ class TestPhaseToRoleForwardCompat:
         assert PlatformRouter._phase_to_role(WorkflowPhase.synthesis) == "plan"
         assert PlatformRouter._phase_to_role(WorkflowPhase.implementation) == "worker"
         assert PlatformRouter._phase_to_role(WorkflowPhase.verification) == "verification"
+
+
+# ---------------------------------------------------------------------------
+# iter114 regression: composite workflow overall timeout
+# ---------------------------------------------------------------------------
+
+
+class TestCompositeOverallTimeout:
+    """route_composite must enforce an overall timeout across all phases."""
+
+    @pytest.mark.asyncio
+    async def test_overall_timeout_fires(self) -> None:
+        """When phases hang beyond overall timeout, route_composite
+        returns a WorkflowResult with error (not hanging forever)."""
+        pm = MagicMock()
+        pm.get_agent.return_value = None
+        router = PlatformRouter(process_manager=pm)
+
+        # Use a very short patched timeout so the test finishes quickly.
+        short_timeout = 0.2
+
+        async def _hanging_phase(*args, **kwargs):
+            await asyncio.sleep(10)  # Much longer than short_timeout
+
+        with patch(
+            "agent_nexus.platform.router.router._DEFAULT_COMPOSITE_TIMEOUT",
+            short_timeout,
+        ):
+            with patch.object(router, "_execute_phase", side_effect=_hanging_phase):
+                with patch.object(
+                    router, "_build_phase_message", return_value="msg"
+                ):
+                    definition = OrchestrationDefinition(
+                        goal="test",
+                        agent_name="test-agent",
+                        agents={
+                            "a": DSLAgent(name="a", description="a", role="worker"),
+                        },
+                        tasks=[DSLTask(id="t1", description="d", agent="a")],
+                        tool_loading=DSLToolLoading(),
+                    )
+                    result = await router.route_composite(
+                        definition, "test", "conv-1"
+                    )
+
+        assert result.success is False
+        assert result.error is not None
+        assert "timed out" in result.error.lower()
+        assert result.completed_phases < result.total_phases
+
+    @pytest.mark.asyncio
+    async def test_overall_timeout_constant_matches_phase_count(self) -> None:
+        """Verify _DEFAULT_COMPOSITE_TIMEOUT is based on phase count and IPC timeout."""
+        from agent_nexus.platform.gateway.tool_adapter import (
+            DEFAULT_IPC_EXECUTE_TIMEOUT,
+        )
+        from agent_nexus.platform.router.router import _DEFAULT_COMPOSITE_TIMEOUT
+
+        assert _DEFAULT_COMPOSITE_TIMEOUT == DEFAULT_IPC_EXECUTE_TIMEOUT * len(
+            _PHASE_ORDER
+        )
 
 
 # ---------------------------------------------------------------------------

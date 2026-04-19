@@ -47,6 +47,12 @@ _PHASE_ORDER: list[WorkflowPhase] = [
     WorkflowPhase.verification,
 ]
 
+# Overall timeout for the entire composite workflow.  Each phase can
+# take up to DEFAULT_IPC_EXECUTE_TIMEOUT per IPC call, so the ceiling
+# is phases x timeout.  This prevents unbounded hangs from retries or
+# stuck agents.
+_DEFAULT_COMPOSITE_TIMEOUT: float = DEFAULT_IPC_EXECUTE_TIMEOUT * len(_PHASE_ORDER)
+
 
 class PlatformRouter:
     """Orchestrate composite agent workflows using 4-Phase pattern.
@@ -177,21 +183,36 @@ class PlatformRouter:
 
         # 3. Execute phases
         try:
-            for phase in _PHASE_ORDER:
-                ctx.current_phase = phase
-                try:
-                    result = await self._execute_phase(ctx, phase, definition, message)
-                    phase_results[phase] = result
-                    completed += 1
+            async def _run_phases() -> None:
+                nonlocal message, completed, last_error, last_error_type
+                for phase in _PHASE_ORDER:
+                    ctx.current_phase = phase
+                    try:
+                        result = await self._execute_phase(ctx, phase, definition, message)
+                        phase_results[phase] = result
+                        completed += 1
 
-                    # Feed previous phase output into next phase's message
-                    message = self._build_phase_message(phase, result)
+                        # Feed previous phase output into next phase's message
+                        message = self._build_phase_message(phase, result)
 
-                except Exception as exc:
-                    last_error = f"Phase {phase.value} failed: {exc}"
-                    last_error_type = type(exc).__name__
-                    logger.error(last_error, exc_info=exc)
-                    break
+                    except Exception as exc:
+                        last_error = f"Phase {phase.value} failed: {exc}"
+                        last_error_type = type(exc).__name__
+                        logger.error(last_error, exc_info=exc)
+                        break
+
+            try:
+                await asyncio.wait_for(
+                    _run_phases(),
+                    timeout=_DEFAULT_COMPOSITE_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                last_error = (
+                    f"Composite workflow timed out after "
+                    f"{_DEFAULT_COMPOSITE_TIMEOUT:.0f}s"
+                )
+                last_error_type = "TimeoutError"
+                logger.error(last_error)
         finally:
             ctx.close()
             # Clean up route locks for agents that are no longer running,
