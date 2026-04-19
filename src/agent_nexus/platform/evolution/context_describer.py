@@ -12,8 +12,7 @@ Reference: docs/04 Section 6.8
 from __future__ import annotations
 
 import logging
-from typing import Any
-
+from agent_nexus.models.evolution import SkillRecord
 from agent_nexus.platform.evolution.health import HealthChecker, HealthReport
 from agent_nexus.platform.evolution.store import EvolutionStore
 
@@ -202,7 +201,7 @@ class EvolutionContextDescriber:
     # ------------------------------------------------------------------
 
     def _build_lineage_tree(
-        self, skills: list[Any]
+        self, skills: list[SkillRecord]
     ) -> list[str]:
         """Build a compact lineage tree representation."""
         lines: list[str] = []
@@ -232,7 +231,7 @@ class EvolutionContextDescriber:
 
     def _build_detail_table(
         self,
-        skills: list[Any],
+        skills: list[SkillRecord],
         reports: dict[str, HealthReport],
     ) -> list[str]:
         """Build a detailed metrics table for L2 context."""
@@ -263,7 +262,7 @@ class EvolutionContextDescriber:
 
     def _build_health_diagnostics(
         self,
-        skills: list[Any],
+        skills: list[SkillRecord],
         reports: dict[str, HealthReport],
     ) -> list[str]:
         """Build health diagnostic details for L2 context."""
@@ -289,7 +288,7 @@ class EvolutionContextDescriber:
         return lines
 
     def _build_judgment_history(
-        self, skills: list[Any]
+        self, skills: list[SkillRecord]
     ) -> list[str]:
         """Build recent judgment history for L2 context."""
         lines: list[str] = []

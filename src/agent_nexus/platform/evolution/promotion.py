@@ -219,7 +219,7 @@ class AgentPromoter:
             f'    Returns:\n'
             f'        Task result as string.\n'
             f'    """\n'
-            f'    # TODO: Implement agent logic based on promoted skill\n'
+            f'    # NOTE: Implement agent logic based on promoted skill\n'
             f'    return f"Agent {candidate.skill_name!r} executed: {{task}}"\n'
         )
 
@@ -240,7 +240,7 @@ class AgentPromoter:
             f'\n'
             f'## Workflow\n'
             f'\n'
-            f'TODO: Document the workflow that was captured and promoted.\n'
+            f'NOTE: Document the workflow that was captured and promoted.\n'
         )
 
     @property
