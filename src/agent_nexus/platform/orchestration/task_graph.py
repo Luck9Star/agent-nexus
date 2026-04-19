@@ -113,7 +113,8 @@ class TaskGraph:
         if self._mem_conn is not None:
             conn = self._mem_conn
             if immediate:
-                conn.execute("BEGIN IMMEDIATE")
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
             try:
                 yield conn
                 conn.commit()

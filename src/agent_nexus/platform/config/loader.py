@@ -120,8 +120,11 @@ class ConfigLoader:
         logger.debug("Loading sources from %s", sources_path)
         try:
             raw = yaml.safe_load(sources_path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            logger.warning("Failed to parse %s: %s", sources_path, exc)
+        except yaml.YAMLError as exc:
+            logger.error("Failed to parse %s: %s", sources_path, exc)
+            return []
+        except OSError as exc:
+            logger.error("Cannot read %s: %s", sources_path, exc)
             return []
 
         if not isinstance(raw, dict) or "sources" not in raw:

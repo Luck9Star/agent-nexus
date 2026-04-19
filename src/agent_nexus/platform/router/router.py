@@ -332,8 +332,11 @@ class PlatformRouter:
                                         continue
                                     seen_names.add(tool_name)
                                     tools.append(tool)
-                        except (json.JSONDecodeError, ValueError):
-                            pass
+                        except (json.JSONDecodeError, ValueError) as exc:
+                            logger.warning(
+                                "Agent '%s' returned invalid JSON tool "
+                                "definitions: %s", name, exc,
+                            )
             except Exception as exc:
                 logger.warning("Failed to get tools from agent '%s': %s", name, exc)
 

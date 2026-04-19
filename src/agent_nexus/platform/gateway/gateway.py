@@ -244,6 +244,13 @@ class MCPGateway:
 
             info = self._registry.get_agent_info(agent_name)
             if info is None or info.tool_schemas is None:
+                logger.debug(
+                    "Skipping tool registration for '%s': "
+                    "info=%s, schemas=%s",
+                    agent_name,
+                    "found" if info else "missing",
+                    "available" if info and info.tool_schemas else "none",
+                )
                 return
 
             adapters = self._registry.get_tool_adapters(agent_name)

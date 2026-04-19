@@ -144,17 +144,25 @@ class EvolutionStore:
             conn.executescript(_SCHEMA_SQL)
 
     @contextmanager
-    def _conn(self) -> Generator[sqlite3.Connection, None, None]:
+    def _conn(
+        self, *, immediate: bool = False
+    ) -> Generator[sqlite3.Connection, None, None]:
         conn = sqlite3.connect(
             str(self._db_path),
             check_same_thread=False,
         )
         conn.execute("PRAGMA foreign_keys=ON")
+        if immediate:
+            conn.execute("BEGIN IMMEDIATE")
         try:
             yield conn
             conn.commit()
+        except sqlite3.Error:
+            logger.exception("Database operation failed in evolution store")
+            conn.rollback()
+            raise
         except Exception:
-            logger.exception("DB commit failed in evolution store context")
+            logger.exception("Unexpected error during DB operation in evolution store")
             conn.rollback()
             raise
         finally:
@@ -166,7 +174,7 @@ class EvolutionStore:
 
     def save_skill_record(self, record: SkillRecord) -> None:
         """Insert or replace a skill record."""
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             lin = record.lineage
             snapshot_json = json.dumps(
                 lin.content_snapshot or {}, ensure_ascii=False
@@ -269,7 +277,7 @@ class EvolutionStore:
 
     def deactivate_skill(self, skill_id: str) -> bool:
         """Set is_active = False for a skill record."""
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             cur = conn.execute(
                 "UPDATE skill_records SET is_active = 0, updated_at = ? "
                 "WHERE id = ?",
@@ -330,7 +338,7 @@ class EvolutionStore:
         if not sets:
             return
 
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             sets.append("updated_at = ?")
             params.append(_now_iso())
             params.append(skill_id)
@@ -371,7 +379,7 @@ class EvolutionStore:
             evolution_suggestions or [], ensure_ascii=False
         )
 
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             conn.execute(
                 """
                 INSERT INTO execution_analyses (
@@ -491,7 +499,7 @@ class EvolutionStore:
         """Record a context budget event."""
         log_id = str(uuid.uuid4())
         details_json = json.dumps(details or {}, ensure_ascii=False)
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             conn.execute(
                 """
                 INSERT INTO context_budget_log (
@@ -552,7 +560,7 @@ class EvolutionStore:
         For CAPTURED: no parents (parent_skill_ids empty).
         """
         from agent_nexus.platform.evolution.evolver import EvolveResult
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             # For FIX: deactivate parent(s)
             if new_record.lineage.origin == SkillOrigin.FIXED:
                 for pid in parent_skill_ids:
@@ -600,6 +608,9 @@ class EvolutionStore:
                     ),
                 )
             except sqlite3.IntegrityError:
+                logger.warning(
+                    "Skill ID collision during evolution: %s", new_record.id
+                )
                 return EvolveResult(
                     success=False,
                     error=f"Skill ID collision: {new_record.id}",
@@ -726,7 +737,7 @@ class EvolutionStore:
         """Insert or update an agent record."""
         skill_ids_json = json.dumps(skill_ids, ensure_ascii=False)
         now = _now_iso()
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             conn.execute(
                 """
                 INSERT INTO agent_records (
@@ -816,7 +827,7 @@ class EvolutionStore:
         avg_duration_ms: float,
     ) -> bool:
         """Update computed metrics for an agent record."""
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             cur = conn.execute(
                 "UPDATE agent_records SET effective_rate = ?, "
                 "avg_steps = ?, avg_duration_ms = ?, updated_at = ? "
@@ -827,7 +838,7 @@ class EvolutionStore:
 
     def deactivate_agent(self, agent_id: str) -> bool:
         """Set is_active = False for an agent record."""
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             cur = conn.execute(
                 "UPDATE agent_records SET is_active = 0, updated_at = ? "
                 "WHERE agent_id = ?",
@@ -841,7 +852,7 @@ class EvolutionStore:
 
     def clear(self) -> None:
         """Delete all data (keeps schema).  For testing."""
-        with self._conn() as conn:
+        with self._conn(immediate=True) as conn:
             conn.execute("DELETE FROM skill_judgments")
             conn.execute("DELETE FROM execution_analyses")
             conn.execute("DELETE FROM skill_lineage_parents")
@@ -893,8 +904,11 @@ class EvolutionStore:
                     # Validate all values are strings (Pydantic requirement)
                     if all(isinstance(v, str) for v in loaded.values()):
                         snapshot = loaded
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                logger.warning(
+                    "Corrupted content_snapshot for skill '%s': %s",
+                    skill_id, exc,
+                )
 
         lineage = SkillLineage(
             origin=SkillOrigin(lineage_origin),

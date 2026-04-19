@@ -74,8 +74,8 @@ class IPythonExecutor:
             if self._shell is not None:
                 return self._shell
 
-            from IPython.core.interactiveshell import InteractiveShell
-            from traitlets.config import Config
+            from IPython.core.interactiveshell import InteractiveShell  # pyright: ignore[reportMissingImports]
+            from traitlets.config import Config  # pyright: ignore[reportMissingImports]
 
             config = Config()
             config.InteractiveShell.cache_size = 0
@@ -94,7 +94,7 @@ class IPythonExecutor:
 
             # Apply any pending injections
             if self._pending_injects:
-                self._shell.user_ns.update(self._pending_injects)
+                self._shell.user_ns.update(self._pending_injects)  # pyright: ignore[reportOptionalMemberAccess]
                 self._pending_injects.clear()
 
         return self._shell
@@ -244,7 +244,7 @@ class IPythonExecutor:
         """
         if self._shell is None:
             raise RuntimeError("_run_cell_sync called before shell initialization")
-        from IPython.utils.capture import capture_output
+        from IPython.utils.capture import capture_output  # pyright: ignore[reportMissingImports]
 
         with capture_output() as captured:
             result = self._shell.run_cell(transformed, store_history=False)

@@ -241,6 +241,15 @@ class DeferredAgentRegistry:
             logger.info(
                 "Activated agent '%s' with %d tools", name, len(tool_schemas)
             )
+            if (
+                len(tool_schemas) == 1
+                and tool_schemas[0].get("name") == "chat"
+            ):
+                logger.warning(
+                    "Agent '%s' activated with fallback chat tool only. "
+                    "Tool discovery may have failed.",
+                    name,
+                )
             return tool_schemas
 
     async def _fetch_agent_tools(self, info: AgentInfo) -> list[dict]:
@@ -275,26 +284,38 @@ class DeferredAgentRegistry:
 
         except Exception as exc:
             logger.warning(
-                "Failed to fetch tools from agent '%s': %s", info.name, exc
+                "Failed to fetch tools from agent '%s': %s. "
+                "Using generic chat tool as fallback -- agent may not "
+                "function correctly.",
+                info.name, exc,
             )
+            return [self._fallback_chat_tool(info)]
 
-        # Return a single chat tool as fallback
-        return [
-            {
-                "name": "chat",
-                "description": info.manifest.description,
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "message": {
-                            "type": "string",
-                            "description": "Message to send to the agent",
-                        }
-                    },
-                    "required": ["message"],
+        # No tool schemas found in response
+        logger.warning(
+            "Agent '%s' returned no tool schemas. "
+            "Using generic chat tool as fallback.",
+            info.name,
+        )
+        return [self._fallback_chat_tool(info)]
+
+    @staticmethod
+    def _fallback_chat_tool(info: AgentInfo) -> dict:
+        """Build a generic chat tool schema as last-resort fallback."""
+        return {
+            "name": "chat",
+            "description": info.manifest.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "Message to send to the agent",
+                    }
                 },
-            }
-        ]
+                "required": ["message"],
+            },
+        }
 
     # ------------------------------------------------------------------
     # Query helpers
