@@ -934,7 +934,17 @@ class TestMCPGatewayRegisterAgentTools:
         """Second _register_agent_tools call skips when agent still alive (lines 251-255)."""
         manifest = _make_manifest("skip-agent")
         await gateway.register_agent(manifest, deferred=True, start_command=[])
-        await gateway.registry.activate_agent("skip-agent")
+
+        # Directly set up the state: agent is registered, info has a live handle.
+        from agent_nexus.platform.gateway.deferred_registry import AgentInfo
+        mock_handle = MagicMock()
+        mock_handle.is_alive = True
+        info = gateway.registry.get_agent_info("skip-agent")
+        info.tool_schemas = [{"name": "tool1", "inputSchema": {"type": "object"}}]
+        info.handle = mock_handle
+        gateway._registered_agents.add("skip-agent")
+
+        # First call registers the tool
         await gateway._register_agent_tools("skip-agent")
 
         # Second call should hit the early-return at line 255

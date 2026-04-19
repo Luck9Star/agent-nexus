@@ -1383,6 +1383,33 @@ class TestExecuteSingleAgentErrorWrapping:
                 "test-agent", "hello", conversation_id="c1"
             )
 
+    @pytest.mark.asyncio
+    async def test_send_chat_error_wrapped_as_runtime_error(self) -> None:
+        """send_chat failure in _execute_single_agent raises RuntimeError.
+
+        iter109 regression — send_chat was bare (unwrapped), unlike
+        route_to_atomic which already wrapped it.  Now both paths are
+        consistent.
+        """
+        mock_pm = MagicMock()
+        router = PlatformRouter.__new__(PlatformRouter)
+        router._pm = mock_pm
+        router._route_locks = {}
+
+        handle = MagicMock()
+        handle.is_alive = True
+        handle.ipc = MagicMock()
+        handle.ipc.send_chat = AsyncMock(
+            side_effect=ConnectionError("Broken pipe on send")
+        )
+
+        mock_pm.get_agent.return_value = handle
+
+        with pytest.raises(RuntimeError, match="IPC send error"):
+            await router._execute_single_agent(
+                "test-agent", "hello", conversation_id="c1"
+            )
+
 
 # ============================================================================
 # Merged from iteration 23: SubtaskController CancelledError handling

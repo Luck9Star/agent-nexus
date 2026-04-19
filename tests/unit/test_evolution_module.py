@@ -3216,3 +3216,18 @@ class TestPromotionAtomicWriteCleanup:
         # Temp file should NOT remain on disk
         tmps = list(target.parent.glob(".promo-*.tmp"))
         assert tmps == []
+
+    def test_atomic_write_cleanup_unlink_fails_silently(self, tmp_path: Path) -> None:
+        """When os.replace AND os.unlink both raise, the original error propagates."""
+        from unittest.mock import patch
+
+        store = _store_with_records(tmp_path)
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        promoter = AgentPromoter(store, agents_root=agents_dir)
+
+        target = tmp_path / "test_output2.txt"
+        with patch("os.replace", side_effect=OSError("replace failed")):
+            with patch("os.unlink", side_effect=OSError("already deleted")):
+                with pytest.raises(OSError, match="replace failed"):
+                    promoter._atomic_write(target, "hello")

@@ -1,11 +1,10 @@
-agent:
-  name: good-skill
-  type: atomic
-  description: Auto-promoted from skill sk-1
-  version: 0.1.0
-  model:
-    tier: standard
-  promotion:
-    from_skill: sk-1
-    effective_rate: 0.9
-    total_selections: 100
+name: good-skill
+type: atomic
+description: Auto-promoted from skill sk-1
+version: 0.1.0
+model_config:
+  recommended: standard
+promotion:
+  from_skill: sk-1
+  effective_rate: 0.9
+  total_selections: 100

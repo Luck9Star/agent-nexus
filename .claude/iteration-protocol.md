@@ -145,6 +145,7 @@
 | 蓝军 adversarial audit iter107: P0 数据一致性 | evolve_skill IntegrityError rollback + _generate_manifest flat YAML + AgentManifest兼容 = 4 tests | 2026-04-20 | iter107 |
 | 蓝军 adversarial audit iter107: P1 FK约束 | skill_judgments.skill_id FK + ghost-skill rejection + atomic rollback = 2 tests | 2026-04-20 | iter107 |
 | 蓝军深度扫描 iter108: 资源泄漏 | store._conn() PRAGMA/BEGIN移入try/finally + proxy-based regression test × 2 = 3 agents 14 findings cross-verified | 2026-04-20 | iter108 |
+| 蓝军积压清零 iter109: 错误处理韧性 | store._rows_to_records批量行恢复 + lockfile腐化ERROR日志 + router send_chat IPC异常包装 = 6 tests | 2026-04-20 | iter109 |
 
 ### 待清模式
 

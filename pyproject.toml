@@ -36,6 +36,11 @@ packages = ["src/agent_nexus"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "unit: fast, isolated unit tests (no I/O, no network)",
+    "integration: tests spanning multiple modules with real I/O",
+    "e2e: full end-to-end tests requiring external services",
+]
 
 [tool.ruff]
 target-version = "py311"

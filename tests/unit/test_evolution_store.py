@@ -1432,3 +1432,95 @@ class TestConnResourceCleanup:
                     pass
 
         assert closes[0] == 1, "Connection leaked after BEGIN IMMEDIATE failure"
+
+
+class TestBatchRowResilience:
+    """iter109 regression: single corrupt row must not kill entire list.
+
+    get_active_skills / get_all_skills / get_versions used list comprehensions.
+    If ``_row_to_record`` threw on one bad row (e.g. malformed datetime),
+    the entire batch was lost.  Now ``_rows_to_records`` skips and logs.
+    """
+
+    @staticmethod
+    def _make_record(
+        skill_id: str,
+        generation: int = 0,
+        origin: SkillOrigin = SkillOrigin.CAPTURED,
+    ) -> SkillRecord:
+        return SkillRecord(
+            id=skill_id,
+            name=f"skill-{skill_id}",
+            version="1.0",
+            lineage=SkillLineage(origin=origin, generation=generation),
+            directory="",
+        )
+
+    def test_corrupt_row_skipped_in_get_active_skills(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        # Insert 2 good records
+        store.save_skill_record(self._make_record("good-1"))
+        store.save_skill_record(self._make_record("good-2"))
+
+        # Corrupt one row's updated_at field directly in DB
+        with store._conn(immediate=True) as conn:
+            conn.execute(
+                "UPDATE skill_records SET updated_at = 'NOT-A-DATE' WHERE id = 'good-1'"
+            )
+
+        # get_active_skills should return 1 good record, skip 1 corrupt
+        skills = store.get_active_skills()
+        assert len(skills) == 1
+        assert skills[0].id == "good-2"
+
+    def test_corrupt_row_skipped_in_get_all_skills(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        store.save_skill_record(self._make_record("a"))
+        store.save_skill_record(self._make_record("b"))
+
+        with store._conn(immediate=True) as conn:
+            conn.execute(
+                "UPDATE skill_records SET created_at = '' WHERE id = 'a'"
+            )
+
+        skills = store.get_all_skills()
+        assert len(skills) == 1
+        assert skills[0].id == "b"
+
+    def test_corrupt_row_skipped_in_get_versions(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        # Both records share the same name so get_versions returns both
+        rec1 = SkillRecord(
+            id="v1", name="my-skill", version="1.0",
+            lineage=SkillLineage(origin=SkillOrigin.CAPTURED, generation=0),
+            directory="",
+        )
+        rec2 = SkillRecord(
+            id="v2", name="my-skill", version="1.1",
+            lineage=SkillLineage(origin=SkillOrigin.CAPTURED, generation=1),
+            directory="",
+        )
+        store.save_skill_record(rec1)
+        store.save_skill_record(rec2)
+
+        with store._conn(immediate=True) as conn:
+            conn.execute(
+                "UPDATE skill_records SET updated_at = 'bogus' WHERE id = 'v1'"
+            )
+
+        versions = store.get_versions("my-skill")
+        assert len(versions) == 1
+        assert versions[0].id == "v2"
+
+    def test_all_rows_corrupt_returns_empty(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        store.save_skill_record(self._make_record("x"))
+
+        with store._conn(immediate=True) as conn:
+            conn.execute(
+                "UPDATE skill_records SET created_at = 'garbage', updated_at = 'garbage' "
+                "WHERE id = 'x'"
+            )
+
+        skills = store.get_active_skills()
+        assert skills == []

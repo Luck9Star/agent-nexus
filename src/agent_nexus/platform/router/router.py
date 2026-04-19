@@ -495,7 +495,12 @@ class PlatformRouter:
         # are mutually exclusive for a given agent.
         lock = self._route_locks.setdefault(agent_name, asyncio.Lock())
         async with lock:
-            await handle.ipc.send_chat(message, conversation_id=conversation_id)
+            try:
+                await handle.ipc.send_chat(message, conversation_id=conversation_id)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"IPC send error for agent '{agent_name}': {exc}"
+                ) from exc
 
             try:
                 response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)

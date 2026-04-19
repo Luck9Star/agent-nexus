@@ -53,7 +53,10 @@ class LockfileManager:
             logger.debug("Loaded lockfile with %d agent(s)", len(lockfile.agents))
             return lockfile
         except (json.JSONDecodeError, ValueError, KeyError, TypeError) as exc:
-            logger.warning("Failed to parse lockfile %s: %s", self._path, exc)
+            logger.error(
+                "Corrupt lockfile %s — returning empty agents list: %s",
+                self._path, exc,
+            )
             return Lockfile()
 
     @contextmanager

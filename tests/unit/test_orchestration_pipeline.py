@@ -1,12 +1,13 @@
-"""End-to-end integration tests for the orchestration layer.
+"""Unit tests for the DSL -> TaskGraph orchestration pipeline.
 
-Exercises the full DSL -> TaskGraph pipeline:
+Exercises:
   1. Parse a TOML orchestration definition (DSL)
-  2. Load tasks into TaskGraph
+  2. Load tasks into TaskGraph (in-memory SQLite)
   3. Verify dependency ordering, parallel groups, cycle detection,
      failure propagation, validation, and snapshots.
 
-These tests cover orchestration logic only -- no real subprocess launches.
+Uses in-memory SQLite — no real subprocess launches. Re-classified from
+tests/integration/ since all dependencies are mocked or in-process.
 """
 
 from __future__ import annotations

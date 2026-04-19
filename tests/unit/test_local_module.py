@@ -96,6 +96,22 @@ class TestLockfileManager:
         lf = mgr.load()
         assert lf.agents == {}
 
+    def test_corrupt_lockfile_logs_error_level(self, tmp_path: Path, caplog) -> None:
+        """iter109 regression: corrupt lockfile logs at ERROR, not WARNING."""
+        import logging
+
+        bad = tmp_path / "lockfile.json"
+        bad.write_text("GARBAGE", encoding="utf-8")
+        mgr = LockfileManager(bad)
+
+        with caplog.at_level(logging.ERROR):
+            mgr.load()
+
+        assert any(
+            "Corrupt lockfile" in r.message and r.levelno >= logging.ERROR
+            for r in caplog.records
+        ), "Corrupt lockfile should log at ERROR level"
+
     def test_load_propagates_os_error(self, tmp_path: Path) -> None:
         """When lockfile is unreadable (PermissionError), load() propagates the error."""
         bad = tmp_path / "lockfile.json"

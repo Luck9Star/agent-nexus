@@ -10,6 +10,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1048,6 +1049,15 @@ class TestGetConfigDir:
 
         result = _get_config_dir()
         assert result == DEFAULT_CONFIG_DIR
+
+    def test_returns_env_var_dir(self, tmp_path) -> None:
+        """_get_config_dir() returns AGENT_NEXUS_HOME path when set."""
+        from agent_nexus.platform.local.cli import _get_config_dir
+
+        custom = tmp_path / "custom_config"
+        with patch.dict(os.environ, {"AGENT_NEXUS_HOME": str(custom)}):
+            result = _get_config_dir()
+        assert result == custom
 
 
 # ============================================================================

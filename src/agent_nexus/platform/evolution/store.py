@@ -280,7 +280,7 @@ class EvolutionStore:
                 "FROM skill_records WHERE is_active = 1"
             ).fetchall()
             parents = self._batch_load_parents(conn)
-            return [self._row_to_record(conn, r, parents) for r in rows]
+            return self._rows_to_records(conn, rows, parents)
 
     def get_all_skills(self) -> list[SkillRecord]:
         """Load all skill records (including inactive)."""
@@ -293,7 +293,7 @@ class EvolutionStore:
                 "FROM skill_records"
             ).fetchall()
             parents = self._batch_load_parents(conn)
-            return [self._row_to_record(conn, r, parents) for r in rows]
+            return self._rows_to_records(conn, rows, parents)
 
     def deactivate_skill(self, skill_id: str) -> bool:
         """Set is_active = False for a skill record."""
@@ -318,7 +318,7 @@ class EvolutionStore:
                 (name,),
             ).fetchall()
             parents = self._batch_load_parents(conn)
-            return [self._row_to_record(conn, r, parents) for r in rows]
+            return self._rows_to_records(conn, rows, parents)
 
     # ------------------------------------------------------------------
     # Atomic counter increments
@@ -1085,6 +1085,29 @@ class EvolutionStore:
             first_seen=datetime.fromisoformat(created_at),
             last_updated=datetime.fromisoformat(updated_at),
         )
+
+    def _rows_to_records(
+        self,
+        conn: sqlite3.Connection,
+        rows: list[tuple[Any, ...]],
+        parents_by_id: dict[str, list[str]] | None = None,
+    ) -> list[SkillRecord]:
+        """Convert multiple rows to SkillRecords, skipping corrupt rows.
+
+        A single malformed row (bad datetime, wrong column count, etc.)
+        is logged and skipped rather than killing the entire batch.
+        """
+        records: list[SkillRecord] = []
+        for row in rows:
+            try:
+                records.append(self._row_to_record(conn, row, parents_by_id))
+            except Exception as exc:
+                row_id = row[0] if row else "<empty>"
+                logger.warning(
+                    "Skipping corrupt skill_records row '%s': %s",
+                    row_id, exc,
+                )
+        return records
 
     @staticmethod
     def _row_to_analysis_dict(
