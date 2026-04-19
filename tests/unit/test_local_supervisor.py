@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -144,21 +143,6 @@ class TestSupervisorStopAgent:
         result = await sup.stop_agent("running-agent")
         assert result is True
         pm.stop_agent.assert_awaited_once_with("running-agent")
-
-    @pytest.mark.asyncio
-    async def test_stop_agent_returns_false_on_timeout(self, tmp_path: Path, caplog) -> None:
-        """iter110c: supervisor stop_agent catches asyncio.TimeoutError."""
-        import logging
-
-        sup, pm, _, _ = _make_supervisor(tmp_path)
-        handle = MagicMock(is_alive=True)
-        pm.get_agent.return_value = handle
-        pm.stop_agent = AsyncMock(side_effect=asyncio.TimeoutError("stuck"))
-
-        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.local.supervisor"):
-            result = await sup.stop_agent("stuck-agent")
-
-        assert result is False
 
 
 class TestSupervisorHealthCheck:

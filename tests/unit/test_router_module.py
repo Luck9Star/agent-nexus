@@ -11,6 +11,7 @@ Uses mocks for ProcessManager, IPC, and external dependencies.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1878,8 +1879,8 @@ class TestGetToolsErrorResponse:
     """iter110b regression: get_tools skips ERROR responses with warning."""
 
     @pytest.mark.asyncio
-    async def test_error_response_skipped(self) -> None:
-        """Agent returning ERROR type during tool discovery is skipped."""
+    async def test_error_response_skipped_with_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Agent returning ERROR type during tool discovery is skipped with a warning log."""
         h = _make_agent_handle(name="a1")
         mock_resp = MagicMock()
         mock_resp.type = AgentToPlatformType.ERROR
@@ -1890,8 +1891,15 @@ class TestGetToolsErrorResponse:
         pm = _make_process_manager(agents={"a1": h}, running=["a1"])
         router = PlatformRouter(process_manager=pm)
 
-        tools = await router.get_tools()
+        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.router.router"):
+            tools = await router.get_tools()
         assert tools == []
+        assert any(
+            "returned error during tool discovery" in r.message
+            and "a1" in r.message
+            and "agent internal panic" in r.message
+            for r in caplog.records
+        )
 
 
 class TestExecutePhaseTaskGraphNone:

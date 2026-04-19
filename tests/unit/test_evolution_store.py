@@ -1534,7 +1534,7 @@ class TestBatchRowResilience:
 class TestRecordAnalysisCounterInvariants:
     """record_analysis must enforce the same counter invariants as increment_counters.
 
-    fell_back requires applied, applied requires selected, completed requires applied.
+    applied requires selected, completed requires applied, fell_back requires selected.
     """
 
     @staticmethod
@@ -1552,8 +1552,8 @@ class TestRecordAnalysisCounterInvariants:
             )
         )
 
-    def test_fell_back_without_applied_raises(self, tmp_path: Path) -> None:
-        """fell_back without selected raises, but fell_back without applied is valid."""
+    def test_fell_back_without_selected_raises(self, tmp_path: Path) -> None:
+        """fell_back without selected raises; fell_back without applied is valid (selected suffices)."""
         store = _make_store(tmp_path)
         self._seed_skill(store, "s1")
         # fell_back WITHOUT selected is invalid
@@ -1699,3 +1699,58 @@ class TestNegativeLimitClamped:
         )
         result = store.get_budget_log("test-agent", limit=0)
         assert len(result) == 1
+
+
+# ============================================================================
+# iter111 regression: get_judgments_batch limit_per_skill clamp
+# ============================================================================
+
+
+class TestJudgmentsBatchLimitClamp:
+    """get_judgments_batch limit_per_skill must clamp negative/zero to 1.
+
+    Mirrors TestNegativeLimitClamped but for the batch method.
+    """
+
+    @staticmethod
+    def _seed_skill(store: EvolutionStore, skill_id: str) -> None:
+        store.save_skill_record(
+            SkillRecord(
+                id=skill_id,
+                name="test-skill",
+                version="1.0.0",
+                lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+                directory="skills/test",
+                is_active=True,
+                first_seen=datetime.now(timezone.utc),
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
+
+    @staticmethod
+    def _seed_judgments(store: EvolutionStore, skill_id: str, count: int) -> None:
+        import uuid
+
+        for i in range(count):
+            store.record_analysis(
+                task_id=f"t-{skill_id}-{i}",
+                agent_name="tester",
+                analysis_text=f"analysis {i}",
+                judgments=[{"skill_id": skill_id, "selected": True}],
+            )
+
+    def test_negative_limit_clamped_to_one(self, tmp_path: Path) -> None:
+        """limit_per_skill=-1 must return at most 1 row per skill."""
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s1")
+        self._seed_judgments(store, "s1", 5)
+        batch = store.get_judgments_batch({"s1"}, limit_per_skill=-1)
+        assert len(batch["s1"]) == 1
+
+    def test_zero_limit_clamped_to_one(self, tmp_path: Path) -> None:
+        """limit_per_skill=0 must return at most 1 row per skill."""
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s1")
+        self._seed_judgments(store, "s1", 3)
+        batch = store.get_judgments_batch({"s1"}, limit_per_skill=0)
+        assert len(batch["s1"]) == 1

@@ -11,7 +11,6 @@ Not persistent across platform restarts -- reads lockfile on start.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -232,11 +231,6 @@ class AgentSupervisor:
             return True
         except KeyError:
             logger.warning("Agent '%s' not found in process manager", agent_name)
-            return False
-        except asyncio.TimeoutError:
-            logger.warning(
-                "Agent '%s' timed out during stop", agent_name,
-            )
             return False
 
     # ------------------------------------------------------------------
