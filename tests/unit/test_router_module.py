@@ -2469,3 +2469,63 @@ class TestUnifiedIpcLock:
         assert r2["success"] is True
         assert "finished" in call_order
         remove_all_locks()
+
+
+# iter125 regression: error_type consistency in all error return paths
+class TestErrorTypeConsistency:
+    """Every error return dict from route_to_atomic must include error_type."""
+
+    @pytest.mark.asyncio
+    async def test_agent_not_found_has_error_type(self) -> None:
+        """Agent not found returns error_type='KeyError'."""
+        from agent_nexus.platform.router.router import PlatformRouter
+        from agent_nexus.platform.orchestration.process_manager import ProcessManager
+
+        pm = ProcessManager()
+        router = PlatformRouter(process_manager=pm)
+        result = await router.route_to_atomic("nonexistent", "hello", "conv-1")
+        assert result["success"] is False
+        assert result["error_type"] == "KeyError"
+
+    @pytest.mark.asyncio
+    async def test_agent_not_alive_has_error_type(self) -> None:
+        """Agent not alive returns error_type='ProcessNotAliveError'."""
+        from agent_nexus.platform.router.router import PlatformRouter
+        from agent_nexus.platform.orchestration.process_manager import (
+            AgentHandle, ProcessManager,
+        )
+        from unittest.mock import MagicMock
+
+        pm = ProcessManager()
+        router = PlatformRouter(process_manager=pm)
+        mock_handle = MagicMock(spec=AgentHandle)
+        mock_handle.is_alive = False
+        pm._agents["dead-agent"] = mock_handle
+
+        result = await router.route_to_atomic("dead-agent", "hello", "conv-1")
+        assert result["success"] is False
+        assert result["error_type"] == "ProcessNotAliveError"
+
+    @pytest.mark.asyncio
+    async def test_empty_agent_name_has_error_type(self) -> None:
+        """Empty agent_name returns error_type='ValueError'."""
+        from agent_nexus.platform.router.router import PlatformRouter
+        from agent_nexus.platform.orchestration.process_manager import ProcessManager
+
+        pm = ProcessManager()
+        router = PlatformRouter(process_manager=pm)
+        result = await router.route_chat("", "hello")
+        assert result["success"] is False
+        assert result["error_type"] == "ValueError"
+
+    @pytest.mark.asyncio
+    async def test_empty_message_has_error_type(self) -> None:
+        """Empty message returns error_type='ValueError'."""
+        from agent_nexus.platform.router.router import PlatformRouter
+        from agent_nexus.platform.orchestration.process_manager import ProcessManager
+
+        pm = ProcessManager()
+        router = PlatformRouter(process_manager=pm)
+        result = await router.route_chat("some-agent", "")
+        assert result["success"] is False
+        assert result["error_type"] == "ValueError"

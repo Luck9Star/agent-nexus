@@ -3207,3 +3207,44 @@ class TestDeferredRegistryNonDictSchema:
             {"name": "ok", "inputSchema": {"type": "object"}},
         ])
         assert len(result) == 1
+
+
+# iter125 regression: error_type consistency in tool_adapter error paths
+class TestToolAdapterErrorTypeConsistency:
+    """Every error return dict from McpToolAdapter must include error_type."""
+
+    @pytest.mark.asyncio
+    async def test_dead_agent_has_error_type(self) -> None:
+        """Agent not alive in execute() returns error_type='ProcessNotAliveError'."""
+        schema = _make_tool_schema("tool")
+        adapter = McpToolAdapter(server_name="dead-agent", tool_schema=schema)
+        handle = _mock_agent_handle("dead-agent", alive=False)
+        result = await adapter.execute(handle, {"x": 1})
+        assert result["success"] is False
+        assert result["error_type"] == "ProcessNotAliveError"
+
+    @pytest.mark.asyncio
+    async def test_ipc_error_has_error_type(self) -> None:
+        """IPC exception in execute() returns error_type with exception class name."""
+        schema = _make_tool_schema("tool")
+        adapter = McpToolAdapter(server_name="agent", tool_schema=schema)
+        handle = _mock_agent_handle("agent", alive=True)
+        handle.ipc.send_chat.side_effect = ConnectionResetError("broken")
+        result = await adapter.execute(handle, {"x": 1})
+        assert result["success"] is False
+        assert result["error_type"] == "ConnectionResetError"
+
+    @pytest.mark.asyncio
+    async def test_agent_error_response_has_error_type(self) -> None:
+        """Agent ERROR response returns error_type='AgentError'."""
+        schema = _make_tool_schema("tool")
+        adapter = McpToolAdapter(server_name="agent", tool_schema=schema)
+        handle = _mock_agent_handle("agent", alive=True)
+        response = AgentToPlatform(
+            type=AgentToPlatformType.ERROR,
+            error="something went wrong",
+        )
+        handle.ipc.receive_until_result.return_value = response
+        result = await adapter.execute(handle, {"x": 1})
+        assert result["success"] is False
+        assert result["error_type"] == "AgentError"

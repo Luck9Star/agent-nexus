@@ -111,9 +111,9 @@ class PlatformRouter:
         conv_id = conversation_id or str(uuid.uuid4())
 
         if not agent_name or not agent_name.strip():
-            return {"output": "", "success": False, "error": "agent_name is required"}
+            return {"output": "", "success": False, "error": "agent_name is required", "error_type": "ValueError"}
         if not message or not message.strip():
-            return {"output": "", "success": False, "error": "message is required"}
+            return {"output": "", "success": False, "error": "message is required", "error_type": "ValueError"}
 
         # Check if this is a composite agent with an orchestration definition
         definition = self._composite_defs.get(agent_name)
@@ -264,6 +264,7 @@ class PlatformRouter:
                 "output": "",
                 "success": False,
                 "error": f"Agent '{atomic_name}' not found",
+                "error_type": "KeyError",
             }
 
         if not handle.is_alive:
@@ -272,6 +273,7 @@ class PlatformRouter:
                 "output": "",
                 "success": False,
                 "error": f"Agent '{atomic_name}' process is not alive",
+                "error_type": "ProcessNotAliveError",
             }
 
         # Serialize send+receive per agent to prevent concurrent IPC
@@ -310,6 +312,7 @@ class PlatformRouter:
                     "output": "",
                     "success": False,
                     "error": response.error or "Agent returned an error",
+                    "error_type": "AgentError",
                 }
 
             return {

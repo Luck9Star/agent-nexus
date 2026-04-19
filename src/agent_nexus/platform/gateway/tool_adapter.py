@@ -145,6 +145,7 @@ class McpToolAdapter:
                 "output": "",
                 "success": False,
                 "error": f"Agent '{self.agent_name}' process is not alive",
+                "error_type": "ProcessNotAliveError",
             }
 
         payload = json.dumps(
@@ -172,6 +173,7 @@ class McpToolAdapter:
                 "output": "",
                 "success": False,
                 "error": response.error or "Agent returned an error",
+                "error_type": "AgentError",
             }
 
         return {
