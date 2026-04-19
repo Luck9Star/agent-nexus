@@ -709,6 +709,14 @@ class EvolutionStore:
                 success=False,
                 error=f"Skill ID collision: {new_record.id}",
             )
+        except sqlite3.Error as exc:
+            logger.error(
+                "Database error during skill evolution: %s", exc, exc_info=True
+            )
+            return EvolveResult(
+                success=False,
+                error=f"Database error during evolution: {exc}",
+            )
 
         return EvolveResult(success=True, new_record=new_record)
 

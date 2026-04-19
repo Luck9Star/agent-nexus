@@ -45,7 +45,7 @@ def _make_agent_handle(
     response_content: str = "agent response",
     response_type: AgentToPlatformType = AgentToPlatformType.RESULT,
     response_error: str | None = None,
-    response_status: str = "completed",
+    response_status: str | None = "completed",
 ) -> MagicMock:
     """Create a mock AgentHandle with an IPC mock.
 
@@ -705,6 +705,17 @@ class TestRouteToAtomic:
 
         result = await router.route_to_atomic("agent-a", "hello", "conv-1")
         assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_status_none_defaults_to_success(self) -> None:
+        """Minimal agents that omit status field should not appear to fail."""
+        handle = _make_agent_handle(response_status=None)
+        pm = _make_process_manager(agents={"agent-a": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        result = await router.route_to_atomic("agent-a", "hello", "conv-1")
+        assert result["success"] is True
+        assert result["output"] == "agent response"
 
 
 class TestRouteChat:

@@ -143,7 +143,7 @@ class TestMcpToolAdapterExecute:
         assert "IPC error" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_execute_null_status_treated_as_not_success(self) -> None:
+    async def test_execute_null_status_defaults_to_success(self) -> None:
         adapter = McpToolAdapter("srv", {"name": "t"})
         handle = _make_handle(alive=True)
         response = AgentToPlatform(
@@ -154,7 +154,7 @@ class TestMcpToolAdapterExecute:
         handle.ipc.receive_until_result.return_value = response
 
         result = await adapter.execute(handle, {})
-        assert result["success"] is False
+        assert result["success"] is True
 
 
 # ---------------------------------------------------------------------------

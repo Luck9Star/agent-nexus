@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest  # noqa: F401 — needed for tmp_path fixture
 
@@ -728,6 +729,37 @@ class TestEvolveSkillIdCollision:
         parent_record = store.get_skill_record("parent-1")
         assert parent_record is not None
         assert parent_record.is_active is True
+
+
+class TestEvolveSkillDatabaseError:
+    """iter117 regression: non-IntegrityError sqlite3.Error returns EvolveResult."""
+
+    def _make_record(self, skill_id: str = "db-error-id") -> SkillRecord:
+        return SkillRecord(
+            id=skill_id,
+            name="test",
+            version="1.0.0",
+            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+            directory="skills/test",
+            is_active=True,
+            first_seen=datetime.now(timezone.utc),
+            last_updated=datetime.now(timezone.utc),
+        )
+
+    def test_operational_error_returns_failure(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        record = self._make_record()
+
+        with patch.object(
+            type(store),
+            "_conn",
+            side_effect=sqlite3.OperationalError("database is locked"),
+        ):
+            result = store.evolve_skill(record, parent_skill_ids=[])
+
+        assert result.success is False
+        assert "database error" in result.error.lower()
+        assert result.new_record is None
 
 
 # ============================================================================

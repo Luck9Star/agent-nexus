@@ -323,7 +323,10 @@ class PlatformRouter:
 
             return {
                 "output": response.content or "",
-                "success": (response.status or "").lower() == "completed",
+                # Default to success when status is unset — minimal agent
+                # implementations may omit the status field.
+                "success": response.status is None
+                or response.status.lower() == "completed",
             }
 
     async def get_tools(self) -> list[dict]:

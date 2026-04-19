@@ -1414,13 +1414,13 @@ def _make_mock_handle_for_status(is_alive: bool = True) -> MagicMock:
 class TestMcpToolAdapterExecuteStatusNone:
     """execute returns success=True when response.status is None.
 
-    None status is NOT treated as success — agents must explicitly
-    return status='completed' to indicate success. This prevents
-    silently treating incomplete/ambiguous responses as successful.
+    Minimal agent implementations may omit the status field. A RESULT
+    type response with no status defaults to success — only ERROR type
+    responses are treated as failure.
     """
 
     @pytest.mark.asyncio
-    async def test_status_none_returns_success_false(self) -> None:
+    async def test_status_none_returns_success_true(self) -> None:
         adapter = _make_bare_adapter()
         handle = _make_mock_handle_for_status()
 
@@ -1432,7 +1432,7 @@ class TestMcpToolAdapterExecuteStatusNone:
         handle.ipc.receive_until_result = AsyncMock(return_value=response)
 
         result = await adapter.execute(handle, {})
-        assert result["success"] is False
+        assert result["success"] is True
 
 
 class TestMcpToolAdapterExecuteStatusCompleted:

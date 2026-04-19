@@ -148,3 +148,54 @@ class TestClassAllowed:
         attr_violations = [v for v in violations if v.rule_type == "attribute"]
         assert len(attr_violations) == 1
         assert "__subclasses__" in attr_violations[0].message
+
+
+# ============================================================================
+# iter115 regression: type() sandbox escape + __bases__/__mro__ forbidden
+# ============================================================================
+
+
+class TestTypeSandboxEscapeBlocked:
+    """type() 3-arg form creates arbitrary classes → MRO escape."""
+
+    def test_type_3arg_blocked(self) -> None:
+        """type('X', (), {}) is a function-level violation."""
+        checker = SecurityChecker()
+        violations = checker.check_code("type('X', (), {})")
+        func_violations = [v for v in violations if v.rule_type == "function"]
+        assert len(func_violations) >= 1
+        assert "type" in func_violations[0].message
+
+    def test_type_1arg_allowed(self) -> None:
+        """type(obj) (1-arg introspection) is also blocked since
+        FunctionRule cannot distinguish arg count at AST level."""
+        checker = SecurityChecker()
+        violations = checker.check_code("t = type(42)")
+        func_violations = [v for v in violations if v.rule_type == "function"]
+        assert len(func_violations) >= 1
+
+    def test_bases_attribute_blocked(self) -> None:
+        """obj.__bases__ is an attribute-level violation (MRO chain traversal)."""
+        checker = SecurityChecker()
+        violations = checker.check_code("x = obj.__bases__")
+        attr_violations = [v for v in violations if v.rule_type == "attribute"]
+        assert len(attr_violations) >= 1
+        assert "__bases__" in attr_violations[0].message
+
+    def test_mro_attribute_blocked(self) -> None:
+        """obj.__mro__ is an attribute-level violation (class hierarchy access)."""
+        checker = SecurityChecker()
+        violations = checker.check_code("x = cls.__mro__")
+        attr_violations = [v for v in violations if v.rule_type == "attribute"]
+        assert len(attr_violations) >= 1
+        assert "__mro__" in attr_violations[0].message
+
+    def test_mro_escape_chain_blocked(self) -> None:
+        """Combined MRO escape: type('', obj.__bases__[0], {}).__subclasses__()
+        should trigger multiple violations (function + attribute)."""
+        checker = SecurityChecker()
+        code = "type('', obj.__bases__[0], {}).__subclasses__()"
+        violations = checker.check_code(code)
+        rule_types = {v.rule_type for v in violations}
+        assert "function" in rule_types   # type() call
+        assert "attribute" in rule_types  # __bases__ and __subclasses__
