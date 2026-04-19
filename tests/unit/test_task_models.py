@@ -19,7 +19,6 @@ class TestTaskState:
             TaskState.IN_PROGRESS,
             TaskState.COMPLETED,
             TaskState.FAILED,
-            TaskState.BLOCKED,
         }
 
     def test_values(self):
@@ -27,7 +26,6 @@ class TestTaskState:
         assert TaskState.IN_PROGRESS == "in_progress"
         assert TaskState.COMPLETED == "completed"
         assert TaskState.FAILED == "failed"
-        assert TaskState.BLOCKED == "blocked"
 
     def test_from_string(self):
         assert TaskState("pending") is TaskState.PENDING

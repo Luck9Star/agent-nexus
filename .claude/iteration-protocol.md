@@ -130,10 +130,15 @@
 | fail_task PENDING→FAILED 状态转换 | task_graph.py 允许 PENDING→FAILED + 3 regression tests | 2026-04-19 | iter98 |
 | get_judgments_batch 全局 LIMIT 不均匀 | ROW_NUMBER() window function 替换全局 LIMIT + 2 tests | 2026-04-19 | iter98 |
 | HookExecutor 空 allowlist 逻辑反转 | deny-by-default + 14 test updates + 2 regression tests | 2026-04-19 | iter98 |
+| 错误传播全量扫描（蓝军 2 agent） | 2 P0 + 6 P1 + 10 P2 + 19 P3 发现 | 2026-04-19 | iter99 |
+| _get_commit_sha 返回伪造 SHA | installer.py raise InstallationError + 2 test updates | 2026-04-19 | iter99 |
+| _read_manifest 静默返回 {} | installer.py raise InstallationError + 1 test update | 2026-04-19 | iter99 |
+| _file_lock FD 泄漏（flock 异常时） | lockfile.py try/except 关闭 FD + 2 regression tests | 2026-04-19 | iter99 |
+| P7 API 前向兼容性（3处） | router mapping.get + health CAPTURED branch + TaskState.BLOCKED 移除 + 5 tests | 2026-04-19 | iter100 |
 
 ### 待清模式
 
 - ~~P2: get_parallel_groups O(n²) → 可用 in-degree 优化~~ FIXED iter97: Kahn's algorithm with in-degree, O(V+E)
-- P2: _would_create_cycle 全表扫描 → 可缓存 dep_map（低频调用）
+- ~~P2: _would_create_cycle 全表扫描~~ EVALUATED iter99: startup-only call, O(100) rows negligible, caching adds complexity with no benefit
 - ~~P2: get_judgments_batch 无 SQL LIMIT → 当前数据量可接受~~ FIXED iter97: LIMIT pushed to SQL
 - ~~P2: context_describer per-skill ancestry~~ FIXED iter97: get_ancestry_batch single-connection batch

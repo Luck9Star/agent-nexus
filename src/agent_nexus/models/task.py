@@ -15,15 +15,18 @@ class TaskState(StrEnum):
     """Task lifecycle states.
 
     State machine: pending -> in_progress -> completed | failed
-                           ^                |
-                           +--- blocked <---+  (if dependencies not met)
+                   |                                     ^
+                   +-------------------------------------+
+                   (pending -> failed: dependency failed upstream)
+
+    Tasks with unresolved dependencies remain in PENDING state;
+    use TaskGraph.get_blocked_tasks() to query them.
     """
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
-    BLOCKED = "blocked"
 
 
 class TaskItem(BaseModel):

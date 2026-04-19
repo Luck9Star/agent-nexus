@@ -1999,10 +1999,10 @@ class TestSourceManagerIndexListValidation:
 
 
 class TestInstallerReadManifestLogs:
-    """Regression: _read_manifest logs on parse failure instead of silent swallow."""
+    """Regression: _read_manifest raises InstallationError on parse failure."""
 
-    def test_read_manifest_logs_on_parse_error(self, tmp_path: Path, caplog) -> None:
-        """_read_manifest logs a debug message when YAML parsing fails."""
+    def test_read_manifest_logs_on_parse_error(self, tmp_path: Path) -> None:
+        """_read_manifest raises InstallationError when YAML parsing fails."""
         installer = GitInstaller(
             MagicMock(spec=SourceManager),
             MagicMock(spec=LockfileManager),
@@ -2015,11 +2015,8 @@ class TestInstallerReadManifestLogs:
             "{{{{invalid yaml", encoding="utf-8"
         )
 
-        with caplog.at_level(logging.DEBUG, logger="agent_nexus.platform.local.installer"):
-            result = installer._read_manifest(agent_dir)
-
-        assert result == {}
-        assert "Failed to read manifest" in caplog.text
+        with pytest.raises(InstallationError, match="Failed to read manifest"):
+            installer._read_manifest(agent_dir)
 
 
 class TestResolveAgentDirValidation:
@@ -2732,12 +2729,12 @@ class TestGitInstallerGetCommitSha:
         )
 
     async def test_exception_falls_back_to_latest(self, mock_installer, tmp_path: Path) -> None:
-        """_get_commit_sha returns 'latest' when git command fails."""
+        """_get_commit_sha raises InstallationError when git command fails."""
         installer = mock_installer
         installer._run_git_capture = AsyncMock(side_effect=RuntimeError("git not found"))
 
-        result = await installer._get_commit_sha(tmp_path)
-        assert result == "latest"
+        with pytest.raises(InstallationError, match="Could not determine commit SHA"):
+            await installer._get_commit_sha(tmp_path)
 
 
 class TestGitInstallerValidateYaml:

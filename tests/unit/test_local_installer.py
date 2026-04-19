@@ -94,6 +94,14 @@ class TestInstallerInstall:
             (agent_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
             mock_clone.return_value = agent_dir
 
+            # _read_manifest reads from dest (agents dir), not agent_dir.
+            # Since copytree is mocked, create the file at dest too.
+            dest = inst._agents_dir / "test-agent"
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "agent-manifest.yaml").write_text(
+                "name: test-agent\nversion: 1.0.0\ntype: atomic\ndescription: test\n", encoding="utf-8"
+            )
+
             entry = await inst.install(
                 "test-agent", source_url="https://example.com/repo.git"
             )
@@ -521,3 +529,44 @@ class TestSubprocessFDLeakFix:
 
         fail_proc.kill.assert_called_once()
         fail_proc.wait.assert_called_once()
+
+
+# -- iter99 regression: error propagation in installer critical paths --
+
+
+class TestGetCommitShaPropagation:
+    """_get_commit_sha raises InstallationError instead of returning 'latest'."""
+
+    @pytest.mark.asyncio
+    async def test_raises_on_git_failure(self, tmp_path: Path) -> None:
+        inst, _, _ = _make_installer(tmp_path)
+        repo_path = tmp_path / "repo"
+
+        with patch.object(
+            inst, "_run_git_capture", new_callable=AsyncMock, side_effect=OSError("no git")
+        ):
+            with pytest.raises(InstallationError, match="Could not determine commit SHA"):
+                await inst._get_commit_sha(repo_path)
+
+
+class TestReadManifestPropagation:
+    """_read_manifest raises InstallationError when file exists but can't be parsed."""
+
+    def test_raises_on_corrupt_manifest(self, tmp_path: Path) -> None:
+        inst, _, _ = _make_installer(tmp_path)
+        agent_dir = tmp_path / "agent"
+        agent_dir.mkdir()
+        (agent_dir / "agent-manifest.yaml").write_text(
+            "{{invalid yaml: [}", encoding="utf-8"
+        )
+
+        with pytest.raises(InstallationError, match="Failed to read manifest"):
+            inst._read_manifest(agent_dir)
+
+    def test_returns_empty_when_file_missing(self, tmp_path: Path) -> None:
+        inst, _, _ = _make_installer(tmp_path)
+        agent_dir = tmp_path / "agent"
+        agent_dir.mkdir()
+
+        result = inst._read_manifest(agent_dir)
+        assert result == {}

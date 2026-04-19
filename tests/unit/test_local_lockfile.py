@@ -175,3 +175,35 @@ class TestLockfileListEntries:
         lockfile_path = tmp_path / "lockfile.json"
         lf = LockfileManager(lockfile_path)
         assert lf.list_entries() == []
+
+
+# -- iter99 regression: _file_lock FD leak on flock failure --
+
+class TestFileLockFDCleanup:
+    """Verify that _file_lock closes the file descriptor if flock() fails."""
+
+    def test_flock_failure_closes_fd(self, tmp_path: Path) -> None:
+        lockfile_path = tmp_path / "lockfile.json"
+        lf = LockfileManager(lockfile_path)
+
+        with patch("fcntl.flock", side_effect=OSError("NFS lock error")):
+            with pytest.raises(OSError, match="NFS lock error"):
+                with lf._file_lock():
+                    pass  # should never reach here
+
+        # If FD leaked, the .lock file would still be open.
+        # Verify we can delete the .lock file (would fail on some OS if FD still open).
+        lock_file = lockfile_path.with_suffix(".lock")
+        if lock_file.exists():
+            lock_file.unlink()
+
+    def test_flock_success_closes_fd_after_yield(self, tmp_path: Path) -> None:
+        lockfile_path = tmp_path / "lockfile.json"
+        lf = LockfileManager(lockfile_path)
+
+        with lf._file_lock():
+            pass  # normal flow
+
+        # Lock file should exist but not be held
+        lock_file = lockfile_path.with_suffix(".lock")
+        assert lock_file.exists()

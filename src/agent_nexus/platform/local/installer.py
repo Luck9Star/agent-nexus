@@ -356,9 +356,10 @@ class GitInstaller:
                 cwd=repo_path,
             )
             return result.strip()
-        except Exception:
-            logger.debug("rev-parse HEAD failed for %s, returning 'latest'", repo_path, exc_info=True)
-            return "latest"
+        except Exception as exc:
+            raise InstallationError(
+                f"Could not determine commit SHA for {repo_path}: {exc}"
+            ) from exc
 
     # ------------------------------------------------------------------
     # Internal: validation
@@ -410,9 +411,10 @@ class GitInstaller:
         try:
             raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
             return raw if isinstance(raw, dict) else {}
-        except Exception:
-            logger.debug("Failed to read manifest from %s", agent_dir, exc_info=True)
-            return {}
+        except Exception as exc:
+            raise InstallationError(
+                f"Failed to read manifest from {manifest_path}: {exc}"
+            ) from exc
 
     # ------------------------------------------------------------------
     # Internal: venv management

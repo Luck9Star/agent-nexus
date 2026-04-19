@@ -252,12 +252,15 @@ class HealthChecker:
 
         fix_count = 0
         derived_count = 0
+        captured_count = 0
         for r in reports.values():
             for s in r.suggestions:
                 if s.evolution_type == EvolutionType.FIX:
                     fix_count += 1
                 elif s.evolution_type == EvolutionType.DERIVED:
                     derived_count += 1
+                elif s.evolution_type == EvolutionType.CAPTURED:
+                    captured_count += 1
 
         return {
             "total_skills": total,
@@ -265,6 +268,7 @@ class HealthChecker:
             "unhealthy": unhealthy,
             "fix_suggestions": fix_count,
             "derived_suggestions": derived_count,
+            "captured_suggestions": captured_count,
             "unhealthy_skills": [
                 r.skill_name for r in reports.values()
                 if not r.is_healthy

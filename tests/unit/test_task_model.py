@@ -20,7 +20,6 @@ class TestTaskState:
             TaskState.IN_PROGRESS,
             TaskState.COMPLETED,
             TaskState.FAILED,
-            TaskState.BLOCKED,
         }
 
     def test_string_values(self):
@@ -28,7 +27,6 @@ class TestTaskState:
         assert TaskState.IN_PROGRESS == "in_progress"
         assert TaskState.COMPLETED == "completed"
         assert TaskState.FAILED == "failed"
-        assert TaskState.BLOCKED == "blocked"
 
     def test_is_str_enum(self):
         assert isinstance(TaskState.PENDING, str)
@@ -174,3 +172,19 @@ class TestTaskItemFieldConstraints:
     def test_missing_agent_rejected(self):
         with pytest.raises(ValidationError):
             TaskItem(id="A", description="t")  # type: ignore[call-arg]
+
+
+# ---------------------------------------------------------------------------
+# iter100 regression: TaskState.BLOCKED removed
+# ---------------------------------------------------------------------------
+
+class TestTaskStateBlockedRemoved:
+    def test_blocked_not_in_enum(self):
+        """BLOCKED was a dead member never used in src/ — removed."""
+        assert not hasattr(TaskState, "BLOCKED")
+
+    def test_pending_to_failed_transition(self):
+        """PENDING -> FAILED is valid (upstream dependency failure)."""
+        task = TaskItem(id="T1", description="t", agent="w", state=TaskState.PENDING)
+        updated = task.model_copy(update={"state": TaskState.FAILED})
+        assert updated.state == TaskState.FAILED

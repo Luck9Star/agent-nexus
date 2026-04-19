@@ -517,7 +517,7 @@ class PlatformRouter:
             WorkflowPhase.implementation: "worker",
             WorkflowPhase.verification: "verification",
         }
-        return mapping[phase]
+        return mapping.get(phase, "worker")
 
     @staticmethod
     def _build_phase_message(

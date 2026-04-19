@@ -69,6 +69,10 @@ class LockfileManager:
         fh = open(lock_path, "w")  # noqa: SIM115
         try:
             fcntl.flock(fh, fcntl.LOCK_EX)
+        except BaseException:
+            fh.close()
+            raise
+        try:
             yield
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
