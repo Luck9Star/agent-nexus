@@ -10,7 +10,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -513,7 +513,7 @@ class TestInfo:
             venv_path="/venvs/my-agent",
             dependencies=["pydantic", "httpx"],
         )
-        mocks, lockfile_mock, _, config_dir = _mock_managers()
+        mocks, lockfile_mock, _, _ = _mock_managers()
         lockfile_mock.get_entry.return_value = entry
 
         manifest_content = (
@@ -630,7 +630,7 @@ class TestSources:
 
         with (
             patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.models.distribution.SourceEntry", wraps=SourceEntry) as SourceEntryCls,
+            patch("agent_nexus.models.distribution.SourceEntry", wraps=SourceEntry),
             patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
         ):
             await _sources("add", "my-source", "https://example.com/repo", "git")
@@ -646,8 +646,8 @@ class TestSources:
 
         with (
             patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.models.distribution.SourceEntry", wraps=SourceEntry) as SourceEntryCls,
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.models.distribution.SourceEntry", wraps=SourceEntry),
+            patch("agent_nexus.platform.local.cli.typer.echo"),
         ):
             await _sources("add", "my-source", "https://example.com/repo", None)
 

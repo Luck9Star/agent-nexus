@@ -9,8 +9,11 @@ The coordinator manages parallel execution, result merging, and localization.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from agent_product_documentation_suite.models import (
     DocArtifact,
@@ -170,6 +173,7 @@ class DocumentationSuiteCoordinator:
             )
             artifacts.append(api_artifact)
         except Exception:
+            logger.exception("API doc generation failed for code_path='%s'", code_path)
             api_spec = {}
 
         # --- Phase 1b: Code Reviewer (parallel) ---
@@ -185,6 +189,7 @@ class DocumentationSuiteCoordinator:
             )
             artifacts.append(review_artifact)
         except Exception:
+            logger.exception("Code review failed for code_path='%s'", code_path)
             review_report = {}
 
         # --- Compute coverage score ---
@@ -209,6 +214,7 @@ class DocumentationSuiteCoordinator:
                 )
                 artifacts.append(loc_artifact)
             except Exception:
+                logger.exception("Localization failed for language '%s'", lang)
                 pass
 
         return DocumentationResult(

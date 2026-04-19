@@ -7,11 +7,14 @@ Supports two backends:
 
 from __future__ import annotations
 
+import logging
 import re
 import zipfile
 from pathlib import Path
 
 from agent_doc_filler.models import PlaceholderInfo, TemplateAnalysis
+
+logger = logging.getLogger(__name__)
 
 # Placeholder pattern: {{name}}
 PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
@@ -38,6 +41,7 @@ def _extract_formatting_from_run(run: object) -> dict:
         if run.font.color and run.font.color.rgb:
             fmt["font_color"] = str(run.font.color.rgb)
     except Exception:
+        logger.exception("Failed to extract formatting from docx Run object")
         pass
     return fmt
 

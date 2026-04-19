@@ -6,9 +6,12 @@ checks in parallel, followed by cross-dimension conflict detection.
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import toml
 
@@ -329,6 +332,10 @@ class ComplianceCoordinator:
                         )
                     )
                 except Exception:
+                    logger.exception(
+                        "Compliance check failed for task '%s' (agent='%s')",
+                        task_id, task.agent,
+                    )
                     checks.append(
                         ComplianceCheck(
                             dimension=task.name,

@@ -9,9 +9,12 @@ aggregation.
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from agent_competitive_intelligence_briefing.models import (
     BriefingResult,
@@ -226,6 +229,7 @@ class CompetitiveIntelCoordinator:
                 loc_results.append(loc_result)
                 localizations[lang] = loc_result.get("translated_text", "")
             except Exception:
+                logger.exception("Localization failed for language '%s'", lang)
                 localizations[lang] = f"[localization failed for {lang}]"
 
         steps[2] = PipelineStep(
