@@ -685,6 +685,26 @@ class TestRouteToAtomic:
         result = await router.route_to_atomic("agent-a", "hello", "conv-1")
         assert result["success"] is False
 
+    @pytest.mark.asyncio
+    async def test_status_case_insensitive_uppercase(self) -> None:
+        """External agents may send 'COMPLETED' — must still be success."""
+        handle = _make_agent_handle(response_status="COMPLETED")
+        pm = _make_process_manager(agents={"agent-a": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        result = await router.route_to_atomic("agent-a", "hello", "conv-1")
+        assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_status_case_insensitive_mixed(self) -> None:
+        """External agents may send 'Completed' — must still be success."""
+        handle = _make_agent_handle(response_status="Completed")
+        pm = _make_process_manager(agents={"agent-a": handle})
+        router = PlatformRouter(process_manager=pm)
+
+        result = await router.route_to_atomic("agent-a", "hello", "conv-1")
+        assert result["success"] is True
+
 
 class TestRouteChat:
     """Tests for PlatformRouter.route_chat."""

@@ -345,6 +345,45 @@ class TestCreateVenvCleanupOnFailure:
 
 
 # ---------------------------------------------------------------------------
+# Regression: symlink directory escape in _create_venv
+# ---------------------------------------------------------------------------
+
+
+class TestSymlinkEscapeFix:
+    """When venv_path is a symlink pointing outside _venvs_dir, _create_venv
+    must abort (return None) instead of creating a venv at the symlink target.
+
+    Before the fix, the code logged a warning but continued to create the
+    venv at the symlink path, which resolved to an arbitrary external
+    directory — a directory escape vulnerability.
+    """
+
+    @pytest.mark.asyncio
+    async def test_symlink_escape_returns_none(self, tmp_path: Path) -> None:
+        """Symlink pointing outside _venvs_dir causes _create_venv to abort."""
+        inst, _, _ = _make_installer(tmp_path)
+        agent_dir = tmp_path / "agents" / "test-agent"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "pyproject.toml").write_text("[project]\nname='t'\nversion='0'\n")
+
+        # Create a symlink in venvs_dir pointing to an external directory
+        external = tmp_path / "external-target"
+        external.mkdir()
+        venvs_dir = tmp_path / "venvs"
+        venvs_dir.mkdir()
+        symlink = venvs_dir / "test-agent"
+        symlink.symlink_to(external)
+
+        # _create_venv should detect the escape and return None
+        result = await inst._create_venv("test-agent", agent_dir)
+
+        assert result is None
+        # External target should NOT have venv contents
+        assert not (external / "bin").exists()
+        assert not (external / "pyvenv.cfg").exists()
+
+
+# ---------------------------------------------------------------------------
 # Regression: subprocess FD cleanup on proc.communicate() exception
 # ---------------------------------------------------------------------------
 

@@ -110,7 +110,13 @@
 | IPC exception handler _registered_tool_names 泄漏 | gateway.py _invoke | 2026-04-19 | iter90 |
 | subprocess FD 泄漏（4处 communicate() 无 cleanup） | installer.py _run_git/_run_git_capture/_create_venv | 2026-04-19 | iter90 |
 | P2 并发安全性分析（ipc/router/task_graph） | 确认 asyncio 单线程模型下安全，无需修复 | 2026-04-19 | iter90 |
+| compaction char/token 单位混淆 | compaction.py tokens_after 改为 chars//4 估计值 | 2026-04-19 | iter91 |
+| N+1 查询 store.py _row_to_record + get_ancestry | _batch_load_parents 批量加载，3个调用方+get_ancestry更新 | 2026-04-19 | iter91 |
+| N+1 查询 task_graph.py get_ready/blocked + parallel_groups | SQL NOT EXISTS + _rows_to_tasks 批量加载 | 2026-04-19 | iter91 |
 
 ### 待清模式
 
-（全部已清）
+- P2: get_parallel_groups O(n²) → 可用 in-degree 优化（当前小图可接受）
+- P2: _would_create_cycle 全表扫描 → 可缓存 dep_map（低频调用）
+- P2: get_judgments_batch 无 SQL LIMIT → 当前数据量可接受
+- P2: context_describer per-skill ancestry → get_ancestry 已优化，批量化为可选

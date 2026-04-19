@@ -1470,6 +1470,36 @@ class TestMcpToolAdapterAffirmativeStatus:
         assert result["success"] is False
 
 
+class TestMcpToolAdapterStatusCaseInsensitive:
+    """Status comparison is case-insensitive at the protocol boundary.
+
+    External agents may send 'Completed', 'COMPLETED', etc.
+    Regression: previously only lowercase 'completed' was accepted.
+    """
+
+    @pytest.mark.asyncio
+    async def test_status_completed_uppercase(self) -> None:
+        adapter = _make_bare_adapter()
+        handle = _make_mock_handle_for_status()
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT, status="COMPLETED", content="done",
+        )
+        handle.ipc.receive_until_result = AsyncMock(return_value=response)
+        result = await adapter.execute(handle, {})
+        assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_status_completed_mixed_case(self) -> None:
+        adapter = _make_bare_adapter()
+        handle = _make_mock_handle_for_status()
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT, status="Completed", content="done",
+        )
+        handle.ipc.receive_until_result = AsyncMock(return_value=response)
+        result = await adapter.execute(handle, {})
+        assert result["success"] is True
+
+
 # ---------------------------------------------------------------------------
 # Iteration 24 fixes: gateway activation message, registry priority
 # ---------------------------------------------------------------------------

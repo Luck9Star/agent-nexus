@@ -167,7 +167,7 @@ class McpToolAdapter:
 
         return {
             "output": response.content or "",
-            "success": response.status == "completed",
+            "success": (response.status or "").lower() == "completed",
         }
 
     # -- Schema helpers ----------------------------------------------------

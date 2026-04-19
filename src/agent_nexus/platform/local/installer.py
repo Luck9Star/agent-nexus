@@ -442,6 +442,10 @@ class GitInstaller:
                     "Skipping removal of venv_path outside allowed directory: %s",
                     resolved,
                 )
+                # Abort: do NOT create a venv at a symlink that points
+                # outside _venvs_dir — that would write to an arbitrary
+                # directory (directory escape via symlink).
+                return None
 
         try:
             # Create venv with uv
