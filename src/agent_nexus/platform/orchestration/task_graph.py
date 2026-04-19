@@ -397,26 +397,20 @@ class TaskGraph:
                     blocked_by_id,
                 )
 
-        # BFS-based topological grouping
-        groups: list[list[TaskItem]] = []
+        # In-degree based topological grouping (Kahn's algorithm) — O(V+E)
+        in_degree: dict[str, int] = {tid: len(deps) for tid, deps in dep_map.items()}
+        reverse_map: dict[str, set[str]] = {tid: set() for tid in task_ids}
+        for tid, deps in dep_map.items():
+            for dep in deps:
+                reverse_map[dep].add(tid)
+
+        available: set[str] = {tid for tid, deg in in_degree.items() if deg == 0}
         assigned: set[str] = set()
 
-        while len(assigned) < len(task_ids):
-            group_ids = [
-                tid
-                for tid in task_ids
-                if tid not in assigned
-                and dep_map[tid].issubset(assigned)
-            ]
-            if not group_ids:
-                # Remaining tasks have unresolvable deps (cycle)
-                unassigned = task_id_set - assigned
-                logger.warning(
-                    "Cannot schedule %d task(s) — likely cyclic dependency: %s",
-                    len(unassigned),
-                    unassigned,
-                )
-                break
+        groups: list[list[TaskItem]] = []
+        while available:
+            # Preserve creation order within each group
+            group_ids = sorted(available, key=lambda t: task_ids.index(t))
             # Batch-load group tasks in one pass instead of per-task queries
             placeholders = ",".join("?" for _ in group_ids)
             group_rows = conn.execute(
@@ -427,6 +421,22 @@ class TaskGraph:
             group_tasks = self._rows_to_tasks(conn, group_rows)
             groups.append(group_tasks)
             assigned.update(group_ids)
+
+            next_available: set[str] = set()
+            for tid in group_ids:
+                for dependent in reverse_map[tid]:
+                    in_degree[dependent] -= 1
+                    if in_degree[dependent] == 0:
+                        next_available.add(dependent)
+            available = next_available
+
+        if len(assigned) < len(task_ids):
+            unassigned = task_id_set - assigned
+            logger.warning(
+                "Cannot schedule %d task(s) — likely cyclic dependency: %s",
+                len(unassigned),
+                unassigned,
+            )
 
         return groups
 
