@@ -261,6 +261,12 @@ class IPythonExecutor:
                 success=False,
                 error=f"Execution timed out after {timeout}s",
             )
+        except asyncio.CancelledError:
+            # Task cancelled while the to_thread is running.  The thread
+            # keeps going (same contamination risk as timeout), so mark
+            # the shell as timed-out to prevent reuse without reset().
+            self._timed_out = True
+            raise
         except Exception as e:
             self._exec_done.set()  # Thread never started — clear the gate
             logger.error("Unexpected execution error: %s", e, exc_info=True)

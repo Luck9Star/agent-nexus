@@ -714,3 +714,107 @@ class TestTimeoutZeroClamped:
             assert result.success is True
         finally:
             executor.close()
+
+
+# iter124c regression: CancelledError sets _timed_out and propagates
+class TestCancelledErrorHandling:
+    """CancelledError during _execute_inner sets _timed_out and re-raises."""
+
+    @pytest.mark.asyncio
+    async def test_cancelled_error_sets_timed_out_flag(self) -> None:
+        """CancelledError during execution sets _timed_out = True."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            # Patch _run_cell_sync to raise CancelledError via transform_cell
+            await executor._require_shell()
+            original_transform = executor._shell.transform_cell
+
+            def raise_cancel(code):
+                raise asyncio.CancelledError("simulated cancellation")
+
+            executor._shell.transform_cell = raise_cancel
+            executor._shell.transform_cell = original_transform  # restore
+
+            # Instead, directly test the _execute_inner path by mocking
+            # the to_thread call to raise CancelledError
+            original_to_thread = asyncio.to_thread
+
+            async def mock_execute_inner(code, timeout):
+                # Simulate what _execute_inner does: it calls to_thread
+                # which raises CancelledError
+                shell = await executor._require_shell()
+                shell  # noqa: just to ensure shell is created
+                # The CancelledError should propagate and set _timed_out
+                raise asyncio.CancelledError("test cancel")
+
+            # Use a more direct approach: cancel the task during execution
+            import time
+
+            async def cancel_after_delay(task):
+                await asyncio.sleep(0.1)
+                task.cancel()
+
+            task = asyncio.create_task(
+                executor.execute("import time; time.sleep(5)", timeout=10)
+            )
+            asyncio.create_task(cancel_after_delay(task))
+
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+            assert executor._timed_out is True
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_error_propagates(self) -> None:
+        """CancelledError is re-raised (not swallowed)."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            import time
+
+            async def cancel_after_delay(task):
+                await asyncio.sleep(0.1)
+                task.cancel()
+
+            task = asyncio.create_task(
+                executor.execute("import time; time.sleep(5)", timeout=10)
+            )
+            asyncio.create_task(cancel_after_delay(task))
+
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_after_cancelled_subsequent_execute_blocked(self) -> None:
+        """After CancelledError, subsequent execute() returns contaminated error."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            import time
+
+            async def cancel_after_delay(task):
+                await asyncio.sleep(0.1)
+                task.cancel()
+
+            task = asyncio.create_task(
+                executor.execute("import time; time.sleep(5)", timeout=10)
+            )
+            asyncio.create_task(cancel_after_delay(task))
+
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+            # Subsequent execute should fail with contaminated message
+            result = await executor.execute("x = 1", timeout=5)
+            assert result.success is False
+            assert "contaminated" in result.error
+        finally:
+            executor.close()
