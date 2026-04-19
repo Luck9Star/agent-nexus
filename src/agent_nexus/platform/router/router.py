@@ -246,6 +246,7 @@ class PlatformRouter:
                     message, conversation_id=conversation_id
                 )
             except Exception as exc:
+                logger.warning("IPC send error for agent '%s': %s", atomic_name, exc)
                 return {
                     "output": "",
                     "success": False,
@@ -256,6 +257,7 @@ class PlatformRouter:
             try:
                 response = await handle.ipc.receive_until_result(timeout=300.0)
             except Exception as exc:
+                logger.warning("IPC receive error for agent '%s': %s", atomic_name, exc)
                 return {
                     "output": "",
                     "success": False,
@@ -382,6 +384,11 @@ class PlatformRouter:
         if not phase_agents:
             # Fallback: if no agents have the matching role, use root tasks
             # for research and first available agent for other phases
+            logger.warning(
+                "No agents with role '%s' found for %s phase, "
+                "falling back to default agent selection",
+                role, phase.value,
+            )
             if phase == WorkflowPhase.research:
                 root_tasks = definition.get_root_tasks()
                 phase_agents = list({t.agent for t in root_tasks})

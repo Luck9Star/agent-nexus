@@ -243,12 +243,12 @@ class DeferredAgentRegistry:
             )
             if (
                 len(tool_schemas) == 1
-                and tool_schemas[0].get("name") == "chat"
+                and tool_schemas[0].get("name") in ("chat", f"{name}__chat")
             ):
                 logger.warning(
-                    "Agent '%s' activated with fallback chat tool only. "
-                    "Tool discovery may have failed.",
-                    name,
+                    "Agent '%s' activated with fallback chat tool only "
+                    "(tool='%s'). Tool discovery may have failed.",
+                    name, tool_schemas[0].get("name"),
                 )
             return tool_schemas
 
@@ -260,6 +260,9 @@ class DeferredAgentRegistry:
         """
         handle = info.handle
         if handle is None:
+            logger.warning(
+                "Cannot fetch tools for agent '%s': no active handle", info.name
+            )
             return []
 
         try:
@@ -280,7 +283,10 @@ class DeferredAgentRegistry:
                     if isinstance(parsed, list):
                         return parsed
                 except json.JSONDecodeError:
-                    pass
+                    logger.debug(
+                        "Agent '%s' tool response not valid JSON: %.200s",
+                        info.name, response.content[:200],
+                    )
 
         except Exception as exc:
             logger.warning(

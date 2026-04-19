@@ -380,7 +380,10 @@ class ProcessManager:
 
             try:
                 ok = await handle.ipc.send_heartbeat()
-            except (IPCError, OSError):
+            except (IPCError, OSError) as exc:
+                logger.debug(
+                    "Health check IPC failed for agent '%s': %s", name, exc
+                )
                 return False
 
             if ok:
@@ -437,9 +440,15 @@ class ProcessManager:
             if not handle.is_alive:
                 dead.append(name)
                 self._agents.pop(name, None)
-                logger.debug(
-                    "Cleaned up dead agent handle '%s' (rc=%s)",
-                    name,
-                    handle.process.returncode,
-                )
+                rc = handle.process.returncode
+                if rc is not None and rc != 0:
+                    logger.warning(
+                        "Agent '%s' exited with non-zero return code %d",
+                        name, rc,
+                    )
+                else:
+                    logger.debug(
+                        "Cleaned up dead agent handle '%s' (rc=%s)",
+                        name, rc,
+                    )
         return dead
