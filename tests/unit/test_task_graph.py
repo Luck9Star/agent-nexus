@@ -957,3 +957,41 @@ class TestSchemaInitTransaction:
         from agent_nexus.platform.orchestration.task_graph import TaskGraph as TG
         source = inspect.getsource(TG)
         assert "executescript" not in source
+
+
+# ---------------------------------------------------------------------------
+# iter121 regression: duplicate blocked_by entries deduplicated before INSERT
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicateBlockedByDedup:
+    """add_task with duplicate blocked_by entries deduplicates before INSERT
+    to avoid IntegrityError from PRIMARY KEY (task_id, blocked_by_id)."""
+
+    def test_duplicate_deps_deduplicated(self, task_graph: TaskGraph) -> None:
+        """blocked_by=["A","A"] should insert only one row, not IntegrityError."""
+        task_graph.add_task(_make_task("A"))
+        task_graph.add_task(_make_task("B", blocked_by=["A", "A"]))
+
+        result = task_graph.get_task("B")
+        assert result is not None
+        assert result.blocked_by == ["A"]
+
+    def test_triple_duplicate_deps(self, task_graph: TaskGraph) -> None:
+        """blocked_by=["A","A","A"] deduplicates to single dep."""
+        task_graph.add_task(_make_task("A"))
+        task_graph.add_task(_make_task("C", blocked_by=["A", "A", "A"]))
+
+        result = task_graph.get_task("C")
+        assert result is not None
+        assert result.blocked_by == ["A"]
+
+    def test_mixed_duplicate_deps(self, task_graph: TaskGraph) -> None:
+        """blocked_by=["A","B","A","B"] deduplicates to ["A","B"]."""
+        task_graph.add_task(_make_task("A"))
+        task_graph.add_task(_make_task("B"))
+        task_graph.add_task(_make_task("D", blocked_by=["A", "B", "A", "B"]))
+
+        result = task_graph.get_task("D")
+        assert result is not None
+        assert result.blocked_by == ["A", "B"]

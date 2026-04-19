@@ -157,6 +157,7 @@
 | executescript→individual execute + rmtree best-effort | task_graph+store DDL transactional + installer uninstall onexc cleanup = 2515 tests | 2026-04-20 | iter118 |
 | 蓝军3-agent深度扫描 iter119: P0腐化锁文件备份 | lockfile.py _corrupt_detected + _save备份到.json.corrupt + 4 regression tests = 2519 tests | 2026-04-20 | iter119 |
 | 蓝军P1修复 iter120: silent UPDATE + is_active保留 | increment_counters rowcount warn + evolve_skill parent validation + save_skill_record is_active保留 = 2522 tests | 2026-04-20 | iter120 |
+| 蓝军P1修复 iter121: Semaphore(0) + duplicate blocked_by | subtask.py Semaphore(max(n,1)) + task_graph.py dict.fromkeys() dedup + 4 regression tests = 2526 tests | 2026-04-20 | iter121 |
 
 ### 待清模式
 

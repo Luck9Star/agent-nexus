@@ -126,7 +126,7 @@ class SubtaskController:
         if not coros:
             return []
 
-        semaphore = asyncio.Semaphore(self._config.max_parallel)
+        semaphore = asyncio.Semaphore(max(self._config.max_parallel, 1))
         results: list[Any] = [None] * len(coros)
         failed = asyncio.Event()
 

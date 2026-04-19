@@ -220,8 +220,8 @@ class TaskGraph:
                 ),
             )
 
-            # Insert dependencies
-            for dep_id in task.blocked_by:
+            # Insert dependencies (deduplicate to avoid PRIMARY KEY violation)
+            for dep_id in dict.fromkeys(task.blocked_by):
                 conn.execute(
                     "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES (?, ?)",
                     (task.id, dep_id),

@@ -284,3 +284,15 @@ class TestRunParallel:
         )
         assert isinstance(results[0], RuntimeError)
         assert isinstance(results[1], RuntimeError)
+
+    # iter121 regression — max_parallel=0 must not deadlock (Semaphore(0) guard)
+    @pytest.mark.asyncio
+    async def test_max_parallel_zero_does_not_deadlock(self):
+        """max_parallel=0 creates Semaphore(max(0,1))=Semaphore(1), not deadlock."""
+        ctrl = SubtaskController(SubtaskConfig(max_parallel=0))
+
+        async def val(x):
+            return x
+
+        results = await ctrl.run_parallel([val(42)])
+        assert results == [42]
