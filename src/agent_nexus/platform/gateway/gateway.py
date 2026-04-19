@@ -314,9 +314,12 @@ class MCPGateway:
 
             try:
                 result = await adapter.execute(info.handle, kwargs)
-            except (OSError, ConnectionError) as exc:
+            except Exception as exc:
                 # Handle race: process may have died between is_alive
-                # check and IPC send.
+                # check and IPC send.  Broad catch because
+                # adapter.execute() normally swallows all exceptions
+                # internally — reaching here means a transport-layer
+                # failure (BrokenPipeError, IncompleteReadError, etc).
                 self._registered_agents.discard(adapter.agent_name)
                 return (
                     f"Error: IPC failed for agent "

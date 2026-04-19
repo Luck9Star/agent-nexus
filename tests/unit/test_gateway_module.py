@@ -1008,7 +1008,32 @@ class TestMCPGatewayMakeToolFunc:
         func = gateway._make_tool_func(adapter)
         result = await func(x=1)
         assert "Error" in result
-        assert "IPC failed" in result# ============================================================================
+        assert "IPC failed" in result
+
+    async def test_func_handles_transport_race_exception(
+        self, gateway: MCPGateway
+    ) -> None:
+        """Non-ConnectionError transport failures also caught (broadened catch)."""
+        manifest = _make_manifest("transport_race_agent")
+        await gateway.register_agent(manifest, deferred=False)
+        info = gateway.registry.get_agent_info("transport_race_agent")
+        assert info is not None
+        mock_handle = _mock_agent_handle("transport_race_agent", alive=True)
+        info.handle = mock_handle
+
+        schema = _make_tool_schema("tool")
+        adapter = McpToolAdapter(server_name="transport_race_agent", tool_schema=schema)
+        adapter.execute = AsyncMock(side_effect=RuntimeError("event loop closed"))  # type: ignore[method-assign]
+        gateway.registry._tool_adapters["transport_race_agent"] = [adapter]
+
+        func = gateway._make_tool_func(adapter)
+        result = await func(x=1)
+        assert "Error" in result
+        assert "IPC failed" in result
+        assert "transport_race_agent" not in gateway._registered_agents
+
+
+# ============================================================================
 # MCPGateway — core tools (_search_and_activate, _list_agents, _agent_info)
 # ============================================================================
 
