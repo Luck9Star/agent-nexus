@@ -2458,3 +2458,171 @@ class TestRegisterAgentToolsFastMCPError:
 
         # Restore to avoid affecting other tests
         gw._mcp.tool = original_tool
+
+
+# ============================================================================
+# Coverage: deferred_registry.py missed lines
+# ============================================================================
+
+
+class TestDeferredRegistryReRegisterAsCore:
+    """register_agent(deferred=False) removes stale deferred entry (lines 146-151)."""
+
+    def test_re_register_deferred_as_core(self, registry: DeferredAgentRegistry) -> None:
+        """Re-registering a deferred agent as core removes it from deferred dict."""
+        manifest = _make_manifest("swap-agent")
+        registry.register_agent(manifest, deferred=True)
+        assert len(registry.list_deferred_agents()) == 1
+        assert len(registry.list_core_agents()) == 0
+
+        # Re-register as core — should warn and move it
+        registry.register_agent(manifest, deferred=False)
+        assert len(registry.list_deferred_agents()) == 0
+        assert len(registry.list_core_agents()) == 1
+
+        info = registry.get_agent_info("swap-agent")
+        assert info is not None
+        assert info in registry.list_core_agents()
+
+
+class TestDeferredRegistryActivateCoreNotYetActivated:
+    """activate_agent for a core agent without tool_schemas (line 193)."""
+
+    @pytest.mark.asyncio
+    async def test_core_agent_no_schemas_gets_placeholder(self) -> None:
+        """A core agent registered without tool_schemas gets placeholder on activate."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = _make_manifest("bare-core")
+        registry.register_agent(manifest, deferred=False)
+
+        info = registry.get_agent_info("bare-core")
+        assert info is not None
+        assert info.tool_schemas is None  # not yet activated
+
+        schemas = await registry.activate_agent("bare-core")
+        assert len(schemas) >= 1
+        # Placeholder tool has the agent name in it
+        assert "bare-core" in schemas[0]["name"]
+
+
+class TestDeferredRegistryFetchAgentTools:
+    """Tests for _fetch_agent_tools edge cases (lines 259, 268, 276-277)."""
+
+    @pytest.mark.asyncio
+    async def test_fetch_tools_none_handle_returns_empty(self) -> None:
+        """_fetch_agent_tools returns [] when handle is None (line 259)."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = _make_manifest("no-handle")
+        info = AgentInfo(name="no-handle", manifest=manifest)
+        # handle is None by default
+
+        result = await registry._fetch_agent_tools(info)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_fetch_tools_response_output_list(self) -> None:
+        """_fetch_agent_tools returns output list from IPC response (line 268)."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = _make_manifest("list-agent")
+        handle = _mock_agent_handle("list-agent", alive=True)
+        tool_list = [
+            {"name": "tool_a", "description": "Tool A", "inputSchema": {}},
+            {"name": "tool_b", "description": "Tool B", "inputSchema": {}},
+        ]
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="",
+            status="completed",
+            output=tool_list,
+        )
+        handle.ipc.receive_until_result.return_value = response
+
+        info = AgentInfo(name="list-agent", manifest=manifest, handle=handle)
+        result = await registry._fetch_agent_tools(info)
+        assert result == tool_list
+
+    @pytest.mark.asyncio
+    async def test_fetch_tools_content_json_fallback(self) -> None:
+        """_fetch_agent_tools parses response.content as JSON list when output is None (lines 276-277)."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = _make_manifest("json-agent")
+        handle = _mock_agent_handle("json-agent", alive=True)
+        import json
+        tool_list = [{"name": "parsed_tool"}]
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content=json.dumps(tool_list),
+            status="completed",
+            output=None,  # output is None -> falls back to content parsing
+        )
+        handle.ipc.receive_until_result.return_value = response
+
+        info = AgentInfo(name="json-agent", manifest=manifest, handle=handle)
+        result = await registry._fetch_agent_tools(info)
+        assert len(result) == 1
+        assert result[0]["name"] == "parsed_tool"
+
+    @pytest.mark.asyncio
+    async def test_fetch_tools_content_not_json_returns_fallback(self) -> None:
+        """When content is not valid JSON, falls back to single chat tool."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = _make_manifest("bad-json-agent")
+        handle = _mock_agent_handle("bad-json-agent", alive=True)
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="not json at all",
+            status="completed",
+            output=None,
+        )
+        handle.ipc.receive_until_result.return_value = response
+
+        info = AgentInfo(name="bad-json-agent", manifest=manifest, handle=handle)
+        result = await registry._fetch_agent_tools(info)
+        assert len(result) == 1
+        assert result[0]["name"] == "chat"
+
+    @pytest.mark.asyncio
+    async def test_fetch_tools_ipc_exception_returns_fallback(self) -> None:
+        """When IPC raises an exception, returns fallback chat tool."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = _make_manifest("ipc-fail-agent")
+        handle = _mock_agent_handle("ipc-fail-agent", alive=True)
+        handle.ipc.send_chat.side_effect = RuntimeError("IPC timeout")
+
+        info = AgentInfo(name="ipc-fail-agent", manifest=manifest, handle=handle)
+        result = await registry._fetch_agent_tools(info)
+        assert len(result) == 1
+        assert result[0]["name"] == "chat"
+
+
+class TestDeferredRegistryGetToolsRunningNoSchemas:
+    """Core agent is running but has no tool_schemas — pass branch (line 331)."""
+
+    def test_running_core_without_schemas_skipped(self) -> None:
+        """A core agent that is running but has no tool_schemas is silently skipped."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = _make_manifest("starting-agent")
+        registry.register_agent(manifest, deferred=False)
+
+        info = registry.get_agent_info("starting-agent")
+        assert info is not None
+        # Simulate: running but tools not yet discovered
+        info.handle = _mock_agent_handle("starting-agent", alive=True)
+        info.tool_schemas = None
+
+        tools = registry.get_tools_for_llm()
+        assert tools == []

@@ -707,3 +707,93 @@ class TestWouldCreateCycleDFS:
         result = task_graph._would_create_cycle(conn, "E", ["D"])
         assert result is False
         conn.close()
+
+
+# ============================================================================
+# Coverage gap tests: task_graph.py line 185 (blocked_by present + cycle check)
+# ============================================================================
+
+
+class TestAddTaskCycleCheckWithBlockedBy:
+    """add_task calls _would_create_cycle when blocked_by is present (line 185).
+
+    Line 185 is: if task.blocked_by and self._would_create_cycle(conn, task.id, task.blocked_by)
+    It is covered when a new task has blocked_by and the cycle check returns True.
+    """
+
+    def test_add_task_blocked_by_creates_cycle_via_chain(self, task_graph: TaskGraph) -> None:
+        """New task blocked_by an existing task that transitively depends on it.
+
+        Build: A -> B (B blocked_by A). Then adding C blocked_by B is fine.
+        Then trying to add a task that closes the loop triggers line 185.
+        """
+        task_graph.add_task(_make_task("A"))
+        task_graph.add_task(_make_task("B", blocked_by=["A"]))
+        task_graph.add_task(_make_task("C", blocked_by=["B"]))
+
+        # Now try to add D blocked_by C where D already has a dep chain back to A.
+        # This is valid (no cycle): D -> C -> B -> A.
+        task_graph.add_task(_make_task("D", blocked_by=["C"]))
+        assert task_graph.get_task("D") is not None
+
+        # To trigger line 185 with a True result: add Z blocked_by D,
+        # then try to add a new task A2 blocked_by Z. But we need to build
+        # a scenario where adding a task's blocked_by creates a cycle.
+        # Since we can't re-add A, we create: A->B, then try to add a
+        # task whose blocked_by references an existing task whose deps
+        # lead back to the new task. We do this by first adding Z
+        # blocked_by D, then trying to add a new task blocked_by Z
+        # where Z also depends back.
+        # Actually the simplest way: use raw SQL to set up the back-edge
+        # so _would_create_cycle returns True on the next add_task.
+        import sqlite3
+        conn = sqlite3.connect(str(task_graph._db_path))
+        # Make A blocked_by D (creating A->D->C->B->A cycle via raw SQL)
+        conn.execute(
+            "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES ('A', 'D')"
+        )
+        conn.commit()
+        conn.close()
+
+        # Now adding any task blocked_by A triggers cycle check via A->D->C->B->A
+        # But the new task itself is fine. The key is that _would_create_cycle
+        # walks from blocked_by_id back and checks if it reaches task_id.
+        # Adding E blocked_by A: walk from A -> D -> C -> B -> A.
+        # But A != E, so no cycle detected for E.
+        # The line is covered when blocked_by is non-empty AND cycle check runs.
+        task_graph.add_task(_make_task("E", blocked_by=["A"]))
+        assert task_graph.get_task("E") is not None
+
+    def test_add_task_blocked_by_cycle_detected(self, task_graph: TaskGraph) -> None:
+        """New task whose blocked_by would create a cycle is rejected at line 185."""
+        task_graph.add_task(_make_task("P"))
+        task_graph.add_task(_make_task("Q", blocked_by=["P"]))
+
+        # Adding a task blocked_by Q where Q transitively depends on
+        # this new task would be a cycle. But since the task doesn't exist yet,
+        # _would_create_cycle walks from Q -> P, and if the new task is "P"
+        # it can't be re-added. We need a different approach.
+        # Add R blocked_by Q first.
+        task_graph.add_task(_make_task("R", blocked_by=["Q"]))
+
+        # Now use raw SQL to add a reverse dep: R -> "NEW"
+        import sqlite3
+        conn = sqlite3.connect(str(task_graph._db_path))
+        conn.execute(
+            "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES ('R', 'NEW')"
+        )
+        conn.commit()
+        conn.close()
+
+        # Now adding "NEW" blocked_by R would walk: R -> Q -> P (no NEW).
+        # But R also -> NEW. Walk from R: R has deps [Q, NEW]. Follow Q->P.
+        # Follow NEW -> NEW == task_id? No, NEW is blocked_by_id in R's deps.
+        # Walk from R: check _can_reach(R, NEW). R's deps = [Q, NEW via SQL].
+        # So R depends on NEW. Then _can_reach(R, NEW) = True because R's dep NEW == NEW.
+        # Wait, we need to walk from R's blocked_by list to see if we reach NEW.
+        # Actually _would_create_cycle adds proposed deps: NEW -> [R].
+        # Then walks from each blocked_by_id (R) to see if we reach task_id (NEW).
+        # R's deps include Q (from add_task) and NEW (from raw SQL).
+        # Walk from R: R has dep Q and NEW. NEW == task_id -> cycle!
+        with pytest.raises(ValueError, match="cycle"):
+            task_graph.add_task(_make_task("NEW", blocked_by=["R"]))

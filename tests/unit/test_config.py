@@ -587,3 +587,81 @@ class TestConfigLoaderSourcesValidation:
         loader = ConfigLoader(config_dir=tmp_path)
         sources = loader.load_sources()
         assert sources == []
+
+
+# ============================================================================
+# Coverage gap tests: loader.py lines 94-95, 143-144, 153-154
+# ============================================================================
+
+
+class TestConfigLoaderProvidersValidation:
+    """Tests for config.toml [models].providers non-mapping guard."""
+
+    def test_providers_not_a_mapping_uses_defaults(self, tmp_path: Path) -> None:
+        """When [models].providers is a list instead of dict, it is ignored."""
+        _write_config(
+            tmp_path,
+            '[models]\n'
+            'default = "openai:gpt-4o"\n'
+            'providers = ["not", "a", "dict"]\n',
+        )
+        loader = ConfigLoader(config_dir=tmp_path)
+        config = loader.load_config()
+        # providers should fall back to built-in defaults, not crash
+        assert set(config.models.providers.keys()) == set(DEFAULT_PROVIDERS.keys())
+
+
+class TestConfigLoaderSourcesNameValidation:
+    """Tests for load_sources name validation (lines 143-144)."""
+
+    def test_source_with_non_string_name_skipped(self, tmp_path: Path) -> None:
+        """Source entry where 'name' is a number is skipped."""
+        _write_sources(
+            tmp_path,
+            "sources:\n  - name: 42\n    type: git\n    url: http://x.com\n",
+        )
+        loader = ConfigLoader(config_dir=tmp_path)
+        sources = loader.load_sources()
+        assert sources == []
+
+    def test_source_with_empty_name_skipped(self, tmp_path: Path) -> None:
+        """Source entry where 'name' is an empty string is skipped."""
+        _write_sources(
+            tmp_path,
+            "sources:\n  - name: ''\n    type: git\n    url: http://x.com\n",
+        )
+        loader = ConfigLoader(config_dir=tmp_path)
+        sources = loader.load_sources()
+        assert sources == []
+
+    def test_source_with_whitespace_name_skipped(self, tmp_path: Path) -> None:
+        """Source entry where 'name' is only whitespace is skipped."""
+        _write_sources(
+            tmp_path,
+            "sources:\n  - name: '   '\n    type: git\n    url: http://x.com\n",
+        )
+        loader = ConfigLoader(config_dir=tmp_path)
+        sources = loader.load_sources()
+        assert sources == []
+
+
+class TestConfigLoaderSourcesInvalidEntry:
+    """Tests for load_sources SourceEntry construction failure (lines 153-154)."""
+
+    def test_git_source_without_url_skipped(self, tmp_path: Path) -> None:
+        """A git-type source with empty URL fails SourceEntry validation and is skipped."""
+        _write_sources(
+            tmp_path,
+            "sources:\n"
+            "  - name: bad-git\n"
+            "    type: git\n"
+            "    url: ''\n"
+            "  - name: good-git\n"
+            "    type: git\n"
+            "    url: https://github.com/example/repo.git\n",
+        )
+        loader = ConfigLoader(config_dir=tmp_path)
+        sources = loader.load_sources()
+        # Only the valid entry should be returned
+        assert len(sources) == 1
+        assert sources[0].name == "good-git"

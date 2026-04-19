@@ -569,3 +569,76 @@ class TestSecurityCheckerAdditionalBlocks:
             assert runtime.retrieve("x") == 3
         finally:
             runtime.close()
+
+
+# ============================================================================
+# Coverage gap tests: security_checker.py lines 155-156, 193-194
+# ============================================================================
+
+
+class TestSecurityCheckerExceptionBranches:
+    """Tests for non-SyntaxError exception branches in SecurityChecker.check_code."""
+
+    def test_non_syntax_error_returns_parse_error(self) -> None:
+        """A non-SyntaxError exception from ast.parse returns parse error."""
+        from unittest.mock import patch
+        from agent_nexus.platform.runtime.security_checker import SecurityChecker
+
+        checker = SecurityChecker()
+        with patch("agent_nexus.platform.runtime.security_checker.ast.parse") as mock_parse:
+            mock_parse.side_effect = MemoryError("out of memory")
+            violations = checker.check_code("x = 1")
+
+        assert len(violations) == 1
+        assert violations[0].rule_type == "parse"
+        assert "out of memory" in violations[0].message
+
+    def test_regex_rule_exception_handled(self) -> None:
+        """A failing regex rule logs warning but does not raise."""
+        from unittest.mock import patch, MagicMock
+        from agent_nexus.platform.runtime.security_checker import SecurityChecker, RegexRule
+
+        bad_rule = MagicMock(spec=RegexRule)
+        bad_rule.check_source.side_effect = RuntimeError("regex engine exploded")
+
+        checker = SecurityChecker(rules=[bad_rule])
+        # Should NOT raise -- exception is caught and logged
+        violations = checker.check_code("x = 1 + 2")
+        assert isinstance(violations, list)
+
+
+# ============================================================================
+# Coverage gap tests: describer.py lines 126, 136-137
+# ============================================================================
+
+
+class TestDescriberEdgeCases:
+    """Tests for TieredRuntimeDescriber edge cases: sanitized empty name,
+    and json.dumps fallback on non-serializable values."""
+
+    def test_l3_value_control_characters_sanitized_to_empty(self) -> None:
+        """var_name with only control chars sanitizes to empty, returns ''."""
+        runtime = PythonRuntime()
+        try:
+            describer = TieredRuntimeDescriber(runtime)
+            # String of only control characters -> sanitized to empty
+            result = describer.l3_value("\x01\x02\x03")
+            assert result == ""
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_l3_value_json_dumps_fallback_on_circular_reference(self) -> None:
+        """When value has circular reference, json.dumps fails and falls back to str()."""
+        runtime = PythonRuntime()
+        try:
+            # Create a circular reference that causes json.dumps ValueError
+            await runtime.execute("a = []; a.append(a)")
+            describer = TieredRuntimeDescriber(runtime)
+            result = describer.l3_value("a")
+            # Should contain the variable header
+            assert "[Variable: a]" in result
+            # str() of a circular list shows [[...]]
+            assert "[...]" in result
+        finally:
+            runtime.close()

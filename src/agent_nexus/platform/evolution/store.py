@@ -16,6 +16,7 @@ Tables:
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -29,6 +30,9 @@ from agent_nexus.models.evolution import (
     SkillOrigin,
     SkillRecord,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 _SCHEMA_SQL = """
