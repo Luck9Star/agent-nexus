@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import re as _re
-from typing import Any
 
 from .runtime import PythonRuntime
 

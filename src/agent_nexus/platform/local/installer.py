@@ -464,7 +464,7 @@ class GitInstaller:
                 raise
 
             if proc.returncode != 0:
-                logger.warning("uv venv failed for %s: %s", agent_name, stderr.decode())
+                logger.warning("uv venv failed for %s: %s", agent_name, stderr.decode(errors="replace"))
                 shutil.rmtree(venv_path, ignore_errors=True)
                 return None
 
@@ -484,7 +484,7 @@ class GitInstaller:
                 raise
 
             if proc.returncode != 0:
-                logger.warning("uv pip install failed for %s: %s", agent_name, stderr.decode())
+                logger.warning("uv pip install failed for %s: %s", agent_name, stderr.decode(errors="replace"))
                 shutil.rmtree(venv_path, ignore_errors=True)
                 return None
 
@@ -537,7 +537,7 @@ class GitInstaller:
         if proc.returncode != 0:
             raise InstallationError(
                 f"git {' '.join(args)} failed (rc={proc.returncode}): "
-                f"{stderr.decode().strip()}"
+                f"{stderr.decode(errors="replace").strip()}"
             )
 
     @staticmethod
@@ -558,9 +558,9 @@ class GitInstaller:
         if proc.returncode != 0:
             raise InstallationError(
                 f"git {' '.join(args)} failed (rc={proc.returncode}): "
-                f"{stderr.decode().strip()}"
+                f"{stderr.decode(errors="replace").strip()}"
             )
-        return stdout.decode()
+        return stdout.decode(errors="replace")
 
 
 def _url_to_source_name(url: str) -> str:

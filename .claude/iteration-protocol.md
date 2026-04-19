@@ -148,6 +148,7 @@
 | 蓝军积压清零 iter109: 错误处理韧性 | store._rows_to_records批量行恢复 + lockfile腐化ERROR日志 + router send_chat IPC异常包装 = 6 tests | 2026-04-20 | iter109 |
 | 蓝军3-agent深度扫描 iter110: 5模式全量修复 | SQL LIMIT clamp(2) + ERROR响应类型检查(2) + asyncio.TimeoutError catch(2) + BaseException细化(1) + 计数器不变量修正(1) = 11 tests | 2026-04-20 | iter110 |
 | iter110 changeset regression: 死代码+测试缺口 | 移除 process_manager/supervisor 死代码 TimeoutError catch(2) + get_judgments_batch clamp test(1) + test名修正 = net -2 tests | 2026-04-20 | iter111 |
+| 蓝军3-agent退出条件验证 iter112 | get_snapshot N+1→_rows_to_tasks批量(1) + unused imports(3) + decode errors=replace(5) + ctypes/open安全回归(2) = 2491 tests | 2026-04-20 | iter112 |
 
 ### 待清模式
 

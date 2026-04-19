@@ -500,11 +500,7 @@ class TaskGraph:
                 "FROM tasks ORDER BY created_at"
             ).fetchall()
 
-            tasks: list[TaskItem] = []
-            for row in rows:
-                task = self._task_from_row(conn, row)
-                if task is not None:
-                    tasks.append(task)
+            tasks = self._rows_to_tasks(conn, rows)
 
             groups = self.get_parallel_groups(conn=conn)
             group_ids = [[t.id for t in group] for group in groups]

@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from agent_nexus.models.context import (
     ContextBudget,
     ContextBudgetLogEntry,
-    TokenUsage,
 )
 
 # Default maximum context window in tokens.

@@ -28,7 +28,6 @@ from typing import Any
 from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.gateway.tool_adapter import (
     DEFAULT_IPC_EXECUTE_TIMEOUT,
-    McpToolAdapter,
     remove_lock,
 )
 from agent_nexus.platform.orchestration.dsl import OrchestrationDefinition

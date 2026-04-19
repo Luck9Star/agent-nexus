@@ -560,6 +560,30 @@ class TestSecurityCheckerAdditionalBlocks:
             runtime.close()
 
     @pytest.mark.asyncio
+    async def test_ctypes_blocked(self) -> None:
+        """ctypes provides FFI — arbitrary native code execution risk."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("import ctypes")
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_open_blocked(self) -> None:
+        """open() is forbidden — runtime agents must not access filesystem."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute("open('/etc/hostname')")
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
     async def test_safe_code_still_passes(self) -> None:
         """Regression: normal safe code must still execute successfully."""
         runtime = PythonRuntime()
