@@ -32,6 +32,7 @@ class LockfileManager:
 
     def __init__(self, lockfile_path: Path) -> None:
         self._path = lockfile_path
+        self._corrupt_detected = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -51,12 +52,14 @@ class LockfileManager:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
             lockfile = Lockfile.model_validate(raw)
             logger.debug("Loaded lockfile with %d agent(s)", len(lockfile.agents))
+            self._corrupt_detected = False
             return lockfile
         except (json.JSONDecodeError, ValueError, KeyError, TypeError) as exc:
             logger.error(
                 "Corrupt lockfile %s — returning empty agents list: %s",
                 self._path, exc,
             )
+            self._corrupt_detected = True
             return Lockfile()
 
     @contextmanager
@@ -86,8 +89,28 @@ class LockfileManager:
 
         Writes to a temporary file first, then renames (``os.rename``) so
         that a crash mid-write never leaves a corrupted lockfile.
+
+        If a corrupt lockfile was previously detected by :meth:`load`, the
+        corrupt file is backed up before being overwritten to prevent
+        permanent data loss.
         """
         self._path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Backup corrupt lockfile before overwriting with empty data
+        if self._corrupt_detected and self._path.exists():
+            backup = self._path.with_suffix(".json.corrupt")
+            try:
+                os.replace(str(self._path), str(backup))
+                logger.warning(
+                    "Backed up corrupt lockfile to %s before overwrite",
+                    backup,
+                )
+            except OSError as exc:
+                logger.error(
+                    "Failed to back up corrupt lockfile to %s: %s",
+                    backup, exc,
+                )
+            self._corrupt_detected = False
 
         payload = lockfile.model_dump(mode="json")
         content = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"

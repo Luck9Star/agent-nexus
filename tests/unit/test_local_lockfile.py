@@ -207,3 +207,101 @@ class TestFileLockFDCleanup:
         # Lock file should exist but not be held
         lock_file = lockfile_path.with_suffix(".lock")
         assert lock_file.exists()
+
+
+# ---------------------------------------------------------------------------
+# iter119 regression: corrupt lockfile → backup before overwrite (P0)
+# ---------------------------------------------------------------------------
+
+
+class TestCorruptLockfileBackup:
+    """Verify that a corrupt lockfile is backed up before being overwritten."""
+
+    def test_corrupt_json_backed_up_before_overwrite(self, tmp_path: Path) -> None:
+        """When lockfile.json is corrupt, _save() backs it up before writing."""
+        lf_path = tmp_path / "lockfile.json"
+        corrupt_content = '{"version": 1, "agents": {BROKEN'
+        lf_path.write_text(corrupt_content)
+
+        lf = LockfileManager(lf_path)
+        # load() detects corruption
+        result = lf.load()
+        assert len(result.agents) == 0
+        assert lf._corrupt_detected is True
+
+        # Save a new entry — should back up corrupt file first
+        entry = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="a" * 40,
+            agent_type=AgentType.ATOMIC,
+        )
+        lf.add_entry_by_name("test-agent", entry)
+
+        # Corrupt file should be backed up
+        backup = lf_path.with_suffix(".json.corrupt")
+        assert backup.exists(), "Corrupt lockfile was not backed up"
+        assert backup.read_text() == corrupt_content
+
+        # New lockfile should have only the new agent
+        loaded = lf.load()
+        assert "test-agent" in loaded.agents
+        assert len(loaded.agents) == 1
+
+    def test_valid_lockfile_not_backed_up(self, tmp_path: Path) -> None:
+        """When lockfile is valid, _save() does NOT create a backup."""
+        lf_path = tmp_path / "lockfile.json"
+        lf = LockfileManager(lf_path)
+
+        entry = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="a" * 40,
+            agent_type=AgentType.ATOMIC,
+        )
+        lf.add_entry_by_name("agent1", entry)
+
+        # Add another — no backup should be created
+        entry2 = LockfileEntry(
+            version="2.0.0",
+            source="official",
+            commit_sha="b" * 40,
+            agent_type=AgentType.ATOMIC,
+        )
+        lf.add_entry_by_name("agent2", entry2)
+
+        backup = lf_path.with_suffix(".json.corrupt")
+        assert not backup.exists(), "Backup was created for a valid lockfile"
+
+        loaded = lf.load()
+        assert len(loaded.agents) == 2
+
+    def test_corrupt_flag_resets_after_successful_load(self, tmp_path: Path) -> None:
+        """_corrupt_detected resets to False after a successful load."""
+        lf_path = tmp_path / "lockfile.json"
+        lf_path.write_text("NOT JSON")
+
+        lf = LockfileManager(lf_path)
+        lf.load()
+        assert lf._corrupt_detected is True
+
+        # Fix the file
+        lf_path.write_text('{"version": 1, "agents": {}}')
+        lf.load()
+        assert lf._corrupt_detected is False
+
+    def test_nonexistent_lockfile_no_backup(self, tmp_path: Path) -> None:
+        """When lockfile doesn't exist, no backup is created on first save."""
+        lf_path = tmp_path / "lockfile.json"
+        lf = LockfileManager(lf_path)
+
+        entry = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="a" * 40,
+            agent_type=AgentType.ATOMIC,
+        )
+        lf.add_entry_by_name("first-agent", entry)
+
+        backup = lf_path.with_suffix(".json.corrupt")
+        assert not backup.exists()

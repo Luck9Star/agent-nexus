@@ -155,6 +155,7 @@
 | run_with_retry MemoryError retry | subtask.py MemoryError加入immediate-rethrow + 1 regression test + route_locks asyncio安全确认 + lockfile save()设计确认 = 2500 tests | 2026-04-20 | iter116 |
 | status=None默认success + evolve_skill sqlite3.Error | tool_adapter+router status=None→success=True + 2 stale tests更新 = 2507 tests | 2026-04-20 | iter117 |
 | executescript→individual execute + rmtree best-effort | task_graph+store DDL transactional + installer uninstall onexc cleanup = 2515 tests | 2026-04-20 | iter118 |
+| 蓝军3-agent深度扫描 iter119: P0腐化锁文件备份 | lockfile.py _corrupt_detected + _save备份到.json.corrupt + 4 regression tests = 2519 tests | 2026-04-20 | iter119 |
 
 ### 待清模式
 
