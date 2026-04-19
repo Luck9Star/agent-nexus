@@ -320,3 +320,23 @@ class TestTokenTrackerNegativeRejection:
         assert tracker.total_tokens == 50_000
         # Turn should be unchanged too (increment happens after validation)
         assert tracker._turn == 1
+
+
+class TestLogTrimming:
+    """Log trimming when entries exceed _MAX_LOG_SIZE (1000)."""
+
+    def test_log_trimmed_after_max_size(self) -> None:
+        """When log exceeds _MAX_LOG_SIZE (1000), oldest entries are dropped."""
+        from agent_nexus.platform.runtime.token_tracker import _MAX_LOG_SIZE
+
+        tracker = TokenTracker(max_tokens=200_000_000)
+        # Record one more than the max to trigger trimming.
+        for i in range(_MAX_LOG_SIZE + 1):
+            tracker.record_usage(1, agent_name=f"agent-{i}")
+
+        log = tracker.get_log()
+        assert len(log) == _MAX_LOG_SIZE
+        # The oldest entry (turn 1) should have been trimmed.
+        assert log[0].turn_number == 2
+        # Total tokens should still be accurate (not trimmed).
+        assert tracker.total_tokens == _MAX_LOG_SIZE + 1

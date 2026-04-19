@@ -651,3 +651,19 @@ class TestLoadAgentSkills:
         skills = loader.load_agent_skills(tmp_path)
         assert len(skills) == 1
         assert skills[0].metadata.name == "valid"
+
+
+class TestBuildMetadataAgentTypeEmpty:
+    """agent_type empty/whitespace must raise ValueError (loader.py line 250)."""
+
+    def test_empty_agent_type_raises(self):
+        """An empty-string agent_type must be rejected."""
+        fm = {"name": "test", "agent_type": ""}
+        with pytest.raises(ValueError, match="must not be empty"):
+            SkillLoader._build_metadata(fm)
+
+    def test_whitespace_agent_type_raises(self):
+        """A whitespace-only agent_type must be rejected."""
+        fm = {"name": "test", "agent_type": "   \t  "}
+        with pytest.raises(ValueError, match="must not be empty"):
+            SkillLoader._build_metadata(fm)

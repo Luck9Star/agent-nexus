@@ -642,3 +642,61 @@ class TestDescriberEdgeCases:
             assert "[...]" in result
         finally:
             runtime.close()
+
+
+# ============================================================================
+# Coverage gap: security_rules.py line 175 — nested ast.Call recursive case
+# ============================================================================
+
+
+class TestFunctionRuleNestedCall:
+    """FunctionRule._get_function_name must recurse through nested ast.Call nodes."""
+
+    def test_nested_call_get_function_name(self) -> None:
+        """A call like get_fn()('x') has func=Call(...), triggering the recursive branch."""
+        import ast as _ast
+
+        from agent_nexus.platform.runtime.security_rules import FunctionRule
+
+        rule = FunctionRule(forbidden=["eval"])
+
+        # Parse "eval(eval('x'))" — outer func is Name(id='eval'), not a nested Call.
+        # Parse "get_fn()('x')" — outer func IS a Call, triggering the recursive branch.
+        tree = _ast.parse("get_fn()('x')")
+        call_node = tree.body[0].value  # the outer Call
+
+        # The outer call's func is itself a Call — _get_function_name must recurse.
+        name = rule._get_function_name(call_node.func)
+        assert name == "get_fn"
+
+        # No violations should be flagged since "get_fn" is not in the forbidden list.
+        violations = rule.check(call_node)
+        assert violations == []
+
+    def test_nested_call_with_forbidden_inner_name(self) -> None:
+        """Nested call where the innermost function IS forbidden but accessed via Call func."""
+        import ast as _ast
+
+        from agent_nexus.platform.runtime.security_rules import FunctionRule
+
+        rule = FunctionRule(forbidden=["eval"])
+
+        # eval()('x') — outer func is Name(id='eval'), not a nested Call.
+        # To get a nested Call whose innermost name IS forbidden, use:
+        # (eval)('x') — nope, func is Name.
+        # We need the .func of a Call to be a Call whose .func is Name('eval'):
+        # eval()('x') -> func=Call(func=Name('eval'))
+        tree = _ast.parse("eval()('x')")
+        call_node = tree.body[0].value  # outer Call
+
+        # _get_function_name on the outer func (a Call) should recurse and find "eval"
+        name = rule._get_function_name(call_node.func)
+        assert name == "eval"
+
+        # The outer call's func is a Call (not ast.Name), so the Name check at line 113
+        # won't fire. But the recursive resolution still exercises line 175.
+        violations = rule.check(call_node)
+        # No violation because the outer func is ast.Call, not ast.Name or ast.Attribute.
+        # Line 113 requires isinstance(node.func, ast.Name) and func_name in forbidden.
+        # Here node.func is ast.Call, so no match at line 113 or 126.
+        assert violations == []

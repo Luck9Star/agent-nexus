@@ -3495,3 +3495,222 @@ class TestInstallerCreateVenvRemovesExisting:
         assert result == venv_path
         # Stale marker should be gone since venv was removed and recreated
         assert not (venv_path / "stale-marker.txt").exists()
+
+
+class TestInstallRollbackAfterCopy:
+    """Cover installer.py lines 197-199: rollback iterates _created_paths with entries.
+
+    The existing rollback tests fail BEFORE the copy-to-agents-dir step, so
+    _created_paths stays empty and the rollback loop body never executes.
+    These tests fail AFTER copy (step 5) to ensure _created_paths has entries.
+    """
+
+    @pytest.mark.asyncio
+    async def test_rollback_removes_dir_after_create_venv_raises(self, tmp_path: Path) -> None:
+        """install() rollback removes agent dir when _create_venv raises."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        sources = MagicMock(spec=SourceManager)
+        lockfile = MagicMock(spec=LockfileManager)
+        installer = GitInstaller(sources, lockfile, config_dir)
+
+        # Create a fake cloned agent with valid structure
+        fake_agent_dir = tmp_path / "cloned" / "packages" / "rb-agent"
+        fake_agent_dir.mkdir(parents=True)
+        (fake_agent_dir / "SKILL.md").write_text("# rb", encoding="utf-8")
+        manifest = {"name": "rb-agent", "version": "1.0.0", "type": "atomic", "description": "test"}
+        _write_yaml(fake_agent_dir / "agent-manifest.yaml", manifest)
+
+        installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
+        installer._validate_agent_package = MagicMock(return_value=[])
+        # Fail AFTER copy by making _create_venv raise
+        installer._create_venv = AsyncMock(side_effect=RuntimeError("venv boom"))
+
+        with pytest.raises(RuntimeError, match="venv boom"):
+            await installer.install("rb-agent", source_url="https://github.com/x/y.git")
+
+        # dest dir was added to _created_paths then cleaned by rollback
+        agents_dest = config_dir / "agents" / "rb-agent"
+        assert not agents_dest.exists()
+
+    @pytest.mark.asyncio
+    async def test_rollback_removes_dir_and_venv_after_commit_sha_fails(self, tmp_path: Path) -> None:
+        """install() rollback removes both dest dir and venv_path entries."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        sources = MagicMock(spec=SourceManager)
+        lockfile = MagicMock(spec=LockfileManager)
+        installer = GitInstaller(sources, lockfile, config_dir)
+
+        # Create a fake cloned agent with valid structure
+        fake_agent_dir = tmp_path / "cloned" / "packages" / "rb2-agent"
+        fake_agent_dir.mkdir(parents=True)
+        (fake_agent_dir / "SKILL.md").write_text("# rb2", encoding="utf-8")
+        manifest = {"name": "rb2-agent", "version": "1.0.0", "type": "atomic", "description": "test"}
+        _write_yaml(fake_agent_dir / "agent-manifest.yaml", manifest)
+
+        installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
+        installer._validate_agent_package = MagicMock(return_value=[])
+
+        # _create_venv succeeds, adding venv_path to _created_paths
+        fake_venv = config_dir / "venvs" / "rb2-agent"
+        fake_venv.mkdir(parents=True)
+        installer._create_venv = AsyncMock(return_value=fake_venv)
+
+        # _get_commit_sha fails AFTER both paths are in _created_paths
+        installer._get_commit_sha = AsyncMock(side_effect=RuntimeError("sha fail"))
+
+        with pytest.raises(RuntimeError, match="sha fail"):
+            await installer.install("rb2-agent", source_url="https://github.com/x/y.git")
+
+        # Both dest dir and venv should be cleaned by rollback
+        agents_dest = config_dir / "agents" / "rb2-agent"
+        assert not agents_dest.exists()
+        # fake_venv was added to _created_paths; rollback removes it
+        # (it's a dir, so rmtree is used)
+        assert not fake_venv.exists()
+
+
+class TestInstallRollbackUnlinkFilePath:
+    """Cover installer.py lines 200-201: rollback unlinks a file (non-dir) path."""
+
+    @pytest.mark.asyncio
+    async def test_rollback_unlinks_non_directory_path(self, tmp_path: Path) -> None:
+        """install() rollback calls unlink for a file path in _created_paths."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        sources = MagicMock(spec=SourceManager)
+        lockfile = MagicMock(spec=LockfileManager)
+        installer = GitInstaller(sources, lockfile, config_dir)
+
+        # Create a fake cloned agent with valid structure
+        fake_agent_dir = tmp_path / "cloned" / "packages" / "ul-agent"
+        fake_agent_dir.mkdir(parents=True)
+        (fake_agent_dir / "SKILL.md").write_text("# ul", encoding="utf-8")
+        manifest = {"name": "ul-agent", "version": "1.0.0", "type": "atomic", "description": "test"}
+        _write_yaml(fake_agent_dir / "agent-manifest.yaml", manifest)
+
+        installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
+        installer._validate_agent_package = MagicMock(return_value=[])
+
+        # Create a real file to use as a fake venv_path return value.
+        # _create_venv normally returns a directory, but we return a file
+        # to exercise the `elif path.exists(): path.unlink()` branch.
+        fake_file = tmp_path / "venvs" / "ul-agent-marker"
+        fake_file.parent.mkdir(parents=True, exist_ok=True)
+        fake_file.write_text("not-a-dir", encoding="utf-8")
+        assert fake_file.exists() and not fake_file.is_dir()
+
+        call_count = 0
+
+        async def _create_venv_side_effect(agent_name, agent_dir):
+            nonlocal call_count
+            call_count += 1
+            return fake_file
+
+        installer._create_venv = AsyncMock(side_effect=_create_venv_side_effect)
+
+        # Fail after _create_venv so the file path is in _created_paths
+        installer._get_commit_sha = AsyncMock(side_effect=RuntimeError("boom"))
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await installer.install("ul-agent", source_url="https://github.com/x/y.git")
+
+        # The file should have been unlinked by the rollback
+        assert not fake_file.exists()
+
+
+class TestSupervisorStartAllExceptionPropagation:
+    """Cover supervisor.py lines 122-123: start_all() catches exception from start_agent.
+
+    The existing TestSupervisorStartAllExceptionHandling mocks pm.start_agent,
+    but the supervisor's own start_agent() catches all exceptions from pm.start_agent
+    (lines 207-211) and returns False. So the exception never propagates to start_all.
+
+    To hit lines 122-123, something must raise OUTSIDE the try block in start_agent()
+    (lines 191-211). We make _resolve_agent_dir raise ValueError for a specific agent,
+    which happens at line 188, before the try block.
+    """
+
+    async def test_start_all_catches_resolve_dir_error(self, tmp_path: Path) -> None:
+        """start_all() catches ValueError from _resolve_agent_dir and continues."""
+        entry = _make_entry(venv_path="")
+        pm = _make_mock_pm()
+        lockfile = _make_mock_lockfile_mgr({"bad-agent": entry, "good-agent": entry})
+        config = _make_mock_config_loader()
+
+        supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path)
+
+        # Make _resolve_agent_dir raise for bad-agent, succeed for good-agent.
+        # This raises at line 188 which is BEFORE start_agent's internal try block,
+        # so the exception propagates to start_all's handler (lines 122-123).
+        original_resolve = supervisor._resolve_agent_dir
+
+        def _patched_resolve(name: str) -> Path:
+            if name == "bad-agent":
+                raise ValueError("unsafe agent name")
+            return original_resolve(name)
+
+        supervisor._resolve_agent_dir = _patched_resolve
+
+        # good-agent should still succeed: _build_command will fall through to
+        # the uvx fallback since no venv and no main.py exist.
+        mock_handle = MagicMock()
+        mock_handle.pid = 99
+        pm.start_agent = AsyncMock(return_value=mock_handle)
+
+        started = await supervisor.start_all()
+
+        # bad-agent raised and was caught by start_all's except block
+        assert "bad-agent" not in started
+        # good-agent should succeed
+        assert "good-agent" in started
+
+
+class TestInstallRollbackCleanupFailure:
+    """Cover installer.py lines 202-203: rollback inner except when cleanup itself fails."""
+
+    @pytest.mark.asyncio
+    async def test_rollback_swallows_rmtree_error(self, tmp_path: Path) -> None:
+        """install() rollback catches and logs rmtree failure during cleanup."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        sources = MagicMock(spec=SourceManager)
+        lockfile = MagicMock(spec=LockfileManager)
+        installer = GitInstaller(sources, lockfile, config_dir)
+
+        # Create a fake cloned agent with valid structure
+        fake_agent_dir = tmp_path / "cloned" / "packages" / "rf-agent"
+        fake_agent_dir.mkdir(parents=True)
+        (fake_agent_dir / "SKILL.md").write_text("# rf", encoding="utf-8")
+        manifest = {"name": "rf-agent", "version": "1.0.0", "type": "atomic", "description": "test"}
+        _write_yaml(fake_agent_dir / "agent-manifest.yaml", manifest)
+
+        installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
+        installer._validate_agent_package = MagicMock(return_value=[])
+
+        # _create_venv raises so dest is in _created_paths but rollback runs
+        installer._create_venv = AsyncMock(side_effect=RuntimeError("venv fail"))
+
+        # Make shutil.rmtree fail during rollback cleanup.
+        # Step 5 copies files (no pre-existing dest so rmtree is NOT called there).
+        # The rollback at line 199 calls rmtree -- make it raise to hit lines 202-203.
+        import shutil as _shutil
+        rmtree_calls = []
+
+        def _rmtree_side_effect(path, *args, **kwargs):
+            rmtree_calls.append(str(path))
+            # Fail during rollback cleanup (second call) to exercise inner except
+            if len(rmtree_calls) > 1:
+                raise OSError("rollback permission denied")
+            return _shutil.rmtree(path, *args, **kwargs)
+
+        with patch(
+            "agent_nexus.platform.local.installer.shutil.rmtree",
+            side_effect=_rmtree_side_effect,
+        ):
+            with pytest.raises(RuntimeError, match="venv fail"):
+                await installer.install("rf-agent", source_url="https://github.com/x/y.git")
+
+        # At least 2 rmtree calls: step-5 pre-copy + rollback cleanup
+        assert len(rmtree_calls) >= 2
