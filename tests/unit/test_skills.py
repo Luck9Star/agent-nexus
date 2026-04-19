@@ -54,7 +54,7 @@ class TestSkillMetadata:
             name="test", agent_type="atomic", triggers=[], capabilities=[], model_config={}
         )
         with pytest.raises(AttributeError):
-            meta.name = "changed"
+            meta.name = "changed"  # pyright: ignore[reportAttributeAccessIssue]
 
     def test_frozen_cannot_modify_list(self):
         meta = SkillMetadata(
@@ -62,7 +62,7 @@ class TestSkillMetadata:
         )
         # Frozen dataclass prevents reassignment of the field itself
         with pytest.raises(AttributeError):
-            meta.triggers = ["b"]
+            meta.triggers = ["b"]  # pyright: ignore[reportAttributeAccessIssue]
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ class TestSkillBody:
     def test_frozen(self):
         body = SkillBody(content="some content")
         with pytest.raises(AttributeError):
-            body.content = "new content"
+            body.content = "new content"  # pyright: ignore[reportAttributeAccessIssue]
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ class TestSkillResources:
     def test_frozen(self):
         res = SkillResources(content="x")
         with pytest.raises(AttributeError):
-            res.content = "y"
+            res.content = "y"  # pyright: ignore[reportAttributeAccessIssue]
 
 
 # ---------------------------------------------------------------------------
@@ -518,8 +518,9 @@ class TestParseString:
     def test_tier2_section_from_parsed(self):
         loader = SkillLoader()
         skill = loader.parse_string(VALID_SKILL_MD)
-        assert skill.tier2_section("Example Fill") is not None
-        assert "Here is an example..." in skill.tier2_section("Example Fill")
+        example = skill.tier2_section("Example Fill")
+        assert example is not None
+        assert "Here is an example..." in example
         assert skill.tier2_section("Template") is not None
 
     def test_body_only(self):
@@ -651,6 +652,29 @@ class TestLoadAgentSkills:
         skills = loader.load_agent_skills(tmp_path)
         assert len(skills) == 1
         assert skills[0].metadata.name == "valid"
+
+    def test_duplicate_skill_names_keeps_first(self, tmp_path: Path):
+        """Duplicate skill names across files — first occurrence wins."""
+        dir_a = tmp_path / "a"
+        dir_a.mkdir()
+        (dir_a / "SKILL.md").write_text(
+            "---\nname: my-skill\nagent_type: atomic\n---\nfirst body",
+            encoding="utf-8",
+        )
+
+        dir_b = tmp_path / "b"
+        dir_b.mkdir()
+        (dir_b / "SKILL.md").write_text(
+            "---\nname: my-skill\nagent_type: atomic\n---\nsecond body",
+            encoding="utf-8",
+        )
+
+        loader = SkillLoader()
+        skills = loader.load_agent_skills(tmp_path)
+        assert len(skills) == 1
+        assert skills[0].metadata.name == "my-skill"
+        assert skills[0].body is not None
+        assert "first body" in skills[0].body.content
 
 
 class TestBuildMetadataAgentTypeEmpty:

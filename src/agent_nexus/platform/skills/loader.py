@@ -111,7 +111,8 @@ class SkillLoader:
         """Load all SKILL.md files from an agent package directory.
 
         Recursively searches *agent_dir* for files named ``SKILL.md``
-        (case-sensitive).
+        (case-sensitive).  Duplicate skill names (across multiple files)
+        are detected and only the first occurrence is kept.
 
         Args:
             agent_dir: Root directory of an agent package.
@@ -120,12 +121,24 @@ class SkillLoader:
             A list of parsed skills (may be empty if no SKILL.md found).
         """
         skills: list[ParsedSkill] = []
+        seen_names: set[str] = set()
         for skill_file in sorted(agent_dir.rglob("SKILL.md")):
             try:
                 skill = self.parse_file(skill_file)
-                skills.append(skill)
             except (ValueError, OSError):
                 logger.warning("Failed to parse %s, skipping", skill_file, exc_info=True)
+                continue
+
+            name = skill.metadata.name
+            if name in seen_names:
+                logger.warning(
+                    "Duplicate skill name '%s' from %s, keeping first occurrence",
+                    name,
+                    skill_file,
+                )
+                continue
+            seen_names.add(name)
+            skills.append(skill)
         return skills
 
     # ------------------------------------------------------------------
