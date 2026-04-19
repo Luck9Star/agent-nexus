@@ -136,7 +136,7 @@ class SecurityChecker:
             return [
                 SecurityViolation(
                     rule_type="parse",
-                    node_type="",
+                    node_type="Module",
                     message="Parse error: Code cannot be empty",
                 )
             ]
@@ -147,7 +147,7 @@ class SecurityChecker:
             return [
                 SecurityViolation(
                     rule_type="parse",
-                    node_type="",
+                    node_type="Module",
                     code_snippet=code[:200],
                     message=f"Syntax error: {e}",
                 )
@@ -156,7 +156,7 @@ class SecurityChecker:
             return [
                 SecurityViolation(
                     rule_type="parse",
-                    node_type="",
+                    node_type="Module",
                     code_snippet=code[:200],
                     message=f"Parse error: {e}",
                 )

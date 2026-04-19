@@ -309,6 +309,11 @@ class MCPGateway:
                 # _register_agent_tools still holds it (asyncio.Lock
                 # is non-reentrant).
                 self._registered_agents.discard(adapter.agent_name)
+                # Clean up all tool names for this agent so re-registration
+                # does not trigger false collision-detection suffixes.
+                adapters = self._registry.get_tool_adapters(adapter.agent_name)
+                for ad in adapters:
+                    self._registered_tool_names.discard(ad.full_name)
                 McpToolAdapter.remove_lock(adapter.agent_name)
                 return f"Error: agent '{adapter.agent_name}' process has died"
 

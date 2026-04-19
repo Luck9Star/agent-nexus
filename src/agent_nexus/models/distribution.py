@@ -90,7 +90,7 @@ class LockfileEntry(BaseModel):
     )
     source: str = Field(min_length=1)
     commit_sha: str = Field(
-        pattern=r"^[0-9a-f]{40}$|^[0-9a-f]{64}$|^latest$|^head$",
+        pattern=r"^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$|^latest$|^head$",
         description="Hex SHA-1 (40 chars), SHA-256 (64 chars), or sentinel 'latest'/'head'",
     )
     agent_type: AgentType
@@ -145,7 +145,7 @@ class IndexEntry(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
+    name: str = Field(min_length=1)
     version: str = Field(
         min_length=1,
         pattern=r"^[a-zA-Z0-9._-]+$",

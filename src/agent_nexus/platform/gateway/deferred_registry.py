@@ -271,7 +271,7 @@ class DeferredAgentRegistry:
             )
             response = await handle.ipc.receive_until_result(timeout=10.0)
 
-            if response.output and isinstance(response.output, list):
+            if isinstance(response.output, list):
                 return response.output
 
             # Fallback: parse content as JSON list

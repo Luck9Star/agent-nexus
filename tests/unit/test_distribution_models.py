@@ -262,15 +262,25 @@ class TestLockfileEntryCommitShaValidation:
                 agent_type=AgentType.ATOMIC,
             )
 
-    def test_invalid_mixed_case_rejected(self):
-        """Only lowercase hex is accepted."""
-        with pytest.raises(ValidationError):
-            LockfileEntry(
-                version="1.0.0",
-                source="official",
-                commit_sha="A" * 40,
-                agent_type=AgentType.ATOMIC,
-            )
+    def test_uppercase_hex_accepted(self):
+        """Uppercase hex is accepted (git SHAs are case-insensitive)."""
+        le = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="A" * 40,
+            agent_type=AgentType.ATOMIC,
+        )
+        assert le.commit_sha == "A" * 40
+
+    def test_mixed_case_hex_accepted(self):
+        """Mixed-case hex is accepted (git SHAs are case-insensitive)."""
+        le = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="aBcDeF" + "0" * 34,
+            agent_type=AgentType.ATOMIC,
+        )
+        assert len(le.commit_sha) == 40
 
     def test_invalid_unknown_sentinel_rejected(self):
         with pytest.raises(ValidationError):
@@ -466,3 +476,56 @@ class TestIndexEntry:
         """Empty path (default layout) is valid."""
         ie = IndexEntry(name="test", version="1.0.0", type=AgentType.ATOMIC, path="")
         assert ie.path == ""
+
+
+# ---------------------------------------------------------------------------
+# IndexEntry.name min_length=1 validation (iter88)
+# ---------------------------------------------------------------------------
+
+
+class TestIndexEntryNameValidation:
+    """IndexEntry.name must reject empty strings."""
+
+    def test_empty_name_rejected(self):
+        with pytest.raises(ValidationError):
+            IndexEntry(name="", version="1.0.0", type=AgentType.ATOMIC)
+
+    def test_valid_name_accepted(self):
+        ie = IndexEntry(name="doc-filler", version="1.0.0", type=AgentType.ATOMIC)
+        assert ie.name == "doc-filler"
+
+
+# ---------------------------------------------------------------------------
+# LockfileEntry uppercase hex commit_sha (iter88)
+# ---------------------------------------------------------------------------
+
+
+class TestLockfileEntryUppercaseSha:
+    """LockfileEntry.commit_sha accepts uppercase hex (git SHAs are case-insensitive)."""
+
+    def test_uppercase_sha1_accepted(self):
+        le = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="A" * 40,
+            agent_type=AgentType.ATOMIC,
+        )
+        assert le.commit_sha == "A" * 40
+
+    def test_uppercase_sha256_accepted(self):
+        le = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="F" * 64,
+            agent_type=AgentType.ATOMIC,
+        )
+        assert len(le.commit_sha) == 64
+
+    def test_mixed_case_sha1_accepted(self):
+        le = LockfileEntry(
+            version="1.0.0",
+            source="official",
+            commit_sha="AbCdEf" + "0" * 34,
+            agent_type=AgentType.ATOMIC,
+        )
+        assert le.commit_sha[:6] == "AbCdEf"

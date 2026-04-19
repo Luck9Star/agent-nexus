@@ -2679,3 +2679,201 @@ class TestDeferredRegistryGetToolsRunningNoSchemas:
 
         tools = registry.get_tools_for_llm()
         assert tools == []
+
+
+# ============================================================================
+# Iteration 88: Regression tests for dead-agent tool-name cleanup + empty
+# tool list truthy bug
+# ============================================================================
+
+
+class TestDeadAgentToolNameCleanup:
+    """Bug: _invoke cleaned _registered_agents but NOT _registered_tool_names.
+
+    When an agent dies and is later re-registered, leftover tool names in
+    _registered_tool_names cause the collision-detection logic to append
+    numeric suffixes (e.g. ``mcp__agent__tool_2``) instead of keeping the
+    original name.
+    """
+
+    @pytest.mark.asyncio
+    async def test_tool_names_cleaned_on_dead_agent(self) -> None:
+        """All tool names for a dead agent are removed from _registered_tool_names."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+        # FastMCP rejects **kwargs functions, so mock it to accept any call.
+        gw._mcp.tool = MagicMock()
+
+        manifest = _make_manifest("stale-agent")
+        await gw.register_agent(manifest, deferred=False)
+
+        info = gw.registry.get_agent_info("stale-agent")
+        assert info is not None
+        dead_handle = _mock_agent_handle("stale-agent", alive=False)
+        info.handle = dead_handle
+        info.tool_schemas = [
+            {"name": "do_work", "description": "Work"},
+            {"name": "do_more", "description": "More"},
+        ]
+
+        adapter_a = McpToolAdapter("stale-agent", _make_tool_schema("do_work", "Work"))
+        adapter_b = McpToolAdapter("stale-agent", _make_tool_schema("do_more", "More"))
+        gw.registry._tool_adapters["stale-agent"] = [adapter_a, adapter_b]
+
+        await gw._register_agent_tools("stale-agent")
+        assert "stale-agent" in gw._registered_agents
+        assert adapter_a.full_name in gw._registered_tool_names
+        assert adapter_b.full_name in gw._registered_tool_names
+
+        # Invoke via dead handle — triggers cleanup
+        func = gw._make_tool_func(adapter_a)
+        await func(x=1)
+
+        assert "stale-agent" not in gw._registered_agents
+        assert adapter_a.full_name not in gw._registered_tool_names
+        assert adapter_b.full_name not in gw._registered_tool_names
+
+    @pytest.mark.asyncio
+    async def test_reregistration_keeps_original_names(self) -> None:
+        """After dead-agent cleanup, re-registration uses original tool names (no suffix)."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+        gw._mcp.tool = MagicMock()
+
+        manifest = _make_manifest("restart-agent")
+        await gw.register_agent(manifest, deferred=False)
+
+        info = gw.registry.get_agent_info("restart-agent")
+        assert info is not None
+
+        # Phase 1: register tools with a dead handle
+        dead_handle = _mock_agent_handle("restart-agent", alive=False)
+        info.handle = dead_handle
+        info.tool_schemas = [{"name": "compute", "description": "Compute"}]
+
+        adapter = McpToolAdapter("restart-agent", _make_tool_schema("compute", "Compute"))
+        gw.registry._tool_adapters["restart-agent"] = [adapter]
+        await gw._register_agent_tools("restart-agent")
+
+        # Trigger cleanup via invoke
+        func = gw._make_tool_func(adapter)
+        await func(x=1)
+        assert "restart-agent" not in gw._registered_agents
+
+        # Phase 2: agent comes back alive, re-register with new adapter
+        alive_handle = _mock_agent_handle("restart-agent", alive=True)
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT, content="42", status="completed",
+        )
+        alive_handle.ipc.receive_until_result.return_value = response
+        info.handle = alive_handle
+        info.tool_schemas = [{"name": "compute", "description": "Compute"}]
+
+        adapter2 = McpToolAdapter("restart-agent", _make_tool_schema("compute", "Compute"))
+        gw.registry._tool_adapters["restart-agent"] = [adapter2]
+        await gw._register_agent_tools("restart-agent")
+
+        # The new adapter should retain its original full_name — no _2 suffix
+        assert adapter2.full_name == "mcp__restart_agent__compute"
+        assert adapter2.full_name in gw._registered_tool_names
+
+    @pytest.mark.asyncio
+    async def test_only_dead_agent_tools_cleaned(self) -> None:
+        """Cleanup of one dead agent does not affect another agent's tool names."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+        gw._mcp.tool = MagicMock()
+
+        # Register agent-a (alive) with a tool
+        manifest_a = _make_manifest("agent-a")
+        await gw.register_agent(manifest_a, deferred=False)
+        info_a = gw.registry.get_agent_info("agent-a")
+        assert info_a is not None
+        alive_handle = _mock_agent_handle("agent-a", alive=True)
+        alive_handle.ipc.receive_until_result.return_value = AgentToPlatform(
+            type=AgentToPlatformType.RESULT, content="ok", status="completed",
+        )
+        info_a.handle = alive_handle
+        info_a.tool_schemas = [{"name": "tool_a", "description": "A"}]
+        adapter_a = McpToolAdapter("agent-a", _make_tool_schema("tool_a", "A"))
+        gw.registry._tool_adapters["agent-a"] = [adapter_a]
+        await gw._register_agent_tools("agent-a")
+
+        # Register agent-b (dead) with a tool
+        manifest_b = _make_manifest("agent-b")
+        await gw.register_agent(manifest_b, deferred=False)
+        info_b = gw.registry.get_agent_info("agent-b")
+        assert info_b is not None
+        dead_handle = _mock_agent_handle("agent-b", alive=False)
+        info_b.handle = dead_handle
+        info_b.tool_schemas = [{"name": "tool_b", "description": "B"}]
+        adapter_b = McpToolAdapter("agent-b", _make_tool_schema("tool_b", "B"))
+        gw.registry._tool_adapters["agent-b"] = [adapter_b]
+        await gw._register_agent_tools("agent-b")
+
+        # Trigger cleanup for agent-b only
+        func = gw._make_tool_func(adapter_b)
+        await func(x=1)
+
+        # agent-a tools must remain untouched
+        assert adapter_a.full_name in gw._registered_tool_names
+        assert "agent-a" in gw._registered_agents
+
+        # agent-b tools must be cleaned
+        assert adapter_b.full_name not in gw._registered_tool_names
+        assert "agent-b" not in gw._registered_agents
+
+
+class TestEmptyToolListNotFalsy:
+    """Bug: _fetch_agent_tools treated empty list [] as falsy, skipping the
+    isinstance branch and falling through to the JSON-content fallback which
+    would create a spurious chat tool.
+
+    After fix: isinstance(response.output, list) correctly returns True for [].
+    """
+
+    @pytest.mark.asyncio
+    async def test_empty_tool_list_returns_empty(self) -> None:
+        """Agent returning zero tools should get an empty list, not a chat fallback."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = _make_manifest("no-tools-agent")
+        handle = _mock_agent_handle("no-tools-agent", alive=True)
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="",
+            status="completed",
+            output=[],  # empty list — was falsy, now correctly handled
+        )
+        handle.ipc.receive_until_result.return_value = response
+
+        info = AgentInfo(name="no-tools-agent", manifest=manifest, handle=handle)
+        result = await registry._fetch_agent_tools(info)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_non_empty_tool_list_still_works(self) -> None:
+        """Non-empty tool list continues to be returned correctly."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = _make_manifest("has-tools-agent")
+        handle = _mock_agent_handle("has-tools-agent", alive=True)
+        tool_list = [{"name": "search"}, {"name": "compute"}]
+        response = AgentToPlatform(
+            type=AgentToPlatformType.RESULT,
+            content="",
+            status="completed",
+            output=tool_list,
+        )
+        handle.ipc.receive_until_result.return_value = response
+
+        info = AgentInfo(name="has-tools-agent", manifest=manifest, handle=handle)
+        result = await registry._fetch_agent_tools(info)
+        assert len(result) == 2
+        assert result[0]["name"] == "search"
+        assert result[1]["name"] == "compute"

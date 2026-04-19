@@ -67,7 +67,7 @@ class SecurityViolation(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    rule_type: str  # e.g. "import", "function", "attribute", "regex"
-    node_type: str  # AST node type, e.g. "Import", "Call"
+    rule_type: str = Field(min_length=1)
+    node_type: str = Field(min_length=1)
     code_snippet: str = ""
     message: str = ""

@@ -170,10 +170,10 @@ class ContextBudgetLogEntry(BaseModel):
     agent_id: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
     turn_number: int | None = None
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    layer0_tokens: int = 0
-    layer1_tokens: int = 0
-    total_tokens: int = 0
+    prompt_tokens: int = Field(default=0, ge=0)
+    completion_tokens: int = Field(default=0, ge=0)
+    layer0_tokens: int = Field(default=0, ge=0)
+    layer1_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
     compaction_triggered: bool = False
     timestamp: datetime = Field(default_factory=_utc_now)

@@ -461,3 +461,47 @@ class TestContextBudgetThresholdOrdering:
     def test_rejects_truncate_equal_ceiling(self) -> None:
         with pytest.raises(ValidationError, match="forced_truncate_threshold"):
             ContextBudget(forced_truncate_threshold=0.9, session_hard_ceiling=0.9)
+
+
+# ---------------------------------------------------------------------------
+# ContextBudgetLogEntry token count ge=0 validation (iter88)
+# ---------------------------------------------------------------------------
+
+
+class TestContextBudgetLogEntryTokenValidation:
+    """ContextBudgetLogEntry token count fields reject negative values."""
+
+    def test_negative_prompt_tokens_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudgetLogEntry(log_id="l", agent_id="a", session_id="s", prompt_tokens=-1)
+
+    def test_negative_completion_tokens_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudgetLogEntry(log_id="l", agent_id="a", session_id="s", completion_tokens=-1)
+
+    def test_negative_layer0_tokens_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudgetLogEntry(log_id="l", agent_id="a", session_id="s", layer0_tokens=-1)
+
+    def test_negative_layer1_tokens_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudgetLogEntry(log_id="l", agent_id="a", session_id="s", layer1_tokens=-1)
+
+    def test_negative_total_tokens_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextBudgetLogEntry(log_id="l", agent_id="a", session_id="s", total_tokens=-1)
+
+    def test_zero_tokens_accepted(self):
+        entry = ContextBudgetLogEntry(
+            log_id="l", agent_id="a", session_id="s",
+            prompt_tokens=0, completion_tokens=0, total_tokens=0,
+        )
+        assert entry.prompt_tokens == 0
+        assert entry.total_tokens == 0
+
+    def test_positive_tokens_accepted(self):
+        entry = ContextBudgetLogEntry(
+            log_id="l", agent_id="a", session_id="s",
+            prompt_tokens=100, completion_tokens=50, total_tokens=150,
+        )
+        assert entry.prompt_tokens == 100

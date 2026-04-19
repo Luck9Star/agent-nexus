@@ -100,7 +100,7 @@ class AgentManifest(BaseModel):
     model preferences, permissions, dependencies, MCP servers, and hooks.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     name: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
     version: str = Field(min_length=1)
@@ -124,6 +124,22 @@ class AgentManifest(BaseModel):
     color: str | None = None
     background: bool = False
     initial_prompt: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_permission_consistency(self) -> "AgentManifest":
+        """Ensure permission_mode and permissions.mode do not diverge."""
+        if (
+            self.permission_mode is not None
+            and self.permissions is not None
+            and self.permissions.mode is not PermissionMode.DEFAULT
+            and self.permissions.mode != self.permission_mode
+        ):
+            raise ValueError(
+                f"permission_mode ({self.permission_mode.value}) conflicts "
+                f"with permissions.mode ({self.permissions.mode.value}). "
+                "Set them consistently or use only one."
+            )
+        return self
 
 
 class SkillDefinition(BaseModel):

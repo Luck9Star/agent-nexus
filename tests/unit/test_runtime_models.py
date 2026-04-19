@@ -266,3 +266,29 @@ class TestRuntimeNameMinLength:
     def test_runtime_type_empty_name(self):
         with pytest.raises(ValidationError):
             RuntimeType(name="", description="empty name type")
+
+
+# ---------------------------------------------------------------------------
+# SecurityViolation min_length=1 validation (iter88)
+# ---------------------------------------------------------------------------
+
+
+class TestSecurityViolationMinLength:
+    """SecurityViolation.rule_type and node_type must reject empty strings."""
+
+    def test_empty_rule_type_rejected(self):
+        with pytest.raises(ValidationError):
+            SecurityViolation(rule_type="", node_type="Import")
+
+    def test_empty_node_type_rejected(self):
+        with pytest.raises(ValidationError):
+            SecurityViolation(rule_type="import", node_type="")
+
+    def test_both_empty_rejected(self):
+        with pytest.raises(ValidationError):
+            SecurityViolation(rule_type="", node_type="")
+
+    def test_valid_fields_accepted(self):
+        sv = SecurityViolation(rule_type="import", node_type="Import")
+        assert sv.rule_type == "import"
+        assert sv.node_type == "Import"

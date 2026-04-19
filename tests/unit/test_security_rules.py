@@ -88,6 +88,36 @@ class TestImportRule:
         node = ast.parse("x = 1").body[0]  # Assign node
         assert rule.check(node) == []
 
+    def test_relative_import_bare_name_blocked(self):
+        """'from . import os' must be caught — names are checked when module is None."""
+        rule = ImportRule(forbidden=["os"])
+        violations = _check_code(rule, "from . import os")
+        assert len(violations) == 1
+        assert violations[0].rule_type == "import"
+        assert "os" in violations[0].message
+
+    def test_relative_import_multiple_forbidden_names(self):
+        """'from . import os, subprocess' catches both forbidden names."""
+        rule = ImportRule(forbidden=["os", "subprocess"])
+        violations = _check_code(rule, "from . import os, subprocess")
+        assert len(violations) == 2
+        names = {v.message for v in violations}
+        assert any("os" in n for n in names)
+        assert any("subprocess" in n for n in names)
+
+    def test_relative_import_allowed_name_not_blocked(self):
+        """'from . import json' is not blocked when json is not forbidden."""
+        rule = ImportRule(forbidden=["os"])
+        violations = _check_code(rule, "from . import json")
+        assert len(violations) == 0
+
+    def test_relative_import_from_module_still_caught(self):
+        """'from .os import path' still caught (regression for module-level check)."""
+        rule = ImportRule(forbidden=["os"])
+        violations = _check_code(rule, "from .os import path")
+        assert len(violations) == 1
+        assert "os" in violations[0].message
+
 
 # ---------------------------------------------------------------------------
 # FunctionRule

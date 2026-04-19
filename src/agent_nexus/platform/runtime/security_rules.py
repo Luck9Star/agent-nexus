@@ -66,6 +66,7 @@ class ImportRule(SecurityRule):
                     )
 
         elif isinstance(node, ast.ImportFrom):
+            # Check module path (e.g. "from os import path")
             if node.module and self._is_forbidden(node.module):
                 violations.append(
                     SecurityViolation(
@@ -75,6 +76,25 @@ class ImportRule(SecurityRule):
                         message=f"Forbidden import: 'from {node.module}' at line {node.lineno}",
                     )
                 )
+
+            # Relative imports like "from . import os" have node.module=None
+            # but forbidden names in node.names.  Only check names when
+            # the module-level check didn't already catch the violation,
+            # to avoid duplicate reports for "from os import os".
+            if not violations:
+                for alias in node.names:
+                    if alias.name and self._is_forbidden(alias.name):
+                        violations.append(
+                            SecurityViolation(
+                                rule_type="import",
+                                node_type="ImportFrom",
+                                code_snippet=f"from . import {alias.name}",
+                                message=(
+                                    f"Forbidden import: '{alias.name}' "
+                                    f"at line {node.lineno}"
+                                ),
+                            )
+                        )
 
         return violations
 

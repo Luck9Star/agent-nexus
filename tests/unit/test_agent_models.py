@@ -21,6 +21,7 @@ from agent_nexus.models.agent import (
     SkillDefinition,
 )
 from agent_nexus.models.hooks import HookEvent, HookType
+from agent_nexus.models.permission import PermissionConfig, PermissionMode
 
 
 # ---------------------------------------------------------------------------
@@ -652,3 +653,125 @@ class TestMcpServerConfigTransportValidation:
             transport="sse", url="http://localhost:8080/mcp", command="helper"
         )
         assert cfg.url == "http://localhost:8080/mcp"
+
+
+# ---------------------------------------------------------------------------
+# AgentManifest.model_config_field alias round-trip (iter88)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentManifestModelConfigRoundTrip:
+    """model_config_field alias must survive serialization round-trip."""
+
+    def test_model_dump_round_trip_preserves_model_config(self):
+        m = AgentManifest(
+            name="test",
+            version="1.0.0",
+            type=AgentType.ATOMIC,
+            description="d",
+            model_config=AgentModelConfig(recommended="gpt-4o"),
+        )
+        data = m.model_dump()
+        m2 = AgentManifest(**data)
+        assert m2.model_config_field is not None
+        assert m2.model_config_field.recommended == "gpt-4o"
+
+    def test_model_dump_json_round_trip_preserves_model_config(self):
+        m = AgentManifest(
+            name="test",
+            version="1.0.0",
+            type=AgentType.ATOMIC,
+            description="d",
+            model_config=AgentModelConfig(recommended="gpt-4o", fallback="gpt-3.5-turbo"),
+        )
+        json_str = m.model_dump_json()
+        m2 = AgentManifest.model_validate_json(json_str)
+        assert m2.model_config_field is not None
+        assert m2.model_config_field.recommended == "gpt-4o"
+        assert m2.model_config_field.fallback == "gpt-3.5-turbo"
+
+    def test_field_name_construction_works(self):
+        m = AgentManifest(
+            name="test",
+            version="1.0.0",
+            type=AgentType.ATOMIC,
+            description="d",
+            model_config_field=AgentModelConfig(recommended="gpt-4o"),
+        )
+        assert m.model_config_field is not None
+        assert m.model_config_field.recommended == "gpt-4o"
+
+    def test_none_model_config_round_trips(self):
+        m = AgentManifest(
+            name="test",
+            version="1.0.0",
+            type=AgentType.ATOMIC,
+            description="d",
+        )
+        data = m.model_dump()
+        m2 = AgentManifest(**data)
+        assert m2.model_config_field is None
+
+
+# ---------------------------------------------------------------------------
+# AgentManifest permission_mode vs permissions.mode consistency (iter88)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentManifestPermissionConsistency:
+    """permission_mode and permissions.mode must not diverge."""
+
+    def test_divergent_modes_rejected(self):
+        with pytest.raises(ValidationError, match="conflicts"):
+            AgentManifest(
+                name="test",
+                version="1.0.0",
+                type=AgentType.ATOMIC,
+                description="d",
+                permission_mode=PermissionMode.PLAN,
+                permissions=PermissionConfig(mode=PermissionMode.FULL_AUTO),
+            )
+
+    def test_consistent_modes_accepted(self):
+        m = AgentManifest(
+            name="test",
+            version="1.0.0",
+            type=AgentType.ATOMIC,
+            description="d",
+            permission_mode=PermissionMode.PLAN,
+            permissions=PermissionConfig(mode=PermissionMode.PLAN),
+        )
+        assert m.permission_mode is PermissionMode.PLAN
+
+    def test_only_permission_mode_accepted(self):
+        m = AgentManifest(
+            name="test",
+            version="1.0.0",
+            type=AgentType.ATOMIC,
+            description="d",
+            permission_mode=PermissionMode.FULL_AUTO,
+        )
+        assert m.permission_mode is PermissionMode.FULL_AUTO
+        assert m.permissions is None
+
+    def test_only_permissions_accepted(self):
+        m = AgentManifest(
+            name="test",
+            version="1.0.0",
+            type=AgentType.ATOMIC,
+            description="d",
+            permissions=PermissionConfig(mode=PermissionMode.FULL_AUTO),
+        )
+        assert m.permissions.mode is PermissionMode.FULL_AUTO
+        assert m.permission_mode is None
+
+    def test_permission_mode_with_default_permissions_mode_accepted(self):
+        m = AgentManifest(
+            name="test",
+            version="1.0.0",
+            type=AgentType.ATOMIC,
+            description="d",
+            permission_mode=PermissionMode.PLAN,
+            permissions=PermissionConfig(),
+        )
+        assert m.permission_mode is PermissionMode.PLAN
