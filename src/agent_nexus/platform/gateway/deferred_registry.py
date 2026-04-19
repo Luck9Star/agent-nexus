@@ -19,6 +19,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from agent_nexus.models.agent import AgentManifest
+from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.orchestration.process_manager import (
     AgentHandle,
     ProcessManager,
@@ -270,6 +271,15 @@ class DeferredAgentRegistry:
                 "__list_tools__", conversation_id="__internal__"
             )
             response = await handle.ipc.receive_until_result(timeout=10.0)
+
+            if response.type == AgentToPlatformType.ERROR:
+                logger.warning(
+                    "Agent '%s' returned ERROR response during tool "
+                    "discovery: %s. Using generic chat tool as fallback.",
+                    info.name,
+                    response.error or "unknown error",
+                )
+                return [self._fallback_chat_tool(info)]
 
             if isinstance(response.output, list):
                 return self._validate_tool_schemas(response.output)

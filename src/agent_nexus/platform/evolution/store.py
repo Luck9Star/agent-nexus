@@ -324,6 +324,22 @@ class EvolutionStore:
     # Atomic counter increments
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _validate_counter_invariants(
+        *, selected: bool, applied: bool, completed: bool, fell_back: bool,
+    ) -> None:
+        """Validate counter prerequisite invariants.
+
+        Each flag requires its prerequisite:
+        applied -> selected, completed -> applied, fell_back -> selected.
+        """
+        if applied and not selected:
+            raise ValueError("applied requires selected=True")
+        if completed and not applied:
+            raise ValueError("completed requires applied=True")
+        if fell_back and not selected:
+            raise ValueError("fell_back requires selected=True")
+
     def increment_counters(
         self,
         skill_id: str,
@@ -337,13 +353,10 @@ class EvolutionStore:
 
         Called within the same transaction as judgment insert.
         """
-        # Validate counter invariants: each flag requires its prerequisite
-        if fell_back and not applied:
-            raise ValueError("fell_back requires applied=True")
-        if applied and not selected:
-            raise ValueError("applied requires selected=True")
-        if completed and not applied:
-            raise ValueError("completed requires applied=True")
+        self._validate_counter_invariants(
+            selected=selected, applied=applied,
+            completed=completed, fell_back=fell_back,
+        )
 
         sets: list[str] = []
         params: list[str] = []
@@ -447,6 +460,11 @@ class EvolutionStore:
                 completed = bool(j.get("completed", False))
                 fell_back = bool(j.get("fell_back", False))
 
+                self._validate_counter_invariants(
+                    selected=selected, applied=applied,
+                    completed=completed, fell_back=fell_back,
+                )
+
                 sets: list[str] = []
                 params: list[Any] = []
                 if selected:
@@ -485,6 +503,8 @@ class EvolutionStore:
         self, skill_id: str, limit: int = 50
     ) -> list[dict[str, Any]]:
         """Load recent judgments for a skill."""
+        if limit < 1:
+            limit = 1
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT id, analysis_id, skill_id, selected, applied, "
@@ -518,6 +538,8 @@ class EvolutionStore:
         """
         if not skill_ids:
             return {}
+        if limit_per_skill < 1:
+            limit_per_skill = 1
         placeholders = ",".join("?" * len(skill_ids))
         with self._conn() as conn:
             rows = conn.execute(
@@ -583,6 +605,8 @@ class EvolutionStore:
         self, agent_name: str, limit: int = 50
     ) -> list[dict[str, Any]]:
         """Load recent budget log entries for an agent."""
+        if limit < 1:
+            limit = 1
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT id, agent_name, event_type, tokens_before, "

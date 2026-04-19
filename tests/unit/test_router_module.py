@@ -1477,6 +1477,50 @@ class TestSubtaskCancelledError:
             await controller.run_parallel([ok(), cancel()])
 
 
+class TestSubtaskSystemExit:
+    """iter110d: SystemExit propagates immediately, not retried."""
+
+    @pytest.mark.asyncio
+    async def test_run_with_retry_propagates_system_exit(self) -> None:
+        """SystemExit in run_with_retry is propagated immediately."""
+
+        attempt = 0
+
+        async def exit_then_succeed():
+            nonlocal attempt
+            attempt += 1
+            if attempt == 1:
+                raise SystemExit(1)
+            return "ok"
+
+        controller = SubtaskController()
+        with pytest.raises(SystemExit):
+            await controller.run_with_retry(
+                exit_then_succeed, max_retries=2,
+            )
+        assert attempt == 1
+
+    @pytest.mark.asyncio
+    async def test_run_with_retry_propagates_generator_exit(self) -> None:
+        """GeneratorExit in run_with_retry is propagated immediately."""
+
+        attempt = 0
+
+        async def gen_exit_then_succeed():
+            nonlocal attempt
+            attempt += 1
+            if attempt == 1:
+                raise GeneratorExit()
+            return "ok"
+
+        controller = SubtaskController()
+        with pytest.raises(GeneratorExit):
+            await controller.run_with_retry(
+                gen_exit_then_succeed, max_retries=2,
+            )
+        assert attempt == 1
+
+
 # ============================================================================
 # Merged from iteration 23: WorkflowContext.close() drops task_graph
 # ============================================================================
@@ -1824,6 +1868,26 @@ class TestGetToolsFallbackHandleNone:
     async def test_none_handle_skipped(self) -> None:
         """Agent listed as running but get_agent returns None is skipped."""
         pm = _make_process_manager(agents={}, running=["ghost"])
+        router = PlatformRouter(process_manager=pm)
+
+        tools = await router.get_tools()
+        assert tools == []
+
+
+class TestGetToolsErrorResponse:
+    """iter110b regression: get_tools skips ERROR responses with warning."""
+
+    @pytest.mark.asyncio
+    async def test_error_response_skipped(self) -> None:
+        """Agent returning ERROR type during tool discovery is skipped."""
+        h = _make_agent_handle(name="a1")
+        mock_resp = MagicMock()
+        mock_resp.type = AgentToPlatformType.ERROR
+        mock_resp.error = "agent internal panic"
+        mock_resp.content = "panic stack trace"
+        h.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
+
+        pm = _make_process_manager(agents={"a1": h}, running=["a1"])
         router = PlatformRouter(process_manager=pm)
 
         tools = await router.get_tools()

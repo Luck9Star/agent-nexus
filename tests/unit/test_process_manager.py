@@ -973,6 +973,36 @@ class TestRestartAgentRaceCondition:
             "already removed during restart" in r.message for r in caplog.records
         )
 
+    @pytest.mark.asyncio
+    async def test_restart_handles_timeout_during_stop(self, caplog):
+        """iter110c: restart_agent catches asyncio.TimeoutError from stop_agent."""
+        import logging
+
+        pm = ProcessManager()
+
+        original_proc = _iter17_make_mock_process(pid=50001)
+        with patch(_SUBPROCESS_PATCH, return_value=original_proc):
+            await pm.start_agent("timeout-agent", command=["echo"])
+
+        pm._agents["timeout-agent"].process.returncode = 0
+
+        async def _stop_raises_timeout(name, timeout=10.0):
+            raise asyncio.TimeoutError("Agent did not terminate in time")
+
+        with patch.object(pm, "stop_agent", side_effect=_stop_raises_timeout):
+            new_proc = _iter17_make_mock_process(pid=50002)
+            with patch(_SUBPROCESS_PATCH, return_value=new_proc):
+                with caplog.at_level(
+                    logging.WARNING,
+                    logger="agent_nexus.platform.orchestration.process_manager",
+                ):
+                    result = await pm.restart_agent("timeout-agent")
+
+        assert isinstance(result, AgentHandle)
+        assert any(
+            "timed out during stop" in r.message for r in caplog.records
+        )
+
 
 class TestHealthCheckCleanup:
     """health_check calls _cleanup_dead before lookup (Defects 2 & 3)."""

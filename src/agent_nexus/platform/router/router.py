@@ -336,6 +336,14 @@ class PlatformRouter:
                     "__list_tools__", conversation_id="__internal__"
                 )
                 response = await handle.ipc.receive_until_result(timeout=10.0)
+                if response.type == AgentToPlatformType.ERROR:
+                    logger.warning(
+                        "Agent '%s' returned error during tool "
+                        "discovery: %s",
+                        name,
+                        response.error or "unknown error",
+                    )
+                    continue
                 if response.content:
                     content = response.content
                     if isinstance(content, str):

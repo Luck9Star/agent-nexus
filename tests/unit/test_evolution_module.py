@@ -2848,11 +2848,15 @@ class TestEvolveCapturedStoreFailure:
 class TestEvolutionStoreCounterValidation:
     """Tests for increment_counters ValueError guards (lines 305, 307, 309)."""
 
-    def test_fell_back_requires_applied(self, tmp_path: Path) -> None:
-        """fell_back=True with applied=False raises ValueError."""
+    def test_fell_back_requires_selected(self, tmp_path: Path) -> None:
+        """fell_back=True with selected=False raises ValueError.
+
+        fell_back without applied is valid (skill was tried but failed),
+        but fell_back without selected is invalid (skill was never considered).
+        """
         store = _store_with_records(tmp_path, _make_record("s1", "x"))
-        with pytest.raises(ValueError, match="fell_back requires applied"):
-            store.increment_counters("s1", fell_back=True, applied=False, selected=True)
+        with pytest.raises(ValueError, match="fell_back requires selected"):
+            store.increment_counters("s1", fell_back=True, applied=False, selected=False)
 
     def test_applied_requires_selected(self, tmp_path: Path) -> None:
         """applied=True with selected=False raises ValueError."""

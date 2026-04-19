@@ -2960,6 +2960,70 @@ class TestEmptyToolListNotFalsy:
 
 
 # ============================================================================
+# Regression: _fetch_agent_tools ERROR response check (iter110b)
+# ============================================================================
+
+
+class TestFetchAgentToolsErrorResponse:
+    """Bug: _fetch_agent_tools did not check for ERROR response type from IPC.
+
+    When an agent returned an ERROR response during tool discovery, the code
+    skipped the ERROR check and tried to parse response.content or
+    response.output as JSON tool definitions. This caused confusing log
+    messages like "not valid JSON" instead of surfacing the actual agent error.
+
+    After fix: ERROR responses are detected early and return the fallback
+    chat tool with a clear warning message.
+    """
+
+    @pytest.mark.asyncio
+    async def test_error_response_returns_fallback(self) -> None:
+        """ERROR response from agent returns fallback chat tool, not JSON parse error."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = _make_manifest("error-agent")
+        handle = _mock_agent_handle("error-agent", alive=True)
+        handle.ipc.receive_until_result = AsyncMock(
+            return_value=AgentToPlatform(
+                type=AgentToPlatformType.ERROR,
+                error="agent internal failure",
+            )
+        )
+
+        info = AgentInfo(name="error-agent", manifest=manifest, handle=handle)
+        result = await registry._fetch_agent_tools(info)
+
+        # Should return fallback chat tool, not attempt JSON parsing
+        assert len(result) == 1
+        assert result[0]["name"] == "chat"
+
+    @pytest.mark.asyncio
+    async def test_error_response_does_not_parse_content(self) -> None:
+        """ERROR response with content field should NOT be parsed as tool JSON."""
+        pm = MagicMock(spec=ProcessManager)
+        registry = DeferredAgentRegistry(pm)
+
+        manifest = _make_manifest("error-with-content")
+        handle = _mock_agent_handle("error-with-content", alive=True)
+        handle.ipc.receive_until_result = AsyncMock(
+            return_value=AgentToPlatform(
+                type=AgentToPlatformType.ERROR,
+                content="this is not JSON tool data",
+                error="something went wrong",
+            )
+        )
+
+        info = AgentInfo(
+            name="error-with-content", manifest=manifest, handle=handle
+        )
+        result = await registry._fetch_agent_tools(info)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "chat"
+
+
+# ============================================================================
 # Regression: _invoke IPC exception handler must clean _registered_tool_names
 # ============================================================================
 

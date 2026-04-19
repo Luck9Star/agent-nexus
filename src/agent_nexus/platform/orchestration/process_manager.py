@@ -347,6 +347,11 @@ class ProcessManager:
                 "Agent '%s' already removed during restart (concurrent stop)",
                 name,
             )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Agent '%s' timed out during stop phase of restart",
+                name,
+            )
         return await self.start_agent(name, command=command, cwd=cwd, env=env)
 
     # ------------------------------------------------------------------

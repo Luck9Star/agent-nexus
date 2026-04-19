@@ -531,7 +531,7 @@ class TestRecordAnalysisSkipsBadSkillId:
             analysis_text="check",
             judgments=[
                 {"skill_id": "", "selected": True},
-                {"skill_id": "s-valid", "applied": True},
+                {"skill_id": "s-valid", "selected": True, "applied": True},
             ],
         )
 
@@ -1524,3 +1524,178 @@ class TestBatchRowResilience:
 
         skills = store.get_active_skills()
         assert skills == []
+
+
+# ============================================================================
+# iter110e regression: record_analysis counter invariant validation
+# ============================================================================
+
+
+class TestRecordAnalysisCounterInvariants:
+    """record_analysis must enforce the same counter invariants as increment_counters.
+
+    fell_back requires applied, applied requires selected, completed requires applied.
+    """
+
+    @staticmethod
+    def _seed_skill(store: EvolutionStore, skill_id: str) -> None:
+        store.save_skill_record(
+            SkillRecord(
+                id=skill_id,
+                name="test-skill",
+                version="1.0.0",
+                lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+                directory="skills/test",
+                is_active=True,
+                first_seen=datetime.now(timezone.utc),
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
+
+    def test_fell_back_without_applied_raises(self, tmp_path: Path) -> None:
+        """fell_back without selected raises, but fell_back without applied is valid."""
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s1")
+        # fell_back WITHOUT selected is invalid
+        with pytest.raises(ValueError, match="fell_back requires selected"):
+            store.record_analysis(
+                task_id="t1",
+                agent_name="tester",
+                analysis_text="test",
+                judgments=[{
+                    "skill_id": "s1",
+                    "selected": False,
+                    "applied": False,
+                    "fell_back": True,
+                }],
+            )
+        # fell_back WITH selected but WITHOUT applied is VALID (tried, failed, fell back)
+        store.record_analysis(
+            task_id="t2",
+            agent_name="tester",
+            analysis_text="test",
+            judgments=[{
+                "skill_id": "s1",
+                "selected": True,
+                "applied": False,
+                "fell_back": True,
+            }],
+        )
+        judgments = store.get_judgments_for_skill("s1")
+        assert len(judgments) == 1
+
+    def test_applied_without_selected_raises(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s1")
+        with pytest.raises(ValueError, match="applied requires selected"):
+            store.record_analysis(
+                task_id="t1",
+                agent_name="tester",
+                analysis_text="test",
+                judgments=[{
+                    "skill_id": "s1",
+                    "selected": False,
+                    "applied": True,
+                }],
+            )
+
+    def test_valid_counters_succeed(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s1")
+        # selected + applied + completed + fell_back is valid
+        store.record_analysis(
+            task_id="t1",
+            agent_name="tester",
+            analysis_text="test",
+            judgments=[{
+                "skill_id": "s1",
+                "selected": True,
+                "applied": True,
+                "completed": True,
+                "fell_back": True,
+            }],
+        )
+        judgments = store.get_judgments_for_skill("s1")
+        assert len(judgments) == 1
+
+
+# ============================================================================
+# iter110 regression: negative limit bypasses SQL LIMIT
+# ============================================================================
+
+
+class TestNegativeLimitClamped:
+    """Negative/zero limit must be clamped to 1, not passed to SQLite.
+
+    SQLite treats ``LIMIT -1`` as "no limit", silently returning all rows.
+    """
+
+    @staticmethod
+    def _seed_skill(store: EvolutionStore, skill_id: str) -> None:
+        store.save_skill_record(
+            SkillRecord(
+                id=skill_id,
+                name="test-skill",
+                version="1.0.0",
+                lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+                directory="skills/test",
+                is_active=True,
+                first_seen=datetime.now(timezone.utc),
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
+
+    def test_get_judgments_for_skill_negative_limit(self, tmp_path: Path) -> None:
+        """limit=-1 must return at most 1 row, not all rows."""
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s1")
+        for i in range(5):
+            store.record_analysis(
+                task_id=f"t{i}",
+                agent_name="tester",
+                analysis_text=f"analysis {i}",
+                judgments=[{"skill_id": "s1", "selected": True}],
+            )
+        # Without fix, limit=-1 would return all 5 rows
+        result = store.get_judgments_for_skill("s1", limit=-1)
+        assert len(result) == 1
+
+    def test_get_judgments_for_skill_zero_limit(self, tmp_path: Path) -> None:
+        """limit=0 must return at most 1 row, not 0 rows."""
+        store = _make_store(tmp_path)
+        self._seed_skill(store, "s1")
+        store.record_analysis(
+            task_id="t1",
+            agent_name="tester",
+            analysis_text="analysis",
+            judgments=[{"skill_id": "s1", "selected": True}],
+        )
+        result = store.get_judgments_for_skill("s1", limit=0)
+        assert len(result) == 1
+
+    def test_get_budget_log_negative_limit(self, tmp_path: Path) -> None:
+        """limit=-1 in get_budget_log must return at most 1 row."""
+        store = _make_store(tmp_path)
+        for i in range(5):
+            store.log_budget_event(
+                agent_name="test-agent",
+                event_type="compaction",
+                tokens_before=1000,
+                tokens_after=500,
+                details={"note": "test"},
+            )
+        result = store.get_budget_log("test-agent", limit=-1)
+        assert len(result) == 1
+
+    def test_get_budget_log_zero_limit(self, tmp_path: Path) -> None:
+        """limit=0 in get_budget_log must return at most 1 row."""
+        store = _make_store(tmp_path)
+        store.log_budget_event(
+            agent_name="test-agent",
+            event_type="compaction",
+            tokens_before=1000,
+            tokens_after=500,
+            details={"note": "test"},
+        )
+        result = store.get_budget_log("test-agent", limit=0)
+        assert len(result) == 1

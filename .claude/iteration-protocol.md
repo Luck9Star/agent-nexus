@@ -146,6 +146,7 @@
 | 蓝军 adversarial audit iter107: P1 FK约束 | skill_judgments.skill_id FK + ghost-skill rejection + atomic rollback = 2 tests | 2026-04-20 | iter107 |
 | 蓝军深度扫描 iter108: 资源泄漏 | store._conn() PRAGMA/BEGIN移入try/finally + proxy-based regression test × 2 = 3 agents 14 findings cross-verified | 2026-04-20 | iter108 |
 | 蓝军积压清零 iter109: 错误处理韧性 | store._rows_to_records批量行恢复 + lockfile腐化ERROR日志 + router send_chat IPC异常包装 = 6 tests | 2026-04-20 | iter109 |
+| 蓝军3-agent深度扫描 iter110: 5模式全量修复 | SQL LIMIT clamp(2) + ERROR响应类型检查(2) + asyncio.TimeoutError catch(2) + BaseException细化(1) + 计数器不变量修正(1) = 11 tests | 2026-04-20 | iter110 |
 
 ### 待清模式
 

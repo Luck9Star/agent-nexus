@@ -974,6 +974,18 @@ class TestAgentSupervisor:
         supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path)
         assert await supervisor.stop_agent("missing-agent") is False
 
+    async def test_stop_agent_timeout_error(self, tmp_path: Path) -> None:
+        """iter110c: stop_agent() returns False when PM raises TimeoutError."""
+        pm = _make_mock_pm()
+        mock_handle = MagicMock()
+        mock_handle.is_alive = True
+        pm.get_agent = MagicMock(return_value=mock_handle)
+        pm.stop_agent = AsyncMock(side_effect=asyncio.TimeoutError("timed out"))
+        lockfile = _make_mock_lockfile_mgr()
+        config = _make_mock_config_loader()
+        supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path)
+        assert await supervisor.stop_agent("hung-agent") is False
+
     async def test_stop_all(self, tmp_path: Path) -> None:
         """stop_all() delegates to ProcessManager.stop_all()."""
         pm = _make_mock_pm()
