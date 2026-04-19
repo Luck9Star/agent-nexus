@@ -255,3 +255,32 @@ class TestRunParallel:
         coros = [delayed(i, 0.05 * (3 - i)) for i in range(4)]
         results = await ctrl.run_parallel(coros)
         assert results == [0, 1, 2, 3]
+
+    # iter97 regression — skipped coroutines must be .close()d
+    @pytest.mark.asyncio
+    async def test_skipped_coroutines_do_not_emit_runtime_warning(self):
+        """Skipped coroutines (due to earlier failure) are properly closed,
+        so no 'coroutine was never awaited' RuntimeWarning is emitted."""
+        import warnings
+
+        ctrl = SubtaskController(SubtaskConfig(max_parallel=1))
+
+        async def fail():
+            raise RuntimeError("boom")
+
+        async def never_started():
+            return "should not run"
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            results = await ctrl.run_parallel([fail(), never_started()])
+            runtime_warnings = [
+                w for w in caught
+                if issubclass(w.category, RuntimeWarning)
+                and "never awaited" in str(w.message)
+            ]
+        assert len(runtime_warnings) == 0, (
+            f"Expected no 'never awaited' warnings, got: {runtime_warnings}"
+        )
+        assert isinstance(results[0], RuntimeError)
+        assert isinstance(results[1], RuntimeError)

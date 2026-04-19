@@ -137,6 +137,7 @@ class SubtaskController:
                 # be discarded.  Already-running tasks are NOT cancelled
                 # because their partial results may be useful.
                 if failed.is_set():
+                    coro.close()
                     results[index] = RuntimeError(
                         "cancelled: another parallel task failed"
                     )
