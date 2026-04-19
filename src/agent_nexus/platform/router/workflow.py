@@ -52,11 +52,13 @@ class WorkflowContext:
     def close(self) -> None:
         """Release the TaskGraph reference for GC.
 
-        TaskGraph uses ephemeral SQLite connections (per-operation), so
-        there is no persistent connection to close.  Setting to ``None``
-        drops the reference so the object (and its db_path) can be
-        collected.
+        In-memory TaskGraph instances hold a persistent SQLite connection
+        (``_mem_conn``) that must be explicitly closed.  File-based
+        TaskGraph instances use per-operation connections, so ``close()``
+        is a no-op for them.
         """
+        if self.task_graph is not None:
+            self.task_graph.close()
         self.task_graph = None
 
 

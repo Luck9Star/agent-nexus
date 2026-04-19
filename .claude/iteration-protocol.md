@@ -166,6 +166,8 @@
 | P1 _cleanup_dead FD leak: IPC stream + drain task | ipc.py close_sync() + process_manager.py _cleanup_dead drain cancel + stream close + 3 regression tests = 2576 tests | 2026-04-20 | iter124d |
 | 蓝军3-agent深度扫描 iter125: error_type一致性 | tool_adapter.py + router.py 6个error path补齐error_type + 7 regression tests = 2583 tests | 2026-04-20 | iter125 |
 | IPC exception type preservation + close() logging | router.py _execute_single_agent IPC异常直传 + ipc.py close() logging + process_manager _cleanup_dead FD leak + 3 tests = 2586 tests | 2026-04-20 | iter126 |
+| 蓝军3-agent深度扫描 iter127: WorkflowContext TaskGraph泄漏 | workflow.py close()先调用task_graph.close()再置None + 1 regression test = 2587 tests | 2026-04-20 | iter127 |
+| 蓝军P0 drain_task异常静默丢失 | process_manager.py _drain_stderr try/except + CancelledError静默 + Exception日志 + 3 tests = 2590 tests | 2026-04-20 | iter128 |
 
 ### 待清模式
 

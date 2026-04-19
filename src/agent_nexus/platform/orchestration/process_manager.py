@@ -351,6 +351,11 @@ class ProcessManager:
         Reuses the original ``command``, ``cwd``, and ``env`` that were
         passed to :meth:`start_agent`.  Any keyword arguments override
         those stored values.
+
+        After stopping, acquires ``_lock`` to check whether a
+        concurrent caller already started an agent with the same name.
+        If so, returns the existing handle instead of failing with an
+        "already running" error.
         """
         async with self._lock:
             handle = self._agents.get(name)
@@ -367,6 +372,18 @@ class ProcessManager:
                 "Agent '%s' already removed during restart (concurrent stop)",
                 name,
             )
+
+        # Re-check under lock: if a concurrent caller already started
+        # an agent with this name while we were stopped, return their
+        # handle rather than raising "already running".
+        async with self._lock:
+            existing = self._agents.get(name)
+            if existing is not None and existing.is_alive:
+                logger.info(
+                    "Agent '%s' already restarted by concurrent caller", name,
+                )
+                return existing
+
         return await self.start_agent(name, command=command, cwd=cwd, env=env)
 
     # ------------------------------------------------------------------

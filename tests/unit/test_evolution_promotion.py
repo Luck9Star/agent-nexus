@@ -235,3 +235,70 @@ class TestAtomicWriteFailure:
         # No stale .promo-*.tmp files left behind
         tmp_files = list(target.parent.glob(".promo-*.tmp"))
         assert tmp_files == []
+
+
+# ---------------------------------------------------------------------------
+# iter128 regression: partial rollback on pre-existing directory
+# ---------------------------------------------------------------------------
+
+
+class TestPromotionPartialRollback:
+    """promote() cleans up partial files on failure in pre-existing directory."""
+
+    def test_partial_files_cleaned_on_preexisting_dir(self, tmp_path: Path) -> None:
+        """When atomic_write fails mid-promotion in a pre-existing dir,
+        only the files we wrote are removed (not the entire directory)."""
+        from unittest.mock import patch
+
+        store = _make_store()
+        agents_root = tmp_path / "agents"
+        agents_root.mkdir()
+        # Pre-create the agent directory
+        agent_dir = agents_root / "good-skill"
+        agent_dir.mkdir()
+        # Put an existing file to prove rmtree is NOT called
+        existing = agent_dir / "README.md"
+        existing.write_text("existing content")
+
+        promoter = AgentPromoter(store, agents_root=agents_root)
+        candidate = _candidate()
+
+        # Make the second write (agent.py) fail
+        original_write = promoter._atomic_write
+        call_count = 0
+
+        def _failing_write(path, content):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise OSError("disk full")
+            return original_write(path, content)
+
+        with patch.object(promoter, "_atomic_write", side_effect=_failing_write):
+            result = promoter.promote(candidate)
+
+        assert result.success is False
+        assert "disk full" in result.error
+        # Pre-existing file should still be there
+        assert existing.exists()
+        # The agent-manifest.yaml (first file) should have been cleaned up
+        assert not (agent_dir / "agent-manifest.yaml").exists()
+
+    def test_full_cleanup_on_new_dir_failure(self, tmp_path: Path) -> None:
+        """When all files fail to write in a newly created dir, dir is removed."""
+        from unittest.mock import patch
+
+        store = _make_store()
+        agents_root = tmp_path / "agents"
+        promoter = AgentPromoter(store, agents_root=agents_root)
+        candidate = _candidate()
+
+        agent_dir = agents_root / "good-skill"
+        assert not agent_dir.exists()
+
+        with patch.object(promoter, "_atomic_write", side_effect=OSError("fail")):
+            result = promoter.promote(candidate)
+
+        assert result.success is False
+        # Newly created directory should be cleaned up entirely
+        assert not agent_dir.exists()

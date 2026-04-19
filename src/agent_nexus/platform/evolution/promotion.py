@@ -144,7 +144,11 @@ class AgentPromoter:
 
         agent_dir = self._agents_root / agent_name
 
-        created = not agent_dir.exists()
+        # Track whether the directory existed BEFORE we started so we
+        # can decide cleanup scope on failure.  A pre-existing directory
+        # from a crashed promotion (SIGKILL) should still be cleaned up
+        # if only partial files were written.
+        preexisting = agent_dir.exists()
         try:
             agent_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -153,26 +157,38 @@ class AgentPromoter:
                 error=f"Failed to create agent directory: {e}",
             )
 
+        # Track files written so we can clean up on partial failure.
+        written_files: list[Path] = []
         try:
             # Generate manifest
             manifest_content = self._generate_manifest(candidate)
             manifest_path = agent_dir / "agent-manifest.yaml"
             self._atomic_write(manifest_path, manifest_content)
+            written_files.append(manifest_path)
 
             # Generate entry point
             entry_content = self._generate_entry_point(candidate)
             entry_path = agent_dir / "agent.py"
             self._atomic_write(entry_path, entry_content)
+            written_files.append(entry_path)
 
             # Generate skill file
             skill_content = self._generate_skill_md(candidate)
             skill_path = agent_dir / "SKILL.md"
             self._atomic_write(skill_path, skill_content)
+            written_files.append(skill_path)
         except OSError as e:
-            # Only clean up if we created the directory — never delete
-            # a pre-existing directory that we didn't create.
-            if created and agent_dir.exists():
+            # Clean up partial files.
+            if not preexisting:
+                # We created the directory — safe to remove entirely.
                 shutil.rmtree(agent_dir, ignore_errors=True)
+            else:
+                # Pre-existing directory — only remove files we wrote.
+                for f in written_files:
+                    try:
+                        f.unlink()
+                    except OSError:
+                        pass
             return PromotionResult(
                 success=False,
                 error=f"Failed to write agent files: {e}",

@@ -1148,3 +1148,50 @@ class TestIPCTimeoutErrorChain:
             await stream.receive(timeout=1.0)
         assert exc_info.value.__cause__ is not None
         assert isinstance(exc_info.value.__cause__, asyncio.TimeoutError)
+
+
+# ---------------------------------------------------------------------------
+# iter128 regression: close_sync() releases stdout FD transport
+# ---------------------------------------------------------------------------
+
+
+class TestCloseSyncStdoutFD:
+    """close_sync() must close both stdin StreamWriter and stdout transport."""
+
+    def test_close_sync_closes_stdin(self) -> None:
+        mock_stdin = MagicMock()
+        mock_stdin.is_closing.return_value = False
+        mock_stdout = MagicMock()
+        mock_stdout._transport = MagicMock()
+        mock_stdout._transport.is_closing.return_value = False
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        stream.close_sync()
+
+        mock_stdin.close.assert_called_once()
+
+    def test_close_sync_closes_stdout_transport(self) -> None:
+        """close_sync() must close the stdout transport, not just stdin."""
+        mock_stdin = MagicMock()
+        mock_stdin.is_closing.return_value = False
+        mock_transport = MagicMock()
+        mock_transport.is_closing.return_value = False
+        mock_stdout = MagicMock()
+        mock_stdout._transport = mock_transport
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        stream.close_sync()
+
+        mock_transport.close.assert_called_once()
+
+    def test_close_sync_no_transport_does_not_crash(self) -> None:
+        """If stdout has no _transport attribute, close_sync still succeeds."""
+        mock_stdin = MagicMock()
+        mock_stdin.is_closing.return_value = False
+        mock_stdout = MagicMock(spec=["readline", "read"])
+        # No _transport attribute
+
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        stream.close_sync()  # Should not raise
+
+        mock_stdin.close.assert_called_once()

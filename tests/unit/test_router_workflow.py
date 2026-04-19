@@ -76,6 +76,21 @@ class TestWorkflowContext:
         ctx.close()
         assert ctx.task_graph is None
 
+    def test_close_releases_mem_conn(self):
+        """Regression: close() must call task_graph.close() to release _mem_conn."""
+        from agent_nexus.platform.orchestration.task_graph import TaskGraph
+        tg = TaskGraph(":memory:")  # pyright: ignore[reportArgumentType]
+        assert tg._mem_conn is not None
+        ctx = WorkflowContext(
+            conversation_id="cid-mem",
+            message="test",
+            agent_name="agent",
+            task_graph=tg,
+        )
+        ctx.close()
+        # After close(), the in-memory connection should have been released
+        assert tg._mem_conn is None
+
     def test_close_idempotent(self):
         ctx = WorkflowContext(
             conversation_id="cid-4",

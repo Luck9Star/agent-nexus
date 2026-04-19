@@ -658,20 +658,49 @@ class EvolutionStore:
 
         try:
             with self._conn(immediate=True) as conn:
-                # For FIX: deactivate parent(s)
+                # For FIX: deactivate parent(s) and guard against
+                # duplicate-active — two FIX evolutions for the same skill
+                # name should not leave two active records.
                 if new_record.lineage.origin == SkillOrigin.FIXED:
+                    # Pre-validate ALL parents exist before deactivating any.
+                    # Without this, a partial deactivation + return would be
+                    # committed by the _conn context manager on normal exit,
+                    # leaving some parents deactivated with no replacement.
                     for pid in parent_skill_ids:
-                        cur = conn.execute(
+                        row = conn.execute(
+                            "SELECT 1 FROM skill_records WHERE id = ?",
+                            (pid,),
+                        ).fetchone()
+                        if row is None:
+                            raise ValueError(
+                                f"Parent skill_id {pid} not found — "
+                                f"cannot deactivate for FIX evolution"
+                            )
+
+                    # All checks passed — deactivate parents atomically.
+                    for pid in parent_skill_ids:
+                        conn.execute(
                             "UPDATE skill_records SET is_active = 0, updated_at = ? "
                             "WHERE id = ?",
                             (_now_iso(), pid),
                         )
-                        if cur.rowcount == 0:
-                            logger.warning(
-                                "evolve_skill: parent skill_id %s not found — "
-                                "skipped deactivation",
-                                pid,
-                            )
+
+                    # Guard: after deactivating parents, if another active
+                    # skill with the same name still exists (from a
+                    # concurrent FIX evolution that committed between our
+                    # read and this write), abort to prevent duplicate-active
+                    # records.  We check AFTER deactivation so that parent
+                    # records (same name, different ID) are excluded.
+                    dup = conn.execute(
+                        "SELECT id FROM skill_records "
+                        "WHERE name = ? AND is_active = 1 AND id != ?",
+                        (new_record.name, new_record.id),
+                    ).fetchone()
+                    if dup is not None:
+                        raise ValueError(
+                            f"Duplicate active skill: '{new_record.name}' "
+                            f"(id={dup[0]}) already active"
+                        )
 
                 # Insert new record — evolved skills always have unique IDs
                 # (uuid-suffixed), so plain INSERT is sufficient.
@@ -726,6 +755,12 @@ class EvolutionStore:
                 success=False,
                 error=f"Skill ID collision: {new_record.id}",
             )
+        except ValueError as exc:
+            # Validation failures raised inside _conn context — the
+            # context manager rolls back on exception, so partial
+            # deactivations are undone.
+            logger.warning("evolve_skill validation failed: %s", exc)
+            return EvolveResult(success=False, error=str(exc))
         except sqlite3.Error as exc:
             logger.error(
                 "Database error during skill evolution: %s", exc, exc_info=True

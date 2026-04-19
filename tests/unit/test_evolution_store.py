@@ -1873,7 +1873,7 @@ class TestSaveSkillRecordPreservesActive:
 class TestEvolveSkillParentValidation:
     """Verify evolve_skill handles parent validation correctly."""
 
-    def test_parent_deactivation_skipped_for_missing(self, tmp_path: Path) -> None:
+    def test_parent_deactivation_succeeds_for_valid_parent(self, tmp_path: Path) -> None:
         """evolve_skill with valid parent creates new record and deactivates parent."""
         store = _make_store(tmp_path)
         from agent_nexus.platform.evolution.evolver import EvolveResult
@@ -1912,3 +1912,156 @@ class TestEvolveSkillParentValidation:
         fetched_new = store.get_skill_record("evolved-1")
         assert fetched_new is not None
         assert fetched_new.is_active is True
+
+
+class TestEvolveSkillParentNotFound:
+    """Regression: FIX evolution must abort when parent_id doesn't exist.
+
+    Previously, evolve_skill warned and continued, creating an orphaned
+    active skill with no parent in the evolution chain.
+    """
+
+    def test_missing_parent_aborts_fix_evolution(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+
+        new_record = SkillRecord(
+            id="evolved-orphan",
+            name="test-skill",
+            version="2.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED,
+                generation=1,
+                parent_skill_ids=["nonexistent-parent"],
+            ),
+            directory="skills/test",
+        )
+        result = store.evolve_skill(
+            new_record, parent_skill_ids=["nonexistent-parent"],
+        )
+
+        assert result.success is False
+        assert "not found" in result.error
+
+        # New record must NOT be in the DB
+        assert store.get_skill_record("evolved-orphan") is None
+
+    def test_partial_parent_missing_aborts_fix_evolution(
+        self, tmp_path: Path,
+    ) -> None:
+        """If one of multiple parents is missing, abort the whole FIX."""
+        store = _make_store(tmp_path)
+
+        # Create only one parent
+        parent = SkillRecord(
+            id="parent-exists",
+            name="multi-parent-skill",
+            version="1.0.0",
+            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+            directory="skills/test",
+        )
+        store.save_skill_record(parent)
+
+        new_record = SkillRecord(
+            id="evolved-partial",
+            name="multi-parent-skill",
+            version="2.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED,
+                generation=1,
+                parent_skill_ids=["parent-exists", "parent-missing"],
+            ),
+            directory="skills/test",
+        )
+        result = store.evolve_skill(
+            new_record,
+            parent_skill_ids=["parent-exists", "parent-missing"],
+        )
+
+        assert result.success is False
+        assert "not found" in result.error
+
+        # Existing parent must NOT have been deactivated (rollback)
+        fetched_parent = store.get_skill_record("parent-exists")
+        assert fetched_parent is not None
+        assert fetched_parent.is_active is True
+
+
+# ---------------------------------------------------------------------------
+# iter128 regression: FIX evolution duplicate-active guard
+# ---------------------------------------------------------------------------
+
+
+class TestFixEvolutionDuplicateActive:
+    """Two sequential FIX evolutions for the same name must not produce
+    duplicate active records."""
+
+    def test_duplicate_active_fix_rejected(self, tmp_path: Path) -> None:
+        """If an active skill with the same name already exists during
+        FIX evolution, the new record is rejected."""
+        store = _make_store(tmp_path)
+
+        # Create parent
+        parent = SkillRecord(
+            id="parent-dup",
+            name="dup-skill",
+            version="1.0.0",
+            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+            directory="skills/dup",
+        )
+        store.save_skill_record(parent)
+
+        # First FIX evolution — succeeds, deactivates parent
+        fix1 = SkillRecord(
+            id="fix1-dup",
+            name="dup-skill",
+            version="2.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED,
+                generation=1,
+                parent_skill_ids=["parent-dup"],
+            ),
+            directory="skills/dup",
+        )
+        result1 = store.evolve_skill(fix1, parent_skill_ids=["parent-dup"])
+        assert result1.success is True
+
+        # Manually insert another active record with the same name to
+        # simulate a concurrent FIX that committed between our read and write.
+        concurrent = SkillRecord(
+            id="concurrent-dup",
+            name="dup-skill",
+            version="2.1.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED,
+                generation=1,
+                parent_skill_ids=[],
+            ),
+            directory="skills/dup",
+            is_active=True,
+        )
+        store.save_skill_record(concurrent)
+
+        # Second FIX evolution — should be rejected because after
+        # deactivating fix1-dup, concurrent-dup is still active.
+        fix2 = SkillRecord(
+            id="fix2-dup",
+            name="dup-skill",
+            version="3.0.0",
+            lineage=SkillLineage(
+                origin=SkillOrigin.FIXED,
+                generation=2,
+                parent_skill_ids=["fix1-dup"],
+            ),
+            directory="skills/dup",
+        )
+        result2 = store.evolve_skill(fix2, parent_skill_ids=["fix1-dup"])
+        assert result2.success is False
+        assert "Duplicate active" in result2.error
+
+        # The concurrent record should still be active
+        fetched_concurrent = store.get_skill_record("concurrent-dup")
+        assert fetched_concurrent is not None
+        assert fetched_concurrent.is_active is True
+
+        # The rejected fix2 should not exist in the DB
+        assert store.get_skill_record("fix2-dup") is None

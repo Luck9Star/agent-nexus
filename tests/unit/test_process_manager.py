@@ -1717,3 +1717,64 @@ class TestHealthCheckNoLockDuringHeartbeat:
 
         assert result is True
         assert handle.last_heartbeat >= before
+
+
+# ---------------------------------------------------------------------------
+# iter128 regression: restart_agent returns concurrent caller's handle
+# ---------------------------------------------------------------------------
+
+
+class TestRestartAgentConcurrentStart:
+    """restart_agent returns existing handle if another caller started
+    the agent between our stop and start phases."""
+
+    @pytest.mark.asyncio
+    async def test_restart_returns_concurrent_handle(self) -> None:
+        """If another caller starts the agent while restart is in progress,
+        restart returns their handle instead of raising 'already running'."""
+        pm = ProcessManager()
+
+        # Start an agent normally
+        original_proc = _iter17_make_mock_process(pid=70001)
+        with patch(_SUBPROCESS_PATCH, return_value=original_proc):
+            await pm.start_agent("concurrent-agent", command=["echo"])
+
+        # Simulate the process dying so stop_agent succeeds quickly
+        pm._agents["concurrent-agent"].process.returncode = 0
+
+        # Intercept stop_agent to inject a new handle before it returns
+        original_stop = pm.stop_agent
+
+        async def _stop_then_inject(name, timeout=10.0):
+            await original_stop(name, timeout=timeout)
+            # Simulate a concurrent caller starting the agent while
+            # our restart is between stop and start
+            injected_proc = _iter17_make_mock_process(pid=70099)
+            with patch(_SUBPROCESS_PATCH, return_value=injected_proc):
+                await pm.start_agent("concurrent-agent", command=["injected"])
+
+        with patch.object(pm, "stop_agent", side_effect=_stop_then_inject):
+            result = await pm.restart_agent("concurrent-agent")
+
+        # Should get the injected handle, not raise ValueError
+        assert isinstance(result, AgentHandle)
+        assert result.pid == 70099
+        assert result.start_command == ["injected"]
+
+    @pytest.mark.asyncio
+    async def test_restart_proceeds_when_no_concurrent_start(self) -> None:
+        """Normal restart (no concurrent start) proceeds as before."""
+        pm = ProcessManager()
+
+        original_proc = _iter17_make_mock_process(pid=80001)
+        with patch(_SUBPROCESS_PATCH, return_value=original_proc):
+            await pm.start_agent("normal-agent", command=["echo"])
+
+        pm._agents["normal-agent"].process.returncode = 0
+
+        new_proc = _iter17_make_mock_process(pid=80002)
+        with patch(_SUBPROCESS_PATCH, return_value=new_proc):
+            result = await pm.restart_agent("normal-agent")
+
+        assert isinstance(result, AgentHandle)
+        assert result.pid == 80002
