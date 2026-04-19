@@ -264,7 +264,7 @@ class HookExecutor:
                 blocked=hook.block_on_failure,
                 error="COMMAND hook has empty command after parsing",
             )
-        if self._allowed_commands and args[0] not in self._allowed_commands:
+        if not self._allowed_commands or args[0] not in self._allowed_commands:
             return HookExecution(
                 hook=hook,
                 passed=False,

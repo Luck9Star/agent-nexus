@@ -18,6 +18,11 @@ from agent_nexus.models.hooks import (
 )
 from agent_nexus.platform.hooks.executor import HookExecutor
 
+# Commands used across command-hook tests.  The allowlist is now
+# deny-by-default (empty = reject all), so every test that runs a
+# COMMAND hook must explicitly allow the base command it uses.
+_ALLOWED = ["echo", "false", "sleep", "cat"]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -182,7 +187,7 @@ class TestGetHooksForEvent:
             _cmd_hook(event=HookEvent.POST_EXECUTION),
             _cmd_hook(event=HookEvent.PRE_EXECUTION),
         ]
-        executor = HookExecutor(hooks=hooks)
+        executor = HookExecutor(hooks=hooks, allowed_commands=_ALLOWED)
 
         pre = executor.get_hooks_for_event(HookEvent.PRE_EXECUTION)
         assert len(pre) == 2
@@ -195,7 +200,7 @@ class TestGetHooksForEvent:
             _cmd_hook(matcher="write_*"),
             _cmd_hook(matcher=None),  # no matcher = matches everything
         ]
-        executor = HookExecutor(hooks=hooks)
+        executor = HookExecutor(hooks=hooks, allowed_commands=_ALLOWED)
 
         read_hooks = executor.get_hooks_for_event(HookEvent.PRE_EXECUTION, matcher="read_file")
         assert len(read_hooks) == 2  # "read_*" matches + no matcher matches
@@ -211,7 +216,7 @@ class TestGetHooksForEvent:
             _cmd_hook(enabled=False),
             _cmd_hook(enabled=True),
         ]
-        executor = HookExecutor(hooks=hooks)
+        executor = HookExecutor(hooks=hooks, allowed_commands=_ALLOWED)
 
         result = executor.get_hooks_for_event(HookEvent.PRE_EXECUTION)
         assert len(result) == 2
@@ -227,7 +232,7 @@ class TestCommandHook:
     @pytest.mark.asyncio
     async def test_command_hook_success(self) -> None:
         hook = _cmd_hook(command="echo hello")
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.blocked is False
@@ -238,7 +243,7 @@ class TestCommandHook:
     @pytest.mark.asyncio
     async def test_command_hook_failure_with_block(self) -> None:
         hook = _cmd_hook(command="false", block_on_failure=True)
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.blocked is True
@@ -250,7 +255,7 @@ class TestCommandHook:
     @pytest.mark.asyncio
     async def test_command_hook_failure_without_block(self) -> None:
         hook = _cmd_hook(command="false", block_on_failure=False)
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.blocked is False
@@ -261,7 +266,7 @@ class TestCommandHook:
     @pytest.mark.asyncio
     async def test_command_hook_timeout(self) -> None:
         hook = _cmd_hook(command="sleep 10", timeout_seconds=0.2, block_on_failure=True)
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.blocked is True
@@ -276,7 +281,7 @@ class TestCommandHook:
             event=HookEvent.PRE_EXECUTION,
             block_on_failure=True,
         )
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.blocked is True
@@ -288,7 +293,7 @@ class TestCommandHook:
     async def test_command_hook_receives_context_via_stdin(self) -> None:
         """Verify context is passed as JSON via stdin."""
         hook = _cmd_hook(command="cat")
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
         ctx = {"tool": "read_file", "args": {"path": "/tmp/test.py"}}
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION, context=ctx)
@@ -296,6 +301,29 @@ class TestCommandHook:
         # cat echoes stdin back to stdout
         assert result.results[0].output is not None
         assert json.loads(result.results[0].output) == ctx
+
+    @pytest.mark.asyncio
+    async def test_command_hook_empty_allowlist_rejects(self) -> None:
+        """Empty allowlist must reject all command hooks (deny-by-default)."""
+        hook = _cmd_hook(command="echo hello")
+        executor = HookExecutor(hooks=[hook])  # no allowed_commands
+
+        result = await executor.execute_event(HookEvent.PRE_EXECUTION)
+        assert result.results[0].passed is False
+        assert "not in allowlist" in result.results[0].error
+
+    @pytest.mark.asyncio
+    async def test_command_hook_non_allowed_command_rejected(self) -> None:
+        """Command not in allowlist is rejected even when allowlist is non-empty."""
+        hook = _cmd_hook(command="rm -rf /")
+        executor = HookExecutor(
+            hooks=[hook], allowed_commands=["echo", "cat"]
+        )
+
+        result = await executor.execute_event(HookEvent.PRE_EXECUTION)
+        assert result.results[0].passed is False
+        assert "rm" in result.results[0].error
+        assert "not in allowlist" in result.results[0].error
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +335,7 @@ class TestHttpHook:
     @pytest.mark.asyncio
     async def test_http_hook_success(self) -> None:
         hook = _http_hook()
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -329,7 +357,7 @@ class TestHttpHook:
     @pytest.mark.asyncio
     async def test_http_hook_non_2xx(self) -> None:
         hook = _http_hook(block_on_failure=True)
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         mock_response = MagicMock()
         mock_response.status_code = 500
@@ -352,7 +380,7 @@ class TestHttpHook:
     @pytest.mark.asyncio
     async def test_http_hook_connection_error(self) -> None:
         hook = _http_hook(block_on_failure=False)
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
@@ -375,7 +403,7 @@ class TestHttpHook:
             event=HookEvent.POST_EXECUTION,
             block_on_failure=True,
         )
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.POST_EXECUTION)
         assert result.blocked is True
@@ -393,7 +421,7 @@ class TestStubHooks:
     @pytest.mark.asyncio
     async def test_prompt_hook_passes(self) -> None:
         hook = _prompt_hook(prompt="Validate input format")
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.blocked is False
@@ -403,7 +431,7 @@ class TestStubHooks:
     @pytest.mark.asyncio
     async def test_agent_hook_passes(self) -> None:
         hook = _agent_hook(prompt="Deep quality review")
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.POST_EXECUTION)
         assert result.blocked is False
@@ -416,7 +444,7 @@ class TestStubHooks:
             type=HookType.PROMPT,
             event=HookEvent.PRE_EXECUTION,
         )
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.results[0].passed is True
@@ -436,7 +464,7 @@ class TestBlockingBehavior:
             _cmd_hook(command="false", block_on_failure=True),
             _cmd_hook(command="echo after"),
         ]
-        executor = HookExecutor(hooks=hooks)
+        executor = HookExecutor(hooks=hooks, allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.blocked is True
@@ -451,7 +479,7 @@ class TestBlockingBehavior:
             _cmd_hook(command="false", block_on_failure=False),
             _cmd_hook(command="echo ok"),
         ]
-        executor = HookExecutor(hooks=hooks)
+        executor = HookExecutor(hooks=hooks, allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.blocked is False
@@ -466,7 +494,7 @@ class TestBlockingBehavior:
             _cmd_hook(command="false", block_on_failure=False),
             _cmd_hook(command="false", block_on_failure=False),
         ]
-        executor = HookExecutor(hooks=hooks)
+        executor = HookExecutor(hooks=hooks, allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.blocked is False
@@ -481,7 +509,7 @@ class TestBlockingBehavior:
             _cmd_hook(command="false", block_on_failure=True),
             _agent_hook(),  # should not execute
         ]
-        executor = HookExecutor(hooks=hooks)
+        executor = HookExecutor(hooks=hooks, allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.blocked is True
@@ -502,7 +530,7 @@ class TestCommandHookProcessCleanup:
     async def test_process_reaped_before_kill(self) -> None:
         """If proc.kill() raises ProcessLookupError, it's caught."""
         hook = _cmd_hook(command="sleep 999")
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
             mock_proc = AsyncMock()
@@ -522,7 +550,7 @@ class TestCommandHookProcessCleanup:
     async def test_process_reaped_before_wait(self) -> None:
         """If proc.wait() raises ProcessLookupError after kill, it's caught."""
         hook = _cmd_hook(command="sleep 999")
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
             mock_proc = AsyncMock()
@@ -650,7 +678,7 @@ class TestUnknownHookType:
     async def test_unknown_hook_type_returns_error(self) -> None:
         """Line 198: handler is None -> error result with blocked=False."""
         hook = _cmd_hook()
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         # Patch all handler methods to None so handlers[type] returns None
         with (
@@ -670,7 +698,7 @@ class TestUnknownHookType:
     async def test_unknown_hook_type_with_block_on_failure(self) -> None:
         """Line 198-203: unknown type + block_on_failure -> blocked=True."""
         hook = _cmd_hook(block_on_failure=True)
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         with (
             patch.object(executor, "_execute_command", None),
@@ -698,7 +726,7 @@ class TestMalformedCommand:
     async def test_malformed_command_returns_error(self) -> None:
         """Lines 232-233: unbalanced quotes in command -> ValueError from shlex."""
         hook = _cmd_hook(command='echo "unclosed')
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert len(result.results) == 1
@@ -711,7 +739,7 @@ class TestMalformedCommand:
     async def test_malformed_command_blocking(self) -> None:
         """Malformed command + block_on_failure -> blocked=True."""
         hook = _cmd_hook(command="echo 'unclosed", block_on_failure=True)
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.results[0].blocked is True
@@ -730,7 +758,7 @@ class TestTimeoutKillFailure:
     async def test_kill_fails_after_timeout(self) -> None:
         """Lines 279-280: proc.kill() raises during timeout cleanup."""
         hook = _cmd_hook(command="sleep 999", timeout_seconds=0.1)
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
             mock_proc = AsyncMock()
@@ -764,7 +792,7 @@ class TestCancelledError:
     async def test_cancelled_error_kills_subprocess(self) -> None:
         """Lines 292-298: CancelledError triggers proc.kill() + proc.wait()."""
         hook = _cmd_hook(command="sleep 999")
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
             mock_proc = AsyncMock()
@@ -788,7 +816,7 @@ class TestCancelledError:
     async def test_cancelled_error_kill_fails(self) -> None:
         """Lines 296-297: proc.kill() raises during CancelledError cleanup."""
         hook = _cmd_hook(command="sleep 999")
-        executor = HookExecutor(hooks=[hook])
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
 
         with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
             mock_proc = AsyncMock()

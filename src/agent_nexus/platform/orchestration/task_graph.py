@@ -282,16 +282,19 @@ class TaskGraph:
     def fail_task(self, task_id: str) -> TaskItem:
         """Transition task to failed.
 
-        Only allowed from 'in_progress' state.
+        Allowed from 'in_progress' or 'pending' state.  Pending tasks
+        may be failed when a dependency they are blocked on has already
+        failed, preventing them from ever becoming ready.
         """
         with self._conn(immediate=True) as conn:
             task = self._get_task_conn(conn, task_id)
             if task is None:
                 raise ValueError(f"Task '{task_id}' not found")
 
-            if task.state != TaskState.IN_PROGRESS:
+            if task.state not in (TaskState.IN_PROGRESS, TaskState.PENDING):
                 raise ValueError(
-                    f"Task '{task_id}' is {task.state.value}, expected in_progress"
+                    f"Task '{task_id}' is {task.state.value}, "
+                    f"expected in_progress or pending"
                 )
 
             now = _now_iso()

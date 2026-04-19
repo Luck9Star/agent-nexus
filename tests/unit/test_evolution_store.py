@@ -1041,3 +1041,81 @@ class TestEvolutionStoreClose:
         store = EvolutionStore(tmp_path / "evo.db")
         store.close()
         store.close()  # second call is fine
+
+
+class TestJudgmentsBatchEvenLimit:
+    """get_judgments_batch must return up to limit_per_skill rows per skill.
+
+    Regression: a global LIMIT could starve low-frequency skills when a
+    high-frequency skill dominated the result set.  The ROW_NUMBER()
+    window function ensures each skill gets its own quota.
+    """
+
+    def _seed_judgments(
+        self, store: EvolutionStore, skill_id: str, count: int
+    ) -> None:
+        """Insert *count* judgment rows for *skill_id*."""
+        import uuid
+        from datetime import datetime, timezone
+
+        with store._conn(immediate=True) as conn:
+            # Insert a parent analysis row (FK requirement)
+            analysis_id = f"ana-{skill_id}"
+            conn.execute(
+                "INSERT OR IGNORE INTO execution_analyses "
+                "(id, task_id, agent_name, analysis, created_at) "
+                "VALUES (?, ?, ?, '', ?)",
+                (
+                    analysis_id,
+                    "test-task",
+                    "test-agent",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            for i in range(count):
+                conn.execute(
+                    "INSERT INTO skill_judgments "
+                    "(id, analysis_id, skill_id, selected, applied, completed, fell_back) "
+                    "VALUES (?, ?, ?, 1, 1, 1, 0)",
+                    (str(uuid.uuid4()), analysis_id, skill_id),
+                )
+
+    def test_even_distribution_with_unbalanced_data(
+        self, tmp_path: Path
+    ) -> None:
+        """High-frequency skill doesn't crowd out low-frequency skill."""
+        store = EvolutionStore(tmp_path / "evo.db")
+        store.save_skill_record(SkillRecord(
+            id="hi", name="hi", version="1.0",
+            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+        ))
+        store.save_skill_record(SkillRecord(
+            id="lo", name="lo", version="1.0",
+            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+        ))
+
+        self._seed_judgments(store, "hi", 90)
+        self._seed_judgments(store, "lo", 10)
+
+        batch = store.get_judgments_batch({"hi", "lo"}, limit_per_skill=50)
+        assert len(batch["hi"]) == 50  # capped at limit
+        assert len(batch["lo"]) == 10  # all available rows
+
+    def test_respects_limit_per_skill(self, tmp_path: Path) -> None:
+        """Each skill is independently capped at limit_per_skill."""
+        store = EvolutionStore(tmp_path / "evo.db")
+        store.save_skill_record(SkillRecord(
+            id="s1", name="s1", version="1.0",
+            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+        ))
+        store.save_skill_record(SkillRecord(
+            id="s2", name="s2", version="1.0",
+            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+        ))
+
+        self._seed_judgments(store, "s1", 100)
+        self._seed_judgments(store, "s2", 100)
+
+        batch = store.get_judgments_batch({"s1", "s2"}, limit_per_skill=5)
+        assert len(batch["s1"]) == 5
+        assert len(batch["s2"]) == 5

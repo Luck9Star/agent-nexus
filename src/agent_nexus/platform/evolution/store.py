@@ -510,6 +510,10 @@ class EvolutionStore:
         """Load recent judgments for multiple skills in one query.
 
         Returns ``{skill_id: [judgment_dict, ...]}``.
+
+        Uses a window function to guarantee *each* skill gets up to
+        *limit_per_skill* rows, avoiding the uneven truncation that a
+        plain global LIMIT would cause.
         """
         if not skill_ids:
             return {}
@@ -517,24 +521,26 @@ class EvolutionStore:
         with self._conn() as conn:
             rows = conn.execute(
                 f"SELECT id, analysis_id, skill_id, selected, applied, "
-                f"completed, fell_back FROM skill_judgments "
-                f"WHERE skill_id IN ({placeholders}) "
-                f"ORDER BY rowid DESC LIMIT ?",
-                tuple(skill_ids) + (len(skill_ids) * limit_per_skill,),
+                f"completed, fell_back FROM ("
+                f"SELECT *, ROW_NUMBER() OVER ("
+                f"PARTITION BY skill_id ORDER BY rowid DESC"
+                f") AS rn FROM skill_judgments "
+                f"WHERE skill_id IN ({placeholders})"
+                f") WHERE rn <= ?",
+                tuple(skill_ids) + (limit_per_skill,),
             ).fetchall()
         result: dict[str, list[dict[str, Any]]] = {sid: [] for sid in skill_ids}
         for r in rows:
             sid = r[2]
-            if len(result[sid]) < limit_per_skill:
-                result[sid].append({
-                    "id": r[0],
-                    "analysis_id": r[1],
-                    "skill_id": sid,
-                    "selected": bool(r[3]),
-                    "applied": bool(r[4]),
-                    "completed": bool(r[5]),
-                    "fell_back": bool(r[6]),
-                })
+            result[sid].append({
+                "id": r[0],
+                "analysis_id": r[1],
+                "skill_id": sid,
+                "selected": bool(r[3]),
+                "applied": bool(r[4]),
+                "completed": bool(r[5]),
+                "fell_back": bool(r[6]),
+            })
         return result
 
     # ------------------------------------------------------------------

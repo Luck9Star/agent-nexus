@@ -179,11 +179,32 @@ class TestFailTask:
         assert result.state == TaskState.FAILED
 
     def test_fail_wrong_state(self, task_graph: TaskGraph) -> None:
-        """Cannot fail a pending task."""
+        """Cannot fail a completed task."""
         task_graph.add_task(_make_task("A"))
+        task_graph.start_task("A")
+        task_graph.complete_task("A")
 
-        with pytest.raises(ValueError, match="expected in_progress"):
+        with pytest.raises(ValueError, match="expected in_progress or pending"):
             task_graph.fail_task("A")
+
+    def test_fail_pending(self, task_graph: TaskGraph) -> None:
+        """pending -> failed transition (dependency cascade)."""
+        task_graph.add_task(_make_task("A"))
+        result = task_graph.fail_task("A")
+
+        assert result.state == TaskState.FAILED
+
+    def test_fail_blocked_pending(self, task_graph: TaskGraph) -> None:
+        """Fail a pending task whose dependency already failed."""
+        task_graph.add_task(_make_task("A"))
+        task_graph.add_task(_make_task("B", blocked_by=["A"]))
+
+        task_graph.start_task("A")
+        task_graph.fail_task("A")
+
+        # B is still pending but can now be failed
+        result = task_graph.fail_task("B")
+        assert result.state == TaskState.FAILED
 
 
 # ============================================================================

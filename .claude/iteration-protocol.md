@@ -127,6 +127,9 @@
 | get_parallel_groups O(n²) → O(V+E) | Kahn's algorithm with in-degree tracking | 2026-04-19 | iter97 |
 | context_describer N+1 ancestry → get_ancestry_batch | store.py batch method + context_describer single-call | 2026-04-19 | iter97 |
 | ipc.py 冗余 except (TimeoutError, Exception) | 简化为 except Exception | 2026-04-19 | iter97 |
+| fail_task PENDING→FAILED 状态转换 | task_graph.py 允许 PENDING→FAILED + 3 regression tests | 2026-04-19 | iter98 |
+| get_judgments_batch 全局 LIMIT 不均匀 | ROW_NUMBER() window function 替换全局 LIMIT + 2 tests | 2026-04-19 | iter98 |
+| HookExecutor 空 allowlist 逻辑反转 | deny-by-default + 14 test updates + 2 regression tests | 2026-04-19 | iter98 |
 
 ### 待清模式
 
