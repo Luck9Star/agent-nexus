@@ -305,3 +305,54 @@ class TestCorruptLockfileBackup:
 
         backup = lf_path.with_suffix(".json.corrupt")
         assert not backup.exists()
+
+
+# ---------------------------------------------------------------------------
+# iter123 regression: pop_entry() — atomic read-remove-write (TOCTOU fix)
+# ---------------------------------------------------------------------------
+
+
+class TestPopEntry:
+    """Verify pop_entry() atomically removes and returns a lockfile entry."""
+
+    def test_pop_entry_returns_entry_and_removes(self, tmp_path: Path) -> None:
+        """pop_entry returns the entry and removes it from the lockfile."""
+        lockfile_path = tmp_path / "lockfile.json"
+        lf = LockfileManager(lockfile_path)
+        entry = _make_entry("pop-me")
+        lf.add_entry_by_name("pop-me", entry)
+
+        result = lf.pop_entry("pop-me")
+        assert result is not None
+        assert result.version == "1.0.0"
+        # Entry should be gone from lockfile
+        assert lf.get_entry("pop-me") is None
+
+    def test_pop_entry_returns_none_for_missing(self, tmp_path: Path) -> None:
+        """pop_entry returns None when agent not in lockfile."""
+        lockfile_path = tmp_path / "lockfile.json"
+        lf = LockfileManager(lockfile_path)
+        assert lf.pop_entry("ghost") is None
+
+    def test_pop_entry_other_agents_unaffected(self, tmp_path: Path) -> None:
+        """Popping one entry does not affect other entries."""
+        lockfile_path = tmp_path / "lockfile.json"
+        lf = LockfileManager(lockfile_path)
+        lf.add_entry_by_name("keep-me", _make_entry("keep-me"))
+        lf.add_entry_by_name("pop-me", _make_entry("pop-me"))
+
+        lf.pop_entry("pop-me")
+        assert lf.get_entry("keep-me") is not None
+        assert lf.get_entry("pop-me") is None
+
+    def test_pop_entry_is_atomic_under_lock(self, tmp_path: Path) -> None:
+        """pop_entry acquires the file lock before reading."""
+        lockfile_path = tmp_path / "lockfile.json"
+        lf = LockfileManager(lockfile_path)
+        entry = _make_entry("atomic")
+        lf.add_entry_by_name("atomic", entry)
+
+        with patch.object(lf, "_file_lock", wraps=lf._file_lock) as spy:
+            result = lf.pop_entry("atomic")
+        spy.assert_called_once()
+        assert result is not None

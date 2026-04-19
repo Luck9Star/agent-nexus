@@ -561,18 +561,18 @@ class TestConfigLoaderProviderApiTypeValidation:
         config = loader.load_config()
         assert config.models.default is not None
 
-    def test_load_malformed_toml_falls_back_to_defaults(self, tmp_path: Path) -> None:
-        """Malformed TOML is caught and falls back to defaults without crashing."""
+    def test_load_malformed_toml_raises(self, tmp_path: Path) -> None:
+        """Malformed TOML raises TomlDecodeError instead of silently falling back."""
+        import toml
+
         config_dir = tmp_path / "config"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text(
             "[section\nkey = value\n", encoding="utf-8"
         )
         loader = ConfigLoader(config_dir=config_dir)
-        config = loader.load_config()
-        # Should not crash — falls back to built-in defaults
-        assert config.models.default == DEFAULT_MODEL_STRING
-        assert set(config.models.providers.keys()) == set(DEFAULT_PROVIDERS.keys())
+        with pytest.raises(toml.TomlDecodeError):
+            loader.load_config()
 
     def test_load_valid_toml_still_works(self, tmp_path: Path) -> None:
         """Valid TOML file is parsed correctly after adding TomlDecodeError handler."""

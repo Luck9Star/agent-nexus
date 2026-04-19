@@ -188,6 +188,29 @@ class LockfileManager:
         logger.info("Lockfile entry removed: %s", agent_name)
         return True
 
+    def pop_entry(self, agent_name: str) -> LockfileEntry | None:
+        """Atomically remove and return a lockfile entry.
+
+        Unlike calling :meth:`get_entry` then :meth:`remove_entry` separately
+        (which has a TOCTOU gap between the unlocked read and the locked
+        remove), this method holds the file lock across the entire
+        read-remove-write sequence.
+
+        Returns the removed entry, or ``None`` if it did not exist.
+        """
+        with self._file_lock():
+            lockfile = self.load()
+            entry = lockfile.agents.get(agent_name)
+            if entry is None:
+                return None
+
+            agents = dict(lockfile.agents)
+            del agents[agent_name]
+            updated = Lockfile(version=lockfile.version, agents=agents)
+            self._save(updated)
+        logger.info("Lockfile entry removed (atomic): %s", agent_name)
+        return entry
+
     def list_entries(self) -> list[LockfileEntry]:
         """Return all lockfile entries in insertion order."""
         return list(self.load().agents.values())

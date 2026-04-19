@@ -30,6 +30,7 @@ def _make_installer(tmp_path: Path) -> tuple[GitInstaller, MagicMock, MagicMock]
     sources.resolve_agent_source.return_value = None
     lf = MagicMock()
     lf.get_entry.return_value = None
+    lf.pop_entry.return_value = None
     lf.add_entry_by_name = MagicMock()
     lf.remove_entry = MagicMock()
     installer = GitInstaller(sources, lf, tmp_path)
@@ -166,14 +167,14 @@ class TestInstallerUninstall:
     @pytest.mark.asyncio
     async def test_uninstall_returns_false_when_not_installed(self, tmp_path: Path) -> None:
         inst, _, lf = _make_installer(tmp_path)
-        lf.get_entry.return_value = None
+        lf.pop_entry.return_value = None
         assert await inst.uninstall("ghost") is False
 
     @pytest.mark.asyncio
-    async def test_uninstall_removes_lockfile_entry_first(self, tmp_path: Path) -> None:
+    async def test_uninstall_uses_atomic_pop_entry(self, tmp_path: Path) -> None:
         inst, _, lf = _make_installer(tmp_path)
         entry = _make_entry()
-        lf.get_entry.return_value = entry
+        lf.pop_entry.return_value = entry
 
         agent_dir = tmp_path / "agents" / "test-agent"
         agent_dir.mkdir(parents=True)
@@ -182,7 +183,9 @@ class TestInstallerUninstall:
         with patch("shutil.rmtree"):
             result = await inst.uninstall("test-agent")
         assert result is True
-        lf.remove_entry.assert_called_once_with("test-agent")
+        lf.pop_entry.assert_called_once_with("test-agent")
+        # remove_entry should NOT be called — pop_entry handles it atomically
+        lf.remove_entry.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_uninstall_refuses_venv_outside_allowed_dir(self, tmp_path: Path) -> None:
@@ -192,7 +195,7 @@ class TestInstallerUninstall:
             commit_sha="a" * 40, agent_type=AgentType.ATOMIC,
             venv_path="/tmp/malicious/path",
         )
-        lf.get_entry.return_value = entry
+        lf.pop_entry.return_value = entry
         agent_dir = tmp_path / "agents" / "agent-x"
         agent_dir.mkdir(parents=True)
 

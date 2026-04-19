@@ -2895,8 +2895,7 @@ class TestGitInstallerUninstallEdgeCases:
         """uninstall() removes default venv when lockfile entry has no venv_path."""
         lockfile = MagicMock(spec=LockfileManager)
         entry = _make_entry(venv_path="")
-        lockfile.get_entry = MagicMock(return_value=entry)
-        lockfile.remove_entry = MagicMock(return_value=True)
+        lockfile.pop_entry = MagicMock(return_value=entry)
 
         config_dir = tmp_path / "config"
         venvs_dir = config_dir / "venvs"
@@ -2918,8 +2917,7 @@ class TestGitInstallerUninstallEdgeCases:
         """uninstall() refuses to remove a venv_path outside the allowed prefix."""
         lockfile = MagicMock(spec=LockfileManager)
         entry = _make_entry(venv_path="/tmp/malicious-venv")
-        lockfile.get_entry = MagicMock(return_value=entry)
-        lockfile.remove_entry = MagicMock(return_value=True)
+        lockfile.pop_entry = MagicMock(return_value=entry)
 
         config_dir = tmp_path / "config"
         config_dir.mkdir()
@@ -3774,8 +3772,7 @@ class TestRmTreeBestEffort:
         """Uninstall should succeed even if agent dir removal hits errors."""
         lockfile = MagicMock(spec=LockfileManager)
         entry = _make_entry(venv_path="")
-        lockfile.get_entry = MagicMock(return_value=entry)
-        lockfile.remove_entry = MagicMock(return_value=True)
+        lockfile.pop_entry = MagicMock(return_value=entry)
 
         config_dir = tmp_path / "config"
         agents_dir = config_dir / "agents"
@@ -3798,8 +3795,8 @@ class TestRmTreeBestEffort:
 
         try:
             result = await installer.uninstall("partial-agent")
-            # Lockfile entry should be removed regardless
-            lockfile.remove_entry.assert_called_once_with("partial-agent")
+            # Lockfile entry should be removed regardless (via pop_entry)
+            lockfile.pop_entry.assert_called_once_with("partial-agent")
             # uninstall returns True (lockfile was removed)
             assert result is True
         finally:

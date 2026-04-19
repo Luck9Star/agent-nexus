@@ -239,14 +239,12 @@ class GitInstaller:
                 "alphanumeric, dots, hyphens, and underscores."
             )
 
-        existing = self._lockfile.get_entry(agent_name)
+        # Atomically pop the lockfile entry — holds the file lock across the
+        # read-remove-write sequence so no concurrent install can race between
+        # our get_entry (unlocked) and remove_entry (locked).
+        existing = self._lockfile.pop_entry(agent_name)
         if existing is None:
             return False
-
-        # Remove lockfile entry FIRST — if file removal fails afterwards the
-        # system is still consistent (orphan files are recoverable, but a stale
-        # lockfile entry pointing to deleted files is not).
-        self._lockfile.remove_entry(agent_name)
 
         # Remove agent files
         agent_dir = self._agents_dir / agent_name
