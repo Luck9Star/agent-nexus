@@ -168,6 +168,9 @@
 | IPC exception type preservation + close() logging | router.py _execute_single_agent IPC异常直传 + ipc.py close() logging + process_manager _cleanup_dead FD leak + 3 tests = 2586 tests | 2026-04-20 | iter126 |
 | 蓝军3-agent深度扫描 iter127: WorkflowContext TaskGraph泄漏 | workflow.py close()先调用task_graph.close()再置None + 1 regression test = 2587 tests | 2026-04-20 | iter127 |
 | 蓝军P0 drain_task异常静默丢失 | process_manager.py _drain_stderr try/except + CancelledError静默 + Exception日志 + 3 tests = 2590 tests | 2026-04-20 | iter128 |
+| 蓝军P1/P2批量修复 iter129: 3 fixes + 1 false positive | close_sync stdout FD(ipc.py) + promotion partial rollback + FIX evolve_skill pre-validate parents(store.py) + PM race=已由identity+stopping防护(false positive) = 2600 tests | 2026-04-20 | iter129 |
+| 蓝军2-agent最终验证 iter130: P0=0 P1=1 fixed | supervisor stop_agent discard _started_agents + 2 regression tests = 2602 tests | 2026-04-20 | iter130 |
+| 蓝军3-agent深度穿透 iter131: 16 findings cross-validated | P1: route_chat composite drops error/error_type(1 fix) + P2: docstring fix + 14 false positives + 1 regression test = 2603 tests | 2026-04-20 | iter131 |
 
 ### 待清模式
 
