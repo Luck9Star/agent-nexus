@@ -563,3 +563,93 @@ class TestErrorBeforeExecPath:
         assert result.success is False
         assert result.error is not None
         assert "return" in result.error or "outside" in result.error
+
+
+class TestCloseRaceWithTimedOutThread:
+    """Regression: close() when timed-out thread is still running.
+
+    executor.py:112-118 — when _timed_out=True and _exec_done.wait()
+    returns False (thread still running), close() must log a warning
+    and still proceed to clear the namespace. Without a test, a future
+    refactor could silently weaken this safety gate.
+    """
+
+    def test_close_logs_warning_when_thread_still_running(self) -> None:
+        """close() logs warning when _exec_done.wait() returns False."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        executor._shell = type("FakeShell", (), {"user_ns": {"a": 1}})()
+        executor._timed_out = True
+        # Simulate wait() returning False (thread still running)
+        executor._exec_done.clear()
+        original_wait = executor._exec_done.wait
+        executor._exec_done.wait = lambda timeout=False: False  # type: ignore[assignment]
+
+        import logging
+
+        with (
+            patch("agent_nexus.platform.runtime.executor.logger") as mock_logger,
+        ):
+            executor.close()
+
+        mock_logger.warning.assert_called()
+        warn_msg = mock_logger.warning.call_args[0][0]
+        assert "still running" in warn_msg
+        # Shell should still be cleaned up
+        assert executor._shell is None
+
+    def test_close_succeeds_when_wait_returns_true(self) -> None:
+        """close() succeeds cleanly when wait() returns True (thread finished)."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        executor._shell = type("FakeShell", (), {"user_ns": {"a": 1}})()
+        executor._timed_out = True
+        executor._exec_done.set()  # Thread is done
+
+        executor.close()
+        assert executor._shell is None
+        assert executor._timed_out is False
+
+
+class TestResetRaceWithTimedOutThread:
+    """Regression: reset() when timed-out thread is still running.
+
+    executor.py:141-147 — same pattern as close() but for reset().
+    When _timed_out=True and _exec_done.wait() returns False, reset()
+    must log warning but still clear namespace.
+    """
+
+    def test_reset_logs_warning_when_thread_still_running(self) -> None:
+        """reset() logs warning when _exec_done.wait() returns False."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        executor._shell = type("FakeShell", (), {"user_ns": {"a": 1}})()
+        executor._timed_out = True
+        executor._exec_done.clear()
+        executor._exec_done.wait = lambda timeout=False: False  # type: ignore[assignment]
+
+        with (
+            patch("agent_nexus.platform.runtime.executor.logger") as mock_logger,
+        ):
+            executor.reset()
+
+        mock_logger.warning.assert_called()
+        warn_msg = mock_logger.warning.call_args[0][0]
+        assert "still running" in warn_msg
+        # Should still clear timed_out flag
+        assert executor._timed_out is False
+
+    def test_reset_succeeds_when_wait_returns_true(self) -> None:
+        """reset() succeeds cleanly when wait() returns True."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        executor._shell = type("FakeShell", (), {"user_ns": {"a": 1}})()
+        executor._timed_out = True
+        executor._exec_done.set()
+
+        executor.reset()
+        assert executor._timed_out is False

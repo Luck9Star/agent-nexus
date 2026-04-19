@@ -968,3 +968,58 @@ class TestGetAncestry:
         store = _make_store(tmp_path)
         ancestors = store.get_ancestry("no-such-id")
         assert ancestors == []
+
+
+# ============================================================================
+# _row_to_record handles invalid lineage_origin (defaults to CAPTURED)
+# ============================================================================
+
+
+class TestInvalidLineageOrigin:
+    """EvolutionStore._row_to_record defaults invalid origin to CAPTURED."""
+
+    def _make_store(self, tmp_path: Path) -> EvolutionStore:
+        return EvolutionStore(tmp_path / "evo.db")
+
+    def _save_with_origin(self, store: EvolutionStore, origin: str) -> str:
+        """Insert a record with a custom lineage_origin value."""
+        import uuid
+
+        sid = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        with store._conn() as conn:
+            conn.execute(
+                "INSERT INTO skill_records "
+                "(id, name, version, lineage_origin, lineage_generation, "
+                "lineage_content_diff, lineage_content_snapshot, directory, "
+                "is_active, total_selections, total_applied, "
+                "total_completions, total_fallbacks, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    sid, "test-skill", "1.0.0", origin, 0,
+                    "", "{}", "/tmp", 1,
+                    0, 0, 0, 0, now, now,
+                ),
+            )
+        return sid
+
+    def test_invalid_origin_defaults_to_captured(self, tmp_path: Path) -> None:
+        store = self._make_store(tmp_path)
+        sid = self._save_with_origin(store, "totally_invalid_value")
+        record = store.get_skill_record(sid)
+        assert record is not None
+        assert record.lineage.origin == SkillOrigin.CAPTURED
+
+    def test_valid_origin_preserved(self, tmp_path: Path) -> None:
+        store = self._make_store(tmp_path)
+        sid = self._save_with_origin(store, "fixed")
+        record = store.get_skill_record(sid)
+        assert record is not None
+        assert record.lineage.origin == SkillOrigin.FIXED
+
+    def test_empty_origin_defaults_to_captured(self, tmp_path: Path) -> None:
+        store = self._make_store(tmp_path)
+        sid = self._save_with_origin(store, "")
+        record = store.get_skill_record(sid)
+        assert record is not None
+        assert record.lineage.origin == SkillOrigin.CAPTURED
