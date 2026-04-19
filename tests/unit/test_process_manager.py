@@ -1177,6 +1177,76 @@ class TestDrainStderrLogging:
         assert any("error: something failed" in r.message for r in caplog.records)
 
 
+# iter127 regression: drain_task exception handling
+# ============================================================================
+
+
+class TestDrainStderrExceptionHandling:
+    """_drain_stderr catches exceptions instead of crashing silently.
+
+    Without this fix, a crash in _drain_stderr would stop stderr
+    consumption, causing the pipe buffer to fill and deadlock the
+    agent subprocess.
+    """
+
+    @pytest.mark.asyncio
+    async def test_drain_stderr_catches_readline_error(self, caplog) -> None:
+        """Unexpected readline error is logged, not silently lost."""
+        import logging
+
+        pm = ProcessManager()
+        mock_proc = MagicMock()
+        mock_stderr = AsyncMock()
+        mock_stderr.readline.side_effect = OSError("pipe broken")
+        mock_proc.stderr = mock_stderr
+
+        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.orchestration.process_manager"):
+            # Should NOT raise — exception is caught and logged
+            await pm._drain_stderr(mock_proc, "crash-agent")
+
+        assert any(
+            "stderr drain task failed unexpectedly" in r.message
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_drain_stderr_cancelled_is_silent(self, caplog) -> None:
+        """CancelledError is expected (stop_agent cancel) — no error log."""
+        import logging
+
+        pm = ProcessManager()
+        mock_proc = MagicMock()
+        mock_stderr = AsyncMock()
+        mock_stderr.readline.side_effect = asyncio.CancelledError()
+        mock_proc.stderr = mock_stderr
+
+        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.orchestration.process_manager"):
+            await pm._drain_stderr(mock_proc, "cancelled-agent")
+
+        # CancelledError should NOT produce "failed unexpectedly" log
+        assert not any(
+            "failed unexpectedly" in r.message
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_drain_stderr_assertion_error_caught(self, caplog) -> None:
+        """AssertionError (stderr is None) is caught and logged."""
+        import logging
+
+        pm = ProcessManager()
+        mock_proc = MagicMock()
+        mock_proc.stderr = None  # Triggers assertion
+
+        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.orchestration.process_manager"):
+            await pm._drain_stderr(mock_proc, "null-stderr-agent")
+
+        assert any(
+            "stderr drain task failed unexpectedly" in r.message
+            for r in caplog.records
+        )
+
+
 # ============================================================================
 # Coverage gap: start_agent orphan cleanup edge cases
 # ============================================================================

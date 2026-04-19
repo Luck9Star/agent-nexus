@@ -105,16 +105,33 @@ class ProcessManager:
         When stderr=PIPE is opened but never read, the OS pipe buffer
         fills (~64KB) and the writing process blocks indefinitely.  This
         background task keeps the buffer clear.
+
+        Runs as a fire-and-forget ``asyncio.create_task``.  Exceptions
+        are caught and logged to prevent silent crashes that would stop
+        stderr consumption and deadlock the agent subprocess.
         """
-        assert process.stderr is not None
-        while True:
-            line = await process.stderr.readline()
-            if not line:
-                break
-            logger.debug(
-                "Agent '%s' stderr: %s",
+        try:
+            assert process.stderr is not None
+            while True:
+                line = await process.stderr.readline()
+                if not line:
+                    break
+                logger.debug(
+                    "Agent '%s' stderr: %s",
+                    name,
+                    line.decode(errors="replace").rstrip(),
+                )
+        except asyncio.CancelledError:
+            # Expected when stop_agent or _cleanup_dead cancels us.
+            pass
+        except Exception:
+            # Unexpected crash — log to prevent "Task exception was
+            # never retrieved" warning and to aid debugging.  The
+            # drain has stopped, so stderr may fill, but the agent
+            # process is likely already dead or dying.
+            logger.exception(
+                "Agent '%s' stderr drain task failed unexpectedly",
                 name,
-                line.decode(errors="replace").rstrip(),
             )
 
     async def start_agent(
