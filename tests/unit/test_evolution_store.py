@@ -1358,3 +1358,77 @@ class TestGetJudgmentsBatchEmptyInput:
     def test_empty_set_returns_empty(self, tmp_path: Path) -> None:
         store = EvolutionStore(tmp_path / "evo.db")
         assert store.get_judgments_batch(set()) == {}
+
+
+class TestConnResourceCleanup:
+    """iter108 regression: PRAGMA/BEGIN failures must not leak connections.
+
+    Before the fix, PRAGMA foreign_keys=ON and BEGIN IMMEDIATE were executed
+    *before* the try/finally block in ``_conn()``.  If either raised, the
+    ``finally: conn.close()`` never ran, leaking the SQLite connection.
+    """
+
+    @staticmethod
+    def _make_failing_connect(fail_on: str, error_msg: str):
+        """Return (patcher, close_counter) for tracking conn.close() calls.
+
+        *fail_on* is a substring matched against the SQL string — any
+        ``execute()`` call whose SQL contains it raises OperationalError.
+        """
+        import unittest.mock as mock
+
+        close_counter: list[int] = [0]
+        _real_connect = sqlite3.connect
+
+        class _Proxy:
+            """Lightweight proxy around sqlite3.Connection."""
+
+            def __init__(self, conn):
+                self._conn = conn
+
+            def execute(self, sql, *a, **kw):
+                if fail_on in sql:
+                    raise sqlite3.OperationalError(error_msg)
+                return self._conn.execute(sql, *a, **kw)
+
+            def commit(self):
+                return self._conn.commit()
+
+            def rollback(self):
+                return self._conn.rollback()
+
+            def close(self):
+                close_counter[0] += 1
+                return self._conn.close()
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        def _connect(*args, **kwargs):
+            return _Proxy(_real_connect(*args, **kwargs))
+
+        return mock.patch.object(sqlite3, "connect", _connect), close_counter
+
+    def test_pragma_failure_closes_connection(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+
+        patcher, closes = self._make_failing_connect("PRAGMA", "forced pragma fail")
+        with patcher:
+            with pytest.raises(sqlite3.OperationalError, match="forced pragma"):
+                with store._conn() as _:
+                    pass
+
+        assert closes[0] == 1, "Connection leaked: conn.close() never called after PRAGMA failure"
+
+    def test_begin_immediate_failure_closes_connection(self, tmp_path: Path) -> None:
+        store = _make_store(tmp_path)
+
+        patcher, closes = self._make_failing_connect(
+            "BEGIN", "database is locked"
+        )
+        with patcher:
+            with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+                with store._conn(immediate=True) as _:
+                    pass
+
+        assert closes[0] == 1, "Connection leaked after BEGIN IMMEDIATE failure"

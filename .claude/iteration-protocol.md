@@ -144,6 +144,7 @@
 | 蓝队积压 iter106: 测试基础设施 | pytest markers(unit/integration/e2e) + 移位分类集成测试 + e2e conftest + cli.py env var覆盖 | 2026-04-20 | iter106 |
 | 蓝军 adversarial audit iter107: P0 数据一致性 | evolve_skill IntegrityError rollback + _generate_manifest flat YAML + AgentManifest兼容 = 4 tests | 2026-04-20 | iter107 |
 | 蓝军 adversarial audit iter107: P1 FK约束 | skill_judgments.skill_id FK + ghost-skill rejection + atomic rollback = 2 tests | 2026-04-20 | iter107 |
+| 蓝军深度扫描 iter108: 资源泄漏 | store._conn() PRAGMA/BEGIN移入try/finally + proxy-based regression test × 2 = 3 agents 14 findings cross-verified | 2026-04-20 | iter108 |
 
 ### 待清模式
 

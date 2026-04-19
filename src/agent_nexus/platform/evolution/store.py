@@ -161,10 +161,10 @@ class EvolutionStore:
             str(self._db_path),
             check_same_thread=False,
         )
-        conn.execute("PRAGMA foreign_keys=ON")
-        if immediate:
-            conn.execute("BEGIN IMMEDIATE")
         try:
+            conn.execute("PRAGMA foreign_keys=ON")
+            if immediate:
+                conn.execute("BEGIN IMMEDIATE")
             yield conn
             conn.commit()
         except sqlite3.Error:
