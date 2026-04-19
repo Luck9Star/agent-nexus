@@ -318,7 +318,7 @@ async def _info(name: str) -> None:
     typer.echo(f"  Version:      {entry.version}")
     typer.echo(f"  Type:         {entry.agent_type.value}")
     typer.echo(f"  Source:       {entry.source}")
-    typer.echo(f"  Commit SHA:   {entry.commit_sha[:12]}")
+    typer.echo(f"  Commit SHA:   {(entry.commit_sha or '')[:12]}")
     typer.echo(f"  Installed at: {entry.installed_at}")
     if entry.venv_path:
         typer.echo(f"  Venv:         {entry.venv_path}")

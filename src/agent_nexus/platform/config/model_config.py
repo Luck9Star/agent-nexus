@@ -186,6 +186,8 @@ class ModelConfigManager:
                 return key
 
         # Secondary: try well-known fallback env vars for the provider
+        # Normalize to lowercase so callers can pass "OpenAI" / "OPENAI" etc.
+        provider_name = provider_name.lower()
         for env_var in _PROVIDER_ENV_FALLBACKS.get(provider_name, []):
             key = os.environ.get(env_var, "")
             if key:

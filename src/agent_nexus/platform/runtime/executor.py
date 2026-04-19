@@ -52,7 +52,8 @@ class IPythonExecutor:
         # Pending injections that happened before shell creation.
         self._pending_injects: dict[str, Any] = {}
         # Lock to prevent concurrent shell creation in _require_shell.
-        # Created eagerly — asyncio.Lock() works without a running loop in 3.10+.
+        # Eager creation is safe: requires-python >= 3.11, where
+        # asyncio.Lock() works outside a running event loop (fixed in 3.10).
         self._shell_lock: asyncio.Lock = asyncio.Lock()
         # Flag set when a timed-out thread execution may still be running.
         # Prevents new executions on a contaminated shell.
@@ -213,6 +214,12 @@ class IPythonExecutor:
             )
 
         except asyncio.TimeoutError:
+            # NOTE: The underlying thread (from asyncio.to_thread) continues
+            # running after this timeout — Python cannot forcibly kill threads.
+            # Only the _timed_out flag prevents new executions on this shell,
+            # but the still-running thread may mutate kernel state (variables,
+            # imports, etc).  Callers should treat the shell as contaminated and
+            # call reset() or close() before reuse.
             self._timed_out = True
             return ExecutionResult(
                 success=False,

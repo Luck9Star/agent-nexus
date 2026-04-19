@@ -543,7 +543,7 @@ class TestDoubleCheckAfterLock:
             # First call will see shell=None at line 68, acquire the lock,
             # and our ShellSettingLock will set a mock shell,
             # so line 74 double-check returns it
-            executor._shell_lock = ShellSettingLock(original_lock, executor)
+            executor._shell_lock = ShellSettingLock(original_lock, executor)  # pyright: ignore[reportAttributeAccessIssue]
             shell = await executor._require_shell()
             assert shell is not None
         finally:
