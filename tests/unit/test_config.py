@@ -225,11 +225,12 @@ class TestConfigLoader:
 
 
 class TestConfigLoaderTomlDecodeErrorLogLevel:
-    """Iteration 85: TomlDecodeError is logged at ERROR level, not WARNING."""
+    """Iteration 85/122: TomlDecodeError is logged at ERROR level, then re-raised."""
 
-    def test_broken_toml_logs_error(self, tmp_path: Path) -> None:
-        """Broken TOML content triggers logger.error, not logger.warning."""
+    def test_broken_toml_raises(self, tmp_path: Path) -> None:
+        """Broken TOML content triggers logger.error and re-raises TomlDecodeError."""
         import logging
+        import toml
 
         _write_config(tmp_path, "[section\nkey = value\n")
         loader = ConfigLoader(config_dir=tmp_path)
@@ -238,11 +239,10 @@ class TestConfigLoaderTomlDecodeErrorLogLevel:
             logging.getLogger("agent_nexus.platform.config.loader"),
             "error",
         ) as mock_error:
-            config = loader.load_config()
+            with pytest.raises(toml.TomlDecodeError):
+                loader.load_config()
 
-        # Config should still return defaults (no crash)
-        assert config.models.default == DEFAULT_MODEL_STRING
-        # logger.error should have been called with the parse failure
+        # logger.error should still have been called before re-raising
         mock_error.assert_called_once()
         assert "Failed to parse config file" in mock_error.call_args[0][0]
 

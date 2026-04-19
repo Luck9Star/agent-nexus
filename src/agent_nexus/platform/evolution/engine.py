@@ -162,6 +162,7 @@ class EvolutionEngine:
         Raises:
             ValueError: If trigger is unknown or required args are missing.
         """
+        min_selections = max(min_selections, 1)
         if trigger == "post_analysis":
             if ctx is None:
                 raise ValueError(

@@ -190,3 +190,24 @@ class TestShouldCompact:
             token_usage=TokenUsage(prompt_tokens=10, completion_tokens=10),
         )
         assert engine.should_compact(ctx) is False
+
+
+# iter122 regression: min_selections minimum guard
+
+class TestEvolveMinSelections:
+    """evolve(metric_check) clamps min_selections to max(n, 1)."""
+
+    def test_metric_check_min_selections_zero(self) -> None:
+        store = _make_store()
+        store.get_active_skills.return_value = []
+        engine = EvolutionEngine(store)
+        # min_selections=0 is clamped to 1 — should not error
+        result = engine.evolve(trigger="metric_check", min_selections=0)
+        assert isinstance(result, list)
+
+    def test_metric_check_min_selections_negative(self) -> None:
+        store = _make_store()
+        store.get_active_skills.return_value = []
+        engine = EvolutionEngine(store)
+        result = engine.evolve(trigger="metric_check", min_selections=-5)
+        assert isinstance(result, list)

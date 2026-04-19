@@ -333,7 +333,7 @@ class TestSubtaskController:
     @pytest.mark.asyncio
     async def test_run_with_timeout_exceeds_default(self) -> None:
         """Coroutine exceeding config timeout raises TimeoutError."""
-        ctrl = SubtaskConfig(timeout_seconds=0.05)
+        ctrl = SubtaskConfig(timeout_seconds=0.1)
         ctrl = SubtaskController(config=ctrl)
 
         async def slow():
@@ -357,7 +357,7 @@ class TestSubtaskController:
     @pytest.mark.asyncio
     async def test_run_with_timeout_none_uses_config(self) -> None:
         """timeout=None falls back to config timeout_seconds."""
-        cfg = SubtaskConfig(timeout_seconds=0.05)
+        cfg = SubtaskConfig(timeout_seconds=0.1)
         ctrl = SubtaskController(config=cfg)
 
         async def slow():
@@ -2349,3 +2349,43 @@ class TestTopologicalSortCycleFallback:
         # Both tasks should be present (appended by fallback)
         ids = [t.id for t in result]
         assert set(ids) == {"A", "B"}
+
+
+# iter122 regression: route_chat empty string validation
+
+class TestRouteChatEmptyStringGuard:
+    """route_chat rejects empty agent_name and message."""
+
+    @pytest.mark.asyncio
+    async def test_empty_agent_name_rejected(self) -> None:
+        router = PlatformRouter(process_manager=_make_process_manager(agents={}))
+        result = await router.route_chat("", "hello")
+        assert result["success"] is False
+        assert "agent_name" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_whitespace_agent_name_rejected(self) -> None:
+        router = PlatformRouter(process_manager=_make_process_manager(agents={}))
+        result = await router.route_chat("   ", "hello")
+        assert result["success"] is False
+        assert "agent_name" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_empty_message_rejected(self) -> None:
+        handle = _make_agent_handle()
+        router = PlatformRouter(
+            process_manager=_make_process_manager(agents={"a": handle})
+        )
+        result = await router.route_chat("a", "")
+        assert result["success"] is False
+        assert "message" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_whitespace_message_rejected(self) -> None:
+        handle = _make_agent_handle()
+        router = PlatformRouter(
+            process_manager=_make_process_manager(agents={"a": handle})
+        )
+        result = await router.route_chat("a", "   ")
+        assert result["success"] is False
+        assert "message" in result["error"]

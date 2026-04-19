@@ -110,6 +110,11 @@ class PlatformRouter:
         """
         conv_id = conversation_id or str(uuid.uuid4())
 
+        if not agent_name or not agent_name.strip():
+            return {"output": "", "success": False, "error": "agent_name is required"}
+        if not message or not message.strip():
+            return {"output": "", "success": False, "error": "message is required"}
+
         # Check if this is a composite agent with an orchestration definition
         definition = self._composite_defs.get(agent_name)
         if definition is not None:

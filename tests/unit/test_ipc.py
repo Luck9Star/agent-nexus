@@ -1094,3 +1094,57 @@ class TestIPCMessageNonDictResolve:
 
         result2 = IPCMessage._resolve_payload(42)
         assert result2 == 42
+
+
+# ---------------------------------------------------------------------------
+# iter122 regression: receive timeout=0 clamped to 0.1
+# ---------------------------------------------------------------------------
+
+
+class TestIPCReceiveTimeoutZeroClamped:
+    """IPCStream.receive with timeout=0 is clamped to 0.1."""
+
+    async def test_receive_timeout_zero_clamped(self) -> None:
+        """timeout=0 does not immediately raise IPCTimeoutError."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_stdout = MagicMock()
+        # Make readline return a valid message after a brief delay
+        msg = AgentToPlatform(type=AgentToPlatformType.RESULT, content="ok")
+        raw_line = msg.model_dump_json() + "\n"
+        mock_stdout.readline = AsyncMock(return_value=raw_line.encode("utf-8"))
+
+        mock_stdin = MagicMock()
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        result = await stream.receive(timeout=0)
+        assert result.type == AgentToPlatformType.RESULT
+
+    async def test_receive_timeout_negative_clamped(self) -> None:
+        """timeout=-1 does not immediately raise IPCTimeoutError."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_stdout = MagicMock()
+        msg = AgentToPlatform(type=AgentToPlatformType.RESULT, content="ok")
+        raw_line = msg.model_dump_json() + "\n"
+        mock_stdout.readline = AsyncMock(return_value=raw_line.encode("utf-8"))
+
+        mock_stdin = MagicMock()
+        stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
+        result = await stream.receive(timeout=-1)
+        assert result.type == AgentToPlatformType.RESULT
+
+
+class TestIPCTimeoutErrorChain:
+    """IPCTimeoutError preserves exception chain from asyncio.TimeoutError."""
+
+    @pytest.mark.asyncio
+    async def test_timeout_error_has_cause(self) -> None:
+        hanging_readline = AsyncMock(side_effect=asyncio.TimeoutError())
+        stream = IPCStream(
+            stdin=MagicMock(),
+            stdout=MagicMock(readline=hanging_readline),
+        )
+        with pytest.raises(IPCTimeoutError) as exc_info:
+            await stream.receive(timeout=1.0)
+        assert exc_info.value.__cause__ is not None
+        assert isinstance(exc_info.value.__cause__, asyncio.TimeoutError)

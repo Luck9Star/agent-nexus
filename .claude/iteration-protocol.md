@@ -158,6 +158,7 @@
 | 蓝军3-agent深度扫描 iter119: P0腐化锁文件备份 | lockfile.py _corrupt_detected + _save备份到.json.corrupt + 4 regression tests = 2519 tests | 2026-04-20 | iter119 |
 | 蓝军P1修复 iter120: silent UPDATE + is_active保留 | increment_counters rowcount warn + evolve_skill parent validation + save_skill_record is_active保留 = 2522 tests | 2026-04-20 | iter120 |
 | 蓝军P1修复 iter121: Semaphore(0) + duplicate blocked_by | subtask.py Semaphore(max(n,1)) + task_graph.py dict.fromkeys() dedup + 4 regression tests = 2526 tests | 2026-04-20 | iter121 |
+| API boundary input validation iter122: 9 sites | executor/ipc timeout clamp + SubtaskConfig __post_init__ + SSRF scheme + route_chat empty-string + engine min_selections + token_tracker max_tokens + loader triggers coerce + deferred_registry max_results clamp + ipc exception chain = 2562 tests | 2026-04-20 | iter122 |
 
 ### 待清模式
 

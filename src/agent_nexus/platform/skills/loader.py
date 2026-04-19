@@ -268,13 +268,19 @@ class SkillLoader:
         extra = {k: v for k, v in frontmatter.items() if k not in known_keys}
 
         raw_triggers = frontmatter.get("triggers", [])
+        if isinstance(raw_triggers, list):
+            raw_triggers = [str(t) for t in raw_triggers if t is not None]
+        elif raw_triggers is not None:
+            raw_triggers = [str(raw_triggers)]
+        else:
+            raw_triggers = []
         raw_capabilities = frontmatter.get("capabilities", [])
         raw_model_config = frontmatter.get("model_config", {})
 
         return SkillMetadata(
             name=name_val,
             agent_type=type_val,
-            triggers=raw_triggers if isinstance(raw_triggers, list) else [raw_triggers],
+            triggers=raw_triggers,
             capabilities=(
                 raw_capabilities
                 if isinstance(raw_capabilities, list)

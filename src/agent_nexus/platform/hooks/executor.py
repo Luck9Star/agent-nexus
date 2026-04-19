@@ -371,6 +371,15 @@ class HookExecutor:
                 error="HTTP hook missing 'url' field",
             )
 
+        # SSRF guard: only http/https schemes allowed
+        if not hook.url.startswith(("http://", "https://")):
+            return HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error=f"HTTP hook URL has unsupported scheme (only http/https): {hook.url}",
+            )
+
         payload = {
             "event": hook.event,
             "context": context,

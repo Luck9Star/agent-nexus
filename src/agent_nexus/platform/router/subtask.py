@@ -29,6 +29,20 @@ class SubtaskConfig:
     max_retries: int = 2
     max_parallel: int = 3
 
+    def __post_init__(self) -> None:
+        if self.timeout_seconds < 0.1:
+            raise ValueError(
+                f"SubtaskConfig.timeout_seconds must be >= 0.1, got {self.timeout_seconds}"
+            )
+        if self.max_retries < 0:
+            raise ValueError(
+                f"SubtaskConfig.max_retries must be >= 0, got {self.max_retries}"
+            )
+        if self.max_parallel < 1:
+            raise ValueError(
+                f"SubtaskConfig.max_parallel must be >= 1, got {self.max_parallel}"
+            )
+
 
 class SubtaskController:
     """Execute subtasks with timeout, retry, and parallel support.

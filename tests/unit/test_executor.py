@@ -680,3 +680,37 @@ class TestExecDoneRestoredOnException:
             assert executor._exec_done.is_set()
         finally:
             executor.close()
+
+
+# ---------------------------------------------------------------------------
+# iter122 regression: timeout=0 clamped to 0.1
+# ---------------------------------------------------------------------------
+
+
+class TestTimeoutZeroClamped:
+    """timeout=0 is clamped to 0.1 to prevent immediate TimeoutError."""
+
+    @pytest.mark.asyncio
+    async def test_timeout_zero_clamped(self) -> None:
+        """execute with timeout=0 does not immediately timeout."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            # timeout=0 should be clamped to 0.1 internally
+            result = await executor.execute("x = 42", timeout=0)
+            assert result.success is True
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_timeout_negative_clamped(self) -> None:
+        """execute with timeout=-1 does not immediately timeout."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            result = await executor.execute("y = 7", timeout=-1)
+            assert result.success is True
+        finally:
+            executor.close()

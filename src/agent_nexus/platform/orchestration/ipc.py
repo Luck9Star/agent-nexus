@@ -99,12 +99,13 @@ class IPCStream:
             IPCTimeoutError: on timeout.
             IPCConnectionError: if stdout is closed.
         """
+        timeout = max(timeout, 0.1)
         try:
             raw = await asyncio.wait_for(self._stdout.readline(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
             raise IPCTimeoutError(
                 f"Timed out after {timeout:.1f}s waiting for agent message"
-            )
+            ) from exc
 
         if not raw:
             raise IPCConnectionError("Agent stdout closed (EOF)")

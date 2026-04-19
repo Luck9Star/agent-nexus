@@ -233,3 +233,29 @@ class TestConfigLoaderEnsureDir:
             result = loader.load_sources()
 
         assert result == []
+
+
+# ============================================================================
+# iter122 regression: TomlDecodeError is re-raised (not silently swallowed)
+# ============================================================================
+
+
+class TestConfigLoaderTomlDecodeError:
+    """Malformed config.toml raises instead of silently falling back to defaults."""
+
+    def test_toml_decode_error_raises(self, tmp_path: Path) -> None:
+        """A config.toml with invalid TOML syntax raises TomlDecodeError."""
+        import toml
+
+        cfg = tmp_path / CONFIG_FILE
+        cfg.write_text("[[invalid\nnot valid toml", encoding="utf-8")
+        loader = ConfigLoader(config_dir=tmp_path)
+
+        with pytest.raises(toml.TomlDecodeError):
+            loader.load_config()
+
+    def test_missing_file_still_uses_defaults(self, tmp_path: Path) -> None:
+        """Missing config.toml (FileNotFoundError) still uses defaults."""
+        loader = ConfigLoader(config_dir=tmp_path)
+        config = loader.load_config()
+        assert config.models.default == DEFAULT_MODEL_STRING

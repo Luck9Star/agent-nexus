@@ -95,6 +95,10 @@ class TokenTracker:
             session_id: Optional session identifier for log entries.
         """
         self._budget = budget if budget is not None else ContextBudget()
+        if max_tokens < 1:
+            raise ValueError(
+                f"max_tokens must be >= 1, got {max_tokens}"
+            )
         self._max_tokens = max_tokens
         self._session_id = session_id or uuid.uuid4().hex[:12]
         self._total: int = 0
@@ -162,8 +166,6 @@ class TokenTracker:
     @property
     def usage_pct(self) -> float:
         """Current usage as percentage of max tokens."""
-        if self._max_tokens <= 0:
-            return 0.0
         return (self._total / self._max_tokens) * 100
 
     def get_log(self) -> list[ContextBudgetLogEntry]:

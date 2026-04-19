@@ -13,6 +13,7 @@ from agent_nexus.models.hooks import (
     HookExecution,
     HookType,
 )
+from agent_nexus.platform.hooks.executor import HookExecutor
 
 
 # ---------------------------------------------------------------------------
@@ -408,3 +409,54 @@ class TestHookExecutionErrorType:
         hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
         he = HookExecution(hook=hook, passed=True)
         assert he.error_type is None
+
+
+# ---------------------------------------------------------------------------
+# iter122 regression: HTTP hook SSRF guard
+# ---------------------------------------------------------------------------
+
+
+class TestHTTPHookSSRFGuard:
+    """HTTP hooks with non-http/https schemes are rejected at runtime."""
+
+    @pytest.mark.asyncio
+    async def test_file_scheme_rejected(self):
+        """file:// scheme is rejected to prevent SSRF."""
+        hook = HookDefinition(
+            type=HookType.HTTP,
+            event=HookEvent.POST_EXECUTION,
+            url="file:///etc/passwd",
+        )
+        executor = HookExecutor(allowed_commands=[])
+        result = await executor._execute_http(hook, {})
+        assert result.passed is False
+        assert "unsupported scheme" in result.error
+
+    @pytest.mark.asyncio
+    async def test_ftp_scheme_rejected(self):
+        """ftp:// scheme is rejected to prevent SSRF."""
+        hook = HookDefinition(
+            type=HookType.HTTP,
+            event=HookEvent.POST_EXECUTION,
+            url="ftp://internal-server/secrets",
+        )
+        executor = HookExecutor(allowed_commands=[])
+        result = await executor._execute_http(hook, {})
+        assert result.passed is False
+        assert "unsupported scheme" in result.error
+
+    @pytest.mark.asyncio
+    async def test_https_scheme_accepted(self):
+        """https:// scheme passes the SSRF guard (may fail on network)."""
+        hook = HookDefinition(
+            type=HookType.HTTP,
+            event=HookEvent.POST_EXECUTION,
+            url="https://httpbin.org/post",
+            timeout_seconds=0.1,
+        )
+        executor = HookExecutor(allowed_commands=[])
+        result = await executor._execute_http(hook, {})
+        # https passes the guard; may fail on network timeout but
+        # the error should NOT be "unsupported scheme"
+        if not result.passed:
+            assert "unsupported scheme" not in result.error

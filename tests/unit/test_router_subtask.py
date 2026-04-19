@@ -40,7 +40,7 @@ class TestRunWithTimeout:
 
     @pytest.mark.asyncio
     async def test_timeout_raises(self):
-        ctrl = SubtaskController(SubtaskConfig(timeout_seconds=0.05))
+        ctrl = SubtaskController(SubtaskConfig(timeout_seconds=0.1))
         with pytest.raises(TimeoutError):
             await ctrl.run_with_timeout(asyncio.sleep(10))
 
@@ -63,7 +63,7 @@ class TestRunWithTimeout:
     @pytest.mark.asyncio
     async def test_uses_config_default_timeout(self):
         """When no override passed, config default is used."""
-        ctrl = SubtaskController(SubtaskConfig(timeout_seconds=0.05))
+        ctrl = SubtaskController(SubtaskConfig(timeout_seconds=0.1))
         with pytest.raises(TimeoutError):
             await ctrl.run_with_timeout(asyncio.sleep(10))
 
@@ -287,12 +287,59 @@ class TestRunParallel:
 
     # iter121 regression — max_parallel=0 must not deadlock (Semaphore(0) guard)
     @pytest.mark.asyncio
-    async def test_max_parallel_zero_does_not_deadlock(self):
-        """max_parallel=0 creates Semaphore(max(0,1))=Semaphore(1), not deadlock."""
-        ctrl = SubtaskController(SubtaskConfig(max_parallel=0))
+    async def test_max_parallel_zero_rejected(self):
+        """max_parallel=0 raises ValueError in SubtaskConfig.__post_init__."""
+        with pytest.raises(ValueError, match="max_parallel"):
+            SubtaskController(SubtaskConfig(max_parallel=0))
 
-        async def val(x):
-            return x
 
-        results = await ctrl.run_parallel([val(42)])
-        assert results == [42]
+# ---------------------------------------------------------------------------
+# iter122 regression: SubtaskConfig __post_init__ validation
+# ---------------------------------------------------------------------------
+
+
+class TestSubtaskConfigValidation:
+    """SubtaskConfig rejects invalid values via __post_init__."""
+
+    def test_timeout_seconds_zero_raises(self):
+        with pytest.raises(ValueError, match="timeout_seconds must be >= 0.1"):
+            SubtaskConfig(timeout_seconds=0)
+
+    def test_timeout_seconds_negative_raises(self):
+        with pytest.raises(ValueError, match="timeout_seconds must be >= 0.1"):
+            SubtaskConfig(timeout_seconds=-1.0)
+
+    def test_timeout_seconds_tiny_raises(self):
+        with pytest.raises(ValueError, match="timeout_seconds must be >= 0.1"):
+            SubtaskConfig(timeout_seconds=0.05)
+
+    def test_timeout_seconds_at_boundary_accepted(self):
+        cfg = SubtaskConfig(timeout_seconds=0.1)
+        assert cfg.timeout_seconds == 0.1
+
+    def test_max_retries_negative_raises(self):
+        with pytest.raises(ValueError, match="max_retries must be >= 0"):
+            SubtaskConfig(max_retries=-1)
+
+    def test_max_retries_zero_accepted(self):
+        cfg = SubtaskConfig(max_retries=0)
+        assert cfg.max_retries == 0
+
+    def test_max_parallel_zero_raises(self):
+        with pytest.raises(ValueError, match="max_parallel must be >= 1"):
+            SubtaskConfig(max_parallel=0)
+
+    def test_max_parallel_negative_raises(self):
+        with pytest.raises(ValueError, match="max_parallel must be >= 1"):
+            SubtaskConfig(max_parallel=-3)
+
+    def test_max_parallel_one_accepted(self):
+        cfg = SubtaskConfig(max_parallel=1)
+        assert cfg.max_parallel == 1
+
+    def test_defaults_still_valid(self):
+        """Default values pass validation."""
+        cfg = SubtaskConfig()
+        assert cfg.timeout_seconds == 60.0
+        assert cfg.max_retries == 2
+        assert cfg.max_parallel == 3

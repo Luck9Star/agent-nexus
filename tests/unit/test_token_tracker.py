@@ -207,11 +207,10 @@ class TestTokenTracker:
         tracker.record_usage(25_000)
         assert tracker.usage_pct == 75.0
 
-    def test_usage_pct_zero_max(self) -> None:
-        """Returns 0.0 when max_tokens=0 to avoid division by zero."""
-        tracker = TokenTracker(max_tokens=0)
-        tracker.record_usage(1000)
-        assert tracker.usage_pct == 0.0
+    def test_usage_pct_zero_max_raises(self) -> None:
+        """max_tokens=0 raises ValueError."""
+        with pytest.raises(ValueError, match="max_tokens must be >= 1"):
+            TokenTracker(max_tokens=0)
 
     # ------------------------------------------------------------------
     # get_log
@@ -340,3 +339,21 @@ class TestLogTrimming:
         assert log[0].turn_number == 2
         # Total tokens should still be accurate (not trimmed).
         assert tracker.total_tokens == _MAX_LOG_SIZE + 1
+
+
+# iter122 regression: max_tokens minimum guard
+
+class TestTokenTrackerMaxTokensGuard:
+    """TokenTracker raises ValueError when max_tokens < 1."""
+
+    def test_max_tokens_zero_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_tokens must be >= 1"):
+            TokenTracker(max_tokens=0)
+
+    def test_max_tokens_negative_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_tokens must be >= 1"):
+            TokenTracker(max_tokens=-10)
+
+    def test_max_tokens_one_accepted(self) -> None:
+        tracker = TokenTracker(max_tokens=1)
+        assert tracker._max_tokens == 1

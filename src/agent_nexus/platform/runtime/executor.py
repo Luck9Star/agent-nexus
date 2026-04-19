@@ -179,11 +179,13 @@ class IPythonExecutor:
 
         Args:
             code: Python source code to execute.
-            timeout: Maximum execution time in seconds.
+            timeout: Maximum execution time in seconds (minimum 0.1s).
 
         Returns:
             ExecutionResult with success status, output, and error info.
         """
+        timeout = max(timeout, 0.1)
+
         # Step 1: Security check (no shell needed)
         if self._timed_out:
             return ExecutionResult(

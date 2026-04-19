@@ -161,3 +161,58 @@ class TestSplitBodyResourcesFenced:
         assert body is not None
         assert resources is not None
         assert "## Ex" in resources
+
+
+# ---------------------------------------------------------------------------
+# iter122 regression: non-string triggers are coerced to strings
+# ---------------------------------------------------------------------------
+
+
+class TestBuildMetadataNonStringTriggers:
+    """Non-string trigger items in frontmatter are coerced to strings."""
+
+    def test_integer_triggers_coerced(self):
+        """Integer triggers like [1, 2] become ['1', '2']."""
+        frontmatter = {"name": "t", "agent_type": "a", "triggers": [1, 2, 3]}
+        meta = SkillLoader._build_metadata(frontmatter)
+        assert meta.triggers == ["1", "2", "3"]
+
+    def test_mixed_triggers_coerced(self):
+        """Mixed types in triggers list are coerced to strings."""
+        frontmatter = {"name": "t", "agent_type": "a", "triggers": ["text", 42, None]}
+        meta = SkillLoader._build_metadata(frontmatter)
+        assert meta.triggers == ["text", "42"]
+        # None is filtered out by the `if t is not None` guard
+
+
+# iter122 regression: triggers type coercion
+
+class TestTriggersTypeCoercion:
+    """SkillLoader coerces non-list triggers to list of strings."""
+
+    def test_triggers_string_coerced_to_list(self, tmp_path: Path) -> None:
+        f = tmp_path / "SKILL.md"
+        f.write_text(
+            "---\nname: str-triggers\nagent_type: atomic\ntriggers: hello\n---\n\n# Role\ntest",
+            encoding="utf-8",
+        )
+        skill = SkillLoader().parse_file(f)
+        assert skill.metadata.triggers == ["hello"]
+
+    def test_triggers_numeric_coerced_to_str(self, tmp_path: Path) -> None:
+        f = tmp_path / "SKILL.md"
+        f.write_text(
+            "---\nname: num-triggers\nagent_type: atomic\ntriggers:\n  - 42\n  - 3.14\n---\n\n# Role\ntest",
+            encoding="utf-8",
+        )
+        skill = SkillLoader().parse_file(f)
+        assert skill.metadata.triggers == ["42", "3.14"]
+
+    def test_triggers_null_becomes_empty_list(self, tmp_path: Path) -> None:
+        f = tmp_path / "SKILL.md"
+        f.write_text(
+            "---\nname: null-triggers\nagent_type: atomic\ntriggers:\n---\n\n# Role\ntest",
+            encoding="utf-8",
+        )
+        skill = SkillLoader().parse_file(f)
+        assert skill.metadata.triggers == []

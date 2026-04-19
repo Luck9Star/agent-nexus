@@ -848,3 +848,36 @@ class TestEmptyCommandAfterSplit:
         assert len(result.results) == 1
         assert result.results[0].passed is False
         assert "empty command" in result.results[0].error.lower()
+
+
+# iter122 regression: SSRF scheme validation
+
+class TestHTTPHookSSRF:
+    """HTTP hooks reject non-http/https URL schemes."""
+
+    @pytest.mark.asyncio
+    async def test_file_scheme_rejected(self) -> None:
+        hook = HookDefinition(
+            type=HookType.HTTP,
+            event=HookEvent.PRE_EXECUTION,
+            block_on_failure=True,
+            url="file:///etc/passwd",
+        )
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
+        result = await executor.execute_event(HookEvent.PRE_EXECUTION)
+        assert result.blocked is True
+        assert result.results[0].passed is False
+        assert "unsupported scheme" in result.results[0].error.lower()
+
+    @pytest.mark.asyncio
+    async def test_ftp_scheme_rejected(self) -> None:
+        hook = HookDefinition(
+            type=HookType.HTTP,
+            event=HookEvent.PRE_EXECUTION,
+            block_on_failure=False,
+            url="ftp://evil.com/payload",
+        )
+        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
+        result = await executor.execute_event(HookEvent.PRE_EXECUTION)
+        assert result.results[0].passed is False
+        assert "unsupported scheme" in result.results[0].error.lower()
