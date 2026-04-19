@@ -13,9 +13,9 @@
 - [x] TaskGraph 实现（SQLite + blocked_by + 环检测）
 - [x] ProcessManager 实现（asyncio.subprocess + 健康检查）
 - [x] IPC 协议实现（stdin/stdout JSON-lines）
-- [ ] doc-filler Agent 实现
-- [ ] MCP Server 暴露测试
-- [ ] Local mode 测试
+- [x] doc-filler Agent 实现
+- [x] MCP Server 暴露测试
+- [x] Local mode 测试
 
 ### Phase 2：Platform Router + 编排集成（Week 3-4）
 
@@ -27,7 +27,7 @@
 - [x] OrchestrationDSL TOML 解析器
 - [x] Continue vs Spawn 决策矩阵
 - [x] Model Config 层
-- [ ] requirements-analyzer + doc-filler 串联测试
+- [x] requirements-analyzer + doc-filler 串联测试
 
 ### Phase 3：MCP Gateway + Model Config（Week 5）
 
@@ -40,7 +40,7 @@
 - [x] **T2: Tiered Context Loading 基础框架** — TieredContextBuilder（L0/L1 分层注入）
 - [x] **T5: Provider-Agnostic Tool Search** — AgentSearchTool MCP tool + Anthropic 原生 `defer_loading` 适配
 - [x] Model Config Manager
-- [ ] 所有 10 个 Atomic Agent 注册
+- [x] 所有 10 个 Atomic Agent 注册
 - [ ] 端到端 MCP 测试
 
 ### Phase 4：Git-based Distribution + CLI（Week 6-7）
@@ -57,7 +57,7 @@
 - [ ] SemVer 版本解析器（从 git tags 解析）
 - [x] Agent Supervisor（asyncio.subprocess，健康检查，自动重启）
 - [ ] 质量验证工具（manifest 检查、SKILL.md 检查、安全审计）
-- [ ] 5 个 Composite Agent 实现
+- [x] 5 个 Composite Agent 实现
 
 > 详见 [§12 Git-Based Agent 分发与本地架构](10-cloud-local-architecture.md)
 
@@ -122,30 +122,72 @@
 
 ```
 agent-nexus/
-├── platform/                    # Platform 核心
-│   ├── router/                  # Platform Router（4-Phase Workflow）
-│   ├── orchestration/           # 自建编排层
-│   │   ├── task_graph.py        # TaskGraph（SQLite + blocked_by + 环检测）
-│   │   ├── process_manager.py   # ProcessManager（asyncio.subprocess + 健康检查）
-│   │   ├── ipc.py               # IPC 协议（stdin/stdout JSON-lines）
-│   │   ├── dsl.py               # OrchestrationDSL（TOML DAG 解析）
-│   │   └── subtask.py           # SubtaskController（超时/重试/并行控制）
-│   ├── gateway/                 # MCP Gateway 聚合
-│   ├── config/                  # 模型配置（Provider Registry + pydantic-ai）
-│   ├── local/                   # Local Platform（CLI + Git Installer + Supervisor）
-│   │   ├── cli.py               # CLI 入口 (Typer)
-│   │   ├── sources.py           # 包源管理（sources.yaml 解析）
-│   │   ├── installer.py         # Git Installer（clone --sparse + venv）
-│   │   ├── lockfile.py          # 锁文件管理（lockfile.json）
-│   │   ├── supervisor.py        # Agent 进程管理
-│   │   └── config.py            # 配置（config.toml + Provider Registry）
-│   ├── skills/                  # Skill 加载器
-│   ├── evolution/               # Self-Evolution Engine
-│   ├── runtime/                 # Python Runtime（CaveAgent 集成）
+├── src/agent_nexus/
+│   ├── platform/                # Platform 核心
+│   │   ├── router/              # Platform Router（4-Phase Workflow）
+│   │   │   ├── router.py
+│   │   │   ├── workflow.py
+│   │   │   └── subtask.py       # SubtaskController（超时/重试/并行控制）
+│   │   ├── orchestration/       # 自建编排层
+│   │   │   ├── task_graph.py    # TaskGraph（SQLite + blocked_by + 环检测）
+│   │   │   ├── process_manager.py # ProcessManager（asyncio.subprocess + 健康检查）
+│   │   │   ├── ipc.py           # IPC 协议（stdin/stdout JSON-lines）
+│   │   │   └── dsl.py           # OrchestrationDSL（TOML DAG 解析）
+│   │   ├── gateway/             # MCP Gateway 聚合
+│   │   │   ├── gateway.py
+│   │   │   ├── deferred_registry.py
+│   │   │   └── tool_adapter.py
+│   │   ├── config/              # 模型配置（Provider Registry + pydantic-ai）
+│   │   │   ├── model_config.py
+│   │   │   ├── loader.py
+│   │   │   └── defaults.py
+│   │   ├── hooks/               # Hook 执行器
+│   │   │   └── executor.py
+│   │   ├── local/               # Local Platform（CLI + Git Installer + Supervisor）
+│   │   │   ├── cli.py           # CLI 入口 (Typer)
+│   │   │   ├── sources.py       # 包源管理（sources.yaml 解析）
+│   │   │   ├── installer.py     # Git Installer（clone --sparse + venv）
+│   │   │   ├── lockfile.py      # 锁文件管理（lockfile.json）
+│   │   │   └── supervisor.py    # Agent 进程管理
+│   │   ├── skills/              # Skill 加载器
+│   │   │   ├── loader.py
+│   │   │   └── models.py
+│   │   ├── evolution/           # Self-Evolution Engine
+│   │   │   ├── engine.py
+│   │   │   ├── evolver.py
+│   │   │   ├── store.py
+│   │   │   ├── analyzer.py
+│   │   │   ├── compaction.py
+│   │   │   ├── context_describer.py
+│   │   │   ├── health.py
+│   │   │   ├── promotion.py
+│   │   │   └── thresholds.py
+│   │   └── runtime/             # Python Runtime（CaveAgent 集成）
+│   │       ├── runtime.py
+│   │       ├── executor.py
+│   │       ├── describer.py
+│   │       ├── permission_checker.py
+│   │       ├── security_checker.py
+│   │       ├── security_rules.py
+│   │       └── token_tracker.py
 │   └── models/                  # 共享数据模型
+│       ├── agent.py
+│       ├── config.py
+│       ├── context.py
+│       ├── distribution.py
+│       ├── evolution.py
+│       ├── hooks.py
+│       ├── ipc.py
+│       ├── permission.py
+│       ├── runtime.py
+│       └── task.py
 ├── agents/                      # 官方 Agent
 │   ├── atomic/                  # 10 Atomic Agents
 │   └── composite/               # 5 Composite Agents
+├── tests/                       # 测试
+│   ├── unit/
+│   ├── integration/
+│   └── e2e/
 ├── templates/                   # OrchestrationDSL TOML 模板
 ├── crates/                      # Rust 重构（远期）
 │   ├── ap-core/                 # 核心类型、配置、协议
