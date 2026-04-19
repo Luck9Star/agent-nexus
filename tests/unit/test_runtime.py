@@ -594,6 +594,51 @@ class TestSecurityCheckerAdditionalBlocks:
         finally:
             runtime.close()
 
+    @pytest.mark.asyncio
+    async def test_type_three_arg_blocked(self) -> None:
+        """type(name, bases, dict) creates arbitrary classes → sandbox escape."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute(
+                "type('Evil', (object,), {'__init__': lambda self: None})"
+            )
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+            assert "type" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_bases_access_blocked(self) -> None:
+        """__bases__ allows MRO chain traversal → sandbox escape."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute(
+                "x = ().__class__.__bases__"
+            )
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+            assert "__bases__" in result.error.lower()
+        finally:
+            runtime.close()
+
+    @pytest.mark.asyncio
+    async def test_mro_access_blocked(self) -> None:
+        """__mro__ exposes class hierarchy → sandbox escape."""
+        runtime = PythonRuntime()
+        try:
+            result = await runtime.execute(
+                "x = str.__mro__"
+            )
+            assert result.success is False
+            assert result.error is not None
+            assert "security violation" in result.error.lower()
+            assert "__mro__" in result.error.lower()
+        finally:
+            runtime.close()
+
 
 # ============================================================================
 # Coverage gap tests: security_checker.py lines 155-156, 193-194

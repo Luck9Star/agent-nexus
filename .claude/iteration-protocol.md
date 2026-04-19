@@ -151,6 +151,7 @@
 | 蓝军3-agent退出条件验证 iter112 | get_snapshot N+1→_rows_to_tasks批量(1) + unused imports(3) + decode errors=replace(5) + ctypes/open安全回归(2) = 2491 tests | 2026-04-20 | iter112 |
 | code-review-expert全量评审 iter113 | evolve_skill双重rollback→外部catch IntegrityError(P0) + executor _exec_done异常恢复(P1) + 回归test(1) = 2492 tests | 2026-04-20 | iter113 |
 | composite workflow整体超时 iter114 | route_composite phase loop添加asyncio.wait_for(1200s) + 2 regression tests = 2496 tests | 2026-04-20 | iter114 |
+| 蓝军sandbox escape type()+__bases__/__mro__ iter115 | type加入forbidden_functions + __bases__/__mro__加入forbidden_attributes + 3 regression tests = 2500 tests | 2026-04-20 | iter115 |
 
 ### 待清模式
 

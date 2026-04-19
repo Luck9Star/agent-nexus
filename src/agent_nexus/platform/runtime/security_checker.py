@@ -54,6 +54,7 @@ _DEFAULT_FORBIDDEN_FUNCTIONS = [
     "locals",
     "breakpoint",
     "input",
+    "type",  # 3-arg form creates arbitrary classes → MRO sandbox escape
 ]
 
 _DEFAULT_FORBIDDEN_ATTRIBUTES = [
@@ -61,6 +62,8 @@ _DEFAULT_FORBIDDEN_ATTRIBUTES = [
     "__globals__",
     "__code__",
     "__builtins__",
+    "__bases__",  # MRO chain traversal → sandbox escape
+    "__mro__",    # method resolution order → class hierarchy access
 ]
 
 _DEFAULT_REGEX_PATTERNS = [
