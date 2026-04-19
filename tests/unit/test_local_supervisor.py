@@ -187,6 +187,44 @@ class TestSupervisorAutoRestart:
         restarted = await sup.auto_restart_dead()
         assert restarted == []
 
+    @pytest.mark.asyncio
+    async def test_auto_restart_dead_success(self, tmp_path: Path) -> None:
+        """Dead agent within restart budget is restarted successfully."""
+        sup, pm, lf, _ = _make_supervisor(tmp_path)
+        entry = _make_entry()
+        lf.load.return_value = Lockfile(agents={"dead-agent": entry})
+        lf.get_entry.return_value = entry
+
+        # Mark as started; agent handle is None (dead / never created)
+        sup._started_agents.add("dead-agent")
+        pm.get_agent.return_value = None
+
+        # start_agent calls pm.start_agent which returns a handle with .pid
+        handle_mock = MagicMock()
+        handle_mock.pid = 12345
+        pm.start_agent = AsyncMock(return_value=handle_mock)
+
+        # _build_command must return a valid command list
+        with patch.object(sup, "_build_command", return_value=["python", "main.py"]):
+            restarted = await sup.auto_restart_dead()
+        assert restarted == ["dead-agent"]
+
+    @pytest.mark.asyncio
+    async def test_auto_restart_dead_start_fails(self, tmp_path: Path) -> None:
+        """Dead agent that fails to restart is NOT in the returned list."""
+        sup, pm, lf, _ = _make_supervisor(tmp_path)
+        entry = _make_entry()
+        lf.load.return_value = Lockfile(agents={"dead-agent": entry})
+        lf.get_entry.return_value = entry
+
+        sup._started_agents.add("dead-agent")
+        pm.get_agent.return_value = None
+
+        # _build_command returns None → start_agent returns False
+        with patch.object(sup, "_build_command", return_value=None):
+            restarted = await sup.auto_restart_dead()
+        assert restarted == []
+
 
 class TestSupervisorListHelpers:
     def test_list_running_delegates(self, tmp_path: Path) -> None:
