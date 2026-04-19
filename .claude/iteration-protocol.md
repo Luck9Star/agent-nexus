@@ -137,6 +137,7 @@
 | P7 API 前向兼容性（3处） | router mapping.get + health CAPTURED branch + TaskState.BLOCKED 移除 + 5 tests | 2026-04-19 | iter100 |
 | 异常上下文丢失（7 P1 + 2 P2 sites） | WorkflowResult/HookExecution 新增 error_type 字段 + 9 sites 传 type(exc).__name__ + 4 tests | 2026-04-19 | iter101 |
 | 外部 dict 裸下标 KeyError（3 sites） | tool_adapter name校验 + sources.py .get() validation + 6 tests | 2026-04-19 | iter102 |
+| __del__ 安全网（TaskGraph + ProcessManager） | task_graph.py + process_manager.py 添加 __del__ 防止资源泄漏 | 2026-04-19 | iter103 |
 
 ### 待清模式
 

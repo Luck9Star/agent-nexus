@@ -465,3 +465,18 @@ class ProcessManager:
                         name, rc,
                     )
         return dead
+
+    def __del__(self) -> None:
+        """Kill orphaned subprocesses on GC.
+
+        Best-effort synchronous cleanup.  Normal shutdown should call
+        ``stop_all()`` which does graceful IPC EOF -> SIGTERM -> SIGKILL.
+        This safety net handles cases where the event loop crashes
+        without calling stop_all().
+        """
+        for name, handle in list(self._agents.items()):
+            if handle.process.returncode is None:
+                try:
+                    handle.process.kill()
+                except ProcessLookupError:
+                    pass
