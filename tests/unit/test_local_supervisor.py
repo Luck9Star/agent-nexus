@@ -273,3 +273,45 @@ class TestSupervisorBuildCommandVenvFallback:
 
         # Should fall through to uvx/python3 fallback, not return None
         assert cmd is not None
+
+
+class TestStopAgentRemovesFromStartedSet:
+    """Regression: stop_agent must remove agent from _started_agents.
+
+    Without this, auto_restart_dead would pull a user-stopped agent
+    back up, violating the user's intent.
+    """
+
+    @pytest.mark.asyncio
+    async def test_stop_removes_from_started_set(self, tmp_path: Path) -> None:
+        sup, pm, _, _ = _make_supervisor(tmp_path)
+        handle = MagicMock(is_alive=True)
+        pm.get_agent.return_value = handle
+
+        # Simulate agent was started
+        sup._started_agents.add("my-agent")
+        assert "my-agent" in sup._started_agents
+
+        result = await sup.stop_agent("my-agent")
+        assert result is True
+        assert "my-agent" not in sup._started_agents
+
+    @pytest.mark.asyncio
+    async def test_auto_restart_ignores_stopped_agent(self, tmp_path: Path) -> None:
+        """Agent stopped by user must NOT be auto-restarted."""
+        sup, pm, lf, _ = _make_supervisor(tmp_path)
+        entry = _make_entry()
+        lf.load.return_value = Lockfile(agents={"my-agent": entry})
+        lf.get_entry.return_value = entry
+        pm.get_agent.return_value = None
+
+        # Start then stop — agent should NOT be in _started_agents
+        sup._started_agents.add("my-agent")
+        handle = MagicMock(is_alive=True)
+        pm.get_agent.return_value = handle
+        await sup.stop_agent("my-agent")
+        pm.get_agent.return_value = None
+
+        # auto_restart_dead should skip it
+        restarted = await sup.auto_restart_dead()
+        assert restarted == []

@@ -227,6 +227,9 @@ class AgentSupervisor:
 
         try:
             await self._pm.stop_agent(agent_name)
+            # Remove from started set so auto_restart_dead won't
+            # pull it back up against the user's intent.
+            self._started_agents.discard(agent_name)
             logger.info("Agent '%s' stopped", agent_name)
             return True
         except KeyError:
