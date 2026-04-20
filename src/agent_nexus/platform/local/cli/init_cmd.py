@@ -64,7 +64,8 @@ def doctor() -> None:
         raw = toml.loads(config_path.read_text(encoding="utf-8"))
         providers = raw.get("models", {}).get("providers", {})
         config_key_envs = [
-            v["api_key_env"] for v in providers.values()
+            str(v["api_key_env"])
+            for v in providers.values()
             if isinstance(v, dict) and "api_key_env" in v
         ]
     except Exception:
@@ -73,7 +74,9 @@ def doctor() -> None:
     if not config_key_envs:
         from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
         config_key_envs = [
-            p["api_key_env"] for p in DEFAULT_PROVIDERS.values() if "api_key_env" in p
+            str(p["api_key_env"])
+            for p in DEFAULT_PROVIDERS.values()
+            if isinstance(p, dict) and "api_key_env" in p
         ]
     has_key = any(os.environ.get(k) for k in config_key_envs)
     checks.append(

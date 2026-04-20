@@ -41,6 +41,8 @@ _DEFAULT_FORBIDDEN_IMPORTS = [
     "socket",
     "http",
     "urllib",
+    "pathlib",   # Path provides file read/write, bypassing open() block
+    "tempfile",   # temp file creation bypasses path_rules
 ]
 
 _DEFAULT_FORBIDDEN_FUNCTIONS = [

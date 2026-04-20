@@ -5,6 +5,7 @@ description = "Accessibility auditing specialist covering WCAG 2.2 AA standards"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",
+    "fastmcp>=2.0",
 ]
 
 [project.optional-dependencies]

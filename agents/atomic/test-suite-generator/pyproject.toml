@@ -9,7 +9,7 @@ dependencies = [
 
 [project.optional-dependencies]
 full = [
-    "fastmcp>=0.1",
+    "fastmcp>=2.0",
 ]
 dev = [
     "pytest>=8.0",

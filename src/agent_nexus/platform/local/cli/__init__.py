@@ -48,7 +48,7 @@ from agent_nexus.platform.local.cli.evolution_cmd import evolution_app
 
 app.add_typer(init_app)
 app.add_typer(config_app, name="config")
-app.add_typer(runtime_app)
+app.add_typer(runtime_app, name="runtime")
 app.add_typer(evolution_app, name="evolution")
 
 if __name__ == "__main__":

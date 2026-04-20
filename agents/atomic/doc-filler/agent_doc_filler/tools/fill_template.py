@@ -199,3 +199,10 @@ def fill_template(
         return _fill_with_docx(template_path, values, output_path)
     except ImportError:
         return _fill_xml_fallback(template_path, values, output_path)
+    except Exception:
+        # python-docx may fail on minimal/malformed docx files
+        import logging
+        logging.getLogger(__name__).debug(
+            "python-docx fill failed, falling back to XML", exc_info=True
+        )
+        return _fill_xml_fallback(template_path, values, output_path)

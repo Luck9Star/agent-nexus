@@ -60,6 +60,18 @@ class TestSecurityCheckerCheckCode:
         assert len(violations) >= 1
         assert any(v.rule_type == "import" for v in violations)
 
+    def test_blocks_pathlib_import(self):
+        checker = SecurityChecker()
+        violations = checker.check_code("from pathlib import Path")
+        assert len(violations) >= 1
+        assert any(v.rule_type == "import" for v in violations)
+
+    def test_blocks_tempfile_import(self):
+        checker = SecurityChecker()
+        violations = checker.check_code("import tempfile")
+        assert len(violations) >= 1
+        assert any(v.rule_type == "import" for v in violations)
+
     def test_blocks_eval(self):
         checker = SecurityChecker()
         violations = checker.check_code(EVAL_CODE + '("x")')

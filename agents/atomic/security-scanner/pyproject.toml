@@ -5,6 +5,7 @@ description = "Application security scanning specialist with real-time vulnerabi
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",
+    "fastmcp>=2.0",
 ]
 
 [project.optional-dependencies]

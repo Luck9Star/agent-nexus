@@ -25,7 +25,7 @@ class TestStatus:
             mock_lockfile.load.return_value.agents = {}
             mock_init.return_value = (MagicMock(), mock_lockfile, MagicMock(), config_dir)
 
-            result = runner.invoke(app, ["status"])
+            result = runner.invoke(app, ["runtime", "status"])
             assert result.exit_code == 0
             assert "no agents" in result.output.lower() or "not installed" in result.output.lower()
 
@@ -40,7 +40,7 @@ class TestLogs:
         with patch("agent_nexus.platform.local.cli.runtime_cmd._init_managers") as mock_init:
             mock_init.return_value = (MagicMock(), MagicMock(), MagicMock(), config_dir)
 
-            result = runner.invoke(app, ["logs", "nonexistent-agent"])
+            result = runner.invoke(app, ["runtime", "logs", "nonexistent-agent"])
             assert "no log" in result.output.lower() or "not" in result.output.lower()
 
 
@@ -56,5 +56,5 @@ class TestPs:
             mock_lockfile.load.return_value.agents = {}
             mock_init.return_value = (MagicMock(), mock_lockfile, MagicMock(), config_dir)
 
-            result = runner.invoke(app, ["ps"])
+            result = runner.invoke(app, ["runtime", "ps"])
             assert result.exit_code == 0

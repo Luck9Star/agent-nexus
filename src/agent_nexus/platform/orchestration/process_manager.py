@@ -498,13 +498,28 @@ class ProcessManager:
             return
 
         # Stop in parallel — each stop_agent has its own timeout.
-        results = await asyncio.gather(
-            *(self.stop_agent(name, timeout=timeout) for name in names),
-            return_exceptions=True,
-        )
-        for agent_name, result in zip(names, results):
-            if isinstance(result, Exception):
-                logger.error("Error stopping agent '%s': %s", agent_name, result)
+        try:
+            results = await asyncio.gather(
+                *(self.stop_agent(name, timeout=timeout) for name in names),
+                return_exceptions=True,
+            )
+            for agent_name, result in zip(names, results):
+                if isinstance(result, Exception):
+                    logger.error("Error stopping agent '%s': %s", agent_name, result)
+        except asyncio.CancelledError:
+            # Platform shutdown interrupted gather — force-kill survivors.
+            logger.warning(
+                "stop_all() cancelled mid-shutdown — force-killing remaining agents"
+            )
+            for name in names:
+                handle = self._agents.get(name)
+                if handle is not None and handle.is_alive:
+                    try:
+                        handle.process.kill()
+                        logger.info("Force-killed agent '%s'", name)
+                    except (ProcessLookupError, OSError):
+                        pass
+            raise
 
     # ------------------------------------------------------------------
     # Cleanup

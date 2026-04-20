@@ -31,12 +31,61 @@ class PlaceholderInfo(BaseModel):
     formatting: dict | None = None
 
 
+class HeadingInfo(BaseModel):
+    """A heading found in the document."""
+
+    model_config = ConfigDict(frozen=True)
+
+    level: int
+    text: str
+
+
+class TableInfo(BaseModel):
+    """Summary of a table found in the document."""
+
+    model_config = ConfigDict(frozen=True)
+
+    index: int
+    rows: int
+    cols: int
+    header_row: list[str] = Field(default_factory=list)
+    preview: list[list[str]] = Field(default_factory=list)
+
+
+class SectionContent(BaseModel):
+    """Content summary for a document section (between headings)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    heading: str = ""
+    level: int = 0
+    paragraph_count: int = 0
+    preview: str = ""
+
+
+class DocumentStats(BaseModel):
+    """Aggregate statistics about the document."""
+
+    model_config = ConfigDict(frozen=True)
+
+    total_paragraphs: int = 0
+    total_tables: int = 0
+    total_images: int = 0
+    total_characters: int = 0
+    total_words: int = 0
+    heading_count: int = 0
+
+
 class TemplateAnalysis(BaseModel):
     """Result of analyzing a Word document template.
 
     Attributes:
         template_path: Path to the analyzed template file.
         placeholders: All placeholders found in the template.
+        headings: Document heading hierarchy.
+        sections: Content sections between headings.
+        tables: Table summaries with header rows and preview data.
+        stats: Aggregate document statistics.
         style_info: Document-level style information (default font, themes, etc.).
         metadata: Additional metadata (page count, section count, etc.).
     """
@@ -45,6 +94,10 @@ class TemplateAnalysis(BaseModel):
 
     template_path: str
     placeholders: list[PlaceholderInfo] = Field(default_factory=list)
+    headings: list[HeadingInfo] = Field(default_factory=list)
+    sections: list[SectionContent] = Field(default_factory=list)
+    tables: list[TableInfo] = Field(default_factory=list)
+    stats: DocumentStats = Field(default_factory=DocumentStats)
     style_info: dict = Field(default_factory=dict)
     metadata: dict = Field(default_factory=dict)
 

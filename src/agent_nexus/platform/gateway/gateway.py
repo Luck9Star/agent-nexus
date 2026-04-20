@@ -438,8 +438,10 @@ class MCPGateway:
         prevent memory leaks across stop/start cycles.
         """
         logger.info("Stopping MCP Gateway and all agents")
-        await self._pm.stop_all()
-        remove_all_locks()
+        try:
+            await self._pm.stop_all()
+        finally:
+            remove_all_locks()
 
     # ------------------------------------------------------------------
     # Properties

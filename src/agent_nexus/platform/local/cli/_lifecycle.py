@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 from pathlib import Path
 from typing import Optional
 
@@ -482,9 +483,25 @@ async def _run(name: str, mode: str, transport: str, extra_args: list[str] | Non
 
 
 async def _wait_forever() -> None:
-    """Block indefinitely until cancelled."""
-    while True:
-        await asyncio.sleep(3600)
+    """Block indefinitely until cancelled or signalled.
+
+    Registers SIGINT/SIGTERM handlers that set a shutdown event,
+    ensuring OS signals cascade graceful shutdown to child processes.
+    """
+    loop = asyncio.get_running_loop()
+    shutdown = asyncio.Event()
+
+    def _signal_handler() -> None:
+        shutdown.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, _signal_handler)
+
+    try:
+        await shutdown.wait()
+    finally:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.remove_signal_handler(sig)
 
 
 def _resolve_local_agent(name: str) -> Path:

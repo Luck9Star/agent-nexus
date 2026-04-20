@@ -171,7 +171,7 @@ def evolution_fix(
     Note: The current engine runs METRIC_CHECK across all skills.
     Per-skill filtering will be added when the engine supports it.
     """
-    from agent_nexus.models.evolution import EvolutionTrigger
+    from agent_nexus.platform.evolution.evolver import EvolutionTrigger
 
     engine, store = _get_engine()
     try:
