@@ -410,20 +410,7 @@ class OrchestrationDSL:
             )
 
         # -- [tool_loading] (optional) --
-        raw_tl = raw.get("tool_loading", {})
-        if not isinstance(raw_tl, dict):
-            raise DSLSyntaxError("[tool_loading] must be a table")
-        tl_strategy = raw_tl.get("strategy", "lazy")
-        tl_preload = raw_tl.get("preload_agents", [])
-        if not isinstance(tl_preload, list):
-            raise DSLSyntaxError("[tool_loading].preload_agents must be a list")
-        try:
-            tool_loading = DSLToolLoading(
-                strategy=tl_strategy,
-                preload_agents=list(tl_preload),
-            )
-        except ValueError as exc:
-            raise DSLSyntaxError(f"[tool_loading]: {exc}") from exc
+        tool_loading = self._parse_tool_loading(raw)
 
         definition = OrchestrationDefinition(
             goal=goal,
@@ -540,20 +527,7 @@ class OrchestrationDSL:
             agents[aname] = DSLAgent(name=aname, description="")
 
         # -- [tool_loading] (optional, rare in composition format) --
-        raw_tl = raw.get("tool_loading", {})
-        if not isinstance(raw_tl, dict):
-            raise DSLSyntaxError("[tool_loading] must be a table")
-        tl_strategy = raw_tl.get("strategy", "lazy")
-        tl_preload = raw_tl.get("preload_agents", [])
-        if not isinstance(tl_preload, list):
-            raise DSLSyntaxError("[tool_loading].preload_agents must be a list")
-        try:
-            tool_loading = DSLToolLoading(
-                strategy=tl_strategy,
-                preload_agents=list(tl_preload),
-            )
-        except ValueError as exc:
-            raise DSLSyntaxError(f"[tool_loading]: {exc}") from exc
+        tool_loading = self._parse_tool_loading(raw)
 
         definition = OrchestrationDefinition(
             goal=goal,
@@ -572,6 +546,24 @@ class OrchestrationDSL:
             )
 
         return definition
+
+    @staticmethod
+    def _parse_tool_loading(raw: dict[str, Any]) -> DSLToolLoading:
+        """Parse [tool_loading] section from raw TOML dict."""
+        raw_tl = raw.get("tool_loading", {})
+        if not isinstance(raw_tl, dict):
+            raise DSLSyntaxError("[tool_loading] must be a table")
+        tl_strategy = raw_tl.get("strategy", "lazy")
+        tl_preload = raw_tl.get("preload_agents", [])
+        if not isinstance(tl_preload, list):
+            raise DSLSyntaxError("[tool_loading].preload_agents must be a list")
+        try:
+            return DSLToolLoading(
+                strategy=tl_strategy,
+                preload_agents=list(tl_preload),
+            )
+        except ValueError as exc:
+            raise DSLSyntaxError(f"[tool_loading]: {exc}") from exc
 
     @staticmethod
     def _detect_cycles(task_map: dict[str, DSLTask]) -> list[list[str]]:

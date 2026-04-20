@@ -601,15 +601,9 @@ class EvolutionStore:
             judgments_by_analysis: dict[str, list[dict[str, Any]]] = {}
             for r in j_rows:
                 aid = r[1]
-                judgments_by_analysis.setdefault(aid, []).append({
-                    "id": r[0],
-                    "analysis_id": r[1],
-                    "skill_id": r[2],
-                    "selected": bool(r[3]),
-                    "applied": bool(r[4]),
-                    "completed": bool(r[5]),
-                    "fell_back": bool(r[6]),
-                })
+                judgments_by_analysis.setdefault(aid, []).append(
+                    self._judgment_row_to_dict(r)
+                )
 
             # Build result dicts without per-row queries
             results: list[dict[str, Any]] = []
@@ -639,15 +633,7 @@ class EvolutionStore:
                 (skill_id, limit),
             ).fetchall()
             return [
-                {
-                    "id": r[0],
-                    "analysis_id": r[1],
-                    "skill_id": r[2],
-                    "selected": bool(r[3]),
-                    "applied": bool(r[4]),
-                    "completed": bool(r[5]),
-                    "fell_back": bool(r[6]),
-                }
+                self._judgment_row_to_dict(r)
                 for r in rows
             ]
 
@@ -681,15 +667,7 @@ class EvolutionStore:
         result: dict[str, list[dict[str, Any]]] = {sid: [] for sid in skill_ids}
         for r in rows:
             sid = r[2]
-            result[sid].append({
-                "id": r[0],
-                "analysis_id": r[1],
-                "skill_id": sid,
-                "selected": bool(r[3]),
-                "applied": bool(r[4]),
-                "completed": bool(r[5]),
-                "fell_back": bool(r[6]),
-            })
+            result[sid].append(self._judgment_row_to_dict(r))
         return result
 
     # ------------------------------------------------------------------
@@ -978,21 +956,21 @@ class EvolutionStore:
         with self._conn() as conn:
             visited: set[str] = set()
             frontier = [skill_id]
-            # Batch-load all lineage edges once
-            all_parents = self._batch_load_parents(conn)
 
-            # Phase 1: BFS to collect all ancestor IDs (no per-ID queries)
+            # Phase 1: BFS — load parents only for the current frontier
+            # each round, instead of the entire lineage table.
             for _ in range(max_depth):
+                if not frontier:
+                    break
+                round_parents = self._batch_load_parents(conn, set(frontier))
                 next_frontier: list[str] = []
                 for sid in frontier:
-                    for pid in all_parents.get(sid, []):
+                    for pid in round_parents.get(sid, []):
                         if pid in visited:
                             continue
                         visited.add(pid)
                         next_frontier.append(pid)
                 frontier = next_frontier
-                if not frontier:
-                    break
 
             if not visited:
                 return []
@@ -1012,7 +990,7 @@ class EvolutionStore:
             ancestors: list[SkillRecord] = []
             for row in rows:
                 ancestors.append(
-                    self._row_to_record(conn, row, all_parents)
+                    self._row_to_record(conn, row)
                 )
 
             ancestors.sort(key=lambda r: r.lineage.generation)
@@ -1126,19 +1104,7 @@ class EvolutionStore:
             ).fetchone()
             if row is None:
                 return None
-            return {
-                "agent_id": row[0],
-                "name": row[1],
-                "type": row[2],
-                "skill_ids": json.loads(row[3]) if row[3] else [],
-                "orchestration_toml": row[4],
-                "effective_rate": row[5],
-                "avg_steps": row[6],
-                "avg_duration_ms": row[7],
-                "is_active": bool(row[8]),
-                "created_at": row[9],
-                "updated_at": row[10],
-            }
+            return self._agent_row_to_dict(row)
 
     def get_active_agents(self) -> list[dict[str, Any]]:
         """Load all active agent records."""
@@ -1150,19 +1116,7 @@ class EvolutionStore:
                 "FROM agent_records WHERE is_active = 1"
             ).fetchall()
             return [
-                {
-                    "agent_id": r[0],
-                    "name": r[1],
-                    "type": r[2],
-                    "skill_ids": json.loads(r[3]) if r[3] else [],
-                    "orchestration_toml": r[4],
-                    "effective_rate": r[5],
-                    "avg_steps": r[6],
-                    "avg_duration_ms": r[7],
-                    "is_active": bool(r[8]),
-                    "created_at": r[9],
-                    "updated_at": r[10],
-                }
+                self._agent_row_to_dict(r)
                 for r in rows
             ]
 
@@ -1194,6 +1148,40 @@ class EvolutionStore:
             return cur.rowcount > 0
 
     # ------------------------------------------------------------------
+    # Row-to-dict helpers (DRY)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _judgment_row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
+        """Convert a 7-column skill_judgments row to a dict."""
+        return {
+            "id": row[0],
+            "analysis_id": row[1],
+            "skill_id": row[2],
+            "selected": bool(row[3]),
+            "applied": bool(row[4]),
+            "completed": bool(row[5]),
+            "fell_back": bool(row[6]),
+        }
+
+    @staticmethod
+    def _agent_row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
+        """Convert an 11-column agent_records row to a dict."""
+        return {
+            "agent_id": row[0],
+            "name": row[1],
+            "type": row[2],
+            "skill_ids": json.loads(row[3]) if row[3] else [],
+            "orchestration_toml": row[4],
+            "effective_rate": row[5],
+            "avg_steps": row[6],
+            "avg_duration_ms": row[7],
+            "is_active": bool(row[8]),
+            "created_at": row[9],
+            "updated_at": row[10],
+        }
+
+    # ------------------------------------------------------------------
     # Maintenance
     # ------------------------------------------------------------------
 
@@ -1220,8 +1208,7 @@ class EvolutionStore:
 
         When *skill_ids* is provided, only parents for those skills are
         loaded using an IN clause.  When None, the full table is loaded
-        (required for BFS ancestry traversal where the needed IDs are
-        not known up front).
+        (legacy fallback for callers that need all edges at once).
         """
         parents: dict[str, list[str]] = {}
         if skill_ids:

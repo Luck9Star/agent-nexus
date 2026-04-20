@@ -134,8 +134,6 @@ class PythonRuntime:
 
     # ── Retrieval ──────────────────────────────────────────────────────
 
-    _MISSING = object()
-
     def retrieve(self, name: str, default: Any = None) -> Any:
         """Retrieve a runtime value by name.
 

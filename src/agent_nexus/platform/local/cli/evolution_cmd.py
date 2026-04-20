@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Generator
+
 import typer
 
 from agent_nexus.platform.local.cli._shared import _get_config_dir
+
+if TYPE_CHECKING:
+    from agent_nexus.platform.evolution.engine import EvolutionEngine
 
 evolution_app = typer.Typer(help="Self-Evolution Engine")
 
@@ -21,11 +27,20 @@ def _get_engine():
     return engine, store
 
 
+@contextmanager
+def _engine_context() -> Generator[EvolutionEngine, None, None]:
+    """Context manager that creates an EvolutionEngine and ensures store cleanup."""
+    engine, store = _get_engine()
+    try:
+        yield engine
+    finally:
+        store.close()
+
+
 @evolution_app.command("status")
 def evolution_status() -> None:
     """Show evolution subsystem status summary."""
-    engine, store = _get_engine()
-    try:
+    with _engine_context() as engine:
         summary = engine.health_checker.get_health_summary()
 
         typer.echo("Evolution Status:")
@@ -33,8 +48,6 @@ def evolution_status() -> None:
         typer.echo(f"  Healthy:       {summary.get('healthy', 0)}")
         typer.echo(f"  Unhealthy:     {summary.get('unhealthy', 0)}")
         typer.echo(f"  Suggestions:   {summary.get('suggestions', 0)}")
-    finally:
-        store.close()
 
 
 @evolution_app.command("health")
@@ -43,8 +56,7 @@ def evolution_health(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show threshold details"),
 ) -> None:
     """Show health diagnostics for skills."""
-    engine, store = _get_engine()
-    try:
+    with _engine_context() as engine:
         if skill_name:
             try:
                 suggestions = engine.check_health(skill_name)
@@ -75,8 +87,6 @@ def evolution_health(
                     f"{report.skill_name:<30} {applied:<15.2%} "
                     f"{completion:<18.2%} {fallback:<16.2%} {verdict}"
                 )
-    finally:
-        store.close()
 
 
 @evolution_app.command("list")
@@ -84,8 +94,7 @@ def evolution_list(
     all_skills: bool = typer.Option(False, "--all", help="Show all skills including inactive"),
 ) -> None:
     """List skills in the evolution system."""
-    engine, store = _get_engine()
-    try:
+    with _engine_context() as engine:
         skills = engine.store.get_all_skills() if all_skills else engine.store.get_active_skills()
 
         if not skills:
@@ -101,8 +110,6 @@ def evolution_list(
                 f"{skill.name:<30} {skill.version:<10} "
                 f"{skill.lineage.generation:<12} {status:<10} {created}"
             )
-    finally:
-        store.close()
 
 
 @evolution_app.command("history")
@@ -110,8 +117,7 @@ def evolution_history(
     skill_name: str = typer.Argument(help="Skill name or ID to trace ancestry"),
 ) -> None:
     """Show version lineage for a skill."""
-    engine, store = _get_engine()
-    try:
+    with _engine_context() as engine:
         # Find skill by name (indexed query) or by ID (direct lookup).
         # Uses get_versions(name) which hits idx_sr_name instead of
         # loading all skill records.
@@ -145,8 +151,6 @@ def evolution_history(
             typer.echo(f"{indent}{ancestor.name} (gen {ancestor.lineage.generation}, {created})")
             if i < len(ancestry) - 1:
                 indent += "  -> "
-    finally:
-        store.close()
 
 
 @evolution_app.command("metrics")
@@ -154,8 +158,7 @@ def evolution_metrics(
     agent: str | None = typer.Option(None, "--agent", "-a", help="Filter by agent name"),
 ) -> None:
     """Show evolution quality metrics."""
-    engine, store = _get_engine()
-    try:
+    with _engine_context() as engine:
         metrics = engine.store.get_metrics(agent_name=agent)
 
         typer.echo(f"  Total selections: {metrics.total_selections}")
@@ -168,8 +171,6 @@ def evolution_metrics(
             fallback_rate = metrics.total_fallbacks / metrics.total_selections
             typer.echo(f"  Success rate:     {success_rate:.2%}")
             typer.echo(f"  Fallback rate:    {fallback_rate:.2%}")
-    finally:
-        store.close()
 
 
 @evolution_app.command("fix")
@@ -183,16 +184,14 @@ def evolution_fix(
     """
     from agent_nexus.platform.evolution.evolver import EvolutionTrigger
 
-    engine, store = _get_engine()
-    try:
-        results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
-        typer.echo(f"Fix evolution triggered (target: {skill_id}).")
-        typer.echo(f"Results: {len(results) if isinstance(results, list) else 1} evolution(s) processed.")
-    except Exception as exc:
-        typer.echo(f"Fix failed: {exc}", err=True)
-        raise typer.Exit(code=1)
-    finally:
-        store.close()
+    with _engine_context() as engine:
+        try:
+            results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
+            typer.echo(f"Fix evolution triggered (target: {skill_id}).")
+            typer.echo(f"Results: {len(results) if isinstance(results, list) else 1} evolution(s) processed.")
+        except Exception as exc:
+            typer.echo(f"Fix failed: {exc}", err=True)
+            raise typer.Exit(code=1)
 
 
 @evolution_app.command("promote")
@@ -202,26 +201,24 @@ def evolution_promote(
     """Promote a skill candidate to a standalone agent."""
     from agent_nexus.platform.evolution.promotion import PromotionCandidate
 
-    engine, store = _get_engine()
-    try:
-        # CLI promote intentionally bypasses quality gates
-        candidate = PromotionCandidate(
-            skill_id=skill_id,
-            skill_name=skill_id,
-            effective_rate=0.0,
-            total_selections=0,
-            directory="",
-            reason="cli-promote",
-        )
-        result = engine.promote_candidate(candidate)
-        if result.success:
-            typer.echo(f"Skill '{skill_id}' promoted to agent.")
-            if result.agent_name:
-                typer.echo(f"New agent: {result.agent_name}")
-        else:
-            typer.echo(f"Promotion not completed for '{skill_id}'.")
-    except Exception as exc:
-        typer.echo(f"Promotion failed: {exc}", err=True)
-        raise typer.Exit(code=1)
-    finally:
-        store.close()
+    with _engine_context() as engine:
+        try:
+            # CLI promote intentionally bypasses quality gates
+            candidate = PromotionCandidate(
+                skill_id=skill_id,
+                skill_name=skill_id,
+                effective_rate=0.0,
+                total_selections=0,
+                directory="",
+                reason="cli-promote",
+            )
+            result = engine.promote_candidate(candidate)
+            if result.success:
+                typer.echo(f"Skill '{skill_id}' promoted to agent.")
+                if result.agent_name:
+                    typer.echo(f"New agent: {result.agent_name}")
+            else:
+                typer.echo(f"Promotion not completed for '{skill_id}'.")
+        except Exception as exc:
+            typer.echo(f"Promotion failed: {exc}", err=True)
+            raise typer.Exit(code=1)

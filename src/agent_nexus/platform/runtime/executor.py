@@ -13,6 +13,7 @@ import logging
 import threading
 from typing import Any
 
+from agent_nexus.models._common import _MISSING
 from agent_nexus.models.runtime import ExecutionResult
 
 from .security_checker import SecurityChecker
@@ -339,8 +340,6 @@ class IPythonExecutor:
         else:
             self._pending_injects[name] = value
 
-    _MISSING = object()
-
     def get(self, name: str, default: Any = None) -> Any:
         """Retrieve a variable from the namespace.
 
@@ -352,9 +351,8 @@ class IPythonExecutor:
             The Python object, or *default* if not found.
         """
         ns = self._shell.user_ns if self._shell is not None else self._pending_injects
-        sentinel = object()
-        result = ns.get(name, sentinel)
-        if result is sentinel:
+        result = ns.get(name, _MISSING)
+        if result is _MISSING:
             return default
         return result
 

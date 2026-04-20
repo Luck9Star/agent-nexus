@@ -17,6 +17,8 @@ import json
 import logging
 import re as _re
 
+from agent_nexus.models._common import _MISSING
+
 from .runtime import PythonRuntime
 
 logger = logging.getLogger(__name__)
@@ -124,7 +126,6 @@ class TieredRuntimeDescriber:
         if not safe_name:
             return ""
 
-        _MISSING = object()
         value = self._runtime.retrieve(safe_name, default=_MISSING)
         if value is _MISSING:
             return ""
