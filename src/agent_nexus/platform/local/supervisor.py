@@ -355,7 +355,7 @@ class AgentSupervisor:
         """Build the subprocess command for an agent.
 
         Strategy:
-        1. If the agent has a venv, use ``<venv>/bin/python -m <agent>``.
+        1. If the agent has a venv, use ``<venv>/bin/python -m <pkg>``.
         2. Otherwise, try ``uvx <agent_name>``.
         3. Fallback: ``python3 <agent_dir>/main.py``.
         """
@@ -365,6 +365,9 @@ class AgentSupervisor:
                 agent_name,
             )
             return None
+
+        agent_dir = self._resolve_agent_dir(agent_name)
+        pkg_name = self._resolve_package_name(agent_dir)
 
         # Strategy 1: venv python
         if entry.venv_path:
@@ -384,20 +387,76 @@ class AgentSupervisor:
                         venv_python,
                     )
                     return None
-                agent_main = self._resolve_agent_dir(agent_name) / "main.py"
+                # Try direct main.py in agent root first
+                agent_main = agent_dir / "main.py"
                 if agent_main.exists():
                     return [str(venv_python), str(agent_main)]
-                # Try module invocation
-                return [str(venv_python), "-m", agent_name.replace("-", "_")]
+                # Try module invocation with discovered package name
+                if pkg_name:
+                    return [str(venv_python), "-m", pkg_name]
+                return None
 
-        # Strategy 2: uvx
-        # Strategy 3: fallback to python3 <agent_dir>/main.py
-        agent_dir = self._resolve_agent_dir(agent_name)
+        # Strategy 2: fallback to python3 <agent_dir>/<pkg>/main.py
+        if pkg_name:
+            pkg_main = agent_dir / pkg_name / "main.py"
+            if pkg_main.exists():
+                return ["python3", str(pkg_main)]
+
+        # Strategy 3: agent root main.py
         main_py = agent_dir / "main.py"
         if main_py.exists() and not main_py.is_symlink():
             return ["python3", str(main_py)]
 
         return ["uvx", agent_name]
+
+    def _resolve_package_name(self, agent_dir: Path) -> str | None:
+        """Discover the Python package name inside an installed agent directory.
+
+        Looks for a subdirectory with ``__init__.py`` (the Python package) and
+        prefers the one that also contains ``main.py``.  Falls back to reading
+        ``pyproject.toml`` [tool.hatch.build.targets.wheel] packages.
+        """
+        if not agent_dir.is_dir():
+            return None
+
+        # Heuristic 1: find subdir with __init__.py + main.py
+        for child in sorted(agent_dir.iterdir()):
+            if (
+                child.is_dir()
+                and not child.name.startswith((".", "_"))
+                and (child / "__init__.py").exists()
+                and (child / "main.py").exists()
+            ):
+                return child.name
+
+        # Heuristic 2: find any subdir with __init__.py
+        for child in sorted(agent_dir.iterdir()):
+            if (
+                child.is_dir()
+                and not child.name.startswith((".", "_"))
+                and (child / "__init__.py").exists()
+            ):
+                return child.name
+
+        # Heuristic 3: read pyproject.toml
+        pyproject = agent_dir / "pyproject.toml"
+        if pyproject.exists():
+            try:
+                raw = toml.loads(pyproject.read_text(encoding="utf-8"))
+                packages = (
+                    raw.get("tool", {})
+                    .get("hatch", {})
+                    .get("build", {})
+                    .get("targets", {})
+                    .get("wheel", {})
+                    .get("packages", [])
+                )
+                if packages:
+                    return packages[0]
+            except Exception:
+                logger.debug("Failed to read pyproject.toml for package name", exc_info=True)
+
+        return None
 
     def _resolve_agent_dir(self, agent_name: str) -> Path:
         """Resolve the installed agent directory.

@@ -1073,12 +1073,18 @@ class TestAgentSupervisor:
         assert supervisor.list_installed() == ["agent-x"]
 
     def test_build_command_venv_strategy(self, tmp_path: Path) -> None:
-        """_build_command uses venv python when venv_path exists."""
+        """_build_command uses venv python with discovered package name."""
         entry = _make_entry(venv_path=str(tmp_path / "venv"))
         # Create venv bin/python
         venv_bin = tmp_path / "venv" / "bin"
         venv_bin.mkdir(parents=True)
         (venv_bin / "python").touch()
+        # Create agent package dir with __init__.py and main.py
+        agent_dir = tmp_path / "agents" / "test-agent"
+        pkg_dir = agent_dir / "agent_test"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "__init__.py").touch()
+        (pkg_dir / "main.py").touch()
         pm = _make_mock_pm()
         lockfile = _make_mock_lockfile_mgr()
         config = _make_mock_config_loader()
@@ -1086,6 +1092,44 @@ class TestAgentSupervisor:
         cmd = supervisor._build_command("test-agent", entry)
         assert cmd is not None
         assert str(tmp_path / "venv" / "bin" / "python") in cmd[0]
+        assert cmd == [str(tmp_path / "venv" / "bin" / "python"), "-m", "agent_test"]
+
+    def test_build_command_venv_with_root_main_py(self, tmp_path: Path) -> None:
+        """_build_command prefers root main.py over package discovery."""
+        entry = _make_entry(venv_path=str(tmp_path / "venv"))
+        venv_bin = tmp_path / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        (venv_bin / "python").touch()
+        # Create BOTH root main.py and package dir — root main.py wins
+        agent_dir = tmp_path / "agents" / "test-agent"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "main.py").touch()
+        pkg_dir = agent_dir / "agent_test"
+        pkg_dir.mkdir()
+        (pkg_dir / "__init__.py").touch()
+        (pkg_dir / "main.py").touch()
+        pm = _make_mock_pm()
+        lockfile = _make_mock_lockfile_mgr()
+        config = _make_mock_config_loader()
+        supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path)
+        cmd = supervisor._build_command("test-agent", entry)
+        assert cmd == [str(venv_bin / "python"), str(agent_dir / "main.py")]
+
+    def test_build_command_venv_no_package_returns_none(self, tmp_path: Path) -> None:
+        """_build_command returns None when venv exists but no package or main.py found."""
+        entry = _make_entry(venv_path=str(tmp_path / "venv"))
+        venv_bin = tmp_path / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        (venv_bin / "python").touch()
+        # Agent dir exists but has no main.py or Python package
+        agent_dir = tmp_path / "agents" / "test-agent"
+        agent_dir.mkdir(parents=True)
+        pm = _make_mock_pm()
+        lockfile = _make_mock_lockfile_mgr()
+        config = _make_mock_config_loader()
+        supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path)
+        cmd = supervisor._build_command("test-agent", entry)
+        assert cmd is None
 
     def test_build_command_uvx_fallback(self, tmp_path: Path) -> None:
         """_build_command falls back to uvx when no venv."""
