@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+import toml
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -422,7 +423,7 @@ class AgentSupervisor:
                     key = os.environ.get(provider.api_key_env, "")
                     if key:
                         env[provider.api_key_env] = key
-        except Exception:
+        except (OSError, toml.TomlDecodeError):
             logger.error(
                 "Failed to load config for agent '%s' env building "
                 "-- agent may lack model config and API keys",

@@ -24,11 +24,11 @@ from agent_nexus.models.evolution import (
 from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.analyzer import EvolutionSuggestion
 from agent_nexus.platform.evolution.thresholds import (
-    _FALLBACK_THRESHOLD,
-    _HIGH_APPLIED_FOR_FIX,
-    _LOW_COMPLETION_THRESHOLD,
-    _MODERATE_EFFECTIVE_THRESHOLD,
-    _MIN_APPLIED_FOR_DERIVED,
+    RULE_HIGH_FALLBACK,
+    RULE_LOW_COMPLETION,
+    RULE_MODERATE_EFFECTIVE,
+    SkillRates,
+    evaluate_skill_health,
 )
 
 
@@ -106,11 +106,19 @@ class HealthChecker:
         )
         effective_rate = skill_record.total_completions / sel
 
+        rates = SkillRates(
+            fallback_rate=fallback_rate,
+            applied_rate=applied_rate,
+            completion_rate=completion_rate,
+            effective_rate=effective_rate,
+        )
+        eval_result = evaluate_skill_health(rates)
+
         # Track best FIX suggestion (deduplicate: keep highest confidence)
         best_fix: EvolutionSuggestion | None = None
 
         # Rule 1: High fallback rate
-        if fallback_rate > _FALLBACK_THRESHOLD:
+        if RULE_HIGH_FALLBACK in eval_result.rules:
             fix1 = EvolutionSuggestion(
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[skill_record.id],
@@ -124,10 +132,7 @@ class HealthChecker:
             best_fix = fix1
 
         # Rule 2: Applied often but rarely completes
-        if (
-            applied_rate > _HIGH_APPLIED_FOR_FIX
-            and completion_rate < _LOW_COMPLETION_THRESHOLD
-        ):
+        if RULE_LOW_COMPLETION in eval_result.rules:
             fix2 = EvolutionSuggestion(
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[skill_record.id],
@@ -147,13 +152,8 @@ class HealthChecker:
         if best_fix is not None:
             suggestions.append(best_fix)
 
-        # Rule 3: Moderate effectiveness -- only if no FIX was triggered
-        # (DERIVED is lower priority than FIX for the same skill)
-        if (
-            best_fix is None
-            and effective_rate < _MODERATE_EFFECTIVE_THRESHOLD
-            and applied_rate > _MIN_APPLIED_FOR_DERIVED
-        ):
+        # Rule 3: Moderate effectiveness
+        if RULE_MODERATE_EFFECTIVE in eval_result.rules:
             suggestions.append(EvolutionSuggestion(
                 evolution_type=EvolutionType.DERIVED,
                 target_skill_ids=[skill_record.id],

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time as _time
 from typing import Any
 
 from agent_nexus.models.runtime import ExecutionResult
@@ -211,13 +212,32 @@ class IPythonExecutor:
         """Inner execution logic, called under _exec_lock."""
         shell = await self._require_shell()
 
+        # Safety gate: if a previous timed-out thread is still running,
+        # wait for it to finish before starting a new execution.
+        # Without this, the old thread may mutate the shell namespace
+        # concurrently with the new execution (TOCTOU race after reset()).
+        if not self._exec_done.is_set():
+            # Wait in the event loop to avoid blocking.  Use a short polling
+            # interval so we don't block the event loop for the full wait.
+            deadline = _time.monotonic() + 5.0
+            while not self._exec_done.is_set():
+                remaining = deadline - _time.monotonic()
+                if remaining <= 0:
+                    return ExecutionResult(
+                        success=False,
+                        error="Previous timed-out execution thread is still running; "
+                        "call reset() or close() and wait for it to finish",
+                    )
+                await asyncio.sleep(min(0.05, remaining))
+            # Old thread finished — safe to proceed
+
         try:
             # Snapshot namespace before execution to detect new variables
             pre_keys = set(self.namespace_keys())
 
             transformed = shell.transform_cell(code)
             self._exec_done.clear()  # Thread is about to start
-            result, stdout, stderr = await asyncio.wait_for(
+            result, stdout, _stderr = await asyncio.wait_for(
                 asyncio.to_thread(
                     self._run_cell_sync, transformed,
                 ),

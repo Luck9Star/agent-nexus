@@ -250,7 +250,7 @@ class TestSupervisorBuildEnv:
 
     def test_build_env_handles_config_error(self, tmp_path: Path) -> None:
         sup, _, _, cfg = _make_supervisor(tmp_path)
-        cfg.load_config.side_effect = RuntimeError("broken")
+        cfg.load_config.side_effect = PermissionError("config not readable")
         env = sup._build_env("test", _make_entry())
         assert env == {}
 

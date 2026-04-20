@@ -28,6 +28,39 @@ from agent_nexus.platform.orchestration.ipc import (
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Minimal subprocess environment
+# ---------------------------------------------------------------------------
+
+# System variables required for agent subprocesses to function.
+# We deliberately avoid os.environ.copy() to prevent leaking sensitive
+# credentials (e.g. AWS_SECRET_ACCESS_KEY, DATABASE_URL) into agent sandboxes.
+_ESSENTIAL_ENV_VARS: tuple[str, ...] = (
+    "PATH",          # find executables (python, uvx, etc.)
+    "HOME",          # resolve ~/.agent-nexus config
+    "USER",          # POSIX convention, some tools expect it
+    "LANG",          # locale for encoding (UTF-8)
+    "TERM",          # terminal metadata
+    "AGENT_NEXUS_HOME",  # platform config override
+)
+
+
+def _build_spawn_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Build a minimal environment for agent subprocesses.
+
+    Only essential system variables are inherited from the parent process.
+    Caller-supplied *extra* variables (model config, API keys) are layered
+    on top.  This prevents accidental credential leakage to agents.
+    """
+    env: dict[str, str] = {}
+    for key in _ESSENTIAL_ENV_VARS:
+        value = os.environ.get(key)
+        if value is not None:
+            env[key] = value
+    if extra:
+        env.update(extra)
+    return env
+
 
 # ---------------------------------------------------------------------------
 # AgentHandle — per-agent process tracker
@@ -147,7 +180,7 @@ class ProcessManager:
             name: Unique agent identifier.
             command: Command to launch the agent (e.g. ``["uvx", "doc-filler"]``).
             cwd: Working directory for the agent.
-            env: Additional environment variables (merged into ``os.environ``).
+            env: Additional environment variables (layered onto a minimal base env).
 
         Returns:
             :class:`AgentHandle` with :class:`IPCProtocol` attached.
@@ -166,9 +199,7 @@ class ProcessManager:
             if name in self._agents:
                 self._agents.pop(name, None)
 
-            spawn_env = os.environ.copy()
-            if env:
-                spawn_env.update(env)
+            spawn_env = _build_spawn_env(env)
 
             try:
                 process = await asyncio.create_subprocess_exec(

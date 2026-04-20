@@ -36,13 +36,29 @@ def _rmtree_best_effort(path: Path, *, context: str = "") -> None:
     Used in cleanup paths (uninstall, rollback) where partial removal is
     acceptable and the caller should not abort.
     """
-    def _on_exc(func, p, exc):  # type: ignore[no-untyped-def]
-        logger.warning("Failed to remove %s during %s: %s", p, context, exc)
+    def _on_error(func, p, exc_info):  # type: ignore[no-untyped-def]
+        logger.warning("Failed to remove %s during %s: %s", p, context, exc_info[1])
 
-    shutil.rmtree(path, onexc=_on_exc)
+    shutil.rmtree(path, onerror=_on_error)
 
 # Valid agent name pattern: starts with alphanumeric, then alphanumeric/dot/hyphen/underscore
 _AGENT_NAME_RE = r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+
+_ALLOWED_GIT_SCHEMES = ("https://", "http://", "git://", "ssh://")
+
+
+def _validate_git_url(url: str) -> None:
+    """Reject URLs with unsupported schemes (e.g. file:///)."""
+    if not any(url.startswith(scheme) for scheme in _ALLOWED_GIT_SCHEMES):
+        raise ValueError(
+            f"Invalid git URL scheme: {url!r}. "
+            f"Allowed schemes: {', '.join(_ALLOWED_GIT_SCHEMES)}"
+        )
+    if url.startswith("http://"):
+        logger.warning(
+            "Using plaintext HTTP for git clone — credentials may be exposed: %s",
+            url,
+        )
 
 
 class AgentNotFoundError(Exception):
@@ -123,6 +139,7 @@ class GitInstaller:
 
         # 1. Resolve source
         if source_url:
+            _validate_git_url(source_url)
             source = SourceEntry(
                 name=_url_to_source_name(source_url),
                 type="git",
@@ -545,9 +562,9 @@ class GitInstaller:
             await proc.wait()
             raise
         if proc.returncode != 0:
+            err_msg = stderr.decode(errors="replace").strip()
             raise InstallationError(
-                f"git {' '.join(args)} failed (rc={proc.returncode}): "
-                f"{stderr.decode(errors="replace").strip()}"
+                f"git {' '.join(args)} failed (rc={proc.returncode}): {err_msg}"
             )
 
     @staticmethod
@@ -566,9 +583,9 @@ class GitInstaller:
             await proc.wait()
             raise
         if proc.returncode != 0:
+            err_msg = stderr.decode(errors="replace").strip()
             raise InstallationError(
-                f"git {' '.join(args)} failed (rc={proc.returncode}): "
-                f"{stderr.decode(errors="replace").strip()}"
+                f"git {' '.join(args)} failed (rc={proc.returncode}): {err_msg}"
             )
         return stdout.decode(errors="replace")
 

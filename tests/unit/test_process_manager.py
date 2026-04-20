@@ -1804,3 +1804,89 @@ class TestRestartAgentConcurrentStart:
 
         assert isinstance(result, AgentHandle)
         assert result.pid == 80002
+
+
+# ============================================================================
+# iter110e: minimal env isolation
+# ============================================================================
+
+
+class TestMinimalEnvIsolation:
+    """P0-3: Agent subprocesses receive a minimal env, not os.environ.copy()."""
+
+    def test_build_spawn_env_excludes_sensitive_vars(self) -> None:
+        """_build_spawn_env only includes essential system variables."""
+        import os
+        from unittest.mock import patch as sync_patch
+
+        full_env = {
+            "PATH": "/usr/bin",
+            "HOME": "/home/test",
+            "USER": "test",
+            "LANG": "en_US.UTF-8",
+            "TERM": "xterm",
+            "AGENT_NEXUS_HOME": "/custom",
+            "AWS_SECRET_ACCESS_KEY": "super-secret-key",
+            "DATABASE_URL": "postgres://admin:pw@db:5432/prod",
+        }
+
+        with sync_patch.dict(os.environ, full_env, clear=True):
+            from agent_nexus.platform.orchestration.process_manager import (
+                _build_spawn_env,
+            )
+
+            result = _build_spawn_env()
+
+        assert result.get("PATH") == "/usr/bin"
+        assert result.get("HOME") == "/home/test"
+        assert "AWS_SECRET_ACCESS_KEY" not in result
+        assert "DATABASE_URL" not in result
+
+    def test_build_spawn_env_layers_extra(self) -> None:
+        """Extra env vars (API keys, model config) are added on top."""
+        from agent_nexus.platform.orchestration.process_manager import (
+            _build_spawn_env,
+        )
+
+        extra = {"AGENT_MODEL": "gpt-4", "OPENAI_API_KEY": "sk-test"}
+        result = _build_spawn_env(extra)
+        assert result["AGENT_MODEL"] == "gpt-4"
+        assert result["OPENAI_API_KEY"] == "sk-test"
+
+    def test_build_spawn_env_omits_missing_essential(self) -> None:
+        """Essential vars not in os.environ are simply omitted."""
+        import os
+        from unittest.mock import patch as sync_patch
+
+        minimal = {"PATH": "/usr/bin"}
+        with sync_patch.dict(os.environ, minimal, clear=True):
+            from agent_nexus.platform.orchestration.process_manager import (
+                _build_spawn_env,
+            )
+
+            result = _build_spawn_env()
+
+        assert "PATH" in result
+        assert "HOME" not in result
+
+    @pytest.mark.asyncio
+    async def test_start_agent_uses_minimal_env(self) -> None:
+        """start_agent passes minimal env to subprocess, not full os.environ."""
+        import os
+        from unittest.mock import patch as sync_patch
+
+        pm = ProcessManager()
+
+        with sync_patch.dict(os.environ, {"SUPER_SECRET": "leak-me"}):
+            mock_process = _iter17_make_mock_process()
+            captured_env: dict = {}
+
+            async def _capture_spawn(*args, **kwargs):
+                captured_env.update(kwargs.get("env", {}))
+                return mock_process
+
+            with patch(_SUBPROCESS_PATCH, side_effect=_capture_spawn):
+                await pm.start_agent("test", command=["echo"])
+
+        assert "SUPER_SECRET" not in captured_env
+        assert "PATH" in captured_env

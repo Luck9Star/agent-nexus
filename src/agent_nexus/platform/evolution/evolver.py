@@ -34,11 +34,11 @@ from agent_nexus.platform.evolution.analyzer import (
     EvolutionSuggestion,
 )
 from agent_nexus.platform.evolution.thresholds import (
-    _FALLBACK_THRESHOLD,
-    _HIGH_APPLIED_FOR_FIX,
-    _LOW_COMPLETION_THRESHOLD,
-    _MODERATE_EFFECTIVE_THRESHOLD,
-    _MIN_APPLIED_FOR_DERIVED,
+    RULE_HIGH_FALLBACK,
+    RULE_LOW_COMPLETION,
+    RULE_MODERATE_EFFECTIVE,
+    SkillRates,
+    evaluate_skill_health,
 )
 
 
@@ -233,8 +233,8 @@ class SkillEvolver:
     def _evolve_fix(
         self,
         suggestion: EvolutionSuggestion,
-        trigger: EvolutionTrigger,
-        task_id: str | None,
+        _trigger: EvolutionTrigger,
+        _task_id: str | None,
     ) -> EvolveResult:
         """In-place fix: same name, same directory, new version record."""
         if not suggestion.target_skill_ids:
@@ -287,8 +287,8 @@ class SkillEvolver:
     def _evolve_derived(
         self,
         suggestion: EvolutionSuggestion,
-        trigger: EvolutionTrigger,
-        task_id: str | None,
+        _trigger: EvolutionTrigger,
+        _task_id: str | None,
     ) -> EvolveResult:
         """Create enhanced version in a new directory."""
         if not suggestion.target_skill_ids:
@@ -348,7 +348,7 @@ class SkillEvolver:
     def _evolve_captured(
         self,
         suggestion: EvolutionSuggestion,
-        trigger: EvolutionTrigger,
+        _trigger: EvolutionTrigger,
         task_id: str | None,
         capture_directory: str | None = None,
     ) -> EvolveResult:
@@ -429,11 +429,19 @@ class SkillEvolver:
         )
         effective_rate = record.total_completions / sel
 
+        rates = SkillRates(
+            fallback_rate=fallback_rate,
+            applied_rate=applied_rate,
+            completion_rate=completion_rate,
+            effective_rate=effective_rate,
+        )
+        eval_result = evaluate_skill_health(rates)
+
         # Track best FIX suggestion (deduplicate: keep highest confidence)
         best_fix: EvolutionSuggestion | None = None
 
         # Rule 1: High fallback rate
-        if fallback_rate > _FALLBACK_THRESHOLD:
+        if RULE_HIGH_FALLBACK in eval_result.rules:
             fix1 = EvolutionSuggestion(
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[record.id],
@@ -447,10 +455,7 @@ class SkillEvolver:
             best_fix = fix1
 
         # Rule 2: Applied often but rarely completes
-        if (
-            applied_rate > _HIGH_APPLIED_FOR_FIX
-            and completion_rate < _LOW_COMPLETION_THRESHOLD
-        ):
+        if RULE_LOW_COMPLETION in eval_result.rules:
             fix2 = EvolutionSuggestion(
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[record.id],
@@ -468,12 +473,8 @@ class SkillEvolver:
         if best_fix is not None:
             return best_fix
 
-        # Rule 3: Moderate effectiveness -- only if no FIX was triggered
-        # (DERIVED is lower priority than FIX for the same skill)
-        if (
-            effective_rate < _MODERATE_EFFECTIVE_THRESHOLD
-            and applied_rate > _MIN_APPLIED_FOR_DERIVED
-        ):
+        # Rule 3: Moderate effectiveness
+        if RULE_MODERATE_EFFECTIVE in eval_result.rules:
             return EvolutionSuggestion(
                 evolution_type=EvolutionType.DERIVED,
                 target_skill_ids=[record.id],

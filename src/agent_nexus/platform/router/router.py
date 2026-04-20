@@ -28,15 +28,15 @@ from typing import Any
 from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.gateway.tool_adapter import (
     DEFAULT_IPC_EXECUTE_TIMEOUT,
-    _get_ipc_lock,
-    remove_lock,
 )
 from agent_nexus.platform.orchestration.dsl import OrchestrationDefinition
 from agent_nexus.platform.orchestration.ipc import (
     IPCConnectionError,
     IPCError,
     IPCTimeoutError,
+    get_ipc_lock,
 )
+from agent_nexus.platform.gateway.tool_adapter import remove_lock
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
@@ -297,7 +297,7 @@ class PlatformRouter:
 
         # Serialize send+receive per agent to prevent concurrent IPC
         # calls from interleaving responses on the same handle.
-        lock = _get_ipc_lock(atomic_name)
+        lock = get_ipc_lock(atomic_name)
         async with lock:
             # Send chat message via IPC
             try:
@@ -540,7 +540,7 @@ class PlatformRouter:
         # calls from interleaving responses on the same handle.
         # Uses the same lock as route_to_atomic so both code paths
         # are mutually exclusive for a given agent.
-        lock = _get_ipc_lock(agent_name)
+        lock = get_ipc_lock(agent_name)
         async with lock:
             try:
                 await handle.ipc.send_chat(message, conversation_id=conversation_id)

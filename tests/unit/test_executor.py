@@ -818,3 +818,155 @@ class TestCancelledErrorHandling:
             assert "contaminated" in result.error
         finally:
             executor.close()
+
+
+# ============================================================================
+# iter115 regression: thread contamination after timeout + _exec_done timing
+# ============================================================================
+
+
+class TestThreadContaminationAfterTimeout:
+    """P1-4: After timeout + reset(), a new execution must not start while the
+    old thread is still running.  _execute_inner now polls _exec_done before
+    proceeding, preventing TOCTOU namespace races.
+    """
+
+    @pytest.mark.asyncio
+    async def test_execute_waits_for_old_thread_after_reset(self) -> None:
+        """After timeout + reset(), execute() waits for old thread to finish."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            # Simulate: a timed-out thread is still running
+            executor._timed_out = True
+            executor._exec_done.clear()  # Old thread hasn't finished yet
+
+            # reset() would normally wait, but let's say it timed out
+            # and cleared _timed_out anyway (the race condition scenario)
+            executor._timed_out = False
+            # _exec_done is still cleared — old thread "still running"
+
+            # Now attempt execute: should block until _exec_done is set
+            # We simulate the thread finishing after a short delay
+            import threading
+
+            def finish_thread():
+                import time
+                time.sleep(0.1)
+                executor._exec_done.set()
+
+            threading.Thread(target=finish_thread, daemon=True).start()
+
+            # execute should succeed after the thread finishes
+            result = await executor.execute("x = 1 + 2", timeout=5)
+            assert result.success is True
+            assert executor.get("x") == 3
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_execute_fails_if_old_thread_never_finishes(self) -> None:
+        """If old thread never finishes within 5s, execute returns error."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            # Old thread "still running" — _exec_done never set
+            executor._exec_done.clear()
+            executor._timed_out = False  # Cleared by reset()
+
+            result = await executor.execute("x = 1", timeout=5)
+            assert result.success is False
+            assert "still running" in result.error
+        finally:
+            # Clean up so close() doesn't hang
+            executor._exec_done.set()
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_exec_done_already_set_skips_wait(self) -> None:
+        """Normal execution (no prior timeout) skips the _exec_done wait."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            assert executor._exec_done.is_set()  # Default state
+            result = await executor.execute("x = 42", timeout=5)
+            assert result.success is True
+            assert executor.get("x") == 42
+        finally:
+            executor.close()
+
+
+class TestExecDoneTiming:
+    """P2-21: _exec_done must remain in consistent state through all code paths.
+
+    Invariants:
+    - _exec_done is SET when no thread is running
+    - _exec_done is CLEARED only while a thread is active
+    - After timeout/cancel, _exec_done is eventually set by the thread
+    - After exception before thread start, _exec_done is set by except handler
+    """
+
+    @pytest.mark.asyncio
+    async def test_exec_done_set_after_normal_execution(self) -> None:
+        """After successful execution, _exec_done is set."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            await executor.execute("x = 1")
+            assert executor._exec_done.is_set()
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_exec_done_set_after_error_in_exec(self) -> None:
+        """After error-in-exec, _exec_done is set by _run_cell_sync finally."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            await executor.execute("1/0")
+            assert executor._exec_done.is_set()
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_exec_done_set_after_pre_thread_exception(self) -> None:
+        """After exception before thread start, _exec_done is set by except handler."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            await executor._require_shell()
+
+            def bad_transform(code):
+                raise OSError("transform failed")
+
+            executor._shell.transform_cell = bad_transform
+            await executor.execute("x = 1")
+            assert executor._exec_done.is_set()
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_exec_done_eventually_set_after_timeout(self) -> None:
+        """After timeout, _exec_done is set once the thread completes."""
+        from agent_nexus.platform.runtime.executor import IPythonExecutor
+
+        executor = IPythonExecutor()
+        try:
+            # Use a short sleep so the thread finishes quickly after timeout
+            result = await executor.execute(
+                "import time; time.sleep(2)", timeout=0.3
+            )
+            assert result.success is False
+            # _exec_done may still be cleared (thread running)
+            # Wait long enough for the 2s sleep to complete
+            import time
+            time.sleep(2.5)
+            assert executor._exec_done.is_set()
+        finally:
+            executor.close()

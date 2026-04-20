@@ -1117,15 +1117,26 @@ class TestAgentSupervisor:
         assert env["AGENT_MODEL"] == "openai:gpt-4o"
 
     def test_build_env_handles_config_failure(self, tmp_path: Path) -> None:
-        """_build_env returns empty dict when config loading fails."""
+        """_build_env returns empty dict when config loading fails with I/O error."""
+        entry = _make_entry()
+        pm = _make_mock_pm()
+        lockfile = _make_mock_lockfile_mgr()
+        config = _make_mock_config_loader()
+        config.load_config = MagicMock(side_effect=PermissionError("config not readable"))
+        supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path)
+        env = supervisor._build_env("test-agent", entry)
+        assert "AGENT_MODEL" not in env
+
+    def test_build_env_propagates_programming_errors(self, tmp_path: Path) -> None:
+        """_build_env lets non-I/O exceptions (e.g. RuntimeError) propagate."""
         entry = _make_entry()
         pm = _make_mock_pm()
         lockfile = _make_mock_lockfile_mgr()
         config = _make_mock_config_loader()
         config.load_config = MagicMock(side_effect=RuntimeError("config broken"))
         supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path)
-        env = supervisor._build_env("test-agent", entry)
-        assert "AGENT_MODEL" not in env
+        with pytest.raises(RuntimeError, match="config broken"):
+            supervisor._build_env("test-agent", entry)
 
 
 # ============================================================================
@@ -1689,7 +1700,7 @@ class TestSupervisorEnvForwarding:
         pm = MagicMock()
         lockfile = MagicMock()
         config_loader = MagicMock()
-        config_loader.load_config.side_effect = RuntimeError("config missing")
+        config_loader.load_config.side_effect = PermissionError("config not readable")
 
         supervisor = AgentSupervisor(
             process_manager=pm,
@@ -1873,7 +1884,7 @@ class TestSupervisorConfigLoadLogsError:
         pm = MagicMock()
         lockfile = MagicMock()
         config_loader = MagicMock()
-        config_loader.load_config.side_effect = RuntimeError("config exploded")
+        config_loader.load_config.side_effect = PermissionError("config not readable")
 
         supervisor = AgentSupervisor(
             process_manager=pm,
@@ -2394,7 +2405,7 @@ class TestSupervisorBuildEnvLogsError:
         pm = MagicMock()
         lockfile = MagicMock()
         config_loader = MagicMock()
-        config_loader.load_config.side_effect = RuntimeError("config exploded")
+        config_loader.load_config.side_effect = PermissionError("config not readable")
 
         supervisor = AgentSupervisor(
             process_manager=pm,

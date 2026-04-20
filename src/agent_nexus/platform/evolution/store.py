@@ -132,20 +132,30 @@ class EvolutionStore:
 
     Uses WAL mode for concurrent read/write.  Connection-per-operation
     pattern (same as TaskGraph) for async compatibility.
+
+    For ``:memory:`` databases, a single persistent connection is kept
+    alive because ``sqlite3.connect(":memory:")`` creates a separate
+    database each time.
     """
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
+        self._is_memory = str(db_path) == ":memory:"
+        self._memory_conn: sqlite3.Connection | None = None
         self._init_db()
 
     def close(self) -> None:
         """Release persistent resources.
 
-        File-based connections are already closed per-operation by
-        ``_conn()``, so this is currently a no-op.  Provided for API
-        consistency with :class:`TaskGraph` and for future in-memory
-        database support.
+        Closes the in-memory connection if one is held.  File-based
+        connections are already closed per-operation by ``_conn()``.
         """
+        if self._memory_conn is not None:
+            try:
+                self._memory_conn.close()
+            except Exception:
+                pass
+            self._memory_conn = None
 
     def _init_db(self) -> None:
         with self._conn() as conn:
@@ -156,16 +166,13 @@ class EvolutionStore:
                 if stmt:
                     conn.execute(stmt)
 
+    @staticmethod
     @contextmanager
-    def _conn(
-        self, *, immediate: bool = False
+    def _run_transaction(
+        conn: sqlite3.Connection, *, immediate: bool = False
     ) -> Generator[sqlite3.Connection, None, None]:
-        conn = sqlite3.connect(
-            str(self._db_path),
-            check_same_thread=False,
-        )
+        """Commit/rollback wrapper shared by memory and file connection paths."""
         try:
-            conn.execute("PRAGMA foreign_keys=ON")
             if immediate:
                 conn.execute("BEGIN IMMEDIATE")
             yield conn
@@ -178,8 +185,31 @@ class EvolutionStore:
             logger.exception("Unexpected error during DB operation in evolution store")
             conn.rollback()
             raise
-        finally:
-            conn.close()
+
+    @contextmanager
+    def _conn(
+        self, *, immediate: bool = False
+    ) -> Generator[sqlite3.Connection, None, None]:
+        if self._is_memory:
+            # Reuse a single connection for :memory: databases
+            if self._memory_conn is None:
+                self._memory_conn = sqlite3.connect(
+                    ":memory:", check_same_thread=False,
+                )
+                self._memory_conn.execute("PRAGMA foreign_keys=ON")
+            with self._run_transaction(self._memory_conn, immediate=immediate):
+                yield self._memory_conn
+        else:
+            conn = sqlite3.connect(
+                str(self._db_path),
+                check_same_thread=False,
+            )
+            try:
+                conn.execute("PRAGMA foreign_keys=ON")
+                with self._run_transaction(conn, immediate=immediate):
+                    yield conn
+            finally:
+                conn.close()
 
     # ------------------------------------------------------------------
     # Skill Record CRUD

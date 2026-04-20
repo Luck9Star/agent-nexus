@@ -51,6 +51,11 @@ class IPCConnectionError(IPCError):
 # ---------------------------------------------------------------------------
 
 
+# Maximum single-line message size (4 MB).  Prevents unbounded memory
+# growth if a misbehaving agent sends an extremely long line.
+_MAX_MESSAGE_SIZE = 4 * 1024 * 1024
+
+
 class IPCStream:
     """Bidirectional JSON-lines stream over asyncio stdin/stdout pipes.
 
@@ -86,7 +91,8 @@ class IPCStream:
             raise IPCTimeoutError("Timed out draining stdin to agent") from exc
         except (BrokenPipeError, ConnectionResetError, OSError, RuntimeError) as exc:
             raise IPCConnectionError(f"Agent stdin closed during drain: {exc}") from exc
-        logger.debug("IPC send: %s", payload)
+        # Truncate to 200 chars to avoid leaking full payloads in logs
+        logger.debug("IPC send: %.200s", payload)
 
     # -- receive ------------------------------------------------------------
 
@@ -110,6 +116,11 @@ class IPCStream:
         if not raw:
             raise IPCConnectionError("Agent stdout closed (EOF)")
 
+        if len(raw) > _MAX_MESSAGE_SIZE:
+            raise IPCError(
+                f"Agent message too large ({len(raw)} bytes, max {_MAX_MESSAGE_SIZE})"
+            )
+
         try:
             line = raw.decode("utf-8").strip()
         except UnicodeDecodeError as exc:
@@ -119,7 +130,7 @@ class IPCStream:
         if not line:
             raise IPCConnectionError("Agent sent empty line (possible EOF)")
 
-        logger.debug("IPC recv: %s", line)
+        logger.debug("IPC recv: %.200s", line)
 
         try:
             data = json.loads(line)
@@ -361,3 +372,37 @@ class IPCProtocol:
                 self._buffer_message(resp)
         except (IPCError, asyncio.TimeoutError):
             return False
+
+
+# ---------------------------------------------------------------------------
+# IPC Lock Registry
+# ---------------------------------------------------------------------------
+# Per-agent asyncio.Lock for serializing IPC calls (tool execution and
+# orchestration).  Lives here because both the gateway (tool_adapter) and
+# the router need shared access without a circular dependency.
+
+
+_ipc_lock_registry: dict[str, asyncio.Lock] = {}
+_ipc_lock_loop_id: int | None = None
+
+
+def get_ipc_lock(agent_name: str) -> asyncio.Lock:
+    """Get or create an asyncio.Lock for *agent_name*.
+
+    If the current event loop differs from the one that created the
+    locks (e.g. after ``asyncio.run()`` in tests), all locks are
+    discarded and recreated to prevent ``attached to a different loop``
+    errors.
+    """
+    global _ipc_lock_registry, _ipc_lock_loop_id
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    current_loop_id = id(loop) if loop is not None else None
+
+    if current_loop_id != _ipc_lock_loop_id:
+        _ipc_lock_registry.clear()
+        _ipc_lock_loop_id = current_loop_id
+
+    return _ipc_lock_registry.setdefault(agent_name, asyncio.Lock())

@@ -19,6 +19,7 @@ import re
 import uuid
 
 from agent_nexus.models.ipc import AgentToPlatformType
+from agent_nexus.platform.orchestration.ipc import IPCError, get_ipc_lock
 from agent_nexus.platform.orchestration.process_manager import AgentHandle
 
 logger = logging.getLogger(__name__)
@@ -41,56 +42,42 @@ def _sanitize(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# IPC Lock Registry — event-loop-safe lock management
+# Backward-compatible re-exports (import from ipc module directly in new code)
 # ---------------------------------------------------------------------------
-
-# Module-level registry so all McpToolAdapter instances for the same
-# agent share the same lock.  Lazily creates asyncio.Lock on first
-# access for the running event loop.  Detects event-loop restarts
-# (common in tests using multiple ``asyncio.run()`` calls) and
-# discards stale locks to prevent ``attached to a different loop``
-# errors.
-_ipc_lock_registry: dict[str, asyncio.Lock] = {}
-_ipc_lock_loop_id: int | None = None
 
 
 def _get_ipc_lock(agent_name: str) -> asyncio.Lock:
-    """Get or create an asyncio.Lock for *agent_name*.
+    """Delegate to :func:`ipc.get_ipc_lock`.
 
-    If the current event loop differs from the one that created the
-    locks (e.g. after ``asyncio.run()`` in tests), all locks are
-    discarded and recreated.
+    Kept for internal use within this module (``execute`` method).
+    New callers should import :func:`get_ipc_lock` directly from
+    :mod:`agent_nexus.platform.orchestration.ipc`.
     """
-    global _ipc_lock_registry, _ipc_lock_loop_id
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    current_loop_id = id(loop) if loop is not None else None
-
-    if current_loop_id != _ipc_lock_loop_id:
-        _ipc_lock_registry.clear()
-        _ipc_lock_loop_id = current_loop_id
-
-    return _ipc_lock_registry.setdefault(agent_name, asyncio.Lock())
+    return get_ipc_lock(agent_name)
 
 
 def remove_lock(agent_name: str) -> None:
-    """Remove IPC lock for *agent_name*.
+    """No-op: IPC lock for *agent_name* is intentionally retained.
 
-    The lock dict entry is intentionally NOT deleted — popping it would
-    allow ``setdefault`` in :func:`_get_ipc_lock` to create a new lock
-    while an old reference is still held (by a coroutine inside
-    ``async with lock``), breaking IPC serialization.  Instead the lock
-    remains in the dict and will be reused if the agent restarts.
+    Despite the function name, the lock dict entry is NOT deleted — popping
+    it would allow ``setdefault`` in :func:`get_ipc_lock` to create a new
+    lock while an old reference is still held (by a coroutine inside
+    ``async with lock``), breaking IPC serialization.  The lock remains
+    in the dict and is reused if the agent restarts.
+
+    Call :func:`remove_all_locks` to clear all locks on gateway shutdown.
     """
 
 
 def remove_all_locks() -> None:
-    """Remove all IPC locks (called on gateway shutdown)."""
-    global _ipc_lock_loop_id
-    _ipc_lock_registry.clear()
-    _ipc_lock_loop_id = None
+    """Remove all IPC locks (called on gateway shutdown).
+
+    Delegates to :func:`ipc.get_ipc_lock`'s internal registry.
+    """
+    import agent_nexus.platform.orchestration.ipc as _ipc_mod
+
+    _ipc_mod._ipc_lock_registry.clear()
+    _ipc_mod._ipc_lock_loop_id = None
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +144,7 @@ class McpToolAdapter:
             async with lock:
                 await handle.ipc.send_chat(payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__")
                 response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
-        except Exception as exc:
+        except (OSError, ConnectionError, asyncio.TimeoutError, IPCError) as exc:
             logger.error(
                 "IPC error executing tool '%s': %s", self.full_name, exc
             )

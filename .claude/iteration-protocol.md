@@ -174,6 +174,7 @@
 | 蓝军3-agent全新角度 iter132: import+fuzz+exception safety | ctx.close()异常安全(1) + gateway IPC错误清理(1) + content_snapshot类型警告(1) + 58 fuzz tests = 2665 tests | 2026-04-20 | iter132 |
 | iter133: 退出条件验证 + 模式队列审计 | 6/6 exit conditions verified + 8/8 priority levels fully scanned = 2665 tests | 2026-04-20 | iter133 |
 | P5 测试warnings清理 iter133b | gc.collect() RuntimeWarning抑制 + ProcessManager.__del__ 广异常兜底 + 2 regression tests = 2667 tests | 2026-04-20 | iter133b |
+| P0 subprocess env isolation iter134 | process_manager.py _build_spawn_env minimal env + _ESSENTIAL_ENV_VARS allowlist + 4 regression tests = 2678 tests | 2026-04-20 | iter134 |
 
 ### 待清模式
 

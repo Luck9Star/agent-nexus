@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agent_nexus.models.hooks import HookEvent, HookType
+from agent_nexus.models.hooks import HookDefinition
 from agent_nexus.models.permission import PermissionConfig, PermissionMode
 
 
@@ -185,24 +185,8 @@ class AgentDefinition(BaseModel):
     tools: list[str] = Field(default_factory=list)
 
 
-class HookDef(BaseModel):
-    """A single lifecycle hook entry."""
-
-    model_config = ConfigDict(frozen=True)
-
-    type: HookType
-    event: HookEvent
-    config: dict[str, Any] = Field(default_factory=dict)
-    enabled: bool = True
-    block_on_failure: bool = False
-    timeout_seconds: float = Field(default=10.0, gt=0)
-    matcher: str | None = None  # fnmatch glob for tool name matching
-
-    # Hook-type-specific fields
-    command: str | None = None  # COMMAND type: shell command to run
-    url: str | None = None  # HTTP type: URL to POST to
-    prompt: str | None = None  # PROMPT/AGENT type: LLM prompt text
-    model: str | None = None  # PROMPT/AGENT type: model to use (e.g. "haiku", "sonnet")
+# Alias for backward compatibility — use HookDefinition from hooks.py
+HookDef = HookDefinition
 
 
 class AgentPackage(BaseModel):

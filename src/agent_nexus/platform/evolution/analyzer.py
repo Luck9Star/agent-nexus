@@ -26,11 +26,11 @@ from agent_nexus.models.evolution import (
 )
 from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.thresholds import (
-    _FALLBACK_THRESHOLD,
-    _HIGH_APPLIED_FOR_FIX,
-    _LOW_COMPLETION_THRESHOLD,
-    _MODERATE_EFFECTIVE_THRESHOLD,
-    _MIN_APPLIED_FOR_DERIVED,
+    RULE_HIGH_FALLBACK,
+    RULE_LOW_COMPLETION,
+    RULE_MODERATE_EFFECTIVE,
+    SkillRates,
+    evaluate_skill_health,
 )
 
 
@@ -251,10 +251,18 @@ class ExecutionAnalyzer:
             )
             effective_rate = skill.total_completions / sel
 
+            rates = SkillRates(
+                fallback_rate=fallback_rate,
+                applied_rate=applied_rate,
+                completion_rate=completion_rate,
+                effective_rate=effective_rate,
+            )
+            eval_result = evaluate_skill_health(rates)
+
             # Threshold checks from docs/04 — keep only the best FIX per skill
             best_fix: EvolutionSuggestion | None = None
 
-            if fallback_rate > _FALLBACK_THRESHOLD:
+            if RULE_HIGH_FALLBACK in eval_result.rules:
                 fix1 = EvolutionSuggestion(
                     evolution_type=EvolutionType.FIX,
                     target_skill_ids=[skill_id],
@@ -266,7 +274,7 @@ class ExecutionAnalyzer:
                 )
                 best_fix = fix1
 
-            if applied_rate > _HIGH_APPLIED_FOR_FIX and completion_rate < _LOW_COMPLETION_THRESHOLD:
+            if RULE_LOW_COMPLETION in eval_result.rules:
                 fix2 = EvolutionSuggestion(
                     evolution_type=EvolutionType.FIX,
                     target_skill_ids=[skill_id],
@@ -284,7 +292,7 @@ class ExecutionAnalyzer:
                 fix_skills.add(skill_id)
 
             # DERIVED is lower priority than FIX: skip if already flagged.
-            if skill_id not in fix_skills and effective_rate < _MODERATE_EFFECTIVE_THRESHOLD and applied_rate > _MIN_APPLIED_FOR_DERIVED:
+            if RULE_MODERATE_EFFECTIVE in eval_result.rules:
                 suggestions.append(EvolutionSuggestion(
                     evolution_type=EvolutionType.DERIVED,
                     target_skill_ids=[skill_id],

@@ -10,10 +10,10 @@ import pytest
 from agent_nexus.models.ipc import AgentToPlatform, AgentToPlatformType
 from agent_nexus.platform.gateway.tool_adapter import (
     McpToolAdapter,
-    _ipc_lock_registry,
     remove_all_locks,
     remove_lock,
 )
+from agent_nexus.platform.orchestration.ipc import _ipc_lock_registry
 
 
 # ---------------------------------------------------------------------------
