@@ -14,7 +14,7 @@ runner = CliRunner()
 
 
 def _make_mock_engine():
-    """Create a mock EvolutionEngine with all needed methods."""
+    """Create a mock (engine, store) pair matching _get_engine() return type."""
     engine = MagicMock()
 
     engine.health_checker.get_health_summary.return_value = {
@@ -38,7 +38,7 @@ def _make_mock_engine():
     )
     engine.store = mock_store
 
-    return engine
+    return engine, mock_store
 
 
 class TestEvolutionStatus:

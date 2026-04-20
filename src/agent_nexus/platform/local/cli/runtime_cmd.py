@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Optional
 
 import typer
 
-from agent_nexus.platform.local.cli._shared import _get_config_dir, _init_managers
+from agent_nexus.platform.local.cli._shared import _init_managers
 
 runtime_app = typer.Typer(help="Runtime management")
 
@@ -20,9 +19,8 @@ runtime_app = typer.Typer(help="Runtime management")
 
 @runtime_app.command()
 def start(
-    name: Optional[str] = typer.Argument(None, help="Agent name to start"),
+    name: str | None = typer.Argument(None, help="Agent name to start"),
     all_agents: bool = typer.Option(False, "--all", help="Start all installed agents"),
-    mode: str = typer.Option("mcp", "--mode", "-m", help="Run mode: mcp, router, cli"),
 ) -> None:
     """Start an agent or all agents."""
     if not name and not all_agents:
@@ -32,12 +30,12 @@ def start(
     if all_agents:
         asyncio.run(_start_all())
     else:
-        asyncio.run(_start_one(name, mode))  # type: ignore[arg-type]
+        asyncio.run(_start_one(name))  # type: ignore[arg-type]
 
 
 @runtime_app.command()
 def stop(
-    name: Optional[str] = typer.Argument(None, help="Agent name to stop"),
+    name: str | None = typer.Argument(None, help="Agent name to stop"),
     all_agents: bool = typer.Option(False, "--all", help="Stop all running agents"),
 ) -> None:
     """Stop a running agent or all agents."""
@@ -85,17 +83,16 @@ def ps() -> None:
 # =====================================================================
 
 
-async def _start_one(name: str, mode: str) -> None:
+async def _make_supervisor():
+    """Create AgentSupervisor with the standard manager stack.
+
+    Returns (supervisor, config_dir) to avoid repeating the
+    init-managers + ProcessManager + AgentSupervisor boilerplate.
+    """
     from agent_nexus.platform.local.supervisor import AgentSupervisor
     from agent_nexus.platform.orchestration.process_manager import ProcessManager
 
     _loader, lockfile, _sources, config_dir = _init_managers()
-
-    entry = lockfile.get_entry(name)
-    if entry is None:
-        typer.echo(f"Agent '{name}' is not installed.", err=True)
-        raise typer.Exit(code=1)
-
     pm = ProcessManager()
     supervisor = AgentSupervisor(
         process_manager=pm,
@@ -103,6 +100,11 @@ async def _start_one(name: str, mode: str) -> None:
         config_loader=_loader,
         config_dir=config_dir,
     )
+    return supervisor, config_dir, pm
+
+
+async def _start_one(name: str) -> None:
+    supervisor, config_dir, pm = await _make_supervisor()
 
     ok = await supervisor.start_agent(name)
     if not ok:
@@ -121,18 +123,7 @@ async def _start_one(name: str, mode: str) -> None:
 
 
 async def _start_all() -> None:
-    from agent_nexus.platform.local.supervisor import AgentSupervisor
-    from agent_nexus.platform.orchestration.process_manager import ProcessManager
-
-    _loader, lockfile, _sources, config_dir = _init_managers()
-
-    pm = ProcessManager()
-    supervisor = AgentSupervisor(
-        process_manager=pm,
-        lockfile_manager=lockfile,
-        config_loader=_loader,
-        config_dir=config_dir,
-    )
+    supervisor, _config_dir, _pm = await _make_supervisor()
 
     started = await supervisor.start_all()
     if started:
@@ -142,18 +133,7 @@ async def _start_all() -> None:
 
 
 async def _stop_one(name: str) -> None:
-    from agent_nexus.platform.local.supervisor import AgentSupervisor
-    from agent_nexus.platform.orchestration.process_manager import ProcessManager
-
-    _loader, lockfile, _sources, config_dir = _init_managers()
-
-    pm = ProcessManager()
-    supervisor = AgentSupervisor(
-        process_manager=pm,
-        lockfile_manager=lockfile,
-        config_loader=_loader,
-        config_dir=config_dir,
-    )
+    supervisor, config_dir, _pm = await _make_supervisor()
 
     ok = await supervisor.stop_agent(name)
     if ok:
@@ -166,18 +146,7 @@ async def _stop_one(name: str) -> None:
 
 
 async def _stop_all() -> None:
-    from agent_nexus.platform.local.supervisor import AgentSupervisor
-    from agent_nexus.platform.orchestration.process_manager import ProcessManager
-
-    _loader, lockfile, _sources, config_dir = _init_managers()
-
-    pm = ProcessManager()
-    supervisor = AgentSupervisor(
-        process_manager=pm,
-        lockfile_manager=lockfile,
-        config_loader=_loader,
-        config_dir=config_dir,
-    )
+    supervisor, config_dir, _pm = await _make_supervisor()
 
     await supervisor.stop_all()
     pid_dir = config_dir / "agents"
@@ -188,8 +157,26 @@ async def _stop_all() -> None:
 
 
 async def _restart_agent(name: str) -> None:
-    await _stop_one(name)
-    await _start_one(name, mode="mcp")
+    supervisor, config_dir, pm = await _make_supervisor()
+
+    ok = await supervisor.stop_agent(name)
+    if ok:
+        pid_file = config_dir / "agents" / f"{name}.pid"
+        if pid_file.exists():
+            pid_file.unlink()
+
+    ok = await supervisor.start_agent(name)
+    if not ok:
+        typer.echo(f"Failed to restart agent '{name}'.", err=True)
+        raise typer.Exit(code=1)
+
+    handle = pm.get_agent(name)
+    pid_str = str(handle.pid) if handle else "unknown"
+    pid_dir = config_dir / "agents"
+    pid_dir.mkdir(parents=True, exist_ok=True)
+    (pid_dir / f"{name}.pid").write_text(pid_str, encoding="utf-8")
+
+    typer.echo(f"Restarted {name} (pid: {pid_str})")
 
 
 async def _status() -> None:
@@ -215,7 +202,10 @@ async def _status() -> None:
                     running.add(agent_name)
                     pids[agent_name] = pid_str
                 except (ProcessLookupError, OSError):
-                    pid_file.unlink()
+                    try:
+                        pid_file.unlink()
+                    except FileNotFoundError:
+                        pass
             except (ValueError, OSError):
                 pass
 
@@ -236,8 +226,10 @@ def _show_logs(name: str, num_lines: int) -> None:
         return
 
     try:
-        all_lines = log_path.read_text(encoding="utf-8").splitlines()
-        tail = all_lines[-num_lines:]
-        typer.echo("\n".join(tail))
+        from collections import deque
+
+        with open(log_path, encoding="utf-8") as f:
+            tail = deque(f, maxlen=num_lines)
+        typer.echo("".join(tail))
     except Exception as exc:
         typer.echo(f"Error reading log: {exc}", err=True)

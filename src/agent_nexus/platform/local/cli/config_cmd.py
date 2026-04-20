@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 from typing import Any
 
@@ -44,8 +45,8 @@ def config_get(
     loader, *_ = _init_managers()
     config = loader.load_config()
 
-    value = _resolve_dot_path(config.model_dump(), key)
-    if value is None:
+    value, found = _resolve_dot_path(config.model_dump(), key)
+    if not found:
         typer.echo(f"Key '{key}' not found.", err=True)
         raise typer.Exit(code=1)
     typer.echo(str(value))
@@ -63,7 +64,7 @@ def config_edit() -> None:
 
     editor = os.environ.get("EDITOR", "vi")
     typer.echo(f"Opening {config_path} in {editor}...")
-    subprocess.call([editor, str(config_path)])
+    subprocess.call(shlex.split(editor) + [str(config_path)])
 
 
 @config_app.command("validate")
@@ -120,13 +121,17 @@ def config_path() -> None:
     typer.echo(str(_get_config_dir()))
 
 
-def _resolve_dot_path(data: dict[str, Any], key: str) -> Any:
-    """Resolve a dot-separated key path on a nested dict."""
+def _resolve_dot_path(data: dict[str, Any], key: str) -> tuple[Any, bool]:
+    """Resolve a dot-separated key path on a nested dict.
+
+    Returns (value, found). ``found`` is False when the key path doesn't exist,
+    allowing callers to distinguish a legitimate None value from a missing key.
+    """
     parts = key.split(".")
     current: Any = data
     for part in parts:
         if isinstance(current, dict) and part in current:
             current = current[part]
         else:
-            return None
-    return current
+            return None, False
+    return current, True

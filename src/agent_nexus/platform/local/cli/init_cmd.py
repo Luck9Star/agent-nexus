@@ -57,7 +57,9 @@ def doctor() -> None:
         checks.append(("config.toml exists and parses", False, str(exc)))
 
     # Check 2: API key configured
-    key_envs = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+    from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
+
+    key_envs = [p["api_key_env"] for p in DEFAULT_PROVIDERS.values() if "api_key_env" in p]
     has_key = any(os.environ.get(k) for k in key_envs)
     checks.append(
         ("API key configured", has_key, "at least one set" if has_key else "none set")
@@ -72,24 +74,22 @@ def doctor() -> None:
     checks.append(("uv on PATH", uv_path is not None, uv_path or "not found"))
 
     # Check 5: Python version
-    py_ok = sys.version_info >= (3, 12)
-    checks.append(("Python >= 3.12", py_ok, sys.version.split()[0]))
+    py_ok = sys.version_info >= (3, 11)
+    checks.append(("Python >= 3.11", py_ok, sys.version.split()[0]))
 
-    # Check 6: lockfile.json writable
-    lockfile_path = config_dir / "lockfile.json"
+    # Check 6: config directory writable (lockfile will be created here)
     try:
         config_dir.mkdir(parents=True, exist_ok=True)
-        lockfile_path.write_text("{}", encoding="utf-8")
-        lockfile_path.read_text()
-        checks.append(("lockfile.json writable", True, "OK"))
+        writable = os.access(config_dir, os.W_OK)
+        checks.append(("config dir writable", writable, "OK" if writable else "not writable"))
     except Exception as exc:
-        checks.append(("lockfile.json writable", False, str(exc)))
+        checks.append(("config dir writable", False, str(exc)))
 
     # Check 7: Evolution DB accessible
     try:
         from agent_nexus.platform.evolution.store import EvolutionStore
 
-        store = EvolutionStore(":memory:")
+        store = EvolutionStore(Path(":memory:"))
         store.close()
         checks.append(("Evolution DB accessible", True, "OK"))
     except Exception as exc:
@@ -248,7 +248,7 @@ def _run_wizard(config_path: Path) -> None:
 
     if api_key:
         key_env = f"{provider.upper()}_API_KEY"
-        typer.echo(f"  Note: Set {key_env}={api_key[:8]}... in your shell profile.")
+        typer.echo(f"  Note: Add your API key to your shell profile: export {key_env}=...")
 
     try:
         raw = toml.loads(config_path.read_text(encoding="utf-8"))
