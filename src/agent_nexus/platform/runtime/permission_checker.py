@@ -14,7 +14,6 @@ import fnmatch
 import logging
 import os
 import re
-from pathlib import Path
 
 from agent_nexus.models.permission import (
     PathAccess,
@@ -58,6 +57,32 @@ SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
     "*.key",
 )
 
+
+def _expand_user(path: str) -> str:
+    """Expand ~ and resolve to absolute canonical path.
+
+    Resolves ``..`` components to prevent path traversal attacks that
+    could bypass sensitive path protection (e.g. ``../../.ssh/id_rsa``).
+    """
+    return os.path.abspath(os.path.expanduser(path))
+
+
+# Pre-expanded sensitive path patterns — computed once at import time
+# to avoid repeated os.path.abspath/expanduser calls in the hot path.
+_EXPANDED_PREFIX_PATTERNS: tuple[str, ...] = tuple(
+    _expand_user(p[:-3])  # strip trailing /**
+    for p in SENSITIVE_PATH_PATTERNS
+    if p.endswith("/**")
+)
+_EXPANDED_FULL_PATTERNS: tuple[str, ...] = tuple(
+    _expand_user(p)
+    for p in SENSITIVE_PATH_PATTERNS
+    if "/" in p and not p.endswith("/**")
+)
+_BASENAME_PATTERNS: tuple[str, ...] = tuple(
+    p for p in SENSITIVE_PATH_PATTERNS if "/" not in p
+)
+
 # Shell commands considered dangerous in DEFAULT mode.
 _DANGEROUS_COMMAND_PATTERNS: tuple[str, ...] = (
     "rm ",
@@ -82,15 +107,6 @@ for _raw in _DANGEROUS_COMMAND_PATTERNS:
     _COMPILED_DANGEROUS_PATTERNS.append(re.compile(rf"(?:^|[|&;])\s*{_escaped}\b"))
 
 
-def _expand_user(path: str) -> str:
-    """Expand ~ and resolve to absolute canonical path.
-
-    Resolves ``..`` components to prevent path traversal attacks that
-    could bypass sensitive path protection (e.g. ``../../.ssh/id_rsa``).
-    """
-    return os.path.abspath(os.path.expanduser(path))
-
-
 def _fnmatch_recursive(value: str, pattern: str) -> bool:
     """Match *value* against *pattern*, supporting recursive ``**`` globs.
 
@@ -107,8 +123,9 @@ def _fnmatch_recursive(value: str, pattern: str) -> bool:
     if "/**" not in pattern:
         return fnmatch.fnmatch(value, pattern)
 
-    prefix = pattern[:pattern.index("/**")]
-    remainder = pattern[pattern.index("/**") + 3 :]  # after the /**
+    idx = pattern.index("/**")
+    prefix = pattern[:idx]
+    remainder = pattern[idx + 3:]  # after the /**
     # remainder examples: "" | "/*.txt" | "/bar/*"
 
     if not remainder:
@@ -157,20 +174,16 @@ def _matches_any_pattern(value: str, patterns: list[str] | tuple[str, ...]) -> b
 def _is_sensitive_path(path: str) -> bool:
     """Return True if *path* matches a built-in sensitive path pattern."""
     expanded = _expand_user(path)
-    for pattern in SENSITIVE_PATH_PATTERNS:
-        expanded_pattern = _expand_user(pattern)
-        # Handle recursive ** patterns — fnmatch doesn't support them,
-        # so use directory prefix matching instead.
-        if expanded_pattern.endswith("/**"):
-            prefix = expanded_pattern[:-3]
-            if expanded.startswith(prefix + "/") or expanded == prefix:
-                return True
-        elif fnmatch.fnmatch(expanded, expanded_pattern):
+    for prefix in _EXPANDED_PREFIX_PATTERNS:
+        if expanded.startswith(prefix + "/") or expanded == prefix:
             return True
-    # Also check the basename for patterns like *.env, *.pem, *.key
-    basename = Path(expanded).name
-    for pattern in SENSITIVE_PATH_PATTERNS:
-        if "/" not in pattern and fnmatch.fnmatch(basename, pattern):
+    for pattern in _EXPANDED_FULL_PATTERNS:
+        if fnmatch.fnmatch(expanded, pattern):
+            return True
+    # Check basename for glob-only patterns like *.env, *.pem, *.key
+    basename = os.path.basename(expanded)
+    for pattern in _BASENAME_PATTERNS:
+        if fnmatch.fnmatch(basename, pattern):
             return True
     return False
 
