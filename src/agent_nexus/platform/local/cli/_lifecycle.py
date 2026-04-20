@@ -16,16 +16,12 @@ from agent_nexus.platform.local.cli._shared import _init_managers
 
 logger = logging.getLogger(__name__)
 
-install_app = typer.Typer(help="Agent installation and management")
-run_app = typer.Typer(help="Run agents and workflows")
-
 
 # =====================================================================
-# Install commands
+# Install commands (registered as top-level commands in __init__.py)
 # =====================================================================
 
 
-@install_app.command("install")
 def install_agent(
     name: str = typer.Argument(help="Agent name to install"),
     version: Optional[str] = typer.Option(
@@ -39,13 +35,11 @@ def install_agent(
     asyncio.run(_install(name, version, source))
 
 
-@install_app.command()
 def uninstall(name: str = typer.Argument(help="Agent name to uninstall")) -> None:
     """Uninstall an agent."""
     asyncio.run(_uninstall(name))
 
 
-@install_app.command()
 def update(
     name: Optional[str] = typer.Argument(None, help="Agent name to update"),
     all_agents: bool = typer.Option(

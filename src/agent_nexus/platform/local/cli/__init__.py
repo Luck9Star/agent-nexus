@@ -20,7 +20,9 @@ app = typer.Typer(
 
 # --- Lifecycle commands (migrated from original cli.py) ---
 from agent_nexus.platform.local.cli._lifecycle import (
-    install_app,
+    install_agent,
+    uninstall,
+    update,
     run_agent,
     list_agents,
     search,
@@ -28,9 +30,10 @@ from agent_nexus.platform.local.cli._lifecycle import (
     sources,
 )
 
-app.add_typer(install_app, name="install")
-# Register run_agent as a plain command (not a Typer sub-app)
-# so `agent-nexus run <name> --mode <mode>` works without expecting a subcommand.
+# All lifecycle commands registered as top-level commands
+app.command("install")(install_agent)
+app.command("uninstall")(uninstall)
+app.command("update")(update)
 app.command("run")(run_agent)
 app.command("list")(list_agents)
 app.command()(search)

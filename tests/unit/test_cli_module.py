@@ -22,7 +22,7 @@ from typer.testing import CliRunner
 from agent_nexus.models.agent import AgentType
 from agent_nexus.models.distribution import Lockfile, LockfileEntry, SourceEntry
 
-from agent_nexus.platform.local.cli import app, install_app
+from agent_nexus.platform.local.cli import app
 from agent_nexus.platform.local.cli._lifecycle import (
     _info,
     _install,
@@ -129,41 +129,37 @@ class TestWaitForeverPropagatesCancelledError:
 
 
 # ============================================================================
-# install_app subcommand registration
+# install/uninstall/update are top-level commands
 # ============================================================================
 
 
-class TestInstallSubcommandsReachable:
-    """Verify install, uninstall, update are registered as separate commands."""
+class TestInstallCommandsReachable:
+    """Verify install, uninstall, update are registered as top-level commands."""
 
-    def test_install_help_shows_subcommands(self) -> None:
-        """'agent-nexus install --help' must list install, uninstall, update."""
+    def test_install_help_works(self) -> None:
+        """'agent-nexus install --help' must show NAME argument."""
         result = runner.invoke(app, ["install", "--help"])
+        assert result.exit_code == 0
+        assert "NAME" in result.output or "name" in result.output.lower()
+
+    def test_uninstall_help_works(self) -> None:
+        result = runner.invoke(app, ["uninstall", "--help"])
+        assert result.exit_code == 0
+        assert "uninstall" in result.output.lower()
+
+    def test_update_help_works(self) -> None:
+        result = runner.invoke(app, ["update", "--help"])
+        assert result.exit_code == 0
+        assert "update" in result.output.lower()
+
+    def test_install_uninstall_update_in_top_level_help(self) -> None:
+        """All three commands appear in the main help listing."""
+        result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
         output_lower = result.output.lower()
         assert "install" in output_lower
         assert "uninstall" in output_lower
         assert "update" in output_lower
-
-    def test_uninstall_is_not_interpreted_as_agent_name(self) -> None:
-        result = runner.invoke(app, ["install", "uninstall", "--help"])
-        assert result.exit_code == 0
-        assert "uninstall" in result.output.lower()
-
-    def test_update_is_not_interpreted_as_agent_name(self) -> None:
-        result = runner.invoke(app, ["install", "update", "--help"])
-        assert result.exit_code == 0
-        assert "update" in result.output.lower()
-
-    def test_install_command_is_separate_subcommand(self) -> None:
-        result = runner.invoke(app, ["install", "install", "--help"])
-        assert result.exit_code == 0
-        assert "install" in result.output.lower()
-
-    def test_install_app_has_three_commands(self) -> None:
-        commands = install_app.registered_commands
-        cmd_names = [cmd.name or cmd.callback.__name__ for cmd in commands]
-        assert sorted(cmd_names) == ["install", "uninstall", "update"]
 
 
 # ============================================================================
@@ -1252,12 +1248,12 @@ class TestRunRouterModeImportError:
 
 
 class TestUninstallCLICommand:
-    """Cover cli.py line 57: uninstall CLI command via CliRunner."""
+    """Cover uninstall CLI command via CliRunner."""
 
     def test_uninstall_command_invokes_async(self) -> None:
         """The uninstall CLI command calls _uninstall via asyncio.run."""
         with patch("agent_nexus.platform.local.cli._lifecycle._uninstall", new_callable=AsyncMock) as mock_uninstall:
-            result = runner.invoke(app, ["install", "uninstall", "my-agent"])
+            result = runner.invoke(app, ["uninstall", "my-agent"])
             assert mock_uninstall.called
             assert mock_uninstall.call_args[0][0] == "my-agent"
 
@@ -1268,12 +1264,12 @@ class TestUninstallCLICommand:
 
 
 class TestUpdateCLICommand:
-    """Cover cli.py line 71: update CLI command via CliRunner with valid args."""
+    """Cover update CLI command via CliRunner with valid args."""
 
     def test_update_command_invokes_async(self) -> None:
         """The update CLI command calls _update via asyncio.run with a name."""
         with patch("agent_nexus.platform.local.cli._lifecycle._update", new_callable=AsyncMock) as mock_update:
-            result = runner.invoke(app, ["install", "update", "my-agent"])
+            result = runner.invoke(app, ["update", "my-agent"])
             assert mock_update.called
             call_args = mock_update.call_args[0]
             assert call_args[0] == "my-agent"
@@ -1282,7 +1278,7 @@ class TestUpdateCLICommand:
     def test_update_all_command_invokes_async(self) -> None:
         """The update --all CLI command calls _update with all_agents=True."""
         with patch("agent_nexus.platform.local.cli._lifecycle._update", new_callable=AsyncMock) as mock_update:
-            result = runner.invoke(app, ["install", "update", "--all"])
+            result = runner.invoke(app, ["update", "--all"])
             assert mock_update.called
             call_args = mock_update.call_args[0]
             assert call_args[1] is True
