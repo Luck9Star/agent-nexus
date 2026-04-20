@@ -43,11 +43,14 @@ from agent_nexus.platform.evolution.thresholds import (
 
 
 class EvolutionTrigger(StrEnum):
-    """What initiated this evolution."""
+    """What initiated this evolution.
 
-    ANALYSIS = "analysis"
+    These values match the trigger routing in EvolutionEngine.evolve().
+    """
+
+    POST_ANALYSIS = "post_analysis"
     TOOL_DEGRADATION = "tool_degradation"
-    METRIC_MONITOR = "metric_monitor"
+    METRIC_CHECK = "metric_check"
 
 
 @dataclass
@@ -82,7 +85,7 @@ class SkillEvolver:
     def evolve(
         self,
         suggestion: EvolutionSuggestion,
-        trigger: EvolutionTrigger = EvolutionTrigger.ANALYSIS,
+        trigger: EvolutionTrigger = EvolutionTrigger.POST_ANALYSIS,
         task_id: str | None = None,
         *,
         capture_directory: str | None = None,
@@ -126,7 +129,7 @@ class SkillEvolver:
         for suggestion in analysis.suggestions:
             result = self.evolve(
                 suggestion,
-                trigger=EvolutionTrigger.ANALYSIS,
+                trigger=EvolutionTrigger.POST_ANALYSIS,
                 task_id=analysis.task_id,
             )
             results.append(result)
@@ -206,7 +209,7 @@ class SkillEvolver:
 
             result = self.evolve(
                 suggestion,
-                trigger=EvolutionTrigger.METRIC_MONITOR,
+                trigger=EvolutionTrigger.METRIC_CHECK,
             )
             results.append(result)
 
@@ -416,25 +419,10 @@ class SkillEvolver:
         FIX rules are deduplicated: only the highest-confidence FIX is kept
         (matching HealthChecker.check_health logic).
         """
-        sel = record.total_selections
-        if sel == 0:
+        rates = SkillRates.from_record(record)
+        if rates is None:
             return None
 
-        fallback_rate = record.total_fallbacks / sel
-        applied_rate = record.total_applied / sel
-        completion_rate = (
-            record.total_completions / record.total_applied
-            if record.total_applied > 0
-            else 0.0
-        )
-        effective_rate = record.total_completions / sel
-
-        rates = SkillRates(
-            fallback_rate=fallback_rate,
-            applied_rate=applied_rate,
-            completion_rate=completion_rate,
-            effective_rate=effective_rate,
-        )
         eval_result = evaluate_skill_health(rates)
 
         # Track best FIX suggestion (deduplicate: keep highest confidence)
@@ -446,11 +434,11 @@ class SkillEvolver:
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[record.id],
                 direction=(
-                    f"High fallback rate ({fallback_rate:.0%}): "
+                    f"High fallback rate ({rates.fallback_rate:.0%}): "
                     f"skill is frequently selected but not applied, "
                     f"suggesting instructions are unclear or outdated"
                 ),
-                confidence=min(fallback_rate, 1.0),
+                confidence=min(rates.fallback_rate, 1.0),
             )
             best_fix = fix1
 
@@ -460,11 +448,11 @@ class SkillEvolver:
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[record.id],
                 direction=(
-                    f"Low completion rate ({completion_rate:.0%}) "
-                    f"despite high applied rate ({applied_rate:.0%}): "
+                    f"Low completion rate ({rates.completion_rate:.0%}) "
+                    f"despite high applied rate ({rates.applied_rate:.0%}): "
                     f"skill instructions may be incorrect or incomplete"
                 ),
-                confidence=min(applied_rate * (1 - completion_rate), 1.0),
+                confidence=min(rates.applied_rate * (1 - rates.completion_rate), 1.0),
             )
             # Keep the FIX with highest confidence
             if best_fix is None or fix2.confidence > best_fix.confidence:
@@ -479,11 +467,11 @@ class SkillEvolver:
                 evolution_type=EvolutionType.DERIVED,
                 target_skill_ids=[record.id],
                 direction=(
-                    f"Moderate effectiveness ({effective_rate:.0%}): "
+                    f"Moderate effectiveness ({rates.effective_rate:.0%}): "
                     f"skill works sometimes but could be enhanced with "
                     f"better error handling or alternative approaches"
                 ),
-                confidence=min(1.0 - effective_rate, 1.0),
+                confidence=min(1.0 - rates.effective_rate, 1.0),
             )
 
         return None

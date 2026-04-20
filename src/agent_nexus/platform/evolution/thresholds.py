@@ -20,6 +20,9 @@ _MODERATE_EFFECTIVE_THRESHOLD = 0.55
 _MIN_APPLIED_FOR_DERIVED = 0.25
 
 
+from agent_nexus.models.evolution import SkillRecord
+
+
 @dataclass(frozen=True)
 class SkillRates:
     """Computed quality rates for a single skill."""
@@ -28,6 +31,22 @@ class SkillRates:
     applied_rate: float
     completion_rate: float
     effective_rate: float
+
+    @classmethod
+    def from_record(cls, record: SkillRecord) -> "SkillRates | None":
+        """Compute rates from a SkillRecord's counters.
+
+        Returns None if total_selections is 0 (no data to compute rates from).
+        """
+        sel = record.total_selections
+        if sel == 0:
+            return None
+        return cls(
+            fallback_rate=record.total_fallbacks / sel,
+            applied_rate=record.total_applied / sel,
+            completion_rate=record.total_completions / record.total_applied if record.total_applied > 0 else 0.0,
+            effective_rate=record.total_completions / sel,
+        )
 
 
 # Rule identifiers returned by evaluate_skill_health.

@@ -6,6 +6,7 @@ Supports Python, JavaScript/TypeScript, Rust, and Java.
 
 from __future__ import annotations
 
+import bisect
 import os
 import re
 from pathlib import Path
@@ -287,12 +288,18 @@ def _run_rules(content: str, language: str) -> list[CodeIssue]:
     issues: list[CodeIssue] = []
     rules = LANGUAGE_RULES.get(language, [])
 
+    # Pre-compute line start offsets for O(log n) line-number lookup
+    line_offsets = [0]
+    for i, ch in enumerate(content):
+        if ch == '\n':
+            line_offsets.append(i + 1)
+
     for rule in rules:
         pattern = rule["pattern"]
         assert isinstance(pattern, re.Pattern)
         for match in pattern.finditer(content):
-            # Find line number
-            line_num = content[: match.start()].count("\n")
+            # Find line number via binary search on pre-computed offsets
+            line_num = bisect.bisect_right(line_offsets, match.start()) - 1
             issues.append(CodeIssue(
                 line=line_num,
                 severity=rule["severity"],

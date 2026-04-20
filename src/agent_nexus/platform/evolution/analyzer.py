@@ -238,25 +238,10 @@ class ExecutionAnalyzer:
                 continue
 
             # Compute rates
-            sel = skill.total_selections
-            if sel == 0:
+            rates = SkillRates.from_record(skill)
+            if rates is None:
                 continue
 
-            fallback_rate = skill.total_fallbacks / sel
-            applied_rate = skill.total_applied / sel
-            completion_rate = (
-                skill.total_completions / skill.total_applied
-                if skill.total_applied > 0
-                else 0.0
-            )
-            effective_rate = skill.total_completions / sel
-
-            rates = SkillRates(
-                fallback_rate=fallback_rate,
-                applied_rate=applied_rate,
-                completion_rate=completion_rate,
-                effective_rate=effective_rate,
-            )
             eval_result = evaluate_skill_health(rates)
 
             # Threshold checks from docs/04 — keep only the best FIX per skill
@@ -267,10 +252,10 @@ class ExecutionAnalyzer:
                     evolution_type=EvolutionType.FIX,
                     target_skill_ids=[skill_id],
                     direction=(
-                        f"High fallback rate ({fallback_rate:.0%}): "
+                        f"High fallback rate ({rates.fallback_rate:.0%}): "
                         f"skill is frequently selected but not applied"
                     ),
-                    confidence=min(fallback_rate, 1.0),
+                    confidence=min(rates.fallback_rate, 1.0),
                 )
                 best_fix = fix1
 
@@ -279,10 +264,10 @@ class ExecutionAnalyzer:
                     evolution_type=EvolutionType.FIX,
                     target_skill_ids=[skill_id],
                     direction=(
-                        f"Low completion rate ({completion_rate:.0%}) "
-                        f"despite high applied rate ({applied_rate:.0%})"
+                        f"Low completion rate ({rates.completion_rate:.0%}) "
+                        f"despite high applied rate ({rates.applied_rate:.0%})"
                     ),
-                    confidence=min(applied_rate * (1 - completion_rate), 1.0),
+                    confidence=min(rates.applied_rate * (1 - rates.completion_rate), 1.0),
                 )
                 if best_fix is None or fix2.confidence > best_fix.confidence:
                     best_fix = fix2
@@ -297,10 +282,10 @@ class ExecutionAnalyzer:
                     evolution_type=EvolutionType.DERIVED,
                     target_skill_ids=[skill_id],
                     direction=(
-                        f"Moderate effectiveness ({effective_rate:.0%}): "
+                        f"Moderate effectiveness ({rates.effective_rate:.0%}): "
                         f"could be enhanced with better error handling"
                     ),
-                    confidence=min(1.0 - effective_rate, 1.0),
+                    confidence=min(1.0 - rates.effective_rate, 1.0),
                 ))
 
         # CAPTURED suggestion if task succeeded with no skills involved

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
+
+from agent_nexus.models._common import FrozenModel
 
 
 class PermissionMode(StrEnum):
@@ -29,7 +31,7 @@ class PathAccess(StrEnum):
     DENY = "deny"
 
 
-class PathRule(BaseModel):
+class PathRule(FrozenModel):
     """A glob-pattern path access rule.
 
     Used in PermissionConfig to control which file paths an Agent can access.
@@ -41,13 +43,11 @@ class PathRule(BaseModel):
           access: deny
     """
 
-    model_config = ConfigDict(frozen=True)
-
     pattern: str = Field(min_length=1)
     access: PathAccess = PathAccess.READ
 
 
-class PermissionConfig(BaseModel):
+class PermissionConfig(FrozenModel):
     """Permission configuration for an Agent.
 
     Maps to the `permissions` section in agent-manifest.yaml.
@@ -73,8 +73,6 @@ class PermissionConfig(BaseModel):
               access: deny
     """
 
-    model_config = ConfigDict(frozen=True)
-
     mode: PermissionMode = PermissionMode.DEFAULT
     allowed_tools: list[str] = Field(default_factory=list)
     denied_tools: list[str] = Field(default_factory=list)
@@ -82,7 +80,7 @@ class PermissionConfig(BaseModel):
     denied_commands: list[str] = Field(default_factory=list)
 
 
-class PermissionDecision(BaseModel):
+class PermissionDecision(FrozenModel):
     """Result of a permission check.
 
     Attributes:
@@ -91,8 +89,6 @@ class PermissionDecision(BaseModel):
         requires_confirmation: True when the action is allowed but needs user
             confirmation first (DEFAULT mode for write operations).
     """
-
-    model_config = ConfigDict(frozen=True)
 
     allowed: bool
     reason: str = ""

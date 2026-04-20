@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from agent_nexus.models.context import ContextBudget, ContextBudgetLogEntry
+from agent_nexus.models.context import BudgetAlertLevel, ContextBudget, ContextBudgetLogEntry
 from agent_nexus.platform.runtime.token_tracker import (
     MAX_TOKENS,
     TokenAlert,
     TokenTracker,
+    _ALERT_OK,
     _alert_from_budget,
 )
 
@@ -23,7 +24,7 @@ class TestTokenAlert:
     def test_creation(self) -> None:
         """TokenAlert with valid fields can be created."""
         alert = TokenAlert(level="ok", message="Within budget", usage_pct=50.0)
-        assert alert.level == "ok"
+        assert alert.level == _ALERT_OK
         assert alert.message == "Within budget"
         assert alert.usage_pct == 50.0
 
@@ -31,7 +32,7 @@ class TestTokenAlert:
         """Modifying fields on TokenAlert raises FrozenInstanceError."""
         alert = TokenAlert(level="ok", message="Within budget", usage_pct=50.0)
         with pytest.raises(Exception):  # FrozenInstanceError
-            alert.level = "compact"  # type: ignore[misc]
+            alert.level = BudgetAlertLevel.COMPACTION  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -45,25 +46,25 @@ class TestAlertFromBudget:
         """Below 80% returns ok."""
         budget = ContextBudget()
         alert = _alert_from_budget(79.0, budget)
-        assert alert.level == "ok"
+        assert alert.level == _ALERT_OK
 
     def test_compact_above_80_percent(self) -> None:
         """Above 80% returns compact (uses strict > comparison)."""
         budget = ContextBudget()
         alert = _alert_from_budget(80.1, budget)
-        assert alert.level == "compact"
+        assert alert.level == BudgetAlertLevel.COMPACTION
 
     def test_truncate_above_90_percent(self) -> None:
         """Above 90% returns truncate (uses strict > comparison)."""
         budget = ContextBudget()
         alert = _alert_from_budget(90.1, budget)
-        assert alert.level == "truncate"
+        assert alert.level == BudgetAlertLevel.FORCED_TRUNCATE
 
     def test_ceiling_above_95_percent(self) -> None:
         """Above 95% returns ceiling (uses strict > comparison)."""
         budget = ContextBudget()
         alert = _alert_from_budget(95.1, budget)
-        assert alert.level == "ceiling"
+        assert alert.level == BudgetAlertLevel.HARD_CEILING
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +110,7 @@ class TestTokenTracker:
         """Under 80% returns level='ok'."""
         tracker = TokenTracker(max_tokens=200_000)
         alert = tracker.record_usage(100_000)
-        assert alert.level == "ok"
+        assert alert.level == _ALERT_OK
         assert "Within budget" in alert.message
 
     def test_record_usage_compact_alert(self) -> None:
@@ -117,7 +118,7 @@ class TestTokenTracker:
         tracker = TokenTracker(max_tokens=100_000)
         # 80.1% = 80100 tokens
         alert = tracker.record_usage(80_100)
-        assert alert.level == "compact"
+        assert alert.level == BudgetAlertLevel.COMPACTION
         assert "Compaction threshold" in alert.message
 
     def test_record_usage_truncate_alert(self) -> None:
@@ -125,7 +126,7 @@ class TestTokenTracker:
         tracker = TokenTracker(max_tokens=100_000)
         # 90.1% = 90100 tokens
         alert = tracker.record_usage(90_100)
-        assert alert.level == "truncate"
+        assert alert.level == BudgetAlertLevel.FORCED_TRUNCATE
         assert "Forced truncate" in alert.message
 
     def test_record_usage_ceiling_alert(self) -> None:
@@ -133,7 +134,7 @@ class TestTokenTracker:
         tracker = TokenTracker(max_tokens=100_000)
         # 95.1% = 95100 tokens
         alert = tracker.record_usage(95_100)
-        assert alert.level == "ceiling"
+        assert alert.level == BudgetAlertLevel.HARD_CEILING
         assert "Hard ceiling" in alert.message
 
     def test_total_tokens_accumulates(self) -> None:
@@ -265,17 +266,17 @@ class TestTokenTracker:
         # Above 80%
         tracker80 = TokenTracker(max_tokens=100_000)
         alert80 = tracker80.record_usage(80_100)
-        assert alert80.level == "compact"
+        assert alert80.level == BudgetAlertLevel.COMPACTION
 
         # Above 90%
         tracker90 = TokenTracker(max_tokens=100_000)
         alert90 = tracker90.record_usage(90_100)
-        assert alert90.level == "truncate"
+        assert alert90.level == BudgetAlertLevel.FORCED_TRUNCATE
 
         # Above 95%
         tracker95 = TokenTracker(max_tokens=100_000)
         alert95 = tracker95.record_usage(95_100)
-        assert alert95.level == "ceiling"
+        assert alert95.level == BudgetAlertLevel.HARD_CEILING
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +303,7 @@ class TestTokenTrackerNegativeRejection:
         """Zero tokens_used is valid (no-op turn)."""
         tracker = TokenTracker(max_tokens=100_000)
         alert = tracker.record_usage(0)
-        assert alert.level == "ok"
+        assert alert.level == _ALERT_OK
         assert tracker.total_tokens == 0
         assert tracker._turn == 1
 

@@ -7,7 +7,7 @@ from agent_nexus.models.evolution import EvolutionContext, SkillRecord
 from agent_nexus.platform.evolution.analyzer import AnalysisResult
 from agent_nexus.platform.evolution.compaction import AgentContext
 from agent_nexus.platform.evolution.engine import EvolutionEngine
-from agent_nexus.platform.evolution.evolver import EvolveResult
+from agent_nexus.platform.evolution.evolver import EvolveResult, EvolutionTrigger
 from agent_nexus.platform.evolution.promotion import PromotionCandidate, PromotionResult
 from agent_nexus.models.evolution import EvolutionType
 
@@ -72,7 +72,7 @@ class TestEvolvePostAnalysis:
         ]
         engine = EvolutionEngine(store)
         ctx = _make_ctx()
-        result = engine.evolve(trigger="post_analysis", ctx=ctx)
+        result = engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
         assert isinstance(result, AnalysisResult)
         assert result.task_id == "task-1"
 
@@ -83,7 +83,7 @@ class TestEvolvePostAnalysis:
         ]
         engine = EvolutionEngine(store)
         ctx = _make_ctx()
-        result = engine.evolve(trigger="post_analysis", ctx=ctx)
+        result = engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
         # Analyzer records analysis even if no suggestions produced
         store.record_analysis.assert_called_once()
         assert isinstance(result, AnalysisResult)
@@ -93,7 +93,7 @@ class TestEvolvePostAnalysis:
         engine = EvolutionEngine(store)
         import pytest  # pyright: ignore[reportMissingImports]
         with pytest.raises(ValueError, match="ctx"):
-            engine.evolve(trigger="post_analysis")
+            engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS)
 
 
 class TestEvolveToolDegradation:
@@ -103,7 +103,7 @@ class TestEvolveToolDegradation:
             SkillRecord(id="sk-1", name="skill-1"),
         ]
         engine = EvolutionEngine(store)
-        results = engine.evolve(trigger="tool_degradation", tool_key="api-x")
+        results = engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION, tool_key="api-x")
         assert isinstance(results, list)
 
     def test_tool_degradation_requires_tool_key(self):
@@ -111,14 +111,14 @@ class TestEvolveToolDegradation:
         engine = EvolutionEngine(store)
         import pytest  # pyright: ignore[reportMissingImports]
         with pytest.raises(ValueError, match="tool_key"):
-            engine.evolve(trigger="tool_degradation")
+            engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION)
 
 
 class TestEvolveMetricCheck:
     def test_metric_check_returns_list(self):
         store = _make_store()
         engine = EvolutionEngine(store)
-        results = engine.evolve(trigger="metric_check")
+        results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
         assert isinstance(results, list)
 
 
@@ -128,7 +128,7 @@ class TestEvolveUnknownTrigger:
         engine = EvolutionEngine(store)
         import pytest  # pyright: ignore[reportMissingImports]
         with pytest.raises(ValueError, match="Unknown trigger"):
-            engine.evolve(trigger="bogus")
+            engine.evolve(trigger="bogus")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -202,12 +202,12 @@ class TestEvolveMinSelections:
         store.get_active_skills.return_value = []
         engine = EvolutionEngine(store)
         # min_selections=0 is clamped to 1 — should not error
-        result = engine.evolve(trigger="metric_check", min_selections=0)
+        result = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK, min_selections=0)
         assert isinstance(result, list)
 
     def test_metric_check_min_selections_negative(self) -> None:
         store = _make_store()
         store.get_active_skills.return_value = []
         engine = EvolutionEngine(store)
-        result = engine.evolve(trigger="metric_check", min_selections=-5)
+        result = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK, min_selections=-5)
         assert isinstance(result, list)

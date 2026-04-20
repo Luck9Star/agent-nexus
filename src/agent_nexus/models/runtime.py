@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
+
+from agent_nexus.models._common import FrozenModel
 
 
-class Variable(BaseModel):
+class Variable(FrozenModel):
     """A named Python object held in the Runtime namespace.
 
     Variables persist across execution rounds within a single Agent process.
     The actual Python value is not serialized; only metadata is stored here.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str = Field(min_length=1)
     description: str = ""
@@ -22,13 +22,11 @@ class Variable(BaseModel):
     type_name: str | None = None
 
 
-class Function(BaseModel):
+class Function(FrozenModel):
     """A callable Python function registered in the Runtime namespace.
 
     The callable itself cannot be serialized; only metadata is stored.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str = Field(min_length=1)
     description: str = ""
@@ -36,14 +34,12 @@ class Function(BaseModel):
     is_async: bool = False
 
 
-class RuntimeType(BaseModel):
+class RuntimeType(FrozenModel):
     """A Python type (class) registered in the Runtime namespace.
 
     Includes an optional JSON Schema for LLM context injection.
     Named `RuntimeType` to avoid shadowing Python's builtin `type`.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str = Field(min_length=1)
     description: str = ""
@@ -51,10 +47,8 @@ class RuntimeType(BaseModel):
     json_schema: dict[str, Any] | None = None
 
 
-class ExecutionResult(BaseModel):
+class ExecutionResult(FrozenModel):
     """Result of executing Python code in the Runtime."""
-
-    model_config = ConfigDict(frozen=True)
 
     success: bool
     output: str = ""
@@ -62,10 +56,8 @@ class ExecutionResult(BaseModel):
     variables_created: list[str] = Field(default_factory=list)
 
 
-class SecurityViolation(BaseModel):
+class SecurityViolation(FrozenModel):
     """A single security rule violation detected by SecurityChecker (AST-level)."""
-
-    model_config = ConfigDict(frozen=True)
 
     rule_type: str = Field(min_length=1)
     node_type: str = Field(min_length=1)

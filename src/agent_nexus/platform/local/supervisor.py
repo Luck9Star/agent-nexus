@@ -11,11 +11,13 @@ Not persistent across platform restarts -- reads lockfile on start.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import toml
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
@@ -93,6 +95,9 @@ class AgentSupervisor:
         self._max_restarts = max_restarts
         self._restart_trackers: dict[str, RestartTracker] = {}
         self._started_agents: set[str] = set()
+        # Config cache with mtime-based invalidation
+        self._config_cache: Any = None
+        self._config_cache_mtime: float = 0.0
 
     # ------------------------------------------------------------------
     # Bulk start / stop
@@ -102,8 +107,9 @@ class AgentSupervisor:
         """Start all agents listed in the lockfile.
 
         Reads the lockfile, resolves each agent entry to a command, and
-        starts it via :class:`ProcessManager`.  Skips agents that fail to
-        start (logs the error and continues).
+        starts it via :class:`ProcessManager`.  Starts agents in parallel
+        using ``asyncio.gather``.  Skips agents that fail to start (logs
+        the error and continues).
 
         Returns
         -------
@@ -111,20 +117,24 @@ class AgentSupervisor:
             Names of agents that were successfully started.
         """
         lockfile = self._lockfile.load()
-        started: list[str] = []
+        if not lockfile.agents:
+            return []
 
-        for agent_name in lockfile.agents:
-            try:
-                ok = await self.start_agent(
-                    agent_name, lockfile=lockfile,
-                )
-                if ok:
-                    started.append(agent_name)
-            except Exception as exc:
+        tasks = [
+            self.start_agent(agent_name, lockfile=lockfile)
+            for agent_name in lockfile.agents
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        started: list[str] = []
+        for agent_name, result in zip(lockfile.agents, results):
+            if isinstance(result, BaseException):
                 logger.error(
                     "Failed to start agent '%s' [%s]: %s",
-                    agent_name, type(exc).__name__, exc,
+                    agent_name, type(result).__name__, result,
                 )
+            elif result:
+                started.append(agent_name)
 
         logger.info(
             "start_all: %d/%d agents started",
@@ -250,14 +260,17 @@ class AgentSupervisor:
             Mapping of ``{agent_name: alive}``.  Only includes agents
             that are registered in the process manager.
         """
-        results: dict[str, bool] = {}
-        for name in self._pm.list_running():
-            try:
-                alive = await self._pm.health_check(name)
-            except KeyError:
-                alive = False
-            results[name] = alive
-        return results
+        names = self._pm.list_running()
+        if not names:
+            return {}
+
+        tasks = [self._pm.health_check(name) for name in names]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        return {
+            name: (result if isinstance(result, bool) else False)
+            for name, result in zip(names, results)
+        }
 
     # ------------------------------------------------------------------
     # Auto-restart
@@ -411,9 +424,9 @@ class AgentSupervisor:
 
         env: dict[str, str] = {}
 
-        # Load platform config for model defaults
+        # Load platform config for model defaults (cached)
         try:
-            config = self._config.load_config()
+            config = self._load_config_cached()
             if config.models.default:
                 env["AGENT_MODEL"] = config.models.default
 
@@ -432,3 +445,17 @@ class AgentSupervisor:
             )
 
         return env
+
+    def _load_config_cached(self):
+        """Load config with file-mtime-based cache invalidation."""
+        config_path = self._config_dir / "config.toml"
+        try:
+            mtime = config_path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        if self._config_cache is not None and mtime == self._config_cache_mtime:
+            return self._config_cache
+        config = self._config.load_config()
+        self._config_cache = config
+        self._config_cache_mtime = mtime
+        return config

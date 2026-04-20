@@ -123,6 +123,12 @@ _ALL_RULES = (
     + _HARDCODED_CREDENTIALS_PATTERNS
 )
 
+# Pre-compiled rules to avoid recompilation on every line x rule match
+_COMPILED_RULES: list[tuple[re.Pattern[str], str, str, str, str, str]] = [
+    (re.compile(p, re.IGNORECASE), cat, cwe, sev, desc, rem)
+    for p, cat, cwe, sev, desc, rem in _ALL_RULES
+]
+
 
 def _severity_rank(severity: str) -> int:
     """Return numeric rank for severity (higher = more severe)."""
@@ -165,8 +171,8 @@ def _scan_file(path: Path) -> SecurityScanResult:
     lines = content.splitlines()
 
     for line_no, line in enumerate(lines, start=1):
-        for pattern, category, cwe_id, severity, description, remediation in _ALL_RULES:
-            if re.search(pattern, line, re.IGNORECASE):
+        for compiled_pattern, category, cwe_id, severity, description, remediation in _COMPILED_RULES:
+            if compiled_pattern.search(line):
                 findings.append(
                     SecurityFinding(
                         severity=severity,

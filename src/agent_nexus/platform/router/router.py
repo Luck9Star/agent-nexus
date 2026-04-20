@@ -60,6 +60,11 @@ _PHASE_ORDER: list[WorkflowPhase] = [
 _DEFAULT_COMPOSITE_TIMEOUT: float = DEFAULT_IPC_EXECUTE_TIMEOUT * len(_PHASE_ORDER)
 
 
+def _make_error_result(error: str, error_type: str) -> dict[str, Any]:
+    """Construct a standardized error result dict."""
+    return {"output": "", "success": False, "error": error, "error_type": error_type}
+
+
 class PlatformRouter:
     """Orchestrate composite agent workflows using 4-Phase pattern.
 
@@ -116,9 +121,9 @@ class PlatformRouter:
         conv_id = conversation_id or str(uuid.uuid4())
 
         if not agent_name or not agent_name.strip():
-            return {"output": "", "success": False, "error": "agent_name is required", "error_type": "ValueError"}
+            return _make_error_result("agent_name is required", "ValueError")
         if not message or not message.strip():
-            return {"output": "", "success": False, "error": "message is required", "error_type": "ValueError"}
+            return _make_error_result("message is required", "ValueError")
 
         # Check if this is a composite agent with an orchestration definition
         definition = self._composite_defs.get(agent_name)
@@ -279,21 +284,11 @@ class PlatformRouter:
         handle = self._pm.get_agent(atomic_name)
         if handle is None:
             remove_lock(atomic_name)
-            return {
-                "output": "",
-                "success": False,
-                "error": f"Agent '{atomic_name}' not found",
-                "error_type": "KeyError",
-            }
+            return _make_error_result(f"Agent '{atomic_name}' not found", "KeyError")
 
         if not handle.is_alive:
             remove_lock(atomic_name)
-            return {
-                "output": "",
-                "success": False,
-                "error": f"Agent '{atomic_name}' process is not alive",
-                "error_type": "ProcessNotAliveError",
-            }
+            return _make_error_result(f"Agent '{atomic_name}' process is not alive", "ProcessNotAliveError")
 
         # Serialize send+receive per agent to prevent concurrent IPC
         # calls from interleaving responses on the same handle.
@@ -306,40 +301,24 @@ class PlatformRouter:
                 )
             except Exception as exc:
                 logger.warning("IPC send error for agent '%s': %s", atomic_name, exc)
-                return {
-                    "output": "",
-                    "success": False,
-                    "error": f"IPC send error: {exc}",
-                    "error_type": type(exc).__name__,
-                }
+                return _make_error_result(f"IPC send error: {exc}", type(exc).__name__)
 
             # Wait for final result (progress messages are silently consumed)
             try:
                 response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
             except Exception as exc:
                 logger.warning("IPC receive error for agent '%s': %s", atomic_name, exc)
-                return {
-                    "output": "",
-                    "success": False,
-                    "error": f"IPC error: {exc}",
-                    "error_type": type(exc).__name__,
-                }
+                return _make_error_result(f"IPC error: {exc}", type(exc).__name__)
 
             # Parse response
             if response.type == AgentToPlatformType.ERROR:
-                return {
-                    "output": "",
-                    "success": False,
-                    "error": response.error or "Agent returned an error",
-                    "error_type": "AgentError",
-                }
+                return _make_error_result(response.error or "Agent returned an error", "AgentError")
 
             return {
                 "output": response.content or "",
                 # Default to success when status is unset — minimal agent
                 # implementations may omit the status field.
-                "success": response.status is None
-                or response.status.lower() == "completed",
+                "success": response.is_success,
             }
 
     async def get_tools(self) -> list[dict]:

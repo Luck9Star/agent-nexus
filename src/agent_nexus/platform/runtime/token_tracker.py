@@ -12,6 +12,7 @@ import uuid
 from dataclasses import dataclass
 
 from agent_nexus.models.context import (
+    BudgetAlertLevel,
     ContextBudget,
     ContextBudgetLogEntry,
 )
@@ -19,18 +20,16 @@ from agent_nexus.models.context import (
 # Default maximum context window in tokens.
 MAX_TOKENS: int = 200_000
 
-# Alert levels returned by TokenTracker.
+# Alert level for "no alert" (within budget).  Not part of BudgetAlertLevel
+# because it represents the absence of an alert rather than a budget breach.
 _ALERT_OK = "ok"
-_ALERT_COMPACT = "compact"
-_ALERT_TRUNCATE = "truncate"
-_ALERT_CEILING = "ceiling"
 
 
 @dataclass(frozen=True)
 class TokenAlert:
     """Alert emitted when token usage crosses a budget threshold."""
 
-    level: str  # "ok" | "compact" | "truncate" | "ceiling"
+    level: str  # "ok" | BudgetAlertLevel members
     message: str
     usage_pct: float
 
@@ -42,19 +41,19 @@ def _alert_from_budget(
     """Map a usage percentage to a tiered TokenAlert."""
     if usage_pct > budget.session_hard_ceiling * 100:
         return TokenAlert(
-            level=_ALERT_CEILING,
+            level=BudgetAlertLevel.HARD_CEILING,
             message="Hard ceiling reached — session must be truncated",
             usage_pct=usage_pct,
         )
     if usage_pct > budget.forced_truncate_threshold * 100:
         return TokenAlert(
-            level=_ALERT_TRUNCATE,
+            level=BudgetAlertLevel.FORCED_TRUNCATE,
             message="Forced truncate threshold reached — earliest messages will be dropped",
             usage_pct=usage_pct,
         )
     if usage_pct > budget.compaction_trigger * 100:
         return TokenAlert(
-            level=_ALERT_COMPACT,
+            level=BudgetAlertLevel.COMPACTION,
             message="Compaction threshold reached — context will be compacted",
             usage_pct=usage_pct,
         )
@@ -76,7 +75,7 @@ class TokenTracker:
 
         tracker = TokenTracker()
         alert = tracker.record_usage(1500, agent_name="code-reviewer")
-        if alert.level != "ok":
+        if alert.level != _ALERT_OK:
             print(f"Budget warning: {alert.message}")
     """
 

@@ -68,6 +68,8 @@ def _make_agent_handle(
     mock_response.error = response_error
     mock_response.status = response_status
     mock_response.output = response_content
+    # Mirror AgentToPlatform.is_success property
+    mock_response.is_success = response_status is None or response_status.lower() == "completed"
 
     handle.ipc = MagicMock()
     handle.ipc.send_chat = AsyncMock()
@@ -1943,6 +1945,7 @@ class TestExecuteSingleAgentReturnTypeSafety:
         mock_resp.content = None
         mock_resp.error = None
         mock_resp.status = "completed"
+        mock_resp.is_success = True
         handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
 
         pm = _make_process_manager(agents={"a1": handle})
@@ -1961,6 +1964,7 @@ class TestExecuteSingleAgentReturnTypeSafety:
         mock_resp.content = ["item1", "item2"]
         mock_resp.error = None
         mock_resp.status = "completed"
+        mock_resp.is_success = True
         handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
 
         pm = _make_process_manager(agents={"a1": handle})
@@ -1979,6 +1983,7 @@ class TestExecuteSingleAgentReturnTypeSafety:
         mock_resp.content = {"key": "value"}
         mock_resp.error = None
         mock_resp.status = "completed"
+        mock_resp.is_success = True
         handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
 
         pm = _make_process_manager(agents={"a1": handle})
@@ -1997,6 +2002,7 @@ class TestExecuteSingleAgentReturnTypeSafety:
         mock_resp.content = 42
         mock_resp.error = None
         mock_resp.status = "completed"
+        mock_resp.is_success = True
         handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
 
         pm = _make_process_manager(agents={"a1": handle})
@@ -2467,23 +2473,21 @@ class TestUnifiedIpcLock:
     tool_adapter.py had _ipc_lock_registry (module-level).  Both serialize
     IPC for the same agent but used different lock objects — concurrent
     route_to_atomic() and McpToolAdapter.execute() calls could interleave.
-    Now both use _get_ipc_lock() from tool_adapter.
+    Now both use get_ipc_lock() from ipc module.
     """
 
     @pytest.mark.asyncio
     async def test_route_to_atomic_uses_shared_lock(self) -> None:
         """route_to_atomic acquires the same lock as McpToolAdapter."""
-        from agent_nexus.platform.gateway.tool_adapter import (
-            _get_ipc_lock,
-            remove_all_locks,
-        )
+        from agent_nexus.platform.orchestration.ipc import get_ipc_lock
+        from agent_nexus.platform.gateway.tool_adapter import remove_all_locks
 
         remove_all_locks()
         handle = _make_agent_handle(response_content="hello back")
         pm = _make_process_manager(agents={"agent-a": handle})
         router = PlatformRouter(process_manager=pm)
 
-        shared_lock = _get_ipc_lock("agent-a")
+        shared_lock = get_ipc_lock("agent-a")
         assert shared_lock.locked() is False
 
         # route_to_atomic should acquire and release the shared lock
@@ -2495,17 +2499,15 @@ class TestUnifiedIpcLock:
     @pytest.mark.asyncio
     async def test_execute_single_agent_uses_shared_lock(self) -> None:
         """_execute_single_agent acquires the same lock as McpToolAdapter."""
-        from agent_nexus.platform.gateway.tool_adapter import (
-            _get_ipc_lock,
-            remove_all_locks,
-        )
+        from agent_nexus.platform.orchestration.ipc import get_ipc_lock
+        from agent_nexus.platform.gateway.tool_adapter import remove_all_locks
 
         remove_all_locks()
         handle = _make_agent_handle(response_content="result")
         pm = _make_process_manager(agents={"agent-a": handle})
         router = PlatformRouter(process_manager=pm)
 
-        shared_lock = _get_ipc_lock("agent-a")
+        shared_lock = get_ipc_lock("agent-a")
 
         result = await router._execute_single_agent("agent-a", "hello", "c1")
         assert result == "result"
@@ -2518,9 +2520,9 @@ class TestUnifiedIpcLock:
         same agent — one must wait for the other to finish."""
         from agent_nexus.platform.gateway.tool_adapter import (
             McpToolAdapter,
-            _get_ipc_lock,
             remove_all_locks,
         )
+        from agent_nexus.platform.orchestration.ipc import get_ipc_lock
 
         remove_all_locks()
 
@@ -2539,6 +2541,7 @@ class TestUnifiedIpcLock:
         mock_resp.type = AgentToPlatformType.RESULT
         mock_resp.content = "done"
         mock_resp.status = "completed"
+        mock_resp.is_success = True
         handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
 
         pm = _make_process_manager(agents={"shared-agent": handle})

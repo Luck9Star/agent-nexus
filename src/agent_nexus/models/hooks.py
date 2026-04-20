@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
-_utc_now = lambda: datetime.now(timezone.utc)
+from agent_nexus.models._common import FrozenModel, _utc_now
 
 
 class HookType(StrEnum):
@@ -45,7 +45,7 @@ class HookEvent(StrEnum):
     ON_EVOLUTION = "on_evolution"
 
 
-class HookDefinition(BaseModel):
+class HookDefinition(FrozenModel):
     """Declarative definition of a lifecycle hook.
 
     Defined in hooks/hooks.yaml within an Agent Package, or in
@@ -64,8 +64,6 @@ class HookDefinition(BaseModel):
             block_on_failure: false
     """
 
-    model_config = ConfigDict(frozen=True)
-
     type: HookType
     event: HookEvent
     config: dict[str, Any] = Field(default_factory=dict)
@@ -81,14 +79,12 @@ class HookDefinition(BaseModel):
     model: str | None = None  # PROMPT/AGENT type: model to use (e.g. "haiku", "sonnet")
 
 
-class HookExecution(BaseModel):
+class HookExecution(FrozenModel):
     """Result of executing a single hook.
 
     Records whether the hook passed or blocked, execution duration,
     and any output or error.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     hook: HookDefinition
     passed: bool
@@ -107,14 +103,12 @@ class HookExecution(BaseModel):
         return self
 
 
-class AggregatedHookResult(BaseModel):
+class AggregatedHookResult(FrozenModel):
     """Aggregated result of all hooks for a single event.
 
     If any hook with block_on_failure=True fails, the entire
     result is marked as blocked.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     event: HookEvent
     results: list[HookExecution] = Field(default_factory=list)

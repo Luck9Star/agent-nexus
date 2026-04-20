@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock
 
-from agent_nexus.models.context import ContextBudget, TokenUsage
+from agent_nexus.models.context import BudgetAlertLevel, ContextBudget, TokenUsage
 from agent_nexus.models.evolution import EvolutionMetrics
 from agent_nexus.platform.evolution.compaction import (
     AgentContext,
@@ -186,19 +186,19 @@ class TestCheckAndLog:
         guard = CompactionGuard(store=_make_store(), agent_id="a1")
         ctx = _make_ctx(prompt=55_000, completion=55_000)
         result = guard.check_and_log(ctx)
-        assert result == "compaction"
+        assert result == BudgetAlertLevel.COMPACTION
 
     def test_returns_forced_truncate_at_90_percent(self):
         guard = CompactionGuard(store=_make_store(), agent_id="a1")
         ctx = _make_ctx(prompt=60_000, completion=60_000)
         result = guard.check_and_log(ctx)
-        assert result == "forced_truncate"
+        assert result == BudgetAlertLevel.FORCED_TRUNCATE
 
     def test_returns_hard_ceiling_at_95_percent(self):
         guard = CompactionGuard(store=_make_store(), agent_id="a1")
         ctx = _make_ctx(prompt=63_000, completion=63_000)
         result = guard.check_and_log(ctx)
-        assert result == "hard_ceiling"
+        assert result == BudgetAlertLevel.HARD_CEILING
 
 
 # ---------------------------------------------------------------------------

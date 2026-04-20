@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
-_utc_now = lambda: datetime.now(timezone.utc)
-
+from agent_nexus.models._common import FrozenModel, _utc_now
 from agent_nexus.models.agent import AgentType
 
 
@@ -31,7 +30,7 @@ class InstallationStatus(StrEnum):
     FAILED = "failed"
 
 
-class SourceEntry(BaseModel):
+class SourceEntry(FrozenModel):
     """A package source entry from sources.yaml.
 
     Example sources.yaml:
@@ -41,8 +40,6 @@ class SourceEntry(BaseModel):
             url: https://github.com/user/agent-nexus-packages.git
             branch: main
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str = Field(min_length=1)
     type: str = "git"
@@ -60,7 +57,7 @@ class SourceEntry(BaseModel):
         return self
 
 
-class LockfileEntry(BaseModel):
+class LockfileEntry(FrozenModel):
     """A single Agent entry in lockfile.json.
 
     Records the installed version, source, commit SHA for reproducibility.
@@ -81,8 +78,6 @@ class LockfileEntry(BaseModel):
         }
     """
 
-    model_config = ConfigDict(frozen=True)
-
     version: str = Field(
         min_length=1,
         pattern=r"^[a-zA-Z0-9._-]+$",
@@ -99,51 +94,32 @@ class LockfileEntry(BaseModel):
     dependencies: list[str] = Field(default_factory=list)
 
 
-class Lockfile(BaseModel):
+class Lockfile(FrozenModel):
     """The complete lockfile.json structure.
 
     Tracks all installed Agent Packages with their exact versions
     and source commit SHAs for reproducible installations.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     version: int = 1
     agents: dict[str, LockfileEntry] = Field(default_factory=dict)
 
 
-class PackageSource(BaseModel):
+class PackageSource(SourceEntry):
     """Git package source with local cache path.
 
     Extends SourceEntry with runtime state (local cache directory).
+    Inherits the _validate_git_url validator from SourceEntry.
     """
 
-    model_config = ConfigDict(frozen=True)
-
-    name: str = Field(min_length=1)
-    type: str = "git"
-    url: str = ""
-    branch: str = "main"
     local_cache: str = ""
 
-    @model_validator(mode="after")
-    def _validate_git_url(self) -> "PackageSource":
-        """Git-type sources must have a non-empty URL."""
-        if self.type == "git" and not self.url.strip():
-            raise ValueError(
-                "Git-type source requires a non-empty 'url'. "
-                f"Source '{self.name}' has type='git' but url is empty."
-            )
-        return self
 
-
-class IndexEntry(BaseModel):
+class IndexEntry(FrozenModel):
     """A single Agent entry from a source's index.yaml.
 
     Used for search and discovery across all configured sources.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str = Field(min_length=1)
     version: str = Field(

@@ -21,7 +21,7 @@ from agent_nexus.models.evolution import (
     SkillOrigin,
     SkillRecord,
 )
-from agent_nexus.models.context import ContextBudget, TokenUsage
+from agent_nexus.models.context import BudgetAlertLevel, ContextBudget, TokenUsage
 from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.analyzer import (
     AnalysisResult,
@@ -1113,7 +1113,7 @@ class TestCompactionGuardCheckAndLog:
         guard = CompactionGuard(store, "agent-a")
         ctx = _make_agent_context(total_tokens=123_000)
         alert = guard.check_and_log(ctx)
-        assert alert == "hard_ceiling"
+        assert alert == BudgetAlertLevel.HARD_CEILING
 
     def test_returns_none_when_healthy(self, tmp_path: Path) -> None:
         store = _store_with_records(tmp_path)
@@ -2199,7 +2199,7 @@ class TestEvolutionEngineEvolvePostAnalysis:
             task_completed=False,
             skill_ids_used=["s1"],
         )
-        result = engine.evolve(trigger="post_analysis", ctx=ctx)
+        result = engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
         assert isinstance(result, AnalysisResult)
         assert result.task_id == "t1"
 
@@ -2215,7 +2215,7 @@ class TestEvolutionEngineEvolvePostAnalysis:
             task_completed=False,
             skill_ids_used=["s1"],
         )
-        result = engine.evolve(trigger="post_analysis", ctx=ctx)
+        result = engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
         # The original should be deactivated (FIX evolution)
         original = store.get_skill_record("s1")
         assert original is not None
@@ -2226,7 +2226,7 @@ class TestEvolutionEngineEvolvePostAnalysis:
         engine = EvolutionEngine(store)
 
         with pytest.raises(ValueError, match="ctx.*required"):
-            engine.evolve(trigger="post_analysis")
+            engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS)
 
 
 class TestEvolutionEngineEvolveToolDegradation:
@@ -2238,7 +2238,7 @@ class TestEvolutionEngineEvolveToolDegradation:
         engine = EvolutionEngine(store)
 
         results = engine.evolve(
-            trigger="tool_degradation",
+            trigger=EvolutionTrigger.TOOL_DEGRADATION,
             tool_key="tool-x",
             problem_description="API changed",
         )
@@ -2253,7 +2253,7 @@ class TestEvolutionEngineEvolveToolDegradation:
         engine = EvolutionEngine(store)
 
         results = engine.evolve(
-            trigger="tool_degradation",
+            trigger=EvolutionTrigger.TOOL_DEGRADATION,
             tool_key="tool-x",
             problem_description="broken",
             affected_skill_ids={"s1"},
@@ -2265,7 +2265,7 @@ class TestEvolutionEngineEvolveToolDegradation:
         engine = EvolutionEngine(store)
 
         with pytest.raises(ValueError, match="tool_key.*required"):
-            engine.evolve(trigger="tool_degradation")
+            engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION)
 
 
 class TestEvolutionEngineEvolveMetricCheck:
@@ -2276,7 +2276,7 @@ class TestEvolutionEngineEvolveMetricCheck:
         store = _store_with_records(tmp_path, r)
         engine = EvolutionEngine(store)
 
-        results = engine.evolve(trigger="metric_check")
+        results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
         assert isinstance(results, list)
         assert len(results) == 1
         assert results[0].success
@@ -2286,7 +2286,7 @@ class TestEvolutionEngineEvolveMetricCheck:
         store = _store_with_records(tmp_path, r)
         engine = EvolutionEngine(store)
 
-        results = engine.evolve(trigger="metric_check", min_selections=5)
+        results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK, min_selections=5)
         assert results == []
 
 
@@ -2298,7 +2298,7 @@ class TestEvolutionEngineEvolveUnknown:
         engine = EvolutionEngine(store)
 
         with pytest.raises(ValueError, match="Unknown trigger"):
-            engine.evolve(trigger="nonexistent")
+            engine.evolve(trigger="nonexistent")  # type: ignore[arg-type]
 
 
 class TestEvolutionEngineConvenienceMethods:
@@ -2460,41 +2460,41 @@ class TestEvolutionEngineFacadeDelegation:
     def test_evolve_post_analysis_requires_ctx(
         self, engine: "EvolutionEngine"
     ) -> None:
-        """trigger='post_analysis' without ctx raises ValueError."""
+        """trigger=POST_ANALYSIS without ctx raises ValueError."""
         with pytest.raises(ValueError, match="ctx.*required"):
-            engine.evolve(trigger="post_analysis", ctx=None)
+            engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=None)
 
     def test_evolve_tool_degradation_requires_tool_key(
         self, engine: "EvolutionEngine"
     ) -> None:
-        """trigger='tool_degradation' without tool_key raises ValueError."""
+        """trigger=TOOL_DEGRADATION without tool_key raises ValueError."""
         with pytest.raises(ValueError, match="tool_key.*required"):
-            engine.evolve(trigger="tool_degradation")
+            engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION)
 
     def test_evolve_unknown_trigger(self, engine: "EvolutionEngine") -> None:
         """Unknown trigger raises ValueError."""
         with pytest.raises(ValueError, match="Unknown trigger"):
-            engine.evolve(trigger="nonexistent")
+            engine.evolve(trigger="nonexistent")  # type: ignore[arg-type]
 
     def test_evolve_post_analysis_returns_analysis_result(
         self, engine: "EvolutionEngine"
     ) -> None:
-        """trigger='post_analysis' with valid ctx returns AnalysisResult."""
+        """trigger=POST_ANALYSIS with valid ctx returns AnalysisResult."""
         ctx = EvolutionContext(
             agent_id="test-agent",
             task_id="task-1",
             task_description="test task",
         )
-        result = engine.evolve(trigger="post_analysis", ctx=ctx)
+        result = engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
         # AnalysisResult has .suggestions attribute
         assert hasattr(result, "suggestions")
 
     def test_evolve_tool_degradation_returns_list(
         self, engine: "EvolutionEngine"
     ) -> None:
-        """trigger='tool_degradation' returns list[EvolveResult]."""
+        """trigger=TOOL_DEGRADATION returns list[EvolveResult]."""
         results = engine.evolve(
-            trigger="tool_degradation",
+            trigger=EvolutionTrigger.TOOL_DEGRADATION,
             tool_key="test-tool",
             problem_description="tool is slow",
         )
@@ -2503,8 +2503,8 @@ class TestEvolutionEngineFacadeDelegation:
     def test_evolve_metric_check_returns_list(
         self, engine: "EvolutionEngine"
     ) -> None:
-        """trigger='metric_check' returns list[EvolveResult]."""
-        results = engine.evolve(trigger="metric_check")
+        """trigger=METRIC_CHECK returns list[EvolveResult]."""
+        results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
         assert isinstance(results, list)
 
     def test_should_compact_delegates(

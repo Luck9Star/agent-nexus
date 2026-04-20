@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import IntEnum
-
+from datetime import datetime
+from enum import IntEnum, StrEnum
 import logging
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
-logger = logging.getLogger(__name__)
+from agent_nexus.models._common import FrozenModel, _utc_now
 
-_utc_now = lambda: datetime.now(timezone.utc)
+logger = logging.getLogger(__name__)
 
 
 class ContextLevel(IntEnum):
@@ -29,14 +28,24 @@ class ContextLevel(IntEnum):
     L3_RUNTIME = 3
 
 
-class ContextBudget(BaseModel):
+class BudgetAlertLevel(StrEnum):
+    """Alert levels from token budget checking.
+
+    Single source of truth for budget alert strings, shared by
+    TokenUsage.check_budget(), TokenTracker, and CompactionGuard.
+    """
+
+    HARD_CEILING = "hard_ceiling"
+    FORCED_TRUNCATE = "forced_truncate"
+    COMPACTION = "compaction"
+
+
+class ContextBudget(FrozenModel):
     """Token budget limits for context tiered loading.
 
     These values define the hard caps for each context layer,
     compaction behavior, and session safety thresholds.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     l0_max: int = Field(default=800, ge=1)
     l1_max: int = Field(default=3000, ge=1)
@@ -124,7 +133,7 @@ class TokenUsage(BaseModel):
         self,
         context_window: int,
         budget: ContextBudget | None = None,
-    ) -> str | None:
+    ) -> BudgetAlertLevel | None:
         """Return alert level or None if within budget.
 
         Args:
@@ -133,9 +142,9 @@ class TokenUsage(BaseModel):
                 Falls back to ContextBudget defaults if not provided.
 
         Returns:
-            "hard_ceiling" -- forced truncation
-            "forced_truncate" -- truncate earliest messages
-            "compaction" -- trigger compaction
+            BudgetAlertLevel.HARD_CEILING -- forced truncation
+            BudgetAlertLevel.FORCED_TRUNCATE -- truncate earliest messages
+            BudgetAlertLevel.COMPACTION -- trigger compaction
             None -- within budget
         """
         if budget is None:
@@ -149,22 +158,20 @@ class TokenUsage(BaseModel):
             return None
         ratio = self.total_tokens / context_window
         if ratio > budget.session_hard_ceiling:
-            return "hard_ceiling"
+            return BudgetAlertLevel.HARD_CEILING
         if ratio > budget.forced_truncate_threshold:
-            return "forced_truncate"
+            return BudgetAlertLevel.FORCED_TRUNCATE
         if ratio > budget.compaction_trigger:
-            return "compaction"
+            return BudgetAlertLevel.COMPACTION
         return None
 
 
-class ContextBudgetLogEntry(BaseModel):
+class ContextBudgetLogEntry(FrozenModel):
     """A single entry in the context_budget_log SQLite table.
 
     Records compaction events and token consumption for observability
     and cross-session analysis.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     log_id: str = Field(min_length=1)
     agent_id: str = Field(min_length=1)

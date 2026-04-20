@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
-_utc_now = lambda: datetime.now(timezone.utc)
+from agent_nexus.models._common import FrozenModel, _utc_now
 
 
 class TaskState(StrEnum):
@@ -29,14 +29,12 @@ class TaskState(StrEnum):
     FAILED = "failed"
 
 
-class TaskItem(BaseModel):
+class TaskItem(FrozenModel):
     """A single task in the TaskGraph.
 
     Tasks form a dependency graph via `blocked_by`. The TaskGraph engine
     manages state transitions; this model is pure data.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     id: str = Field(min_length=1)
     description: str = Field(min_length=1)
@@ -56,10 +54,8 @@ class TaskItem(BaseModel):
         return self
 
 
-class TaskGraphSnapshot(BaseModel):
+class TaskGraphSnapshot(FrozenModel):
     """Frozen snapshot of a TaskGraph for serialization / inspection."""
-
-    model_config = ConfigDict(frozen=True)
 
     tasks: list[TaskItem] = Field(default_factory=list)
     parallel_groups: list[list[str]] = Field(default_factory=list)

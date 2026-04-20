@@ -30,6 +30,7 @@ from agent_nexus.models.evolution import (
     SkillOrigin,
     SkillRecord,
 )
+from agent_nexus.platform.utils import now_iso as _now_iso
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -121,10 +122,6 @@ CREATE TABLE IF NOT EXISTS agent_records (
 CREATE INDEX IF NOT EXISTS idx_ar_active ON agent_records(is_active);
 CREATE INDEX IF NOT EXISTS idx_ar_name ON agent_records(name);
 """
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class EvolutionStore:
@@ -877,11 +874,11 @@ class EvolutionStore:
         """Walk up the lineage tree, returns ancestors oldest-first."""
         with self._conn() as conn:
             visited: set[str] = set()
-            ancestors: list[SkillRecord] = []
             frontier = [skill_id]
-            # Batch-load all lineage edges and parent records once
+            # Batch-load all lineage edges once
             all_parents = self._batch_load_parents(conn)
 
+            # Phase 1: BFS to collect all ancestor IDs (no per-ID queries)
             for _ in range(max_depth):
                 next_frontier: list[str] = []
                 for sid in frontier:
@@ -889,23 +886,31 @@ class EvolutionStore:
                         if pid in visited:
                             continue
                         visited.add(pid)
-                        row = conn.execute(
-                            "SELECT id, name, version, lineage_origin, "
-                            "lineage_generation, lineage_content_diff, "
-                            "lineage_content_snapshot, directory, is_active, "
-                            "total_selections, total_applied, total_completions, "
-                            "total_fallbacks, created_at, updated_at "
-                            "FROM skill_records WHERE id = ?",
-                            (pid,),
-                        ).fetchone()
-                        if row:
-                            ancestors.append(
-                                self._row_to_record(conn, row, all_parents)
-                            )
-                            next_frontier.append(pid)
+                        next_frontier.append(pid)
                 frontier = next_frontier
                 if not frontier:
                     break
+
+            if not visited:
+                return []
+
+            # Phase 2: Batch-load all ancestor records in one query
+            placeholders = ",".join("?" * len(visited))
+            rows = conn.execute(
+                "SELECT id, name, version, lineage_origin, "
+                "lineage_generation, lineage_content_diff, "
+                "lineage_content_snapshot, directory, is_active, "
+                "total_selections, total_applied, total_completions, "
+                "total_fallbacks, created_at, updated_at "
+                f"FROM skill_records WHERE id IN ({placeholders})",
+                tuple(visited),
+            ).fetchall()
+
+            ancestors: list[SkillRecord] = []
+            for row in rows:
+                ancestors.append(
+                    self._row_to_record(conn, row, all_parents)
+                )
 
             ancestors.sort(key=lambda r: r.lineage.generation)
             return ancestors

@@ -6,7 +6,9 @@ from enum import StrEnum
 import json
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
+
+from agent_nexus.models._common import FrozenModel
 
 
 class MessageDirection(StrEnum):
@@ -32,7 +34,7 @@ class AgentToPlatformType(StrEnum):
     ERROR = "error"
 
 
-class PlatformToAgent(BaseModel):
+class PlatformToAgent(FrozenModel):
     """Message from Platform Router to Agent subprocess (stdin).
 
     Examples:
@@ -40,8 +42,6 @@ class PlatformToAgent(BaseModel):
         Task: {"type": "task", "task_id": "...", "description": "..."}
         Data: {"type": "data_reference", "ref_id": "var://...", "summary": "..."}
     """
-
-    model_config = ConfigDict(frozen=True)
 
     type: PlatformToAgentType
     content: str = Field(default="", max_length=65536)
@@ -51,7 +51,7 @@ class PlatformToAgent(BaseModel):
     summary: str | None = None
 
 
-class AgentToPlatform(BaseModel):
+class AgentToPlatform(FrozenModel):
     """Message from Agent subprocess to Platform Router (stdout).
 
     Examples:
@@ -59,8 +59,6 @@ class AgentToPlatform(BaseModel):
         Progress: {"type": "progress", "task_id": "...", "message": "..."}
         Error:    {"type": "error", "task_id": "...", "error": "..."}
     """
-
-    model_config = ConfigDict(frozen=True)
 
     type: AgentToPlatformType
     content: str = Field(default="", max_length=65536)
@@ -70,6 +68,11 @@ class AgentToPlatform(BaseModel):
     error: str | None = Field(default=None, max_length=65536)
     status: str | None = None
     output: Any | None = None
+
+    @property
+    def is_success(self) -> bool:
+        """Check if this response indicates successful completion."""
+        return self.status is None or self.status.lower() == "completed"
 
     @field_validator("output")
     @classmethod
@@ -81,7 +84,7 @@ class AgentToPlatform(BaseModel):
         return v
 
 
-class IPCMessage(BaseModel):
+class IPCMessage(FrozenModel):
     """Envelope for any IPC message, with direction tagging.
 
     This is the union type used for deserialization of raw JSON-lines
@@ -92,8 +95,6 @@ class IPCMessage(BaseModel):
     Pydantic would try PlatformToAgent first (left-to-right union) and
     might accept AgentToPlatform data with wrong default values.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     direction: MessageDirection
     payload: PlatformToAgent | AgentToPlatform

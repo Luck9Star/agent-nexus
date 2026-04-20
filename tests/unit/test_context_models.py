@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from agent_nexus.models.context import (
+    BudgetAlertLevel,
     ContextBudget,
     ContextBudgetLogEntry,
     ContextLevel,
@@ -143,7 +144,7 @@ class TestTokenUsageCheckBudget:
         """81% usage triggers 'compaction' alert."""
         tu = TokenUsage(prompt_tokens=700, completion_tokens=110)
         assert tu.total_tokens == 810
-        assert tu.check_budget(context_window=1000) == "compaction"
+        assert tu.check_budget(context_window=1000) == BudgetAlertLevel.COMPACTION
 
     def test_compaction_exact_boundary(self):
         """81% triggers compaction, 80% does not."""
@@ -153,26 +154,26 @@ class TestTokenUsageCheckBudget:
 
         tu_81 = TokenUsage(prompt_tokens=700, completion_tokens=101)
         assert tu_81.total_tokens == 801
-        assert tu_81.check_budget(context_window=1000) == "compaction"
+        assert tu_81.check_budget(context_window=1000) == BudgetAlertLevel.COMPACTION
 
     def test_forced_truncate_threshold(self):
         """91% usage triggers 'forced_truncate' alert."""
         tu = TokenUsage(prompt_tokens=800, completion_tokens=110)
         assert tu.total_tokens == 910
-        assert tu.check_budget(context_window=1000) == "forced_truncate"
+        assert tu.check_budget(context_window=1000) == BudgetAlertLevel.FORCED_TRUNCATE
 
     def test_hard_ceiling_threshold(self):
         """96% usage triggers 'hard_ceiling' alert."""
         tu = TokenUsage(prompt_tokens=800, completion_tokens=160)
         assert tu.total_tokens == 960
-        assert tu.check_budget(context_window=1000) == "hard_ceiling"
+        assert tu.check_budget(context_window=1000) == BudgetAlertLevel.HARD_CEILING
 
     def test_priority_hard_ceiling_over_others(self):
         """hard_ceiling is checked first, even if other thresholds are met."""
         tu = TokenUsage(prompt_tokens=800, completion_tokens=190)
         assert tu.total_tokens == 990
         result = tu.check_budget(context_window=1000)
-        assert result == "hard_ceiling"
+        assert result == BudgetAlertLevel.HARD_CEILING
 
     def test_zero_context_window(self):
         tu = TokenUsage(prompt_tokens=80, completion_tokens=20)

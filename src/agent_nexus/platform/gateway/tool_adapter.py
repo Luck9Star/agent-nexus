@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import uuid
+from typing import Any
 
 from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.orchestration.ipc import IPCError, get_ipc_lock
@@ -42,18 +43,18 @@ def _sanitize(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Backward-compatible re-exports (import from ipc module directly in new code)
+# Error result helper (shared pattern with router — keep in sync)
 # ---------------------------------------------------------------------------
 
 
-def _get_ipc_lock(agent_name: str) -> asyncio.Lock:
-    """Delegate to :func:`ipc.get_ipc_lock`.
+def _make_error_result(error: str, error_type: str) -> dict[str, Any]:
+    """Construct a standardized error result dict."""
+    return {"output": "", "success": False, "error": error, "error_type": error_type}
 
-    Kept for internal use within this module (``execute`` method).
-    New callers should import :func:`get_ipc_lock` directly from
-    :mod:`agent_nexus.platform.orchestration.ipc`.
-    """
-    return get_ipc_lock(agent_name)
+
+# ---------------------------------------------------------------------------
+# Backward-compatible re-exports (import from ipc module directly in new code)
+# ---------------------------------------------------------------------------
 
 
 def remove_lock(agent_name: str) -> None:
@@ -128,19 +129,17 @@ class McpToolAdapter:
             Dict with ``output`` and ``success`` keys.
         """
         if not handle.is_alive:
-            return {
-                "output": "",
-                "success": False,
-                "error": f"Agent '{self.agent_name}' process is not alive",
-                "error_type": "ProcessNotAliveError",
-            }
+            return _make_error_result(
+                f"Agent '{self.agent_name}' process is not alive",
+                "ProcessNotAliveError",
+            )
 
         payload = json.dumps(
             {"tool": self._original_tool_name, "arguments": arguments}
         )
 
         try:
-            lock = _get_ipc_lock(self.agent_name)
+            lock = get_ipc_lock(self.agent_name)
             async with lock:
                 await handle.ipc.send_chat(payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__")
                 response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
@@ -148,25 +147,16 @@ class McpToolAdapter:
             logger.error(
                 "IPC error executing tool '%s': %s", self.full_name, exc
             )
-            return {
-                "output": "",
-                "success": False,
-                "error": f"IPC error: {exc}",
-                "error_type": type(exc).__name__,
-            }
+            return _make_error_result(f"IPC error: {exc}", type(exc).__name__)
 
         if response.type == AgentToPlatformType.ERROR:
-            return {
-                "output": "",
-                "success": False,
-                "error": response.error or "Agent returned an error",
-                "error_type": "AgentError",
-            }
+            return _make_error_result(
+                response.error or "Agent returned an error", "AgentError"
+            )
 
         return {
             "output": response.content or "",
-            "success": response.status is None
-            or response.status.lower() == "completed",
+            "success": response.is_success,
         }
 
     # -- Schema helpers ----------------------------------------------------

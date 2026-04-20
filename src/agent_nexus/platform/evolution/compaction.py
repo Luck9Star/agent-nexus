@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from agent_nexus.models.context import ContextBudget, TokenUsage
+from agent_nexus.models.context import BudgetAlertLevel, ContextBudget, TokenUsage
 from agent_nexus.platform.evolution.store import EvolutionStore
 
 
@@ -155,13 +155,13 @@ class CompactionGuard:
 
         return result
 
-    def check_and_log(self, ctx: AgentContext) -> str | None:
+    def check_and_log(self, ctx: AgentContext) -> BudgetAlertLevel | None:
         """Check context health and log budget state.
 
         Returns alert level or None if within budget:
-          - "hard_ceiling" -- forced truncation at 95%
-          - "forced_truncate" -- truncate earliest at 90%
-          - "compaction" -- trigger compaction at 80%
+          - BudgetAlertLevel.HARD_CEILING -- forced truncation at 95%
+          - BudgetAlertLevel.FORCED_TRUNCATE -- truncate earliest at 90%
+          - BudgetAlertLevel.COMPACTION -- trigger compaction at 80%
           - None -- within budget
 
         Also logs the budget state for observability.

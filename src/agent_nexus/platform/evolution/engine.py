@@ -16,13 +16,13 @@ Usage::
     engine = EvolutionEngine(store)
 
     # Trigger 1: post-task analysis -> evolve
-    result = engine.evolve(trigger="post_analysis", ctx=evolution_ctx)
+    result = engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=evolution_ctx)
 
     # Trigger 2: tool degradation
-    results = engine.evolve(trigger="tool_degradation", tool_key="api-x", ...)
+    results = engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION, tool_key="api-x", ...)
 
     # Trigger 3: metric check
-    results = engine.evolve(trigger="metric_check")
+    results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
 
     # Convenience methods
     report = engine.check_health(skill_record)
@@ -48,6 +48,7 @@ from agent_nexus.platform.evolution.analyzer import (
 )
 from agent_nexus.platform.evolution.evolver import (
     EvolveResult,
+    EvolutionTrigger,
     SkillEvolver,
 )
 from agent_nexus.platform.evolution.health import (
@@ -139,7 +140,7 @@ class EvolutionEngine:
     def evolve(
         self,
         *,
-        trigger: str,
+        trigger: EvolutionTrigger,
         ctx: EvolutionContext | None = None,
         tool_key: str | None = None,
         problem_description: str | None = None,
@@ -149,33 +150,34 @@ class EvolutionEngine:
         """Route to the appropriate evolution sub-component by trigger.
 
         Args:
-            trigger: One of "post_analysis", "tool_degradation", "metric_check".
-            ctx: EvolutionContext (required for "post_analysis").
-            tool_key: Degraded tool identifier (required for "tool_degradation").
-            problem_description: Tool problem description (for "tool_degradation").
+            trigger: EvolutionTrigger enum indicating the evolution source.
+            ctx: EvolutionContext (required for POST_ANALYSIS).
+            tool_key: Degraded tool identifier (required for TOOL_DEGRADATION).
+            problem_description: Tool problem description (for TOOL_DEGRADATION).
             affected_skill_ids: Optional filter for affected skills.
             min_selections: Minimum selections for metric check evaluation.
 
         Returns:
-            AnalysisResult for "post_analysis", list[EvolveResult] otherwise.
+            AnalysisResult for POST_ANALYSIS, list[EvolveResult] otherwise.
 
         Raises:
             ValueError: If trigger is unknown or required args are missing.
         """
         min_selections = max(min_selections, 1)
-        if trigger == "post_analysis":
+        if trigger == EvolutionTrigger.POST_ANALYSIS:
             if ctx is None:
                 raise ValueError(
-                    "ctx (EvolutionContext) is required for trigger='post_analysis'"
+                    "ctx (EvolutionContext) is required for "
+                    f"trigger={EvolutionTrigger.POST_ANALYSIS!r}"
                 )
             analysis = self._analyzer.analyze_execution(ctx)
             self._evolver.process_analysis(analysis)
             return analysis
 
-        elif trigger == "tool_degradation":
+        elif trigger == EvolutionTrigger.TOOL_DEGRADATION:
             if tool_key is None:
                 raise ValueError(
-                    "tool_key is required for trigger='tool_degradation'"
+                    f"tool_key is required for trigger={EvolutionTrigger.TOOL_DEGRADATION!r}"
                 )
             return self._evolver.process_tool_degradation(
                 tool_key=tool_key,
@@ -183,7 +185,7 @@ class EvolutionEngine:
                 affected_skill_ids=affected_skill_ids,
             )
 
-        elif trigger == "metric_check":
+        elif trigger == EvolutionTrigger.METRIC_CHECK:
             return self._evolver.process_metric_check(
                 min_selections=min_selections,
             )
@@ -191,7 +193,7 @@ class EvolutionEngine:
         else:
             raise ValueError(
                 f"Unknown trigger: {trigger!r}. "
-                f"Expected one of: post_analysis, tool_degradation, metric_check"
+                f"Expected one of: {', '.join(t.value for t in EvolutionTrigger)}"
             )
 
     # ------------------------------------------------------------------

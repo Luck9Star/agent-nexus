@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
+
+from agent_nexus.models._common import FrozenModel
 
 
 class ProviderApiType(StrEnum):
@@ -14,7 +16,7 @@ class ProviderApiType(StrEnum):
     OLLAMA = "ollama"
 
 
-class ProviderConfig(BaseModel):
+class ProviderConfig(FrozenModel):
     """A single model provider configuration.
 
     Maps to a [models.providers.<name>] section in config.toml.
@@ -22,14 +24,12 @@ class ProviderConfig(BaseModel):
     never stored directly in the config file.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     base_url: str = ""
     api_key_env: str = ""
     api: ProviderApiType = ProviderApiType.OPENAI_COMPATIBLE
 
 
-class ModelConfig(BaseModel):
+class ModelConfig(FrozenModel):
     """Top-level model configuration.
 
     Maps to the [models] section in config.toml.
@@ -44,13 +44,11 @@ class ModelConfig(BaseModel):
         api = "openai-compatible"
     """
 
-    model_config = ConfigDict(frozen=True)
-
     default: str = "openai:gpt-4o"
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
 
 
-class RuntimeConfig(BaseModel):
+class RuntimeConfig(FrozenModel):
     """Runtime environment configuration.
 
     Maps to the [runtime] section in config.toml.
@@ -61,19 +59,15 @@ class RuntimeConfig(BaseModel):
         uv_path = "uv"
     """
 
-    model_config = ConfigDict(frozen=True)
-
     python_path: str = "python3"
     uv_path: str = "uv"
 
 
-class PlatformConfig(BaseModel):
+class PlatformConfig(FrozenModel):
     """Root configuration model for the entire platform.
 
     This is the top-level object parsed from config.toml.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     models: ModelConfig = Field(default_factory=ModelConfig)

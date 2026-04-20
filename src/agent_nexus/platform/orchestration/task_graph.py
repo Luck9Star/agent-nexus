@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Generator
 
 from agent_nexus.models.task import TaskGraphSnapshot, TaskItem, TaskState
+from agent_nexus.platform.utils import now_iso as _now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +58,9 @@ CREATE TABLE IF NOT EXISTS task_dependencies (
 );
 CREATE INDEX IF NOT EXISTS idx_dep_task ON task_dependencies(task_id);
 CREATE INDEX IF NOT EXISTS idx_dep_blocked ON task_dependencies(blocked_by_id);
+CREATE INDEX IF NOT EXISTS idx_task_state ON tasks(state);
+CREATE INDEX IF NOT EXISTS idx_task_agent ON tasks(agent);
 """
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class TaskGraph:
@@ -416,10 +415,13 @@ class TaskGraph:
         available: set[str] = {tid for tid, deg in in_degree.items() if deg == 0}
         assigned: set[str] = set()
 
+        # Pre-build position map for O(1) lookup instead of list.index O(n)
+        position = {tid: idx for idx, tid in enumerate(task_ids)}
+
         groups: list[list[TaskItem]] = []
         while available:
             # Preserve creation order within each group
-            group_ids = sorted(available, key=lambda t: task_ids.index(t))
+            group_ids = sorted(available, key=lambda t: position[t])
             # Batch-load group tasks in one pass instead of per-task queries
             placeholders = ",".join("?" for _ in group_ids)
             group_rows = conn.execute(

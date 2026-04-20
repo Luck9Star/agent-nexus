@@ -15,6 +15,7 @@ import logging
 from agent_nexus.models.evolution import SkillRecord
 from agent_nexus.platform.evolution.health import HealthChecker, HealthReport
 from agent_nexus.platform.evolution.store import EvolutionStore
+from agent_nexus.platform.evolution.thresholds import SkillRates
 
 logger = logging.getLogger(__name__)
 
@@ -124,9 +125,8 @@ class EvolutionContextDescriber:
 
         for skill in active:
             sel = skill.total_selections
-            eff = (
-                skill.total_completions / sel if sel > 0 else 0.0
-            )
+            rates = SkillRates.from_record(skill)
+            eff = rates.effective_rate if rates is not None else 0.0
             report = reports.get(skill.id)
             health_status = (
                 "OK" if report and report.is_healthy else "WARN"
@@ -245,9 +245,8 @@ class EvolutionContextDescriber:
 
         for skill in skills:
             sel = skill.total_selections
-            eff = (
-                skill.total_completions / sel if sel > 0 else 0.0
-            )
+            rates = SkillRates.from_record(skill)
+            eff = rates.effective_rate if rates is not None else 0.0
             report = reports.get(skill.id)
             health_status = (
                 "OK" if report and report.is_healthy else "WARN"

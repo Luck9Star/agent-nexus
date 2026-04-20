@@ -92,26 +92,11 @@ class HealthChecker:
             List of evolution suggestions (empty if healthy).
         """
         suggestions: list[EvolutionSuggestion] = []
-        sel = skill_record.total_selections
 
-        if sel == 0:
+        rates = SkillRates.from_record(skill_record)
+        if rates is None:
             return suggestions
 
-        fallback_rate = skill_record.total_fallbacks / sel
-        applied_rate = skill_record.total_applied / sel
-        completion_rate = (
-            skill_record.total_completions / skill_record.total_applied
-            if skill_record.total_applied > 0
-            else 0.0
-        )
-        effective_rate = skill_record.total_completions / sel
-
-        rates = SkillRates(
-            fallback_rate=fallback_rate,
-            applied_rate=applied_rate,
-            completion_rate=completion_rate,
-            effective_rate=effective_rate,
-        )
         eval_result = evaluate_skill_health(rates)
 
         # Track best FIX suggestion (deduplicate: keep highest confidence)
@@ -123,11 +108,11 @@ class HealthChecker:
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[skill_record.id],
                 direction=(
-                    f"High fallback rate ({fallback_rate:.0%}): "
+                    f"High fallback rate ({rates.fallback_rate:.0%}): "
                     f"skill is frequently selected but not applied, "
                     f"suggesting instructions are unclear or outdated"
                 ),
-                confidence=min(fallback_rate, 1.0),
+                confidence=min(rates.fallback_rate, 1.0),
             )
             best_fix = fix1
 
@@ -137,12 +122,12 @@ class HealthChecker:
                 evolution_type=EvolutionType.FIX,
                 target_skill_ids=[skill_record.id],
                 direction=(
-                    f"Low completion rate ({completion_rate:.0%}) "
-                    f"despite high applied rate ({applied_rate:.0%}): "
+                    f"Low completion rate ({rates.completion_rate:.0%}) "
+                    f"despite high applied rate ({rates.applied_rate:.0%}): "
                     f"skill instructions may be incorrect or incomplete"
                 ),
                 confidence=min(
-                    applied_rate * (1 - completion_rate), 1.0
+                    rates.applied_rate * (1 - rates.completion_rate), 1.0
                 ),
             )
             # Keep the FIX with highest confidence
@@ -158,11 +143,11 @@ class HealthChecker:
                 evolution_type=EvolutionType.DERIVED,
                 target_skill_ids=[skill_record.id],
                 direction=(
-                    f"Moderate effectiveness ({effective_rate:.0%}): "
+                    f"Moderate effectiveness ({rates.effective_rate:.0%}): "
                     f"skill works sometimes but could be enhanced with "
                     f"better error handling or alternative approaches"
                 ),
-                confidence=min(1.0 - effective_rate, 1.0),
+                confidence=min(1.0 - rates.effective_rate, 1.0),
             ))
 
         return suggestions
@@ -199,15 +184,12 @@ class HealthChecker:
             metrics: dict[str, float] = {
                 "total_selections": float(sel),
             }
-            if sel > 0:
-                metrics["applied_rate"] = skill.total_applied / sel
-                metrics["completion_rate"] = (
-                    skill.total_completions / skill.total_applied
-                    if skill.total_applied > 0
-                    else 0.0
-                )
-                metrics["effective_rate"] = skill.total_completions / sel
-                metrics["fallback_rate"] = skill.total_fallbacks / sel
+            rates = SkillRates.from_record(skill)
+            if rates is not None:
+                metrics["applied_rate"] = rates.applied_rate
+                metrics["completion_rate"] = rates.completion_rate
+                metrics["effective_rate"] = rates.effective_rate
+                metrics["fallback_rate"] = rates.fallback_rate
             else:
                 metrics.update({
                     "applied_rate": 0.0,

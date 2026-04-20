@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
-_utc_now = lambda: datetime.now(timezone.utc)
+from agent_nexus.models._common import FrozenModel, _utc_now
 
 
 class EvolutionType(StrEnum):
@@ -38,14 +38,12 @@ class SkillOrigin(StrEnum):
     FIXED = "fixed"
 
 
-class SkillLineage(BaseModel):
+class SkillLineage(FrozenModel):
     """DAG version history of a Skill.
 
     Tracks the origin, generation number, parent Skills (for FIX/DERIVED),
     content diff/snapshot for auditing.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     origin: SkillOrigin = SkillOrigin.IMPORTED
     generation: int = Field(default=0, ge=0)
@@ -54,7 +52,7 @@ class SkillLineage(BaseModel):
     content_snapshot: dict[str, str] | None = None
 
 
-class SkillRecord(BaseModel):
+class SkillRecord(FrozenModel):
     """A Skill in the Evolution Engine's registry.
 
     Each SkillRecord tracks quality counters used by health diagnostics
@@ -64,8 +62,6 @@ class SkillRecord(BaseModel):
         effective_rate    = total_completions / total_selections
         fallback_rate     = total_fallbacks / total_selections
     """
-
-    model_config = ConfigDict(frozen=True)
 
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -98,13 +94,11 @@ class SkillRecord(BaseModel):
         return self
 
 
-class EvolutionMetrics(BaseModel):
+class EvolutionMetrics(FrozenModel):
     """Aggregated evolution quality metrics for an Agent.
 
     Used in L0 context injection (~30 tokens).
     """
-
-    model_config = ConfigDict(frozen=True)
 
     total_selections: int = Field(default=0, ge=0)
     total_applied: int = Field(default=0, ge=0)
@@ -129,14 +123,12 @@ class EvolutionMetrics(BaseModel):
         return self
 
 
-class EvolutionContext(BaseModel):
+class EvolutionContext(FrozenModel):
     """Context passed to the Evolution Engine when triggering evolution.
 
     Contains the information needed for the LLM analyzer to decide
     whether and how to evolve a Skill.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     agent_id: str = Field(min_length=1)
     task_id: str = Field(min_length=1)

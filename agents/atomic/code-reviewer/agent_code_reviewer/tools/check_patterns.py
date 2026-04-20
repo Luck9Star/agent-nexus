@@ -6,6 +6,7 @@ security issues, performance problems, and maintainability concerns.
 
 from __future__ import annotations
 
+import bisect
 import re
 
 from agent_code_reviewer.models import PatternMatch
@@ -130,12 +131,18 @@ def check_patterns(code: str, language: str = "") -> list[PatternMatch]:
 
     matches: list[PatternMatch] = []
 
+    # Pre-compute line start offsets for O(log n) line-number lookup
+    line_offsets = [0]
+    for i, ch in enumerate(code):
+        if ch == '\n':
+            line_offsets.append(i + 1)
+
     for pattern_def in ANTI_PATTERNS:
         pattern = pattern_def["pattern"]
         assert isinstance(pattern, re.Pattern)
 
         for match in pattern.finditer(code):
-            line_num = code[: match.start()].count("\n")
+            line_num = bisect.bisect_right(line_offsets, match.start()) - 1
             matches.append(PatternMatch(
                 pattern=pattern_def["name"],
                 line=line_num,
