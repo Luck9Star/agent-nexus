@@ -891,45 +891,70 @@ class TestRunCliMode:
     """Tests for _run(mode='cli')."""
 
     @pytest.mark.asyncio
-    async def test_cli_start_success_cancelled(self) -> None:
-        """CLI mode starts agent, waits, then stops on cancel."""
+    async def test_cli_exec_into_agent(self) -> None:
+        """CLI mode resolves command and execs into agent process."""
         mocks, lockfile_mock, _, _ = _mock_managers()
         lockfile_mock.get_entry.return_value = _make_lockfile_entry()
 
         supervisor_mock = MagicMock()
-        supervisor_mock.start_agent = AsyncMock(return_value=True)
-        supervisor_mock.stop_agent = AsyncMock()
+        supervisor_mock._build_command.return_value = ["python3", "/path/to/main.py"]
+        supervisor_mock._build_env.return_value = {"AGENT_MODEL": "openai:gpt-4o"}
         pm_mock = MagicMock()
-
-        async def _cancel_wait():
-            raise asyncio.CancelledError()
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli._lifecycle._wait_forever", side_effect=_cancel_wait),
-            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle.os.execvpe") as mock_exec,
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
             await _run("test-agent", "cli", "stdio")
 
-        supervisor_mock.stop_agent.assert_called_once_with("test-agent")
+        mock_exec.assert_called_once()
+        call_args = mock_exec.call_args[0]
+        assert call_args[0] == "python3"
+        assert call_args[1] == ["python3", "/path/to/main.py"]
+        assert call_args[2]["AGENT_MODE"] == "cli"
+        assert call_args[2]["AGENT_MODEL"] == "openai:gpt-4o"
 
     @pytest.mark.asyncio
-    async def test_cli_start_fails(self) -> None:
-        """CLI mode start fails → error exit."""
+    async def test_cli_command_resolve_fails(self) -> None:
+        """CLI mode exits with code 1 when command cannot be resolved."""
         mocks, lockfile_mock, _, _ = _mock_managers()
         lockfile_mock.get_entry.return_value = _make_lockfile_entry()
 
         supervisor_mock = MagicMock()
-        supervisor_mock.start_agent = AsyncMock(return_value=False)
+        supervisor_mock._build_command.return_value = None
         pm_mock = MagicMock()
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
+        ):
+            from agent_nexus.platform.local.cli._lifecycle import _run
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _run("test-agent", "cli", "stdio")
+
+        assert exc_info.value.exit_code == 1
+
+    @pytest.mark.asyncio
+    async def test_cli_exec_not_found(self) -> None:
+        """CLI mode handles FileNotFoundError from execvpe."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        supervisor_mock = MagicMock()
+        supervisor_mock._build_command.return_value = ["nonexistent-python", "/path/to/main.py"]
+        supervisor_mock._build_env.return_value = {}
+        pm_mock = MagicMock()
+
+        with (
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
+            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.local.cli._lifecycle.os.execvpe", side_effect=FileNotFoundError("not found")),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
@@ -1346,28 +1371,25 @@ class TestRunFinallyStopsAgent:
         gateway_mock.stop.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_cli_mode_stops_agent_on_unexpected_error(self) -> None:
-        """CLI mode stops agent even when _wait_forever raises RuntimeError."""
+    async def test_cli_exec_os_error(self) -> None:
+        """CLI mode handles OSError from execvpe."""
         mocks, lockfile_mock, _, _ = _mock_managers()
         lockfile_mock.get_entry.return_value = _make_lockfile_entry()
 
         supervisor_mock = MagicMock()
-        supervisor_mock.start_agent = AsyncMock(return_value=True)
-        supervisor_mock.stop_agent = AsyncMock()
+        supervisor_mock._build_command.return_value = ["python3", "/path/to/main.py"]
+        supervisor_mock._build_env.return_value = {}
         pm_mock = MagicMock()
-
-        async def _raise_runtime():
-            raise RuntimeError("unexpected crash")
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli._lifecycle._wait_forever", side_effect=_raise_runtime),
+            patch("agent_nexus.platform.local.cli._lifecycle.os.execvpe", side_effect=OSError("permission denied")),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
-            with pytest.raises(RuntimeError, match="unexpected crash"):
+            with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "cli", "stdio")
 
-        supervisor_mock.stop_agent.assert_called_once_with("test-agent")
+        assert exc_info.value.exit_code == 1

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -430,28 +431,40 @@ async def _run(name: str, mode: str, transport: str) -> None:
             await gateway.stop()
 
     elif mode == "cli":
-        pm = ProcessManager()
+        # CLI mode: exec directly into the agent process for interactive use.
+        # os.execvpe replaces the current process, giving the agent direct
+        # terminal I/O without a pipe intermediary.  This avoids the deadlock
+        # where piped stdin/stdout are never read/written by either side.
         supervisor = AgentSupervisor(
-            process_manager=pm,
+            process_manager=ProcessManager(),
             lockfile_manager=lockfile,
             config_loader=_loader,
             config_dir=config_dir,
         )
 
-        ok = await supervisor.start_agent(name)
-        if not ok:
-            typer.echo(f"Failed to start agent '{name}'.", err=True)
+        command = supervisor._build_command(name, entry)
+        if not command:
+            typer.echo(
+                f"Could not resolve command for agent '{name}'.",
+                err=True,
+            )
             raise typer.Exit(code=1)
 
-        typer.echo(f"Agent '{name}' started in CLI mode.")
-        typer.echo("Press Ctrl+C to stop.")
+        env = supervisor._build_env(name, entry)
+        env["AGENT_MODE"] = "cli"
+
+        # Merge with OS environment for interactive CLI mode
+        spawn_env = os.environ.copy()
+        spawn_env.update(env)
 
         try:
-            await _wait_forever()
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            typer.echo("\nStopping agent...")
-        finally:
-            await supervisor.stop_agent(name)
+            os.execvpe(command[0], command, spawn_env)
+        except FileNotFoundError:
+            typer.echo(f"Command not found: {command[0]}", err=True)
+            raise typer.Exit(code=1)
+        except OSError as exc:
+            typer.echo(f"Failed to exec agent: {exc}", err=True)
+            raise typer.Exit(code=1)
 
     else:
         typer.echo(
