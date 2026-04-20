@@ -210,7 +210,7 @@ def _make_gate_decision(
         if check.agent == "code-reviewer" and check.score < thresholds["review_threshold"]:
             blockers.append(f"Review score {check.score} below threshold {thresholds['review_threshold']}")
 
-    gate_score = total_score / len(checks)
+    gate_score = total_score / len(checks) if checks else 0.0
     overall_passed = len(blockers) == 0
     return overall_passed, gate_score, blockers, warnings
 
@@ -365,7 +365,7 @@ class QualityGateCoordinator:
                             )
                         )
                     else:
-                        completed_results[task.id] = result
+                        completed_results[task.id] = result  # type: ignore[assignment]
                         converter = _AGENT_CONVERTERS.get(task.agent, _convert_default)
                         checks.append(converter(result))
 

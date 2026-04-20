@@ -377,7 +377,11 @@ class IPCProtocol:
                     continue
                 # Non-progress message — buffer and keep looking for pong.
                 self._buffer_message(resp)
-        except (IPCError, asyncio.TimeoutError):
+        except (IPCError, asyncio.TimeoutError) as exc:
+            logger.debug(
+                "Heartbeat failed for agent: [%s] %s",
+                type(exc).__name__, exc,
+            )
             return False
 
 

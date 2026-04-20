@@ -636,6 +636,8 @@ class TaskGraph:
 
         When *task_ids* is provided, only load dependencies for those tasks.
         """
+        if task_ids is not None and not task_ids:
+            return {}
         deps: dict[str, list[str]] = {}
         if task_ids:
             placeholders = ",".join("?" * len(task_ids))

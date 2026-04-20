@@ -20,7 +20,7 @@ import logging
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Generator
 
@@ -151,7 +151,7 @@ class EvolutionStore:
             try:
                 self._memory_conn.close()
             except Exception:
-                pass
+                logger.warning("Failed to close evolution store connection", exc_info=True)
             self._memory_conn = None
 
     def _init_db(self) -> None:
