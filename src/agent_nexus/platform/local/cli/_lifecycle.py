@@ -91,7 +91,6 @@ def sources(
     asyncio.run(_sources(action, name, url, source_type))
 
 
-@run_app.callback()
 def run_agent(
     name: str = typer.Argument(help="Agent name to run"),
     mode: str = typer.Option(

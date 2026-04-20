@@ -57,10 +57,25 @@ def doctor() -> None:
         checks.append(("config.toml exists and parses", False, str(exc)))
 
     # Check 2: API key configured
-    from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
-
-    key_envs = [p["api_key_env"] for p in DEFAULT_PROVIDERS.values() if "api_key_env" in p]
-    has_key = any(os.environ.get(k) for k in key_envs)
+    # Read api_key_env from user's config.toml (may have custom providers)
+    config_key_envs: list[str] = []
+    try:
+        import toml
+        raw = toml.loads(config_path.read_text(encoding="utf-8"))
+        providers = raw.get("models", {}).get("providers", {})
+        config_key_envs = [
+            v["api_key_env"] for v in providers.values()
+            if isinstance(v, dict) and "api_key_env" in v
+        ]
+    except Exception:
+        pass
+    # Fallback to built-in defaults if config has no providers
+    if not config_key_envs:
+        from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
+        config_key_envs = [
+            p["api_key_env"] for p in DEFAULT_PROVIDERS.values() if "api_key_env" in p
+        ]
+    has_key = any(os.environ.get(k) for k in config_key_envs)
     checks.append(
         ("API key configured", has_key, "at least one set" if has_key else "none set")
     )
@@ -167,8 +182,14 @@ def init(
     key_envs = {
         "OPENAI_API_KEY": "openai",
         "ANTHROPIC_API_KEY": "anthropic",
+        "ANTHROPIC_AUTH_TOKEN": "anthropic",
+        "DEEPSEEK_API_KEY": "deepseek",
+        "DASHSCOPE_API_KEY": "qwen",
+        "OLLAMA_HOST": "ollama",
     }
-    detected = [provider for env_var, provider in key_envs.items() if os.environ.get(env_var)]
+    detected = sorted(set(
+        provider for env_var, provider in key_envs.items() if os.environ.get(env_var)
+    ))
     if detected:
         typer.echo(f"Detected API keys for: {', '.join(detected)}")
     else:

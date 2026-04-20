@@ -21,7 +21,7 @@ app = typer.Typer(
 # --- Lifecycle commands (migrated from original cli.py) ---
 from agent_nexus.platform.local.cli._lifecycle import (
     install_app,
-    run_app,
+    run_agent,
     list_agents,
     search,
     info,
@@ -29,7 +29,9 @@ from agent_nexus.platform.local.cli._lifecycle import (
 )
 
 app.add_typer(install_app, name="install")
-app.add_typer(run_app, name="run", invoke_without_command=True)
+# Register run_agent as a plain command (not a Typer sub-app)
+# so `agent-nexus run <name> --mode <mode>` works without expecting a subcommand.
+app.command("run")(run_agent)
 app.command("list")(list_agents)
 app.command()(search)
 app.command()(info)
