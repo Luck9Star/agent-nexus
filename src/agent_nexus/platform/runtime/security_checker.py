@@ -43,6 +43,8 @@ _DEFAULT_FORBIDDEN_IMPORTS = [
     "urllib",
     "pathlib",   # Path provides file read/write, bypassing open() block
     "tempfile",   # temp file creation bypasses path_rules
+    "builtins",   # access to eval/exec/compile via builtins module
+    "pdb",        # interactive debugger can escape sandbox
 ]
 
 _DEFAULT_FORBIDDEN_FUNCTIONS = [
@@ -72,6 +74,7 @@ _DEFAULT_REGEX_PATTERNS = [
     r"getattr\s*\(\s*\w+\s*,\s*['\"](?:eval|exec|compile|__import__)['\"]",
     r"__builtins__\s*\[",
     r"__builtins__\s*\.\s*__getitem__\s*\(",
+    r"\b__builtins__\b",  # bare __builtins__ Name access bypasses AttributeRule
 ]
 
 
