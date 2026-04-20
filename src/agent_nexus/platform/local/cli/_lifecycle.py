@@ -91,6 +91,7 @@ def sources(
 
 
 def run_agent(
+    ctx: typer.Context,
     name: str = typer.Argument(help="Agent name to run"),
     mode: str = typer.Option(
         "mcp", "--mode", "-m", help="Run mode: mcp, router, cli"
@@ -99,8 +100,14 @@ def run_agent(
         "stdio", "--transport", "-t", help="Transport: stdio, sse"
     ),
 ) -> None:
-    """Run an agent in the specified mode."""
-    asyncio.run(_run(name, mode, transport))
+    """Run an agent in the specified mode.
+
+    Extra arguments after the agent name are forwarded to the agent
+    (only effective in CLI mode).  Example:
+        agent-nexus run doc-filler --mode cli analyze template.docx
+    """
+    extra_args = ctx.args if ctx.args else []
+    asyncio.run(_run(name, mode, transport, extra_args))
 
 
 # =====================================================================
@@ -347,7 +354,7 @@ async def _sources(
         raise typer.Exit(code=1)
 
 
-async def _run(name: str, mode: str, transport: str) -> None:
+async def _run(name: str, mode: str, transport: str, extra_args: list[str] | None = None) -> None:
     """Async run implementation."""
     from agent_nexus.platform.local.supervisor import AgentSupervisor
     from agent_nexus.platform.orchestration.process_manager import ProcessManager
@@ -458,7 +465,8 @@ async def _run(name: str, mode: str, transport: str) -> None:
         spawn_env.update(env)
 
         try:
-            os.execvpe(command[0], command, spawn_env)
+            exec_argv = command + (extra_args or [])
+            os.execvpe(exec_argv[0], exec_argv, spawn_env)
         except FileNotFoundError:
             typer.echo(f"Command not found: {command[0]}", err=True)
             raise typer.Exit(code=1)

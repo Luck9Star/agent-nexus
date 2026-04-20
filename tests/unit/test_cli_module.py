@@ -918,6 +918,29 @@ class TestRunCliMode:
         assert call_args[2]["AGENT_MODEL"] == "openai:gpt-4o"
 
     @pytest.mark.asyncio
+    async def test_cli_exec_with_extra_args(self) -> None:
+        """CLI mode forwards extra args to agent process."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = _make_lockfile_entry()
+
+        supervisor_mock = MagicMock()
+        supervisor_mock._build_command.return_value = ["python3", "/path/to/main.py"]
+        supervisor_mock._build_env.return_value = {}
+        pm_mock = MagicMock()
+
+        with (
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
+            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch("agent_nexus.platform.local.cli._lifecycle.os.execvpe") as mock_exec,
+        ):
+            from agent_nexus.platform.local.cli._lifecycle import _run
+            await _run("test-agent", "cli", "stdio", ["analyze", "template.docx"])
+
+        call_args = mock_exec.call_args[0]
+        assert call_args[1] == ["python3", "/path/to/main.py", "analyze", "template.docx"]
+
+    @pytest.mark.asyncio
     async def test_cli_command_resolve_fails(self) -> None:
         """CLI mode exits with code 1 when command cannot be resolved."""
         mocks, lockfile_mock, _, _ = _mock_managers()
