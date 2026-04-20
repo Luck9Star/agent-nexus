@@ -232,22 +232,79 @@ def _run_wizard(config_path: Path) -> None:
 
     provider = questionary.select(
         "Select default provider:",
-        choices=["openai", "anthropic"],
+        choices=["openai", "anthropic", "deepseek", "ollama", "custom"],
     ).ask()
     if provider is None:
         return
 
-    api_key = questionary.password(
-        f"Enter {provider.upper()} API key:",
-    ).ask()
+    if provider == "custom":
+        custom_name = questionary.text(
+            "Provider name (lowercase, e.g. my-provider):",
+        ).ask()
+        if not custom_name:
+            return
+        provider = custom_name.strip().lower()
+
+        api_type = questionary.select(
+            "API type:",
+            choices=["openai-compatible", "anthropic-messages"],
+        ).ask()
+        if api_type is None:
+            return
+
+        base_url = questionary.text(
+            "Base URL (e.g. https://api.example.com/v1):",
+        ).ask()
+
+        key_env = questionary.text(
+            "API key environment variable name (e.g. MY_PROVIDER_API_KEY):",
+        ).ask()
+
+        model = questionary.text(
+            "Default model name (e.g. my-model-v1):",
+        ).ask()
+        if not model:
+            return
+
+        # Write custom provider config
+        try:
+            raw = toml.loads(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            raw = {}
+        raw.setdefault("models", {})["default"] = f"{provider}:{model}"
+        prov_section = raw.setdefault("models", {}).setdefault("providers", {}).setdefault(provider, {})
+        if base_url:
+            prov_section["base_url"] = base_url
+        if key_env:
+            prov_section["api_key_env"] = key_env
+        if api_type:
+            prov_section["api"] = api_type
+        config_path.write_text(toml.dumps(raw), encoding="utf-8")
+        typer.echo(f"Config updated: default model = {provider}:{model}")
+        if key_env:
+            typer.echo(f"  Note: Add your API key to your shell profile: export {key_env}=...")
+        return
+
+    # Built-in providers: openai, anthropic, deepseek, ollama
+    _preset_models = {
+        "openai": ("OPENAI_API_KEY", "openai-compatible", None, "gpt-4o"),
+        "anthropic": ("ANTHROPIC_API_KEY", "anthropic-messages", None, "claude-sonnet-4-20250514"),
+        "deepseek": ("DEEPSEEK_API_KEY", "openai-compatible", "https://api.deepseek.com/v1", "deepseek-chat"),
+        "ollama": (None, "openai-compatible", "http://localhost:11434/v1", "llama3"),
+    }
+    key_env, api_type, base_url, default_model = _preset_models[provider]
+
+    if key_env:
+        api_key = questionary.password(
+            f"Enter {key_env} value (or leave blank to set via env later):",
+        ).ask()
 
     model = questionary.text(
-        "Enter default model (e.g. gpt-4o, claude-sonnet-4-20250514):",
-        default="gpt-4o" if provider == "openai" else "claude-sonnet-4-20250514",
+        "Enter default model:",
+        default=default_model,
     ).ask()
 
-    if api_key:
-        key_env = f"{provider.upper()}_API_KEY"
+    if key_env:
         typer.echo(f"  Note: Add your API key to your shell profile: export {key_env}=...")
 
     try:
@@ -255,6 +312,13 @@ def _run_wizard(config_path: Path) -> None:
     except Exception:
         raw = {}
     raw.setdefault("models", {})["default"] = f"{provider}:{model}"
+    prov_section = raw.setdefault("models", {}).setdefault("providers", {}).setdefault(provider, {})
+    if base_url:
+        prov_section["base_url"] = base_url
+    if key_env:
+        prov_section["api_key_env"] = key_env
+    if api_type != "openai-compatible":
+        prov_section["api"] = api_type
     config_path.write_text(toml.dumps(raw), encoding="utf-8")
     typer.echo(f"Config updated: default model = {provider}:{model}")
 

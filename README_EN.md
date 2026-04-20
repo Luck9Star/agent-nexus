@@ -6,7 +6,7 @@ English | **[中文](README.md)**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests: 1793](https://img.shields.io/badge/tests-1793_passing-brightgreen.svg)]()
+[![Tests: 2705](https://img.shields.io/badge/tests-2705_passing-brightgreen.svg)]()
 
 Agent Nexus is an **MCP-native** intelligent agent platform built on a four-layer architecture. Users run Agents locally with their own model configuration (OpenAI / Anthropic / Ollama / Chinese providers all supported).
 
@@ -283,6 +283,25 @@ sources:
 
 ## CLI Commands
 
+### Setup and Diagnostics
+
+```bash
+# First-time setup: initialize config directory
+agent-nexus init
+
+# Interactive wizard (select provider + configure API key)
+agent-nexus init --wizard
+
+# Diagnostic checks (config file, API keys, git/uv, Python version, Evolution DB)
+agent-nexus doctor
+
+# Print version
+agent-nexus version
+
+# Print environment snapshot (config path, Python version, provider status)
+agent-nexus env
+```
+
 ### Install and Manage Agents
 
 ```bash
@@ -319,25 +338,6 @@ agent-nexus search "document"
 agent-nexus info doc-filler
 ```
 
-Output of `agent-nexus info`:
-
-```
-Agent: doc-filler
-  Version:      1.0.0
-  Type:         atomic
-  Source:       official
-  Commit SHA:   a1b2c3d4e5f6
-  Installed at: 2025-04-18T10:30:00
-  Venv:         ~/.agent-nexus/venvs/doc-filler
-
-  Description:  Word document template filling specialist
-
-  SKILL.md preview:
-    # doc-filler -- Word document template filling specialist
-    ## Role
-    ...
-```
-
 ### Package Sources
 
 ```bash
@@ -347,11 +347,88 @@ agent-nexus sources list
 # Add a private source
 agent-nexus sources add --name internal --url https://github.com/myorg/agents.git
 
-# Add a source with explicit type
-agent-nexus sources add --name staging --url git@github.com:org/staging.git --type private
-
 # Remove a source
 agent-nexus sources remove internal
+```
+
+### Runtime Management
+
+```bash
+# Start a single agent
+agent-nexus start doc-filler
+
+# Start all installed agents
+agent-nexus start --all
+
+# Stop an agent
+agent-nexus stop doc-filler
+agent-nexus stop --all
+
+# Restart an agent
+agent-nexus restart doc-filler
+
+# Show runtime status (Installed / Running / PID)
+agent-nexus status
+
+# Status alias
+agent-nexus ps
+
+# Show agent logs (default: last 50 lines)
+agent-nexus logs doc-filler
+agent-nexus logs doc-filler --lines 200
+```
+
+### Configuration Management
+
+```bash
+# Show merged configuration
+agent-nexus config show
+
+# JSON output
+agent-nexus config show --json
+
+# Get a config value by dot-path key
+agent-nexus config get models.default
+
+# Open config.toml in $EDITOR
+agent-nexus config edit
+
+# Validate configuration file
+agent-nexus config validate
+
+# List all providers and their API key status
+agent-nexus config providers
+
+# Print config directory path
+agent-nexus config path
+```
+
+### Self-Evolution Engine
+
+```bash
+# Show evolution status summary (skill count, healthy/unhealthy)
+agent-nexus evolution status
+
+# Health diagnostics (all skills or a specific skill)
+agent-nexus evolution health
+agent-nexus evolution health doc-filler --verbose
+
+# List skills
+agent-nexus evolution list
+agent-nexus evolution list --all
+
+# Show skill version lineage
+agent-nexus evolution history doc-filler
+
+# Show evolution quality metrics
+agent-nexus evolution metrics
+agent-nexus evolution metrics --agent doc-filler
+
+# Trigger FIX evolution
+agent-nexus evolution fix <skill-id>
+
+# Promote a skill to standalone agent
+agent-nexus evolution promote <skill-id>
 ```
 
 ### Run Agents
@@ -368,9 +445,6 @@ agent-nexus run doc-filler --mode cli
 
 # Router mode (via Platform Router + MCP Gateway)
 agent-nexus run doc-filler --mode router
-
-# Router mode with SSE transport
-agent-nexus run doc-filler --mode router --transport sse
 ```
 
 | Mode | `--mode` | `--transport` | Description |
@@ -772,7 +846,7 @@ pytest tests/integration/ -v
 pytest tests/e2e/ -v
 ```
 
-Current test coverage: **1793 tests all passing**, covering all platform modules and Agent packages.
+Current test coverage: **2705 tests all passing**, covering all platform modules and Agent packages.
 
 ---
 
@@ -784,7 +858,7 @@ Current test coverage: **1793 tests all passing**, covering all platform modules
 | Data Models | Pydantic v2 (frozen) | All-immutable models |
 | Agent Framework | PydanticAI | Agent logic and tool definitions |
 | MCP Server | FastMCP | per-Agent MCP exposure |
-| CLI | Typer | install/run/list/search/info/sources |
+| CLI | Typer | init/doctor/version/env, install/run/list/search, runtime start/stop/status, config, evolution |
 | Persistence | SQLite WAL | TaskGraph concurrent safety |
 | Runtime | IPython InteractiveShell | Kernel execution |
 | Config | TOML + YAML | config.toml + sources.yaml |
@@ -803,7 +877,7 @@ agent-nexus/
 |       +-- orchestration/    # TaskGraph + IPC + ProcessManager + DSL
 |       +-- gateway/          # MCP Gateway aggregation + DeferredRegistry
 |       +-- config/           # Model config + Provider registry
-|       +-- local/            # CLI + Git Installer + Supervisor
+|       +-- local/            # CLI (Typer subcommands) + Git Installer + Supervisor
 |       +-- skills/           # Skill Loader
 |       +-- evolution/        # Self-Evolution Engine (6 modules)
 |       +-- runtime/          # Python Runtime (IPython + SecurityChecker)

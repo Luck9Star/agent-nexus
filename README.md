@@ -6,7 +6,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests: 1793](https://img.shields.io/badge/tests-1793_passing-brightgreen.svg)]()
+[![Tests: 2705](https://img.shields.io/badge/tests-2705_passing-brightgreen.svg)]()
 
 Agent Nexus 是一个 **MCP-native** 的智能体平台，采用四层架构设计。用户在本地运行 Agent，自行配置模型（OpenAI / Anthropic / Ollama / 国产模型均支持）。
 
@@ -283,6 +283,25 @@ sources:
 
 ## CLI 命令
 
+### 初始化与诊断
+
+```bash
+# 首次使用：初始化配置目录
+agent-nexus init
+
+# 交互式向导（选择 provider + 配置 API key）
+agent-nexus init --wizard
+
+# 诊断检查（配置文件、API key、git/uv、Python 版本、Evolution DB）
+agent-nexus doctor
+
+# 查看版本
+agent-nexus version
+
+# 查看环境快照（config 路径、Python 版本、provider 状态）
+agent-nexus env
+```
+
 ### 安装与管理
 
 ```bash
@@ -319,25 +338,6 @@ agent-nexus search "document"
 agent-nexus info doc-filler
 ```
 
-`agent-nexus info` 输出示例：
-
-```
-Agent: doc-filler
-  Version:      1.0.0
-  Type:         atomic
-  Source:       official
-  Commit SHA:   a1b2c3d4e5f6
-  Installed at: 2025-04-18T10:30:00
-  Venv:         ~/.agent-nexus/venvs/doc-filler
-
-  Description:  Word 文档模板填充专家
-
-  SKILL.md preview:
-    # doc-filler -- Word 文档模板填充专家
-    ## 角色
-    ...
-```
-
 ### 包源管理
 
 ```bash
@@ -347,11 +347,88 @@ agent-nexus sources list
 # 添加私有源
 agent-nexus sources add --name internal --url https://github.com/myorg/agents.git
 
-# 添加指定类型的源
-agent-nexus sources add --name staging --url git@github.com:org/staging.git --type private
-
 # 移除源
 agent-nexus sources remove internal
+```
+
+### 运行时管理
+
+```bash
+# 启动单个 Agent
+agent-nexus start doc-filler
+
+# 启动所有已安装的 Agent
+agent-nexus start --all
+
+# 停止 Agent
+agent-nexus stop doc-filler
+agent-nexus stop --all
+
+# 重启 Agent
+agent-nexus restart doc-filler
+
+# 查看运行状态（Installed / Running / PID）
+agent-nexus status
+
+# 查看别名
+agent-nexus ps
+
+# 查看 Agent 日志（默认最近 50 行）
+agent-nexus logs doc-filler
+agent-nexus logs doc-filler --lines 200
+```
+
+### 配置管理
+
+```bash
+# 查看合并后的配置
+agent-nexus config show
+
+# JSON 格式输出
+agent-nexus config show --json
+
+# 按 dot-path 获取配置值
+agent-nexus config get models.default
+
+# 用 $EDITOR 编辑 config.toml
+agent-nexus config edit
+
+# 验证配置文件合法性
+agent-nexus config validate
+
+# 列出所有 provider 及 API key 状态
+agent-nexus config providers
+
+# 输出配置目录路径
+agent-nexus config path
+```
+
+### 自进化引擎
+
+```bash
+# 查看进化状态总览（技能数、健康/不健康计数）
+agent-nexus evolution status
+
+# 健康诊断（全部技能或指定技能）
+agent-nexus evolution health
+agent-nexus evolution health doc-filler --verbose
+
+# 列出技能
+agent-nexus evolution list
+agent-nexus evolution list --all
+
+# 查看技能版本血统
+agent-nexus evolution history doc-filler
+
+# 查看进化质量指标
+agent-nexus evolution metrics
+agent-nexus evolution metrics --agent doc-filler
+
+# 触发 FIX 演化
+agent-nexus evolution fix <skill-id>
+
+# 晋升技能为独立 Agent
+agent-nexus evolution promote <skill-id>
 ```
 
 ### 运行 Agent
@@ -368,9 +445,6 @@ agent-nexus run doc-filler --mode cli
 
 # Router 模式（通过 Platform Router + MCP Gateway）
 agent-nexus run doc-filler --mode router
-
-# Router 模式，SSE 传输
-agent-nexus run doc-filler --mode router --transport sse
 ```
 
 | 模式 | `--mode` | `--transport` | 说明 |
@@ -772,7 +846,7 @@ pytest tests/integration/ -v
 pytest tests/e2e/ -v
 ```
 
-当前测试覆盖：**1793 个测试全部通过**，覆盖所有平台模块和 Agent 包。
+当前测试覆盖：**2705 个测试全部通过**，覆盖所有平台模块和 Agent 包。
 
 ---
 
@@ -784,7 +858,7 @@ pytest tests/e2e/ -v
 | 数据模型 | Pydantic v2 (frozen) | 全量不可变模型 |
 | Agent 框架 | PydanticAI | Agent 逻辑和工具定义 |
 | MCP Server | FastMCP | per-Agent MCP 暴露 |
-| CLI | Typer | install/run/list/search/info/sources |
+| CLI | Typer | init/doctor/version/env, install/run/list/search, runtime start/stop/status, config, evolution |
 | 持久化 | SQLite WAL | TaskGraph 并发安全 |
 | Runtime | IPython InteractiveShell | 内核执行 |
 | 配置 | TOML + YAML | config.toml + sources.yaml |
