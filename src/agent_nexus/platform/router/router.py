@@ -353,10 +353,11 @@ class PlatformRouter:
             if handle is None or not handle.is_alive:
                 return []
             try:
-                await handle.ipc.send_chat(
-                    "__list_tools__", conversation_id="__internal__"
-                )
-                response = await handle.ipc.receive_until_result(timeout=10.0)
+                async with get_ipc_lock(name):
+                    await handle.ipc.send_chat(
+                        "__list_tools__", conversation_id="__internal__"
+                    )
+                    response = await handle.ipc.receive_until_result(timeout=10.0)
                 if response.type == AgentToPlatformType.ERROR:
                     logger.warning(
                         "Agent '%s' returned error during tool discovery: %s",

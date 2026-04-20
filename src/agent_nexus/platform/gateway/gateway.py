@@ -296,6 +296,11 @@ class MCPGateway:
                     suffix = 2
                     while f"{full_name}_{suffix}" in self._registered_tool_names:
                         suffix += 1
+                        if suffix > 100:
+                            raise ValueError(
+                                f"Too many tool name collisions for '{full_name}' "
+                                f"(max 100 disambiguations)"
+                            )
                     disambiguated = f"{full_name}_{suffix}"
                     logger.warning(
                         "Tool name collision: '%s' from agent '%s' "

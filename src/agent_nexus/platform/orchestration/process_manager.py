@@ -486,7 +486,12 @@ class ProcessManager:
         return self._agents.get(name)
 
     def list_running(self) -> list[str]:
-        """Return names of all agents whose process is still alive."""
+        """Return names of all agents whose process is still alive.
+
+        Also cleans up dead handles to prevent unbounded growth of
+        ``_agents`` when :meth:`health_check` is not called regularly.
+        """
+        self._cleanup_dead()
         return [
             name
             for name, handle in self._agents.items()
@@ -596,6 +601,14 @@ class ProcessManager:
         except Exception:
             return
         for _name, handle in agents:
+            # Cancel drain task to release StreamReader reference
+            if handle.drain_task is not None and not handle.drain_task.done():
+                handle.drain_task.cancel()
+            # Close IPC streams to release FDs
+            try:
+                handle.ipc.stream.close_sync()
+            except Exception:
+                pass
             try:
                 if handle.process.returncode is None:
                     handle.process.kill()

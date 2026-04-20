@@ -154,6 +154,13 @@ class EvolutionStore:
                 logger.warning("Failed to close evolution store connection", exc_info=True)
             self._memory_conn = None
 
+    def __del__(self) -> None:
+        # Safety net: close connection if close() was never called.
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def _init_db(self) -> None:
         with self._conn() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
@@ -899,18 +906,28 @@ class EvolutionStore:
         if not skill_ids:
             return {}
         with self._conn() as conn:
-            all_parents = self._batch_load_parents(conn)  # one load
-
-            # BFS per skill to collect all ancestor IDs
+            # Iterative BFS: load parents only for known frontier IDs
+            # instead of loading the entire lineage table.
             visited_per_skill: dict[str, set[str]] = {sid: set() for sid in skill_ids}
             frontiers: dict[str, list[str]] = {sid: [sid] for sid in skill_ids}
 
             for _ in range(max_depth):
+                # Collect all IDs we need parents for this round
+                all_frontier_ids: set[str] = set()
+                for sid in skill_ids:
+                    all_frontier_ids.update(frontiers[sid])
+
+                if not all_frontier_ids:
+                    break
+
+                # Load parents only for the current frontier
+                round_parents = self._batch_load_parents(conn, all_frontier_ids)
+
                 next_frontiers: dict[str, list[str]] = {sid: [] for sid in skill_ids}
                 any_progress = False
                 for sid in skill_ids:
                     for fid in frontiers[sid]:
-                        for pid in all_parents.get(fid, []):
+                        for pid in round_parents.get(fid, []):
                             if pid not in visited_per_skill[sid]:
                                 visited_per_skill[sid].add(pid)
                                 next_frontiers[sid].append(pid)
@@ -940,7 +957,7 @@ class EvolutionStore:
 
             records_by_id: dict[str, SkillRecord] = {}
             for row in rows:
-                record = self._row_to_record(conn, row, all_parents)
+                record = self._row_to_record(conn, row)
                 records_by_id[record.id] = record
 
             result: dict[str, list[SkillRecord]] = {}

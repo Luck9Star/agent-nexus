@@ -171,9 +171,13 @@ def _matches_any_pattern(value: str, patterns: list[str] | tuple[str, ...]) -> b
     return False
 
 
-def _is_sensitive_path(path: str) -> bool:
-    """Return True if *path* matches a built-in sensitive path pattern."""
-    expanded = _expand_user(path)
+def _is_sensitive_path(path: str, _already_expanded: bool = False) -> bool:
+    """Return True if *path* matches a built-in sensitive path pattern.
+
+    When *_already_expanded* is True, the path is assumed to have been
+    through ``_expand_user()`` already (avoids redundant expansion).
+    """
+    expanded = path if _already_expanded else _expand_user(path)
     for prefix in _EXPANDED_PREFIX_PATTERNS:
         if expanded.startswith(prefix + "/") or expanded == prefix:
             return True
@@ -268,14 +272,16 @@ class PermissionChecker:
             return tool_decision
 
         # 2. Built-in sensitive paths — always denied, cannot be overridden
-        if _is_sensitive_path(path):
+        #    Compute expanded path once, reuse for both sensitive check and
+        #    user-configured path_rules below.
+        expanded = _expand_user(path)
+        if _is_sensitive_path(expanded, _already_expanded=True):
             return PermissionDecision(
                 allowed=False,
                 reason=f"Path '{path}' is a sensitive system path and is always denied",
             )
 
         # 3. User-configured path_rules — first matching rule wins
-        expanded = _expand_user(path)
         for expanded_pattern, access in self._expanded_path_rules:
             if _fnmatch_recursive(expanded, expanded_pattern):
                 return self._apply_path_access(access, tool_name, path)

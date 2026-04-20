@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-import time as _time
 from typing import Any
 
 from agent_nexus.models.runtime import ExecutionResult
@@ -67,6 +66,7 @@ class IPythonExecutor:
         # reset()/close() can wait before clearing user_ns.
         self._exec_done: threading.Event = threading.Event()
         self._exec_done.set()  # Initially "done" (no thread running)
+        self._closed: bool = False  # Prevents shell re-creation after close()
 
     async def _require_shell(self) -> Any:
         """Return the shell, creating it lazily if needed.
@@ -110,6 +110,7 @@ class IPythonExecutor:
 
     def close(self) -> None:
         """Release the InteractiveShell and its resources."""
+        self._closed = True
         if self._timed_out:
             # Wait for the still-running thread to finish before clearing.
             if not self._exec_done.wait(timeout=5.0):
@@ -187,7 +188,14 @@ class IPythonExecutor:
         """
         timeout = max(timeout, 0.1)
 
-        # Step 1: Security check (no shell needed)
+        # Step 1: Reject calls after close()
+        if self._closed:
+            return ExecutionResult(
+                success=False,
+                error="Executor has been closed; create a new instance",
+            )
+
+        # Step 2: Security check (no shell needed)
         if self._timed_out:
             return ExecutionResult(
                 success=False,
@@ -217,18 +225,22 @@ class IPythonExecutor:
         # Without this, the old thread may mutate the shell namespace
         # concurrently with the new execution (TOCTOU race after reset()).
         if not self._exec_done.is_set():
-            # Wait in the event loop to avoid blocking.  Use a short polling
-            # interval so we don't block the event loop for the full wait.
-            deadline = _time.monotonic() + 5.0
-            while not self._exec_done.is_set():
-                remaining = deadline - _time.monotonic()
-                if remaining <= 0:
-                    return ExecutionResult(
-                        success=False,
-                        error="Previous timed-out execution thread is still running; "
-                        "call reset() or close() and wait for it to finish",
-                    )
-                await asyncio.sleep(min(0.05, remaining))
+            # Wait for the thread using asyncio.to_thread to avoid
+            # polling the event loop.  Event.wait(timeout) returns True
+            # if the event was set, False if it timed out.
+            try:
+                thread_done = await asyncio.wait_for(
+                    asyncio.to_thread(self._exec_done.wait, 5.0),
+                    timeout=6.0,
+                )
+            except asyncio.TimeoutError:
+                thread_done = False
+            if not thread_done:
+                return ExecutionResult(
+                    success=False,
+                    error="Previous timed-out execution thread is still running; "
+                    "call reset() or close() and wait for it to finish",
+                )
             # Old thread finished — safe to proceed
 
         try:
