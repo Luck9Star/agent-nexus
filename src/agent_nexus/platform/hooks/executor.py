@@ -56,6 +56,7 @@ class HookExecutor:
     ) -> None:
         self._hooks: list[HookDefinition] = hooks or []
         self._allowed_commands: set[str] = set(allowed_commands or [])
+        self._http_client: Any = None  # httpx.AsyncClient, lazy-init
 
     # ------------------------------------------------------------------
     # Construction helpers
@@ -385,12 +386,15 @@ class HookExecutor:
         }
         import httpx
 
-        timeout = httpx.Timeout(hook.timeout_seconds)
+        # Reuse a long-lived client for connection pooling across hooks.
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(hook.timeout_seconds),
+            )
 
         start = time.monotonic()
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(hook.url, json=payload)
+            resp = await self._http_client.post(hook.url, json=payload)
 
             duration_ms = (time.monotonic() - start) * 1000
             passed = 200 <= resp.status_code < 300
@@ -414,6 +418,11 @@ class HookExecutor:
                 error_type=type(exc).__name__,
                 duration_ms=round(duration_ms, 2),
             )
+
+    async def close(self) -> None:
+        """Shut down the persistent HTTP client (if any)."""
+        if self._http_client is not None and not self._http_client.is_closed:
+            await self._http_client.aclose()
 
     async def _execute_prompt(
         self,

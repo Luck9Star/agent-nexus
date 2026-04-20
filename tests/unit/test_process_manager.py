@@ -1837,10 +1837,12 @@ class TestMinimalEnvIsolation:
         }
 
         with sync_patch.dict(os.environ, full_env, clear=True):
+            import agent_nexus.platform.orchestration.process_manager as _pm
             from agent_nexus.platform.orchestration.process_manager import (
                 _build_spawn_env,
             )
 
+            _pm._base_env_cache = None  # reset cache so it picks up patched env
             result = _build_spawn_env()
 
         assert result.get("PATH") == "/usr/bin"
@@ -1866,10 +1868,12 @@ class TestMinimalEnvIsolation:
 
         minimal = {"PATH": "/usr/bin"}
         with sync_patch.dict(os.environ, minimal, clear=True):
+            import agent_nexus.platform.orchestration.process_manager as _pm
             from agent_nexus.platform.orchestration.process_manager import (
                 _build_spawn_env,
             )
 
+            _pm._base_env_cache = None  # reset cache so it picks up patched env
             result = _build_spawn_env()
 
         assert "PATH" in result

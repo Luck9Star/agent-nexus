@@ -309,13 +309,14 @@ class IPCProtocol:
             timeout: Total timeout for the entire wait.
             progress_callback: ``async def callback(msg) -> None``
         """
-        deadline = asyncio.get_running_loop().time() + timeout
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
         # Minimum per-receive timeout to avoid stream corruption from
         # prematurely interrupting a partial readline.
         _MIN_RECEIVE_TIMEOUT: float = 1.0
 
         while True:
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = deadline - loop.time()
             if remaining <= 0:
                 raise IPCTimeoutError(
                     f"Timed out after {timeout:.1f}s waiting for final result"
@@ -360,9 +361,10 @@ class IPCProtocol:
             # Non-pong messages (e.g. progress) are buffered so they
             # are not lost — callers of receive() / receive_until_result()
             # will find them in _peek_buffer.
-            deadline = asyncio.get_running_loop().time() + _HEARTBEAT_TIMEOUT
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + _HEARTBEAT_TIMEOUT
             while True:
-                remaining = deadline - asyncio.get_running_loop().time()
+                remaining = deadline - loop.time()
                 if remaining <= 0:
                     return False
                 try:
@@ -406,14 +408,17 @@ def get_ipc_lock(agent_name: str) -> asyncio.Lock:
     errors.
     """
     global _ipc_lock_registry, _ipc_lock_loop_id
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    current_loop_id = id(loop) if loop is not None else None
 
-    if current_loop_id != _ipc_lock_loop_id:
-        _ipc_lock_registry.clear()
-        _ipc_lock_loop_id = current_loop_id
+    # Check loop identity only when registry is empty (startup / test reset).
+    # A running event loop's id() does not change during normal operation.
+    if not _ipc_lock_registry:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        current_loop_id = id(loop) if loop is not None else None
+        if current_loop_id != _ipc_lock_loop_id:
+            _ipc_lock_registry.clear()
+            _ipc_lock_loop_id = current_loop_id
 
     return _ipc_lock_registry.setdefault(agent_name, asyncio.Lock())

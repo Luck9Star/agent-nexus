@@ -45,6 +45,9 @@ _ESSENTIAL_ENV_VARS: tuple[str, ...] = (
 )
 
 
+_base_env_cache: dict[str, str] | None = None
+
+
 def _build_spawn_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """Build a minimal environment for agent subprocesses.
 
@@ -52,11 +55,14 @@ def _build_spawn_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     Caller-supplied *extra* variables (model config, API keys) are layered
     on top.  This prevents accidental credential leakage to agents.
     """
-    env: dict[str, str] = {}
-    for key in _ESSENTIAL_ENV_VARS:
-        value = os.environ.get(key)
-        if value is not None:
-            env[key] = value
+    global _base_env_cache
+    if _base_env_cache is None:
+        _base_env_cache = {
+            key: value
+            for key in _ESSENTIAL_ENV_VARS
+            if (value := os.environ.get(key)) is not None
+        }
+    env = dict(_base_env_cache)  # shallow copy to avoid mutating cache
     if extra:
         env.update(extra)
     return env
@@ -67,7 +73,7 @@ def _build_spawn_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(slots=True)
 class AgentHandle:
     """Track a running agent subprocess.
 

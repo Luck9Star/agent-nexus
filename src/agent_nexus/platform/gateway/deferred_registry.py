@@ -46,6 +46,10 @@ class AgentInfo:
     start_command: list[str] = field(default_factory=list)
     start_cwd: str | None = None
     start_env: dict[str, str] = field(default_factory=dict)
+    _search_text: str = ""
+
+    def __post_init__(self) -> None:
+        self._search_text = f"{self.name} {self.manifest.description}".lower()
 
     @property
     def is_activated(self) -> bool:
@@ -521,9 +525,7 @@ class DeferredAgentRegistry:
         for info in itertools.chain(
             self._core_agents.values(), self._deferred_agents.values()
         ):
-            search_text = (
-                f"{info.name} {info.manifest.description}".lower()
-            )
+            search_text = info._search_text
             score = sum(1 for w in query_words if w in search_text)
             if score > 0:
                 scored.append((score, info.manifest))
