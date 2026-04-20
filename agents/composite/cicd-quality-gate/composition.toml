@@ -17,7 +17,5 @@ name = "test-generation"
 agent = "test-suite-generator"
 blocked_by = []
 
-[tasks.task4]
-name = "quality-gate-decision"
-agent = "quality-gate-decider"
-blocked_by = ["task1", "task2", "task3"]
+# task4 (quality-gate-decision) removed: quality-gate-decider atomic agent
+# does not exist yet. Will be re-added when the agent is created.

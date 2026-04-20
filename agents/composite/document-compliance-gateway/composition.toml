@@ -17,7 +17,5 @@ name = "localization-analysis"
 agent = "localization-specialist"
 blocked_by = []
 
-[tasks.task4]
-name = "conflict-detection"
-agent = "conflict-detector"
-blocked_by = ["task1", "task2", "task3"]
+# task4 (conflict-detection) removed: conflict-detector atomic agent
+# does not exist yet. Will be re-added when the agent is created.
