@@ -2,12 +2,16 @@ name: good-skill
 type: atomic
 description: Auto-promoted from skill sk-1
 version: 0.1.0
-model_config:
-  recommended: standard
 permissions:
   mode: default
-  allowed_tools: [file_read]
-  denied_tools: [bash]
+  allowed_tools:
+  - file_read
+  - grep
+  - glob
+  denied_tools:
+  - bash
+model_config:
+  recommended: standard
 promotion:
   from_skill: sk-1
   effective_rate: 0.9

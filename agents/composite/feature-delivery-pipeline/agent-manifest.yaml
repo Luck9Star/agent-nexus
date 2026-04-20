@@ -3,6 +3,11 @@ version: 1.0.0
 type: composite
 description: 需求驱动并行生成 API 文档、测试套件和代码审查
 
+permissions:
+  mode: default
+  allowed_tools: [file_read, file_write, grep, glob]
+  denied_tools: [bash]
+
 model_config:
   recommended: "standard"
   fallback: "lightweight"

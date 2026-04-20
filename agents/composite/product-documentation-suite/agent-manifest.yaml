@@ -3,6 +3,11 @@ version: 1.0.0
 type: composite
 description: 产品文档套件 — API文档 + 代码审查并行后本地化
 
+permissions:
+  mode: default
+  allowed_tools: [file_read, file_write, grep, glob]
+  denied_tools: [bash]
+
 model_config:
   recommended: "standard"
   fallback: "lightweight"
