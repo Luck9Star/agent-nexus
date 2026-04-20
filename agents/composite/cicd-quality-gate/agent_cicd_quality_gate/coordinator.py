@@ -6,6 +6,7 @@ checks in parallel, followed by an aggregate quality gate decision.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Any
@@ -174,6 +175,11 @@ def _simulate_agent_check(agent_name: str, context: dict[str, Any] | None = None
     return result
 
 
+async def _simulate_agent_check_async(agent_name: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Async version of _simulate_agent_check for use with asyncio.gather."""
+    return _simulate_agent_check(agent_name, context)
+
+
 def _make_gate_decision(
     checks: list[GateCheck],
     config: dict[str, Any],
@@ -199,17 +205,79 @@ def _make_gate_decision(
         elif check.findings:
             warnings.append(f"{check.agent}: {', '.join(check.findings)}")
 
-    gate_score = total_score / len(checks) if checks else 0.0
-
-    # Apply thresholds
-    for check in checks:
         if check.agent == "security-scanner" and check.score < thresholds["security_threshold"]:
             blockers.append(f"Security score {check.score} below threshold {thresholds['security_threshold']}")
         if check.agent == "code-reviewer" and check.score < thresholds["review_threshold"]:
             blockers.append(f"Review score {check.score} below threshold {thresholds['review_threshold']}")
 
+    gate_score = total_score / len(checks)
     overall_passed = len(blockers) == 0
     return overall_passed, gate_score, blockers, warnings
+
+
+def _convert_security(r: dict[str, Any]) -> GateCheck:
+    score = r.get("risk_score", 100.0)
+    findings = r.get("vulnerabilities", [])
+    passed = score >= 70.0 and len(findings) == 0
+    if findings and score >= 70.0:
+        passed = True
+    return GateCheck(
+        agent="security-scanner",
+        passed=passed,
+        findings=findings if isinstance(findings, list) else [str(findings)],
+        score=score,
+    )
+
+
+def _convert_review(r: dict[str, Any]) -> GateCheck:
+    score = r.get("quality_score", 100.0)
+    findings = r.get("issues", [])
+    passed = score >= 70.0 and len(findings) == 0
+    if findings and score >= 70.0:
+        passed = True
+    return GateCheck(
+        agent="code-reviewer",
+        passed=passed,
+        findings=findings if isinstance(findings, list) else [str(findings)],
+        score=score,
+    )
+
+
+def _convert_test(r: dict[str, Any]) -> GateCheck:
+    coverage = r.get("coverage", 1.0)
+    failing = r.get("failing_tests", 0)
+    score = coverage * 100
+    findings = [f"{failing} failing tests"] if failing > 0 else []
+    passed = score >= 70.0 and len(findings) == 0
+    if findings and score >= 70.0:
+        passed = True
+    return GateCheck(
+        agent="test-suite-generator",
+        passed=passed,
+        findings=findings if isinstance(findings, list) else [str(findings)],
+        score=score,
+    )
+
+
+def _convert_default(r: dict[str, Any]) -> GateCheck:
+    score = r.get("score", 100.0)
+    findings = r.get("findings", [])
+    passed = score >= 70.0 and len(findings) == 0
+    if findings and score >= 70.0:
+        passed = True
+    return GateCheck(
+        agent=r.get("agent", "unknown"),
+        passed=passed,
+        findings=findings if isinstance(findings, list) else [str(findings)],
+        score=score,
+    )
+
+
+_AGENT_CONVERTERS: dict[str, Any] = {
+    "security-scanner": _convert_security,
+    "code-reviewer": _convert_review,
+    "test-suite-generator": _convert_test,
+}
 
 
 class QualityGateCoordinator:
@@ -251,7 +319,9 @@ class QualityGateCoordinator:
         """
         if config is None:
             config = {}
+        return asyncio.run(self._run_gate_async(code_path, config))
 
+    async def _run_gate_async(self, code_path: str, config: dict[str, Any]) -> GateResult:
         try:
             composition = self.load_composition()
         except CompositionError:
@@ -262,74 +332,55 @@ class QualityGateCoordinator:
         checks: list[GateCheck] = []
 
         for group in execution_order:
+            context_base: dict[str, Any] = {"code_path": code_path, "config": config}
+            merge_task = None
+            non_merge_tasks = []
             for task_id in group:
                 task = composition.tasks[task_id]
-
-                # Build context from completed dependencies
-                context: dict[str, Any] = {"code_path": code_path, "config": config}
-                for dep_id in task.blocked_by:
-                    if dep_id in completed_results:
-                        context[dep_id] = completed_results[dep_id]
-
-                # Check if this is the quality gate decision merge step
                 if task.agent == "quality-gate-decider":
-                    overall_passed, gate_score, blockers, warnings = _make_gate_decision(
-                        checks, config
-                    )
-                    return GateResult(
-                        checks=checks,
-                        overall_passed=overall_passed,
-                        gate_score=gate_score,
-                        blockers=blockers,
-                        warnings=warnings,
-                    )
+                    merge_task = task
+                else:
+                    non_merge_tasks.append(task)
 
-                try:
-                    result = _simulate_agent_check(task.agent, context)
-                    completed_results[task_id] = result
-
-                    # Convert to GateCheck
-                    if task.agent == "security-scanner":
-                        score = result.get("risk_score", 100.0)
-                        findings = result.get("vulnerabilities", [])
-                    elif task.agent == "code-reviewer":
-                        score = result.get("quality_score", 100.0)
-                        findings = result.get("issues", [])
-                    elif task.agent == "test-suite-generator":
-                        coverage = result.get("coverage", 1.0)
-                        failing = result.get("failing_tests", 0)
-                        score = coverage * 100
-                        findings = (
-                            [f"{failing} failing tests"] if failing > 0 else []
+            if non_merge_tasks:
+                coros = []
+                for task in non_merge_tasks:
+                    context = dict(context_base)
+                    for dep_id in task.blocked_by:
+                        if dep_id in completed_results:
+                            context[dep_id] = completed_results[dep_id]
+                    coros.append((task, _simulate_agent_check_async(task.agent, context)))
+                results = await asyncio.gather(
+                    *[c for _, c in coros],
+                    return_exceptions=True,
+                )
+                for (task, _), result in zip(coros, results):
+                    if isinstance(result, Exception):
+                        checks.append(
+                            GateCheck(
+                                agent=task.agent,
+                                passed=False,
+                                findings=[str(result)],
+                                score=0.0,
+                            )
                         )
                     else:
-                        score = result.get("score", 100.0)
-                        findings = result.get("findings", [])
+                        completed_results[task.id] = result
+                        converter = _AGENT_CONVERTERS.get(task.agent, _convert_default)
+                        checks.append(converter(result))
 
-                    passed = score >= 70.0 and len(findings) == 0
-                    # For minor findings, still pass but record them
-                    if findings and score >= 70.0:
-                        passed = True
+            if merge_task is not None:
+                overall_passed, gate_score, blockers, warnings = _make_gate_decision(
+                    checks, config
+                )
+                return GateResult(
+                    checks=checks,
+                    overall_passed=overall_passed,
+                    gate_score=gate_score,
+                    blockers=blockers,
+                    warnings=warnings,
+                )
 
-                    checks.append(
-                        GateCheck(
-                            agent=task.agent,
-                            passed=passed,
-                            findings=findings if isinstance(findings, list) else [str(findings)],
-                            score=score,
-                        )
-                    )
-                except Exception as exc:
-                    checks.append(
-                        GateCheck(
-                            agent=task.agent,
-                            passed=False,
-                            findings=[str(exc)],
-                            score=0.0,
-                        )
-                    )
-
-        # If no quality-gate-decider task, make decision directly
         overall_passed, gate_score, blockers, warnings = _make_gate_decision(
             checks, config
         )

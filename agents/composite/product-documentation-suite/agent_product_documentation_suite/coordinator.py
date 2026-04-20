@@ -8,10 +8,14 @@ The coordinator manages parallel execution, result merging, and localization.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import logging
 import os
 import uuid
+
+import toml
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +115,11 @@ def _simulate_localization(text: str, target_lang: str) -> dict:
     }
 
 
+async def _simulate_localization_async(text: str, target_lang: str) -> dict:
+    """Async wrapper for _simulate_localization."""
+    return _simulate_localization(text, target_lang)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -156,14 +165,20 @@ class DocumentationSuiteCoordinator:
         """
         if target_langs is None:
             target_langs = ["en"]
+        return asyncio.run(self._generate_docs_async(code_path, target_langs))
 
+    async def _generate_docs_async(
+        self,
+        code_path: str,
+        target_langs: list[str],
+    ) -> DocumentationResult:
         artifacts: list[DocArtifact] = []
         drift_report = ""
 
         # --- Phase 1a: API Doc Generator (parallel) ---
         try:
             api_spec = _simulate_api_doc_generator(code_path)
-            spec_json = str(api_spec)
+            spec_json = json.dumps(api_spec, sort_keys=True)
 
             api_artifact = DocArtifact(
                 type="openapi_spec",
@@ -179,7 +194,7 @@ class DocumentationSuiteCoordinator:
         # --- Phase 1b: Code Reviewer (parallel) ---
         try:
             review_report = _simulate_code_reviewer(code_path)
-            review_json = str(review_report)
+            review_json = json.dumps(review_report, sort_keys=True)
 
             review_artifact = DocArtifact(
                 type="review_report",
@@ -194,18 +209,21 @@ class DocumentationSuiteCoordinator:
 
         # --- Compute coverage score ---
         paths = api_spec.get("paths", {})
-        coverage_score = min(len(paths) / max(len(paths), 1), 1.0)
-        if paths:
-            coverage_score = 0.75  # Simulated coverage
+        coverage_score = 0.75 if paths else 0.0
 
         # --- Drift detection ---
         drift_report = self._detect_drift(artifacts)
 
-        # --- Phase 2: Localization (sequential, after both parallel tasks) ---
+        # --- Phase 2: Localization (parallel) ---
         summary_text = review_report.get("summary", "")
-        for lang in target_langs:
-            try:
-                loc_result = _simulate_localization(summary_text, lang)
+        loc_results = await asyncio.gather(
+            *[_simulate_localization_async(summary_text, lang) for lang in target_langs],
+            return_exceptions=True,
+        )
+        for lang, loc_result in zip(target_langs, loc_results):
+            if isinstance(loc_result, Exception):
+                logger.exception("Localization failed for language '%s'", lang)
+            else:
                 loc_artifact = DocArtifact(
                     type="localization",
                     path=f"/tmp/docs_{lang}_{uuid.uuid4().hex[:8]}.md",
@@ -213,9 +231,6 @@ class DocumentationSuiteCoordinator:
                     content_hash=_content_hash(loc_result.get("translated_text", "")),
                 )
                 artifacts.append(loc_artifact)
-            except Exception:
-                logger.exception("Localization failed for language '%s'", lang)
-                pass
 
         return DocumentationResult(
             artifacts=artifacts,
@@ -258,8 +273,6 @@ class DocumentationSuiteCoordinator:
         Raises:
             FileNotFoundError: If the file does not exist.
         """
-        import toml
-
         if not os.path.exists(toml_path):
             raise FileNotFoundError(f"Composition file not found: {toml_path}")
 
@@ -322,19 +335,27 @@ class DocumentationSuiteCoordinator:
             if task_id in blocked_by:
                 errors.append(f"Task '{task_id}' cannot depend on itself")
 
-        # Basic cycle detection
-        for task_id in task_ids:
-            visited: set[str] = set()
-            current = task_id
-            while current:
-                if current in visited:
+        # Cycle detection via DFS
+        WHITE, GRAY, BLACK = 0, 1, 2
+        color = {tid: WHITE for tid in task_ids}
+
+        def _has_cycle(tid: str) -> bool:
+            color[tid] = GRAY
+            for dep in tasks[tid].get("blocked_by", []):
+                if dep not in task_ids:
+                    continue
+                if color[dep] == GRAY:
+                    return True
+                if color[dep] == WHITE and _has_cycle(dep):
+                    return True
+            color[tid] = BLACK
+            return False
+
+        for tid in task_ids:
+            if color[tid] == WHITE:
+                if _has_cycle(tid):
                     errors.append(
-                        f"Circular dependency detected involving '{task_id}'"
+                        f"Circular dependency detected involving '{tid}'"
                     )
-                    break
-                visited.add(current)
-                task_def = tasks.get(current, {})
-                deps = task_def.get("blocked_by", [])
-                current = deps[0] if deps else None
 
         return errors

@@ -7,6 +7,7 @@ agent execution; production will use ProcessManager subprocess calls.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Any
@@ -210,6 +211,11 @@ def _simulate_agent_execution(agent_name: str, context: dict[str, Any] | None = 
     return result
 
 
+async def _simulate_agent_execution_async(agent_name: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Async version of _simulate_agent_execution for use with asyncio.gather."""
+    return _simulate_agent_execution(agent_name, context)
+
+
 class FeatureDeliveryCoordinator:
     """Coordinates the feature delivery pipeline execution.
 
@@ -259,6 +265,9 @@ class FeatureDeliveryCoordinator:
         Returns:
             PipelineResult with all stage outputs and artifacts.
         """
+        return asyncio.run(self._run_pipeline_async(spec))
+
+    async def _run_pipeline_async(self, spec: str) -> PipelineResult:
         try:
             composition = self.load_composition()
         except CompositionError as exc:
@@ -269,58 +278,42 @@ class FeatureDeliveryCoordinator:
         artifacts: dict[str, Any] = {}
         all_success = True
 
-        # Compute execution groups
         execution_order = composition.get_execution_order()
 
-        for group in execution_order:
-            # Execute all tasks in this group (sequentially in POC, parallel in prod)
+        for group_idx, group in enumerate(execution_order):
             group_results: list[PipelineStage] = []
 
+            coros = []
             for task_id in group:
                 task = composition.tasks[task_id]
-
-                # Build context from completed dependencies
                 context: dict[str, Any] = {}
                 for dep_id in task.blocked_by:
                     if dep_id in completed_results:
                         context[dep_id] = completed_results[dep_id]
+                coros.append((task, context, _simulate_agent_execution_async(task.agent, context)))
 
-                stage = PipelineStage(
-                    name=task.name,
-                    agent=task.agent,
-                    status=StageStatus.IN_PROGRESS,
-                )
+            results = await asyncio.gather(
+                *[c for _, _, c in coros],
+                return_exceptions=True,
+            )
 
-                try:
-                    # Check if this is the first stage and it fails
-                    result = _simulate_agent_execution(task.agent, context)
-                    completed_results[task_id] = result
-                    artifacts[task.name] = result
-
-                    stage = PipelineStage(
-                        name=task.name,
-                        agent=task.agent,
-                        status=StageStatus.COMPLETED,
-                        result=result,
-                    )
-                except Exception as exc:
+            for (task, context, _), result in zip(coros, results):
+                if isinstance(result, Exception):
                     all_success = False
-                    completed_results[task_id] = {"error": str(exc)}
+                    completed_results[task.id] = {"error": str(result)}
 
                     stage = PipelineStage(
                         name=task.name,
                         agent=task.agent,
                         status=StageStatus.FAILED,
-                        error=str(exc),
+                        error=str(result),
                     )
+                    group_results.append(stage)
 
-                    # If root task fails, skip all remaining
                     if not task.blocked_by:
-                        # Append failed stage first, then mark remaining as skipped
-                        group_results.append(stage)
                         for remaining_id in (
                             tid
-                            for grp in execution_order[execution_order.index(group) + 1 :]
+                            for grp in execution_order[group_idx + 1 :]
                             for tid in grp
                         ):
                             remaining_task = composition.tasks[remaining_id]
@@ -332,12 +325,20 @@ class FeatureDeliveryCoordinator:
                                 )
                             )
                         break
-
-                group_results.append(stage)
+                else:
+                    completed_results[task.id] = result  # type: ignore[assignment]
+                    artifacts[task.name] = result
+                    group_results.append(
+                        PipelineStage(
+                            name=task.name,
+                            agent=task.agent,
+                            status=StageStatus.COMPLETED,
+                            result=result,
+                        )
+                    )
 
             stages.extend(group_results)
 
-            # Check if we broke out due to root failure
             if any(s.status == StageStatus.SKIPPED for s in stages):
                 break
 

@@ -9,10 +9,13 @@ aggregation.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
 from pathlib import Path
+
+import toml
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +106,11 @@ def _simulate_localization(
     }
 
 
+async def _simulate_localization_async(text: str, target_lang: str) -> dict:
+    """Async wrapper for _simulate_localization."""
+    return _simulate_localization(text, target_lang)
+
+
 # ---------------------------------------------------------------------------
 # Coordinator
 # ---------------------------------------------------------------------------
@@ -142,7 +150,15 @@ class CompetitiveIntelCoordinator:
         """
         if target_langs is None:
             target_langs = ["en"]
+        return asyncio.run(self._generate_briefing_async(query, target_langs, template_path, framework))
 
+    async def _generate_briefing_async(
+        self,
+        query: str,
+        target_langs: list[str],
+        template_path: str | None,
+        framework: str,
+    ) -> BriefingResult:
         steps = self._build_steps(query, template_path)
 
         # --- Phase 1: Market Intelligence ---
@@ -222,15 +238,18 @@ class CompetitiveIntelCoordinator:
             status="running",
         )
 
+        loc_raw = await asyncio.gather(
+            *[_simulate_localization_async(summary_text, lang) for lang in target_langs],
+            return_exceptions=True,
+        )
         loc_results: list[dict] = []
-        for lang in target_langs:
-            try:
-                loc_result = _simulate_localization(summary_text, lang)
-                loc_results.append(loc_result)
-                localizations[lang] = loc_result.get("translated_text", "")
-            except Exception:
+        for lang, result in zip(target_langs, loc_raw):
+            if isinstance(result, Exception):
                 logger.exception("Localization failed for language '%s'", lang)
                 localizations[lang] = f"[localization failed for {lang}]"
+            else:
+                loc_results.append(result)
+                localizations[lang] = result.get("translated_text", "")
 
         steps[2] = PipelineStep(
             name=steps[2].name,
@@ -287,8 +306,6 @@ class CompetitiveIntelCoordinator:
         Raises:
             FileNotFoundError: If the file does not exist.
         """
-        import toml
-
         if not os.path.exists(toml_path):
             raise FileNotFoundError(f"Composition file not found: {toml_path}")
 
@@ -354,19 +371,27 @@ class CompetitiveIntelCoordinator:
             if task_id in blocked_by:
                 errors.append(f"Task '{task_id}' cannot depend on itself")
 
-        # Basic cycle detection: walk each task's dependency chain
-        for task_id in task_ids:
-            visited: set[str] = set()
-            current = task_id
-            while current:
-                if current in visited:
+        # Cycle detection via DFS
+        WHITE, GRAY, BLACK = 0, 1, 2
+        color = {tid: WHITE for tid in task_ids}
+
+        def _has_cycle(tid: str) -> bool:
+            color[tid] = GRAY
+            for dep in tasks[tid].get("blocked_by", []):
+                if dep not in task_ids:
+                    continue
+                if color[dep] == GRAY:
+                    return True
+                if color[dep] == WHITE and _has_cycle(dep):
+                    return True
+            color[tid] = BLACK
+            return False
+
+        for tid in task_ids:
+            if color[tid] == WHITE:
+                if _has_cycle(tid):
                     errors.append(
-                        f"Circular dependency detected involving '{task_id}'"
+                        f"Circular dependency detected involving '{tid}'"
                     )
-                    break
-                visited.add(current)
-                task_def = tasks.get(current, {})
-                deps = task_def.get("blocked_by", [])
-                current = deps[0] if deps else None
 
         return errors

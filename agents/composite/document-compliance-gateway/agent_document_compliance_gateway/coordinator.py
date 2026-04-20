@@ -6,6 +6,7 @@ checks in parallel, followed by cross-dimension conflict detection.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from pathlib import Path
@@ -175,6 +176,11 @@ def _simulate_agent_check(agent_name: str, context: dict[str, Any] | None = None
     return result
 
 
+async def _simulate_agent_check_async(agent_name: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Async version of _simulate_agent_check for use with asyncio.gather."""
+    return _simulate_agent_check(agent_name, context)
+
+
 def _detect_conflicts(checks: list[ComplianceCheck]) -> list[ConflictItem]:
     """Detect cross-dimension conflicts from completed checks.
 
@@ -276,7 +282,9 @@ class ComplianceCoordinator:
         """
         if jurisdictions is None:
             jurisdictions = []
+        return asyncio.run(self._check_compliance_async(document, jurisdictions))
 
+    async def _check_compliance_async(self, document: str, jurisdictions: list[str]) -> ComplianceResult:
         try:
             composition = self.load_composition()
         except CompositionError:
@@ -287,65 +295,73 @@ class ComplianceCoordinator:
         checks: list[ComplianceCheck] = []
 
         for group in execution_order:
+            context_base: dict[str, Any] = {"document": document, "jurisdictions": jurisdictions}
+            merge_task = None
+            non_merge_tasks = []
             for task_id in group:
                 task = composition.tasks[task_id]
-
-                # Build context from completed dependencies
-                context: dict[str, Any] = {"document": document, "jurisdictions": jurisdictions}
-                for dep_id in task.blocked_by:
-                    if dep_id in completed_results:
-                        context[dep_id] = completed_results[dep_id]
-
-                # Check if this is the conflict detection merge step
                 if task.agent == "conflict-detector":
-                    # This is the synthetic merge step
-                    conflicts = _detect_conflicts(checks)
-                    recommendations = _generate_recommendations(checks, conflicts)
-                    overall_score = _compute_overall_score(checks)
+                    merge_task = task
+                else:
+                    non_merge_tasks.append(task)
 
-                    return ComplianceResult(
-                        checks=checks,
-                        conflicts=conflicts,
-                        overall_score=overall_score,
-                        recommendations=recommendations,
-                    )
-
-                try:
-                    result = _simulate_agent_check(task.agent, context)
-                    completed_results[task_id] = result
-
-                    # Convert to ComplianceCheck
-                    dimension = result.get("dimension", task.agent)
-                    issues = result.get("issues", [])
-                    score = result.get("score", 100.0)
-
-                    status = CheckStatus.PASS
-                    if issues:
-                        status = CheckStatus.FAIL if score < 70 else CheckStatus.WARNING
-
-                    checks.append(
-                        ComplianceCheck(
-                            dimension=dimension,
-                            status=status,
-                            issues=issues,
-                            score=score,
+            if non_merge_tasks:
+                coros = []
+                for task in non_merge_tasks:
+                    context = dict(context_base)
+                    for dep_id in task.blocked_by:
+                        if dep_id in completed_results:
+                            context[dep_id] = completed_results[dep_id]
+                    coros.append((task, _simulate_agent_check_async(task.agent, context)))
+                results = await asyncio.gather(
+                    *[c for _, c in coros],
+                    return_exceptions=True,
+                )
+                for (task, _), result in zip(coros, results):
+                    if isinstance(result, Exception):
+                        logger.exception(
+                            "Compliance check failed for task '%s' (agent='%s')",
+                            task.id, task.agent,
                         )
-                    )
-                except Exception:
-                    logger.exception(
-                        "Compliance check failed for task '%s' (agent='%s')",
-                        task_id, task.agent,
-                    )
-                    checks.append(
-                        ComplianceCheck(
-                            dimension=task.name,
-                            status=CheckStatus.ERROR,
-                            issues=[f"Agent {task.agent} failed"],
-                            score=0.0,
+                        checks.append(
+                            ComplianceCheck(
+                                dimension=task.name,
+                                status=CheckStatus.ERROR,
+                                issues=[f"Agent {task.agent} failed"],
+                                score=0.0,
+                            )
                         )
-                    )
+                    else:
+                        completed_results[task.id] = result
+                        dimension = result.get("dimension", task.agent)
+                        issues = result.get("issues", [])
+                        score = result.get("score", 100.0)
 
-        # If no conflict-detector task, return what we have
+                        status = CheckStatus.PASS
+                        if issues:
+                            status = CheckStatus.FAIL if score < 70 else CheckStatus.WARNING
+
+                        checks.append(
+                            ComplianceCheck(
+                                dimension=dimension,
+                                status=status,
+                                issues=issues,
+                                score=score,
+                            )
+                        )
+
+            if merge_task is not None:
+                conflicts = _detect_conflicts(checks)
+                recommendations = _generate_recommendations(checks, conflicts)
+                overall_score = _compute_overall_score(checks)
+
+                return ComplianceResult(
+                    checks=checks,
+                    conflicts=conflicts,
+                    overall_score=overall_score,
+                    recommendations=recommendations,
+                )
+
         return ComplianceResult(
             checks=checks,
             overall_score=_compute_overall_score(checks),
