@@ -171,6 +171,7 @@
 | 蓝军P1/P2批量修复 iter129: 3 fixes + 1 false positive | close_sync stdout FD(ipc.py) + promotion partial rollback + FIX evolve_skill pre-validate parents(store.py) + PM race=已由identity+stopping防护(false positive) = 2600 tests | 2026-04-20 | iter129 |
 | 蓝军2-agent最终验证 iter130: P0=0 P1=1 fixed | supervisor stop_agent discard _started_agents + 2 regression tests = 2602 tests | 2026-04-20 | iter130 |
 | 蓝军3-agent深度穿透 iter131: 16 findings cross-validated | P1: route_chat composite drops error/error_type(1 fix) + P2: docstring fix + 14 false positives + 1 regression test = 2603 tests | 2026-04-20 | iter131 |
+| 蓝军3-agent全新角度 iter132: import+fuzz+exception safety | ctx.close()异常安全(1) + gateway IPC错误清理(1) + content_snapshot类型警告(1) + 58 fuzz tests = 2665 tests | 2026-04-20 | iter132 |
 
 ### 待清模式
 
