@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import logging
 import shutil
+import toml
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -569,6 +570,18 @@ class GitInstaller:
     # Internal: venv management
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _has_extra(agent_dir: Path, extra_name: str) -> bool:
+        """Check if the agent's pyproject.toml defines the given optional extra."""
+        pyproject = agent_dir / "pyproject.toml"
+        if not pyproject.exists():
+            return False
+        try:
+            raw = toml.loads(pyproject.read_text(encoding="utf-8"))
+            return extra_name in raw.get("project", {}).get("optional-dependencies", {})
+        except Exception:
+            return False
+
     async def _create_venv(self, agent_name: str, agent_dir: Path) -> Path | None:
         """Create a per-agent venv if the agent has ``pyproject.toml``.
 
@@ -619,8 +632,10 @@ class GitInstaller:
 
             # Install the agent package into the venv (non-editable to avoid
             # relative-path dependency breakage and cache-cleanup fragility).
+            # Include [full] extras if defined (e.g. python-docx, fastmcp).
+            install_target = f"{agent_dir}[full]" if self._has_extra(agent_dir, "full") else str(agent_dir)
             proc = await asyncio.create_subprocess_exec(
-                "uv", "pip", "install", str(agent_dir),
+                "uv", "pip", "install", install_target,
                 "--python", str(venv_path / "bin" / "python"),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
