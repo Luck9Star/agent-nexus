@@ -14,7 +14,6 @@ Actions:
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -23,9 +22,7 @@ from pathlib import Path
 import yaml
 
 from agent_nexus.platform.evolution.store import EvolutionStore
-
-# Same pattern as installer.py _AGENT_NAME_RE and supervisor.py _SAFE_NAME_RE
-_AGENT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+from agent_nexus.platform.utils import AGENT_NAME_RE
 
 
 @dataclass
@@ -136,7 +133,7 @@ class AgentPromoter:
             PromotionResult with paths to generated files.
         """
         agent_name = candidate.skill_name
-        if not _AGENT_NAME_RE.match(agent_name):
+        if not AGENT_NAME_RE.match(agent_name):
             return PromotionResult(
                 success=False,
                 error=f"Invalid skill name for promotion: {agent_name!r}",

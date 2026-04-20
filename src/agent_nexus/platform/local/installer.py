@@ -13,7 +13,6 @@ Version management uses git tags in the format ``{agent-name}/v{semver}``.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import shutil
 import toml
@@ -24,6 +23,7 @@ import yaml
 
 from agent_nexus.models.agent import AgentManifest, AgentType
 from agent_nexus.models.distribution import LockfileEntry, SourceEntry
+from agent_nexus.platform.utils import AGENT_NAME_RE
 
 from .lockfile import LockfileManager
 from .sources import SourceManager
@@ -41,9 +41,6 @@ def _rmtree_best_effort(path: Path, *, context: str = "") -> None:
         logger.warning("Failed to remove %s during %s: %s", p, context, exc_info[1])
 
     shutil.rmtree(path, onerror=_on_error)
-
-# Valid agent name pattern: starts with alphanumeric, then alphanumeric/dot/hyphen/underscore
-_AGENT_NAME_RE = r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
 
 _ALLOWED_GIT_SCHEMES = ("https://", "http://", "git://", "ssh://")
 
@@ -130,8 +127,7 @@ class GitInstaller:
             Clone, validation, or venv creation failed.
         """
         # 0. Validate agent name (prevent path traversal)
-        import re
-        if not re.match(_AGENT_NAME_RE, agent_name):
+        if not AGENT_NAME_RE.match(agent_name):
             raise InstallationError(
                 f"Invalid agent name: '{agent_name}'. "
                 "Must start with alphanumeric and contain only "
@@ -249,8 +245,7 @@ class GitInstaller:
         the agent was installed (and is now removed).
         """
         # Validate agent name (prevent path traversal)
-        import re
-        if not re.match(_AGENT_NAME_RE, agent_name):
+        if not AGENT_NAME_RE.match(agent_name):
             raise InstallationError(
                 f"Invalid agent name: '{agent_name}'. "
                 "Must start with alphanumeric and contain only "
@@ -328,9 +323,7 @@ class GitInstaller:
         InstallationError
             Validation or venv creation failed.
         """
-        import re
-
-        if not re.match(_AGENT_NAME_RE, agent_name):
+        if not AGENT_NAME_RE.match(agent_name):
             raise InstallationError(
                 f"Invalid agent name: '{agent_name}'. "
                 "Must start with alphanumeric and contain only "
@@ -674,8 +667,8 @@ class GitInstaller:
 
     def _get_cache_path(self, source_url: str) -> Path:
         """Derive a stable local cache directory from *source_url*."""
-        digest = hashlib.sha256(source_url.encode()).hexdigest()[:12]
-        return self._cache_dir / digest
+        from agent_nexus.platform.utils import cache_path_for_url
+        return cache_path_for_url(self._config_dir, source_url)
 
     @staticmethod
     async def _run_git(args: list[str], cwd: Path) -> None:

@@ -566,43 +566,18 @@ class TaskGraph:
     def _detect_cycles_conn(
         self, conn: sqlite3.Connection,
     ) -> list[list[str]]:
-        """Detect cycles using an existing connection."""
-        all_rows = conn.execute("SELECT id FROM tasks").fetchall()
-        task_ids = [r[0] for r in all_rows]
+        """Detect cycles using database-backed dependency lookup."""
+        from agent_nexus.platform.utils import detect_cycles_dfs
 
-        dep_map: dict[str, list[str]] = {tid: [] for tid in task_ids}
-        dep_rows = conn.execute(
-            "SELECT task_id, blocked_by_id FROM task_dependencies"
-        ).fetchall()
-        for task_id, blocked_by_id in dep_rows:
-            dep_map[task_id].append(blocked_by_id)
-
-        cycles: list[list[str]] = []
-        visiting: set[str] = set()
-        visited: set[str] = set()
-
-        def _dfs(node: str, path: list[str]) -> None:
-            if node in visiting:
-                # Found a cycle -- extract it from path
-                cycle_start = path.index(node)
-                cycles.append(path[cycle_start:])
-                return
-            if node in visited:
-                return
-
-            visiting.add(node)
-            path.append(node)
-            for dep in dep_map.get(node, []):
-                _dfs(dep, path)
-            path.pop()
-            visiting.discard(node)
-            visited.add(node)
-
-        for tid in task_ids:
-            if tid not in visited:
-                _dfs(tid, [])
-
-        return cycles
+        return detect_cycles_dfs(
+            nodes=[row[0] for row in conn.execute("SELECT id FROM tasks")],
+            get_deps=lambda name: [
+                row[0] for row in conn.execute(
+                    "SELECT blocked_by_id FROM task_dependencies WHERE task_id = ?",
+                    (name,),
+                )
+            ],
+        )
 
     def get_snapshot(self) -> TaskGraphSnapshot:
         """Get a full snapshot of the graph state."""

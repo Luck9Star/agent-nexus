@@ -430,6 +430,11 @@ class PlatformRouter:
         For research and implementation: run assigned agents in parallel.
         For synthesis and verification: run single agent.
 
+        Returns:
+            Aggregated result string for the phase.  Raises ``RuntimeError``
+            on agent failure (converted from error dict) so the caller
+            (``route_composite``) catches and records the failure.
+
         Args:
             role_agents: Pre-computed role→agent-names mapping.  When provided
                 (by ``route_composite``), the list comprehension is skipped.
@@ -479,9 +484,17 @@ class PlatformRouter:
         else:
             # Single agent execution (synthesis, verification)
             agent_name = phase_agents[0]
-            return await self._execute_single_agent(
+            result = await self._execute_single_agent(
                 agent_name, phase_message, ctx.conversation_id
             )
+            if isinstance(result, dict):
+                # Error dict from _execute_single_agent — raise so the
+                # phase-level exception handler in route_composite
+                # records the failure and stops the workflow.
+                raise RuntimeError(
+                    result.get("error") or "Unknown agent error"
+                )
+            return result
 
     async def _execute_parallel_agents(
         self,
@@ -520,15 +533,28 @@ class PlatformRouter:
         agent_name: str,
         message: str,
         conversation_id: str,
-    ) -> str:
+    ) -> str | dict:
         """Execute a single agent interaction via IPC.
 
         Sends the message, waits for a final result, returns the content.
+
+        Returns:
+            ``str`` on success (the response content), or a ``dict`` with
+            ``output``, ``success``, ``error``, and ``error_type`` keys on
+            failure.  This matches the error-dict pattern used by
+            ``route_to_atomic`` and ``McpToolAdapter.execute``, ensuring
+            composite workflow callers never need to catch RuntimeError.
+
+        Raises:
+            IPCConnectionError, IPCTimeoutError, IPCError: propagated
+            directly so callers can distinguish infrastructure-level IPC
+            failures from agent-level errors.
         """
         handle = self._pm.get_agent(agent_name)
         if handle is None or not handle.is_alive:
-            raise RuntimeError(
-                f"Agent '{agent_name}' not found or not alive"
+            return _make_error_result(
+                f"Agent '{agent_name}' not found or not alive",
+                "ProcessNotAliveError",
             )
 
         # Serialize send+receive per agent to prevent concurrent IPC
@@ -542,22 +568,25 @@ class PlatformRouter:
             except (IPCConnectionError, IPCTimeoutError, IPCError):
                 raise
             except Exception as exc:
-                raise RuntimeError(
-                    f"IPC send error for agent '{agent_name}': {exc}"
-                ) from exc
+                return _make_error_result(
+                    f"IPC send error for agent '{agent_name}': {exc}",
+                    type(exc).__name__,
+                )
 
             try:
                 response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
             except (IPCConnectionError, IPCTimeoutError, IPCError):
                 raise
             except Exception as exc:
-                raise RuntimeError(
-                    f"IPC error communicating with agent '{agent_name}': {exc}"
-                ) from exc
+                return _make_error_result(
+                    f"IPC error communicating with agent '{agent_name}': {exc}",
+                    type(exc).__name__,
+                )
 
             if response.type == AgentToPlatformType.ERROR:
-                raise RuntimeError(
-                    f"Agent '{agent_name}' error: {response.error or 'unknown'}"
+                return _make_error_result(
+                    f"Agent '{agent_name}' error: {response.error or 'unknown'}",
+                    "AgentError",
                 )
 
             return str(response.content) if response.content is not None else ""
@@ -657,14 +686,17 @@ class PlatformRouter:
     def _aggregate_results(results: list[Any], phase: WorkflowPhase) -> str:
         """Aggregate parallel results into a single string.
 
-        Failed tasks (exceptions) are reported but don't prevent
-        successful results from being included.
+        Failed tasks (exceptions or error dicts) are reported but don't
+        prevent successful results from being included.
         """
         parts: list[str] = []
         errors: list[str] = []
 
         for i, result in enumerate(results):
-            if isinstance(result, Exception):
+            if isinstance(result, dict) and not result.get("success", True):
+                # Error dict returned by _execute_single_agent
+                errors.append(f"Worker {i + 1} failed: {result.get('error', 'unknown error')}")
+            elif isinstance(result, Exception):
                 errors.append(f"Worker {i + 1} failed: {result}")
             elif result is None or (isinstance(result, str) and not result):
                 parts.append(f"Worker {i + 1}: (no output)")

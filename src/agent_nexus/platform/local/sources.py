@@ -10,7 +10,6 @@ Sources are searched by priority (official first, then by order in the file).
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import tempfile
@@ -256,8 +255,8 @@ class SourceManager:
 
     def _get_cache_path(self, source: SourceEntry) -> Path:
         """Compute cache path matching GitInstaller._get_cache_path."""
-        digest = hashlib.sha256(source.url.encode()).hexdigest()[:12]
-        return self._path.parent / "cache" / "repos" / digest
+        from agent_nexus.platform.utils import cache_path_for_url
+        return cache_path_for_url(self._path.parent, source.url)
 
     def _load_source_index(self, source: SourceEntry) -> list[IndexEntry] | None:
         """Load the ``index.yaml`` for *source* from its local cache.

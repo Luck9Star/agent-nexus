@@ -575,36 +575,12 @@ class OrchestrationDSL:
 
     @staticmethod
     def _detect_cycles(task_map: dict[str, DSLTask]) -> list[list[str]]:
-        """Detect cycles using DFS with visiting/visited two-set technique.
+        """Detect cycles in the task dependency graph."""
+        from agent_nexus.platform.utils import detect_cycles_dfs
 
-        Returns list of cycles found, each cycle as a list of task IDs.
-        """
-        cycles: list[list[str]] = []
-        visiting: set[str] = set()
-        visited: set[str] = set()
-
-        def _dfs(node: str, path: list[str]) -> None:
-            if node in visiting:
-                # Found a cycle -- extract it from path
-                cycle_start = path.index(node)
-                cycles.append(path[cycle_start:])
-                return
-            if node in visited:
-                return
-
-            visiting.add(node)
-            path.append(node)
-            task = task_map.get(node)
-            if task is not None:
-                for dep in task.blocked_by:
-                    if dep in task_map:  # only follow valid refs
-                        _dfs(dep, path)
-            path.pop()
-            visiting.discard(node)
-            visited.add(node)
-
-        for tid in task_map:
-            if tid not in visited:
-                _dfs(tid, [])
-
-        return cycles
+        return detect_cycles_dfs(
+            nodes=task_map.keys(),
+            get_deps=lambda name: [
+                dep for dep in task_map[name].blocked_by if dep in task_map
+            ],
+        )

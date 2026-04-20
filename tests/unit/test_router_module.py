@@ -1382,8 +1382,8 @@ class TestExecuteSingleAgentErrorWrapping:
     """
 
     @pytest.mark.asyncio
-    async def test_ipc_timeout_wrapped_as_runtime_error(self) -> None:
-        """Non-IPC timeout in _execute_single_agent raises RuntimeError."""
+    async def test_ipc_timeout_returns_error_dict(self) -> None:
+        """Non-IPC timeout in _execute_single_agent returns error dict."""
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
@@ -1399,14 +1399,17 @@ class TestExecuteSingleAgentErrorWrapping:
 
         mock_pm.get_agent.return_value = handle
 
-        with pytest.raises(RuntimeError, match="IPC error"):
-            await router._execute_single_agent(
-                "test-agent", "hello", conversation_id="c1"
-            )
+        result = await router._execute_single_agent(
+            "test-agent", "hello", conversation_id="c1"
+        )
+        assert isinstance(result, dict)
+        assert result["success"] is False
+        assert "IPC error" in result["error"]
+        assert result["error_type"] == "TimeoutError"
 
     @pytest.mark.asyncio
-    async def test_ipc_connection_error_wrapped(self) -> None:
-        """Non-IPC ConnectionError in _execute_single_agent raises RuntimeError."""
+    async def test_ipc_connection_error_returns_error_dict(self) -> None:
+        """Non-IPC ConnectionError in _execute_single_agent returns error dict."""
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
@@ -1422,14 +1425,17 @@ class TestExecuteSingleAgentErrorWrapping:
 
         mock_pm.get_agent.return_value = handle
 
-        with pytest.raises(RuntimeError, match="IPC error"):
-            await router._execute_single_agent(
-                "test-agent", "hello", conversation_id="c1"
-            )
+        result = await router._execute_single_agent(
+            "test-agent", "hello", conversation_id="c1"
+        )
+        assert isinstance(result, dict)
+        assert result["success"] is False
+        assert "IPC error" in result["error"]
+        assert result["error_type"] == "ConnectionError"
 
     @pytest.mark.asyncio
-    async def test_send_chat_error_wrapped_as_runtime_error(self) -> None:
-        """Non-IPC send_chat failure raises RuntimeError.
+    async def test_send_chat_error_returns_error_dict(self) -> None:
+        """Non-IPC send_chat failure returns error dict.
 
         iter109 regression — send_chat was bare (unwrapped), unlike
         route_to_atomic which already wrapped it.  Now both paths are
@@ -1449,10 +1455,13 @@ class TestExecuteSingleAgentErrorWrapping:
 
         mock_pm.get_agent.return_value = handle
 
-        with pytest.raises(RuntimeError, match="IPC send error"):
-            await router._execute_single_agent(
-                "test-agent", "hello", conversation_id="c1"
-            )
+        result = await router._execute_single_agent(
+            "test-agent", "hello", conversation_id="c1"
+        )
+        assert isinstance(result, dict)
+        assert result["success"] is False
+        assert "IPC send error" in result["error"]
+        assert result["error_type"] == "ConnectionError"
 
     # -- iter126 regression: IPC exceptions propagate directly --
 
@@ -2194,23 +2203,25 @@ class TestExecutePhaseFallbackAgent:
 
 
 class TestExecuteSingleAgentHandleNotFound:
-    """_execute_single_agent raises RuntimeError when handle is None."""
+    """_execute_single_agent returns error dict when handle is None or dead."""
 
     @pytest.mark.asyncio
-    async def test_none_handle_raises(self) -> None:
+    async def test_none_handle_returns_error_dict(self) -> None:
         mock_pm = MagicMock()
         mock_pm.get_agent.return_value = None
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
 
 
-        with pytest.raises(RuntimeError, match="not found or not alive"):
-            await router._execute_single_agent(
-                "ghost-agent", "hello", conversation_id="c1"
-            )
+        result = await router._execute_single_agent(
+            "ghost-agent", "hello", conversation_id="c1"
+        )
+        assert isinstance(result, dict)
+        assert result["success"] is False
+        assert "not found or not alive" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_dead_handle_raises(self) -> None:
+    async def test_dead_handle_returns_error_dict(self) -> None:
         handle = MagicMock()
         handle.is_alive = False
         mock_pm = MagicMock()
@@ -2219,10 +2230,12 @@ class TestExecuteSingleAgentHandleNotFound:
         router._pm = mock_pm
 
 
-        with pytest.raises(RuntimeError, match="not found or not alive"):
-            await router._execute_single_agent(
-                "dead-agent", "hello", conversation_id="c1"
-            )
+        result = await router._execute_single_agent(
+            "dead-agent", "hello", conversation_id="c1"
+        )
+        assert isinstance(result, dict)
+        assert result["success"] is False
+        assert "not found or not alive" in result["error"]
 
 
 class TestTopologicalSortTasks:

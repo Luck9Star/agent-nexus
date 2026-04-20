@@ -14,19 +14,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import toml
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 from agent_nexus.models.distribution import Lockfile, LockfileEntry
 from agent_nexus.platform.config.loader import ConfigLoader
 from agent_nexus.platform.orchestration.process_manager import (
     ProcessManager,
 )
+from agent_nexus.platform.utils import AGENT_NAME_RE
 
 from .lockfile import LockfileManager
 
@@ -360,7 +358,7 @@ class AgentSupervisor:
         2. Otherwise, try ``uvx <agent_name>``.
         3. Fallback: ``python3 <agent_dir>/main.py``.
         """
-        if not _SAFE_NAME_RE.match(agent_name):
+        if not AGENT_NAME_RE.match(agent_name):
             logger.warning(
                 "Agent name '%s' contains unsafe characters, skipping command build",
                 agent_name,
@@ -484,7 +482,7 @@ class AgentSupervisor:
         Raises:
             ValueError: If agent_name contains unsafe characters.
         """
-        if not _SAFE_NAME_RE.match(agent_name):
+        if not AGENT_NAME_RE.match(agent_name):
             raise ValueError(
                 f"Agent name '{agent_name}' contains unsafe characters"
             )
