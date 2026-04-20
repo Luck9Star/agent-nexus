@@ -1147,7 +1147,7 @@ class TestAgentSupervisor:
 class TestCLI:
     """Tests for the Typer CLI commands using CliRunner."""
 
-    @patch("agent_nexus.platform.local.cli._install", new_callable=AsyncMock)
+    @patch("agent_nexus.platform.local.cli._lifecycle._install", new_callable=AsyncMock)
     def test_install_agent_success(self, mock_install) -> None:
         """install command invokes _install with the agent name."""
         result = runner.invoke(app, ["install", "install", "doc-filler"])
@@ -1163,7 +1163,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["list"])
@@ -1178,7 +1178,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["list"])
@@ -1201,7 +1201,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["info", "nonexistent"])
@@ -1218,7 +1218,7 @@ class TestCLI:
         config_dir = Path("/tmp/cfg")
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, config_dir),
         ):
             result = runner.invoke(app, ["info", "doc-filler"])
@@ -1235,7 +1235,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["sources", "list"])
@@ -1249,7 +1249,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["sources", "add", "--name", "my-src"])
@@ -1263,7 +1263,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["sources", "add", "--name", "my-src", "--url", "https://x.com/r.git"])
@@ -1278,7 +1278,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["sources", "remove", "--name", "my-src"])
@@ -1292,7 +1292,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["sources", "remove", "--name", "nope"])
@@ -1305,7 +1305,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["sources", "remove"])
@@ -1318,7 +1318,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["sources", "explode"])
@@ -1334,7 +1334,7 @@ class TestCLI:
 
     def test_wait_forever_is_cancellable(self) -> None:
         """_wait_forever can be cancelled."""
-        from agent_nexus.platform.local.cli import _wait_forever
+        from agent_nexus.platform.local.cli._lifecycle import _wait_forever
 
         async def _run():
             task = asyncio.create_task(_wait_forever())
@@ -1352,7 +1352,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["search", "nonexistent"])
@@ -1374,7 +1374,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["search", "doc"])
@@ -1389,7 +1389,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._init_managers",
+            "agent_nexus.platform.local.cli._lifecycle._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["run", "ghost"])

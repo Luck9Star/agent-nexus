@@ -22,7 +22,8 @@ from typer.testing import CliRunner
 from agent_nexus.models.agent import AgentType
 from agent_nexus.models.distribution import Lockfile, LockfileEntry, SourceEntry
 
-from agent_nexus.platform.local.cli import (
+from agent_nexus.platform.local.cli import app, install_app
+from agent_nexus.platform.local.cli._lifecycle import (
     _info,
     _install,
     _list_agents,
@@ -30,8 +31,6 @@ from agent_nexus.platform.local.cli import (
     _uninstall,
     _update,
     _wait_forever,
-    app,
-    install_app,
 )
 
 runner = CliRunner()
@@ -182,9 +181,9 @@ class TestInstall:
         entry = _make_entry(version="2.3.0")
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.installer.GitInstaller") as GitInstallerCls,
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
             installer_instance.install = AsyncMock(return_value=entry)
@@ -203,9 +202,9 @@ class TestInstall:
         mocks, _, _, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.installer.GitInstaller") as GitInstallerCls,
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
             installer_instance.install = AsyncMock(
@@ -234,9 +233,9 @@ class TestUninstall:
         mocks, _, _, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.installer.GitInstaller") as GitInstallerCls,
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
             installer_instance.uninstall = AsyncMock(return_value=True)
@@ -252,9 +251,9 @@ class TestUninstall:
         mocks, _, _, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.installer.GitInstaller") as GitInstallerCls,
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
             installer_instance.uninstall = AsyncMock(return_value=False)
@@ -270,9 +269,9 @@ class TestUninstall:
         mocks, _, _, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.installer.GitInstaller") as GitInstallerCls,
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
             installer_instance.uninstall = AsyncMock(
@@ -302,10 +301,10 @@ class TestUpdate:
         updated_entry = _make_entry(version="2.0.0")
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.installer.GitInstaller") as GitInstallerCls,
             patch("agent_nexus.platform.local.installer.AgentNotFoundError", RuntimeError),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
             installer_instance.update = AsyncMock(return_value=updated_entry)
@@ -322,9 +321,9 @@ class TestUpdate:
         mocks, _, _, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.installer.GitInstaller") as GitInstallerCls,
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
             installer_instance.update = AsyncMock(return_value=None)
@@ -347,9 +346,9 @@ class TestUpdate:
         updated_entry = _make_entry(version="1.1.0")
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.installer.GitInstaller") as GitInstallerCls,
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
             installer_instance.update = AsyncMock(return_value=updated_entry)
@@ -367,9 +366,9 @@ class TestUpdate:
         mocks, _, _, _ = _mock_managers(lockfile_data=lf)
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.installer.GitInstaller"),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             await _update(None, all_agents=True)
 
@@ -382,9 +381,9 @@ class TestUpdate:
         mocks, _, _, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.installer.GitInstaller") as GitInstallerCls,
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
             installer_instance.update = AsyncMock(
@@ -409,9 +408,9 @@ class TestUpdate:
         mocks, _, _, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.installer.GitInstaller") as GitInstallerCls,
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
             installer_instance.update = AsyncMock(
@@ -440,8 +439,8 @@ class TestListAgents:
         mocks, _, _, _ = _mock_managers(lockfile_data=lf)
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             await _list_agents()
 
@@ -467,8 +466,8 @@ class TestListAgents:
         mocks, _, _, _ = _mock_managers(lockfile_data=lf)
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             await _list_agents()
 
@@ -495,8 +494,8 @@ class TestInfo:
         lockfile_mock.get_entry.return_value = None
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _info("missing-agent")
@@ -526,8 +525,8 @@ class TestInfo:
         )
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
             patch("pathlib.Path.exists") as exists_mock,
             patch("pathlib.Path.read_text", return_value=manifest_content),
         ):
@@ -551,8 +550,8 @@ class TestInfo:
         lockfile_mock.get_entry.return_value = entry
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
             patch("pathlib.Path.exists", return_value=False),
         ):
             await _info("my-agent")
@@ -583,8 +582,8 @@ class TestSources:
         sources_mock.list_sources.return_value = source_entries
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             await _sources("list", None, None, None)
 
@@ -600,8 +599,8 @@ class TestSources:
         sources_mock.list_sources.return_value = []
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             await _sources("list", None, None, None)
 
@@ -614,8 +613,8 @@ class TestSources:
         mocks, _, _, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _sources("add", None, "https://example.com", "git")
@@ -630,9 +629,9 @@ class TestSources:
         mocks, _, sources_mock, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.models.distribution.SourceEntry", wraps=SourceEntry),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             await _sources("add", "my-source", "https://example.com/repo", "git")
 
@@ -646,9 +645,9 @@ class TestSources:
         mocks, _, sources_mock, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.models.distribution.SourceEntry", wraps=SourceEntry),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             await _sources("add", "my-source", "https://example.com/repo", None)
 
@@ -666,8 +665,8 @@ class TestSources:
         sources_mock.remove_source.return_value = True
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             await _sources("remove", "my-source", None, None)
 
@@ -682,8 +681,8 @@ class TestSources:
         sources_mock.remove_source.return_value = False
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             await _sources("remove", "missing-source", None, None)
 
@@ -696,8 +695,8 @@ class TestSources:
         mocks, _, _, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _sources("remove", None, None, None)
@@ -712,8 +711,8 @@ class TestSources:
         mocks, _, _, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _sources("bogus", None, None, None)
@@ -751,11 +750,11 @@ class TestRunMcpMode:
         lockfile_mock.get_entry.return_value = None
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             with pytest.raises(click.exceptions.Exit) as exc_info:
-                from agent_nexus.platform.local.cli import _run
+                from agent_nexus.platform.local.cli._lifecycle import _run
                 await _run("missing-agent", "mcp", "stdio")
 
         assert exc_info.value.exit_code == 1
@@ -772,12 +771,12 @@ class TestRunMcpMode:
         pm_mock.get_agent.return_value = None
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
-            from agent_nexus.platform.local.cli import _run
+            from agent_nexus.platform.local.cli._lifecycle import _run
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "mcp", "stdio")
 
@@ -801,13 +800,13 @@ class TestRunMcpMode:
             raise asyncio.CancelledError()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli._wait_forever", side_effect=_cancel_wait),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle._wait_forever", side_effect=_cancel_wait),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
-            from agent_nexus.platform.local.cli import _run
+            from agent_nexus.platform.local.cli._lifecycle import _run
             await _run("test-agent", "mcp", "stdio")
 
         supervisor_mock.stop_agent.assert_called_once_with("test-agent")
@@ -831,14 +830,14 @@ class TestRunRouterMode:
         gateway_mock.stop = AsyncMock()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
             patch("agent_nexus.platform.gateway.gateway.MCPGateway", return_value=gateway_mock),
             patch("agent_nexus.platform.router.router.PlatformRouter", return_value=MagicMock()),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
-            from agent_nexus.platform.local.cli import _run
+            from agent_nexus.platform.local.cli._lifecycle import _run
             await _run("test-agent", "router", "sse")
 
         gateway_mock.run_sse.assert_called_once()
@@ -859,14 +858,14 @@ class TestRunRouterMode:
         gateway_mock.stop = AsyncMock()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
             patch("agent_nexus.platform.gateway.gateway.MCPGateway", return_value=gateway_mock),
             patch("agent_nexus.platform.router.router.PlatformRouter", return_value=MagicMock()),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
-            from agent_nexus.platform.local.cli import _run
+            from agent_nexus.platform.local.cli._lifecycle import _run
             await _run("test-agent", "router", "stdio")
 
         gateway_mock.run_stdio.assert_called_once()
@@ -882,12 +881,12 @@ class TestRunRouterMode:
         pm_mock = MagicMock()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
-            from agent_nexus.platform.local.cli import _run
+            from agent_nexus.platform.local.cli._lifecycle import _run
             with pytest.raises(click.exceptions.Exit):
                 await _run("test-agent", "router", "stdio")
 
@@ -910,13 +909,13 @@ class TestRunCliMode:
             raise asyncio.CancelledError()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli._wait_forever", side_effect=_cancel_wait),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle._wait_forever", side_effect=_cancel_wait),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
-            from agent_nexus.platform.local.cli import _run
+            from agent_nexus.platform.local.cli._lifecycle import _run
             await _run("test-agent", "cli", "stdio")
 
         supervisor_mock.stop_agent.assert_called_once_with("test-agent")
@@ -932,12 +931,12 @@ class TestRunCliMode:
         pm_mock = MagicMock()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
-            from agent_nexus.platform.local.cli import _run
+            from agent_nexus.platform.local.cli._lifecycle import _run
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "cli", "stdio")
 
@@ -954,10 +953,10 @@ class TestRunUnknownMode:
         lockfile_mock.get_entry.return_value = _make_lockfile_entry()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
-            from agent_nexus.platform.local.cli import _run
+            from agent_nexus.platform.local.cli._lifecycle import _run
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "bogus", "stdio")
 
@@ -980,10 +979,10 @@ class TestSearchAgents:
         sources_mock.search_agents.return_value = []
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
-            from agent_nexus.platform.local.cli import _search
+            from agent_nexus.platform.local.cli._lifecycle import _search
             await _search("nonexistent")
 
         calls = _echo_calls(echo_mock)
@@ -1006,10 +1005,10 @@ class TestSearchAgents:
         sources_mock.search_agents.return_value = [(source_entry, index_entry)]
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
-            from agent_nexus.platform.local.cli import _search
+            from agent_nexus.platform.local.cli._lifecycle import _search
             await _search("doc")
 
         calls = _echo_calls(echo_mock)
@@ -1024,10 +1023,10 @@ class TestSearchAgents:
         sources_mock.search_agents.return_value = []
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
-            from agent_nexus.platform.local.cli import _search
+            from agent_nexus.platform.local.cli._lifecycle import _search
             await _search("anything")
 
         calls = _echo_calls(echo_mock)
@@ -1045,14 +1044,14 @@ class TestGetConfigDir:
     def test_returns_default_config_dir(self) -> None:
         """_get_config_dir() returns DEFAULT_CONFIG_DIR from config.defaults."""
         from agent_nexus.platform.config.defaults import DEFAULT_CONFIG_DIR
-        from agent_nexus.platform.local.cli import _get_config_dir
+        from agent_nexus.platform.local.cli._shared import _get_config_dir
 
         result = _get_config_dir()
         assert result == DEFAULT_CONFIG_DIR
 
     def test_returns_env_var_dir(self, tmp_path) -> None:
         """_get_config_dir() returns AGENT_NEXUS_HOME path when set."""
-        from agent_nexus.platform.local.cli import _get_config_dir
+        from agent_nexus.platform.local.cli._shared import _get_config_dir
 
         custom = tmp_path / "custom_config"
         with patch.dict(os.environ, {"AGENT_NEXUS_HOME": str(custom)}):
@@ -1070,7 +1069,7 @@ class TestInitManagers:
 
     def test_with_explicit_config_dir(self, tmp_path: Path) -> None:
         """_init_managers with explicit config_dir returns the expected tuple."""
-        from agent_nexus.platform.local.cli import _init_managers
+        from agent_nexus.platform.local.cli._shared import _init_managers
 
         config_dir = tmp_path / "config"
         config_dir.mkdir()
@@ -1083,10 +1082,10 @@ class TestInitManagers:
     def test_uses_default_config_dir_when_none(self) -> None:
         """_init_managers with None config_dir falls back to _get_config_dir."""
         from agent_nexus.platform.config.defaults import DEFAULT_CONFIG_DIR
-        from agent_nexus.platform.local.cli import _init_managers
+        from agent_nexus.platform.local.cli._shared import _init_managers
 
         with patch(
-            "agent_nexus.platform.local.cli._get_config_dir",
+            "agent_nexus.platform.local.cli._shared._get_config_dir",
             return_value=DEFAULT_CONFIG_DIR,
         ):
             _, _, _, returned_dir = _init_managers(None)
@@ -1095,7 +1094,7 @@ class TestInitManagers:
 
     def test_creates_config_dir_if_missing(self, tmp_path: Path) -> None:
         """_init_managers calls ensure_config_dir on the loader."""
-        from agent_nexus.platform.local.cli import _init_managers
+        from agent_nexus.platform.local.cli._shared import _init_managers
 
         config_dir = tmp_path / "new_config"
         config_dir.mkdir()
@@ -1125,10 +1124,10 @@ class TestUpdateElseBranch:
         mocks, _, _, _ = _mock_managers()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.installer.GitInstaller"),
             patch("agent_nexus.platform.local.installer.AgentNotFoundError", RuntimeError),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _update(None, all_agents=False)
@@ -1156,8 +1155,8 @@ class TestInfoManifestExceptionAndSkillMd:
         manifest_content = "description: valid\nrun_modes:\n  - mcp\n"
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
             patch("pathlib.Path.exists") as exists_mock,
             patch("pathlib.Path.read_text", return_value=manifest_content),
             patch("yaml.safe_load", side_effect=RuntimeError("yaml broke")),
@@ -1178,8 +1177,8 @@ class TestInfoManifestExceptionAndSkillMd:
         skill_content = "# My Agent\n\nDoes things.\n\nMore info."
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
             patch("pathlib.Path.exists") as exists_mock,
             patch("pathlib.Path.read_text", return_value=skill_content),
         ):
@@ -1198,8 +1197,8 @@ class TestInfoManifestExceptionAndSkillMd:
         lockfile_mock.get_entry.return_value = entry
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
             patch("pathlib.Path.exists") as exists_mock,
             patch("pathlib.Path.read_text", side_effect=OSError("read error")),
         ):
@@ -1233,11 +1232,11 @@ class TestRunRouterModeImportError:
             return original_import(name, *args, **kwargs)
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("builtins.__import__", side_effect=blocking_import),
-            patch("agent_nexus.platform.local.cli.typer.echo") as echo_mock,
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
-            from agent_nexus.platform.local.cli import _run
+            from agent_nexus.platform.local.cli._lifecycle import _run
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "router", "stdio")
 
@@ -1257,7 +1256,7 @@ class TestUninstallCLICommand:
 
     def test_uninstall_command_invokes_async(self) -> None:
         """The uninstall CLI command calls _uninstall via asyncio.run."""
-        with patch("agent_nexus.platform.local.cli._uninstall", new_callable=AsyncMock) as mock_uninstall:
+        with patch("agent_nexus.platform.local.cli._lifecycle._uninstall", new_callable=AsyncMock) as mock_uninstall:
             result = runner.invoke(app, ["install", "uninstall", "my-agent"])
             assert mock_uninstall.called
             assert mock_uninstall.call_args[0][0] == "my-agent"
@@ -1273,7 +1272,7 @@ class TestUpdateCLICommand:
 
     def test_update_command_invokes_async(self) -> None:
         """The update CLI command calls _update via asyncio.run with a name."""
-        with patch("agent_nexus.platform.local.cli._update", new_callable=AsyncMock) as mock_update:
+        with patch("agent_nexus.platform.local.cli._lifecycle._update", new_callable=AsyncMock) as mock_update:
             result = runner.invoke(app, ["install", "update", "my-agent"])
             assert mock_update.called
             call_args = mock_update.call_args[0]
@@ -1282,7 +1281,7 @@ class TestUpdateCLICommand:
 
     def test_update_all_command_invokes_async(self) -> None:
         """The update --all CLI command calls _update with all_agents=True."""
-        with patch("agent_nexus.platform.local.cli._update", new_callable=AsyncMock) as mock_update:
+        with patch("agent_nexus.platform.local.cli._lifecycle._update", new_callable=AsyncMock) as mock_update:
             result = runner.invoke(app, ["install", "update", "--all"])
             assert mock_update.called
             call_args = mock_update.call_args[0]
@@ -1310,13 +1309,13 @@ class TestRunFinallyStopsAgent:
             raise RuntimeError("unexpected crash")
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli._wait_forever", side_effect=_raise_runtime),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle._wait_forever", side_effect=_raise_runtime),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
-            from agent_nexus.platform.local.cli import _run
+            from agent_nexus.platform.local.cli._lifecycle import _run
             with pytest.raises(RuntimeError, match="unexpected crash"):
                 await _run("test-agent", "mcp", "stdio")
 
@@ -1337,14 +1336,14 @@ class TestRunFinallyStopsAgent:
         gateway_mock.stop = AsyncMock()
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
             patch("agent_nexus.platform.gateway.gateway.MCPGateway", return_value=gateway_mock),
             patch("agent_nexus.platform.router.router.PlatformRouter", return_value=MagicMock()),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
-            from agent_nexus.platform.local.cli import _run
+            from agent_nexus.platform.local.cli._lifecycle import _run
             with pytest.raises(RuntimeError, match="network error"):
                 await _run("test-agent", "router", "sse")
 
@@ -1365,13 +1364,13 @@ class TestRunFinallyStopsAgent:
             raise RuntimeError("unexpected crash")
 
         with (
-            patch("agent_nexus.platform.local.cli._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli._wait_forever", side_effect=_raise_runtime),
-            patch("agent_nexus.platform.local.cli.typer.echo"),
+            patch("agent_nexus.platform.local.cli._lifecycle._wait_forever", side_effect=_raise_runtime),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
-            from agent_nexus.platform.local.cli import _run
+            from agent_nexus.platform.local.cli._lifecycle import _run
             with pytest.raises(RuntimeError, match="unexpected crash"):
                 await _run("test-agent", "cli", "stdio")
 

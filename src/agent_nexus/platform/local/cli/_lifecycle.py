@@ -1,36 +1,23 @@
-"""CLI entry point for Agent Nexus.
+"""Lifecycle commands: install, uninstall, update, list, search, info, sources, run.
 
-Built with Typer.  Declared in ``pyproject.toml`` as::
-
-    [project.scripts]
-    agent-nexus = "agent_nexus.platform.local.cli:app"
-
-This module MUST export ``app`` as a Typer instance at module level.
+Migrated from the original cli.py monolith.  All async implementations
+are here; sync Typer callbacks delegate to them via ``asyncio.run()``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
-from pathlib import Path
 from typing import Optional
 
 import typer
 
+from agent_nexus.platform.local.cli._shared import _init_managers
+
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(
-    name="agent-nexus",
-    help="Agent Nexus -- MCP-native Agent Platform",
-    no_args_is_help=True,
-)
-
-# Sub-command groups
 install_app = typer.Typer(help="Agent installation and management")
 run_app = typer.Typer(help="Run agents and workflows")
-app.add_typer(install_app, name="install")
-app.add_typer(run_app, name="run", invoke_without_command=True)
 
 
 # =====================================================================
@@ -73,34 +60,25 @@ def update(
 
 
 # =====================================================================
-# Discovery commands
+# Discovery commands (top-level, registered in __init__.py)
 # =====================================================================
 
 
-@app.command("list")
 def list_agents() -> None:
     """List installed agents."""
     asyncio.run(_list_agents())
 
 
-@app.command()
 def search(query: str = typer.Argument(help="Search query")) -> None:
     """Search for available agents."""
     asyncio.run(_search(query))
 
 
-@app.command()
 def info(name: str = typer.Argument(help="Agent name")) -> None:
     """Show detailed information about an agent."""
     asyncio.run(_info(name))
 
 
-# =====================================================================
-# Source commands
-# =====================================================================
-
-
-@app.command()
 def sources(
     action: str = typer.Argument(help="Action: list, add, remove"),
     name: Optional[str] = typer.Option(None, "--name", help="Source name"),
@@ -111,11 +89,6 @@ def sources(
 ) -> None:
     """Manage package sources."""
     asyncio.run(_sources(action, name, url, source_type))
-
-
-# =====================================================================
-# Run commands
-# =====================================================================
 
 
 @run_app.callback()
@@ -135,39 +108,6 @@ def run_agent(
 # =====================================================================
 # Internal async implementations
 # =====================================================================
-
-
-def _get_config_dir() -> Path:
-    """Resolve the platform config directory.
-
-    Priority: ``AGENT_NEXUS_HOME`` env var > built-in default.
-    """
-    env = os.environ.get("AGENT_NEXUS_HOME")
-    if env:
-        return Path(env)
-    from agent_nexus.platform.config.defaults import DEFAULT_CONFIG_DIR
-    return DEFAULT_CONFIG_DIR
-
-
-def _init_managers(
-    config_dir: Path | None = None,
-) -> tuple:
-    """Initialise the standard manager stack used by most commands.
-
-    Returns (config_loader, lockfile_manager, source_manager, config_dir).
-    """
-    from agent_nexus.platform.config.loader import ConfigLoader
-    from agent_nexus.platform.local.lockfile import LockfileManager
-    from agent_nexus.platform.local.sources import SourceManager
-
-    _config_dir = config_dir or _get_config_dir()
-    loader = ConfigLoader(_config_dir)
-    loader.ensure_config_dir()
-
-    lockfile = LockfileManager(_config_dir / "lockfile.json")
-    sources = SourceManager(_config_dir / "sources.yaml")
-
-    return loader, lockfile, sources, _config_dir
 
 
 async def _install(
@@ -266,14 +206,9 @@ async def _list_agents() -> None:
 
 
 async def _search(query: str) -> None:
-    """Async search implementation.
-
-    Searches across all configured sources' index.yaml files for
-    matching agent names, descriptions, or tags.
-    """
+    """Async search implementation."""
     _loader, lockfile, sources, _config_dir = _init_managers()
 
-    # Search across all source indexes using the public API
     results: list[dict] = []
     for source, entry in sources.search_agents(query):
         results.append(
@@ -310,7 +245,6 @@ async def _info(name: str) -> None:
         typer.echo(f"Agent '{name}' is not installed.", err=True)
         raise typer.Exit(code=1)
 
-    # Display lockfile info
     typer.echo(f"Agent: {name}")
     typer.echo(f"  Version:      {entry.version}")
     typer.echo(f"  Type:         {entry.agent_type.value}")
@@ -322,7 +256,6 @@ async def _info(name: str) -> None:
     if entry.dependencies:
         typer.echo(f"  Dependencies: {', '.join(entry.dependencies)}")
 
-    # Try to read and display manifest
     agent_dir = config_dir / "agents" / name
     manifest_path = agent_dir / "agent-manifest.yaml"
     if manifest_path.exists():
@@ -342,7 +275,6 @@ async def _info(name: str) -> None:
         except Exception:
             logger.debug("Failed to read manifest for info display", exc_info=True)
 
-    # Try to read SKILL.md summary
     skill_path = agent_dir / "SKILL.md"
     if skill_path.exists():
         try:
@@ -406,16 +338,12 @@ async def _sources(
 
 
 async def _run(name: str, mode: str, transport: str) -> None:
-    """Async run implementation.
-
-    Starts an agent via the supervisor (or gateway for router mode).
-    """
+    """Async run implementation."""
     from agent_nexus.platform.local.supervisor import AgentSupervisor
     from agent_nexus.platform.orchestration.process_manager import ProcessManager
 
     _loader, lockfile, _sources, config_dir = _init_managers()
 
-    # Check agent is installed
     entry = lockfile.get_entry(name)
     if entry is None:
         typer.echo(
@@ -426,7 +354,6 @@ async def _run(name: str, mode: str, transport: str) -> None:
         raise typer.Exit(code=1)
 
     if mode == "mcp":
-        # Run agent directly as MCP server (standalone mode)
         pm = ProcessManager()
         supervisor = AgentSupervisor(
             process_manager=pm,
@@ -448,7 +375,6 @@ async def _run(name: str, mode: str, transport: str) -> None:
         typer.echo("Press Ctrl+C to stop.")
 
         try:
-            # Keep running until interrupted
             await _wait_forever()
         except (KeyboardInterrupt, asyncio.CancelledError):
             typer.echo("\nStopping agent...")
@@ -456,7 +382,6 @@ async def _run(name: str, mode: str, transport: str) -> None:
             await supervisor.stop_agent(name)
 
     elif mode == "router":
-        # Run via Platform Router (gateway mode)
         try:
             from agent_nexus.platform.gateway.gateway import MCPGateway
             from agent_nexus.platform.router.router import PlatformRouter
@@ -496,7 +421,6 @@ async def _run(name: str, mode: str, transport: str) -> None:
             await gateway.stop()
 
     elif mode == "cli":
-        # Direct CLI invocation (no MCP server)
         pm = ProcessManager()
         supervisor = AgentSupervisor(
             process_manager=pm,
@@ -531,11 +455,3 @@ async def _wait_forever() -> None:
     """Block indefinitely until cancelled."""
     while True:
         await asyncio.sleep(3600)
-
-
-# =====================================================================
-# Entry point
-# =====================================================================
-
-if __name__ == "__main__":
-    app()
