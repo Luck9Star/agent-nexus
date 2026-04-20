@@ -15,11 +15,11 @@ Reference: docs/06-mcp-communication.md Section 8.2, 8.8
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
-from pydantic import create_model
 
 from agent_nexus.models.agent import AgentManifest
 from agent_nexus.platform.gateway.deferred_registry import DeferredAgentRegistry
@@ -343,10 +343,6 @@ class MCPGateway:
         """
         display_name = registered_name or adapter.full_name
 
-        # Build a dynamic Pydantic model from the agent's input schema
-        # so FastMCP generates correct inputSchema for MCP clients.
-        input_model = self._build_input_model(adapter, display_name)
-
         async def _invoke(**kwargs: Any) -> str:
             info = self._registry.get_agent_info(adapter.agent_name)
             if info is None or info.handle is None:
@@ -399,61 +395,71 @@ class MCPGateway:
                     )
             return f"Error: {result.get('error', 'unknown failure')}"
 
-        # Set function metadata for FastMCP schema generation
+        # Override __signature__ and __annotations__ so FastMCP's
+        # ParsedFunction.from_function() sees explicit typed parameters
+        # instead of **kwargs (which it rejects with ValueError).
+        params, annotations = self._build_params(adapter)
+        _invoke.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+            parameters=params, return_annotation=str,
+        )
+        annotations["return"] = str
+        _invoke.__annotations__ = annotations
         _invoke.__name__ = display_name
         _invoke.__doc__ = adapter.description or f"Call {display_name}"
 
-        # Attach dynamic input model so FastMCP produces correct inputSchema
-        if input_model is not None:
-            _invoke.__annotations__["kwargs"] = input_model
-
         return _invoke
 
-    def _build_input_model(
-        self, adapter: McpToolAdapter, display_name: str,
-    ) -> type | None:
-        """Build a Pydantic model from the adapter's JSON-schema input.
+    @staticmethod
+    def _build_params(
+        adapter: McpToolAdapter,
+    ) -> tuple[list[inspect.Parameter], dict[str, Any]]:
+        """Build explicit inspect.Parameter list from adapter's JSON-schema.
 
-        Returns ``None`` if the schema is empty or cannot be converted,
-        in which case FastMCP falls back to ``**kwargs: Any`` (empty schema).
+        Returns (params, annotations) for overriding ``__signature__``
+        and ``__annotations__`` on the invoke function.
         """
         schema = adapter._input_schema
         if not schema or "properties" not in schema:
-            return None
+            return [], {"return": str}
 
-        try:
-            properties = schema.get("properties", {})
-            required = set(schema.get("required", []))
-            fields: dict[str, Any] = {}
-            for prop_name, prop_def in properties.items():
-                if not isinstance(prop_def, dict):
-                    continue
-                prop_type = str  # default to string
-                if prop_def.get("type") == "integer":
-                    prop_type = int
-                elif prop_def.get("type") == "number":
-                    prop_type = float
-                elif prop_def.get("type") == "boolean":
-                    prop_type = bool
-                elif prop_def.get("type") == "array":
-                    prop_type = list
-                elif prop_def.get("type") == "object":
-                    prop_type = dict
-                if prop_name in required:
-                    fields[prop_name] = (prop_type, ...)
-                else:
-                    default = prop_def.get("default")
-                    fields[prop_name] = (prop_type, default)
+        type_map: dict[str, type] = {
+            "integer": int,
+            "number": float,
+            "boolean": bool,
+            "array": list,
+            "object": dict,
+        }
+        properties = schema.get("properties", {})
+        required = set(schema.get("required", []))
+        params: list[inspect.Parameter] = []
+        annotations: dict[str, Any] = {}
 
-            model_name = f"{display_name}_Input"
-            return create_model(model_name, **fields)
-        except Exception:
-            logger.debug(
-                "Failed to build input model for %s, falling back to empty schema",
-                display_name,
-                exc_info=True,
-            )
-            return None
+        for prop_name, prop_def in properties.items():
+            if not isinstance(prop_def, dict):
+                continue
+            py_type = type_map.get(prop_def.get("type"), str)
+            annotations[prop_name] = py_type
+
+            if prop_name in required:
+                params.append(
+                    inspect.Parameter(
+                        prop_name,
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        annotation=py_type,
+                    )
+                )
+            else:
+                default = prop_def.get("default")
+                params.append(
+                    inspect.Parameter(
+                        prop_name,
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        annotation=py_type,
+                        default=default,
+                    )
+                )
+
+        return params, annotations
 
     # ------------------------------------------------------------------
     # Runtime

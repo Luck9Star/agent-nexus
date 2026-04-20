@@ -90,6 +90,8 @@ class AgentToPlatform(FrozenModel):
     @property
     def is_success(self) -> bool:
         """Check if this response indicates successful completion."""
+        if self.type == AgentToPlatformType.ERROR:
+            return False
         return self.status is None or self.status.lower() == "completed"
 
     @field_validator("output")
