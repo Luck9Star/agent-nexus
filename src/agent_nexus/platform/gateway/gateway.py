@@ -35,6 +35,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Pre-computed JSON Schema → Python type mapping (used by _build_params)
+_JSON_SCHEMA_TYPE_MAP: dict[str, type] = {
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
+
 
 # ---------------------------------------------------------------------------
 # MCPGateway
@@ -94,13 +103,11 @@ class MCPGateway:
         if not results:
             return "No matching agents found."
 
-        activated: list[str] = []
-        for manifest in results:
+        async def _activate_one(manifest: AgentManifest) -> str:
             try:
                 schemas = await self._registry.activate_agent(manifest.name)
-                # Register the discovered tools with the FastMCP server
                 await self._register_agent_tools(manifest.name)
-                activated.append(
+                return (
                     f"- {manifest.name}: {manifest.description} "
                     f"({len(schemas)} tools loaded)"
                 )
@@ -110,10 +117,14 @@ class MCPGateway:
                     manifest.name,
                     exc,
                 )
-                activated.append(
+                return (
                     f"- {manifest.name}: activation failed "
                     f"[{type(exc).__name__}] {exc}"
                 )
+
+        activated = await asyncio.gather(
+            *[_activate_one(m) for m in results]
+        )
 
         header = "Found and activated the following agents "
         header += "(tools now available):\n"
@@ -422,13 +433,6 @@ class MCPGateway:
         if not schema or "properties" not in schema:
             return [], {"return": str}
 
-        type_map: dict[str, type] = {
-            "integer": int,
-            "number": float,
-            "boolean": bool,
-            "array": list,
-            "object": dict,
-        }
         properties = schema.get("properties", {})
         required = set(schema.get("required", []))
         params: list[inspect.Parameter] = []
@@ -438,7 +442,7 @@ class MCPGateway:
             if not isinstance(prop_def, dict):
                 continue
             type_str = prop_def.get("type")
-            py_type = type_map.get(type_str, str) if isinstance(type_str, str) else str
+            py_type = _JSON_SCHEMA_TYPE_MAP.get(type_str, str) if isinstance(type_str, str) else str
             annotations[prop_name] = py_type
 
             if prop_name in required:

@@ -212,6 +212,11 @@ class PermissionChecker:
 
     def __init__(self, config: PermissionConfig) -> None:
         self._config = config
+        # Pre-expand path rules to avoid repeated _expand_user calls in hot path
+        self._expanded_path_rules: list[tuple[str, PathAccess]] = [
+            (_expand_user(rule.pattern), rule.access)
+            for rule in config.path_rules
+        ]
 
     # ------------------------------------------------------------------
     # Public API
@@ -271,10 +276,9 @@ class PermissionChecker:
 
         # 3. User-configured path_rules — first matching rule wins
         expanded = _expand_user(path)
-        for rule in self._config.path_rules:
-            expanded_pattern = _expand_user(rule.pattern)
+        for expanded_pattern, access in self._expanded_path_rules:
             if _fnmatch_recursive(expanded, expanded_pattern):
-                return self._apply_path_access(rule.access, tool_name, path)
+                return self._apply_path_access(access, tool_name, path)
 
         # 4. No matching rule — default allow (sensitive paths already handled above)
         return tool_decision

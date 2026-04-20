@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Generator
 
 from agent_nexus.models.task import TaskGraphSnapshot, TaskItem, TaskState
-from agent_nexus.platform.utils import now_iso as _now_iso
+from agent_nexus.platform.utils import detect_cycles_dfs, now_iso as _now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -269,21 +269,26 @@ class TaskGraph:
                 )
 
             # 2. Validate all blocked_by references (must exist in DB or in this batch)
+            #    Collect external deps, then validate in a single query.
             all_deps: list[tuple[str, str]] = []
+            external_deps: set[str] = set()
             for task in tasks:
                 for dep_id in dict.fromkeys(task.blocked_by):
                     # Self-dependency will be caught by cycle detection
                     if dep_id not in id_set and dep_id != task.id:
-                        # Check if it exists in the DB already
-                        row = conn.execute(
-                            "SELECT 1 FROM tasks WHERE id = ?", (dep_id,)
-                        ).fetchone()
-                        if row is None:
-                            raise ValueError(
-                                f"Task '{task.id}' blocked_by references "
-                                f"non-existent task '{dep_id}'"
-                            )
+                        external_deps.add(dep_id)
                     all_deps.append((task.id, dep_id))
+            if external_deps:
+                ph = ",".join("?" * len(external_deps))
+                found = {r[0] for r in conn.execute(
+                    f"SELECT id FROM tasks WHERE id IN ({ph})",
+                    tuple(external_deps),
+                ).fetchall()}
+                missing = external_deps - found
+                if missing:
+                    raise ValueError(
+                        f"blocked_by references non-existent tasks: {missing}"
+                    )
 
             # 3. Batch insert all tasks
             task_rows = [
@@ -566,17 +571,16 @@ class TaskGraph:
     def _detect_cycles_conn(
         self, conn: sqlite3.Connection,
     ) -> list[list[str]]:
-        """Detect cycles using database-backed dependency lookup."""
-        from agent_nexus.platform.utils import detect_cycles_dfs
-
+        """Detect cycles using preloaded dependency map (single query)."""
+        dep_rows = conn.execute(
+            "SELECT task_id, blocked_by_id FROM task_dependencies"
+        ).fetchall()
+        dep_map: dict[str, list[str]] = {}
+        for task_id, blocked_by_id in dep_rows:
+            dep_map.setdefault(task_id, []).append(blocked_by_id)
         return detect_cycles_dfs(
             nodes=[row[0] for row in conn.execute("SELECT id FROM tasks")],
-            get_deps=lambda name: [
-                row[0] for row in conn.execute(
-                    "SELECT blocked_by_id FROM task_dependencies WHERE task_id = ?",
-                    (name,),
-                )
-            ],
+            get_deps=lambda name: dep_map.get(name, []),
         )
 
     def get_snapshot(self) -> TaskGraphSnapshot:
@@ -756,10 +760,16 @@ class TaskGraph:
         Walk from each blocked_by_id back through their dependencies.
         If we can reach task_id, there's a cycle.
 
-        Uses targeted BFS that only queries reachable nodes instead of
-        loading the entire dependency table, making it efficient for
-        large task graphs.
+        Preloads all dependencies in a single query so the BFS loop
+        does not issue per-node SQL.
         """
+        dep_rows = conn.execute(
+            "SELECT task_id, blocked_by_id FROM task_dependencies"
+        ).fetchall()
+        dep_map: dict[str, list[str]] = {}
+        for tid, bid in dep_rows:
+            dep_map.setdefault(tid, []).append(bid)
+
         visited: set[str] = set()
 
         # BFS from blocked_by_ids backwards through their dependencies
@@ -772,12 +782,7 @@ class TaskGraph:
                 continue
             visited.add(node)
 
-            # Query only this node's dependencies
-            rows = conn.execute(
-                "SELECT blocked_by_id FROM task_dependencies WHERE task_id = ?",
-                (node,),
-            ).fetchall()
-            for (dep_id,) in rows:
+            for dep_id in dep_map.get(node, []):
                 if dep_id not in visited:
                     queue.append(dep_id)
 

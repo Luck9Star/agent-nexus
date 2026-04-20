@@ -25,6 +25,8 @@ from agent_nexus.platform.orchestration.process_manager import (
     AgentHandle,
     ProcessManager,
 )
+from pathlib import Path
+
 from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
 
 logger = logging.getLogger(__name__)
@@ -204,8 +206,6 @@ class DeferredAgentRegistry:
 
             # 1. Start subprocess if not running
             if not info.is_running and info.start_command:
-                from pathlib import Path
-
                 cwd = Path(info.start_cwd) if info.start_cwd else None
                 handle = await self._pm.start_agent(
                     name=name,

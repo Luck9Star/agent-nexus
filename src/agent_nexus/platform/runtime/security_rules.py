@@ -49,6 +49,7 @@ class ImportRule(SecurityRule):
 
     def __init__(self, forbidden: list[str] | set[str]) -> None:
         self.forbidden: set[str] = set(forbidden)
+        self._forbidden_prefixes: tuple[str, ...] = tuple(f"{mod}." for mod in self.forbidden)
 
     def check(self, node: ast.AST) -> list[SecurityViolation]:
         violations: list[SecurityViolation] = []
@@ -109,13 +110,9 @@ class ImportRule(SecurityRule):
 
     def _is_forbidden(self, module_name: str) -> bool:
         """Check if module_name is forbidden (exact match or parent module)."""
-        if module_name in self.forbidden:
-            return True
-        # Block submodules too: "os.path" blocked if "os" is forbidden
-        for forbidden_mod in self.forbidden:
-            if module_name.startswith(forbidden_mod + "."):
-                return True
-        return False
+        # Block submodules too: "os.path" blocked if "os" is forbidden.
+        # str.startswith(tuple) is a single C-level call checking all prefixes.
+        return module_name in self.forbidden or module_name.startswith(self._forbidden_prefixes)
 
 
 class FunctionRule(SecurityRule):
@@ -144,7 +141,7 @@ class FunctionRule(SecurityRule):
                     SecurityViolation(
                         rule_type="function",
                         node_type="Call",
-                        code_snippet=ast.unparse(node) if hasattr(ast, "unparse") else str(func_name),
+                        code_snippet=ast.unparse(node),
                         message=f"Forbidden function call: '{func_name}' at line {node.lineno}",
                     )
                 )
@@ -159,7 +156,7 @@ class FunctionRule(SecurityRule):
                     SecurityViolation(
                         rule_type="function",
                         node_type="AttributeCall",
-                        code_snippet=ast.unparse(node) if hasattr(ast, "unparse") else str(func_name),
+                        code_snippet=ast.unparse(node),
                         message=(
                             f"Forbidden function call via attribute: "
                             f"'{func_name}' at line {node.lineno}"
@@ -182,7 +179,7 @@ class FunctionRule(SecurityRule):
                         SecurityViolation(
                             rule_type="function",
                             node_type="Call",
-                            code_snippet=ast.unparse(node) if hasattr(ast, "unparse") else "getattr(...)",
+                            code_snippet=ast.unparse(node),
                             message=(
                                 f"Forbidden dynamic attribute access via getattr: "
                                 f"'{attr_value}' at line {node.lineno}"
