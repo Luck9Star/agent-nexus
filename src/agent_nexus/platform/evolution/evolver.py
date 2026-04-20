@@ -300,16 +300,16 @@ class SkillEvolver:
                 error="DERIVED requires at least 1 parent",
             )
 
-        # Load all parent skills
+        # Load all parent skills in a single query (avoid N+1)
+        found = self._store.get_skill_records_batch(suggestion.target_skill_ids)
         parents: list[SkillRecord] = []
         for pid in suggestion.target_skill_ids:
-            parent = self._store.get_skill_record(pid)
-            if parent is None:
+            if pid not in found:
                 return EvolveResult(
                     success=False,
                     error=f"Parent skill not found: {pid}",
                 )
-            parents.append(parent)
+            parents.append(found[pid])
 
         # Determine new skill name
         first_parent = parents[0]

@@ -299,6 +299,33 @@ class EvolutionStore:
                 return None
             return self._row_to_record(conn, row)
 
+    def get_skill_records_batch(
+        self, skill_ids: list[str]
+    ) -> dict[str, SkillRecord]:
+        """Load multiple skill records by ID in a single query.
+
+        Returns a dict mapping each found ID to its SkillRecord.
+        IDs not found in the database are simply absent from the result.
+        """
+        if not skill_ids:
+            return {}
+        placeholders = ",".join("?" * len(skill_ids))
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, name, version, lineage_origin, lineage_generation, "
+                "lineage_content_diff, lineage_content_snapshot, directory, "
+                "is_active, total_selections, total_applied, total_completions, "
+                "total_fallbacks, created_at, updated_at "
+                f"FROM skill_records WHERE id IN ({placeholders})",
+                tuple(skill_ids),
+            ).fetchall()
+            parents = self._batch_load_parents(conn)
+            result: dict[str, SkillRecord] = {}
+            for row in rows:
+                record = self._row_to_record(conn, row, parents)
+                result[record.id] = record
+            return result
+
     def get_active_skills(self) -> list[SkillRecord]:
         """Load all active skill records."""
         with self._conn() as conn:

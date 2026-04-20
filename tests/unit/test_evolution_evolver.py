@@ -24,6 +24,7 @@ def _make_store(skills=None):
     store = MagicMock()
     store.get_active_skills.return_value = skills or []
     store.evolve_skill.return_value = EvolveResult(success=True)
+    store.get_skill_records_batch.return_value = {}
     return store
 
 
@@ -78,7 +79,7 @@ class TestEvolveDerived:
     def test_derived_creates_enhanced_record(self):
         parent = _skill()
         store = _make_store()
-        store.get_skill_record.return_value = parent
+        store.get_skill_records_batch.return_value = {"sk-1": parent}
         result = SkillEvolver(store).evolve(EvolutionSuggestion(
             evolution_type=EvolutionType.DERIVED, target_skill_ids=["sk-1"], direction="enhance",
         ))
@@ -90,7 +91,7 @@ class TestEvolveDerived:
     def test_derived_merge_multiple_parents(self):
         p1, p2 = _skill(id="a", name="alpha"), _skill(id="b", name="beta", gen=2)
         store = _make_store()
-        store.get_skill_record.side_effect = lambda sid: {"a": p1, "b": p2}.get(sid)
+        store.get_skill_records_batch.return_value = {"a": p1, "b": p2}
         result = SkillEvolver(store).evolve(EvolutionSuggestion(
             evolution_type=EvolutionType.DERIVED, target_skill_ids=["a", "b"], direction="merge",
         ))
@@ -107,7 +108,7 @@ class TestEvolveDerived:
 
     def test_derived_parent_not_found_fails(self):
         store = _make_store()
-        store.get_skill_record.return_value = None
+        store.get_skill_records_batch.return_value = {}  # no parents found
         result = SkillEvolver(store).evolve(EvolutionSuggestion(
             evolution_type=EvolutionType.DERIVED, target_skill_ids=["missing"],
         ))

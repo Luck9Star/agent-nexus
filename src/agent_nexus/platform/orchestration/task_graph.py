@@ -774,40 +774,30 @@ class TaskGraph:
 
         Walk from each blocked_by_id back through their dependencies.
         If we can reach task_id, there's a cycle.
+
+        Uses targeted BFS that only queries reachable nodes instead of
+        loading the entire dependency table, making it efficient for
+        large task graphs.
         """
-        # Build current dependency graph from DB
-        dep_rows = conn.execute(
-            "SELECT task_id, blocked_by_id FROM task_dependencies"
-        ).fetchall()
-        dep_map: dict[str, list[str]] = {}
-        for tid, bid in dep_rows:
-            dep_map.setdefault(tid, []).append(bid)
-
-        # Add proposed dependencies
-        for bid in blocked_by_ids:
-            dep_map.setdefault(task_id, []).append(bid)
-
-        # BFS/DFS from blocked_by_ids to see if we reach task_id
         visited: set[str] = set()
 
-        def _can_reach(node: str, target: str) -> bool:
-            if node == target:
+        # BFS from blocked_by_ids backwards through their dependencies
+        queue = list(blocked_by_ids)
+        while queue:
+            node = queue.pop(0)
+            if node == task_id:
                 return True
             if node in visited:
-                return False
+                continue
             visited.add(node)
-            for dep in dep_map.get(node, []):
-                if _can_reach(dep, target):
-                    return True
-            return False
 
-        for start_id in blocked_by_ids:
-            visited.clear()
-            # Walk from start_id through its dependencies
-            # If start_id is task_id itself, that's a self-loop
-            if start_id == task_id:
-                return True
-            if _can_reach(start_id, task_id):
-                return True
+            # Query only this node's dependencies
+            rows = conn.execute(
+                "SELECT blocked_by_id FROM task_dependencies WHERE task_id = ?",
+                (node,),
+            ).fetchall()
+            for (dep_id,) in rows:
+                if dep_id not in visited:
+                    queue.append(dep_id)
 
         return False
