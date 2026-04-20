@@ -95,9 +95,12 @@ def _check_content_requirements(
 
         # Check if any matching clause contains required keywords
         all_keywords = req.get("required_keywords", []) + req.get("en_required_keywords", [])
+        if not all_keywords:
+            continue
+        matching_contents_lower = [c.content.lower() for c in matching_clauses]
         has_keywords = any(
-            any(kw.lower() in clause.content.lower() for kw in all_keywords)
-            for clause in matching_clauses
+            any(kw.lower() in content_lower for kw in all_keywords)
+            for content_lower in matching_contents_lower
         )
 
         if all_keywords and not has_keywords:

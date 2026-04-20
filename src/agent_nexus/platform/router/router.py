@@ -22,7 +22,6 @@ import json
 import logging
 import uuid
 from collections import deque
-from pathlib import Path
 from typing import Any
 
 from agent_nexus.models.ipc import AgentToPlatformType
@@ -58,6 +57,13 @@ _PHASE_ORDER: list[WorkflowPhase] = [
 # is phases x timeout.  This prevents unbounded hangs from retries or
 # stuck agents.
 _DEFAULT_COMPOSITE_TIMEOUT: float = DEFAULT_IPC_EXECUTE_TIMEOUT * len(_PHASE_ORDER)
+
+_PHASE_ROLE_MAP: dict[WorkflowPhase, str] = {
+    WorkflowPhase.research: "explore",
+    WorkflowPhase.synthesis: "plan",
+    WorkflowPhase.implementation: "worker",
+    WorkflowPhase.verification: "verification",
+}
 
 
 def _make_error_result(error: str, error_type: str) -> dict[str, Any]:
@@ -184,12 +190,10 @@ class PlatformRouter:
         #    so that add_task can validate blocked_by references.  The DSL
         #    validate() method checks that all blocked_by IDs exist in the
         #    task set but does NOT enforce topological ordering of the list.
-        db_path = Path(f":memory:")
-        ctx.task_graph = TaskGraph(db_path)
+        ctx.task_graph = TaskGraph(":memory:")
         try:
             sorted_tasks = self._topological_sort_tasks(definition.tasks)
-            for dsl_task in sorted_tasks:
-                ctx.task_graph.add_task(dsl_task.to_task_item())
+            ctx.task_graph.add_tasks([dsl_task.to_task_item() for dsl_task in sorted_tasks])
         except Exception as exc:
             last_error = f"TaskGraph setup failed: {exc}"
             last_error_type = type(exc).__name__
@@ -561,13 +565,7 @@ class PlatformRouter:
     @staticmethod
     def _phase_to_role(phase: WorkflowPhase) -> str:
         """Map WorkflowPhase to DSL agent role."""
-        mapping = {
-            WorkflowPhase.research: "explore",
-            WorkflowPhase.synthesis: "plan",
-            WorkflowPhase.implementation: "worker",
-            WorkflowPhase.verification: "verification",
-        }
-        return mapping.get(phase, "worker")
+        return _PHASE_ROLE_MAP.get(phase, "worker")
 
     @staticmethod
     def _build_phase_message(

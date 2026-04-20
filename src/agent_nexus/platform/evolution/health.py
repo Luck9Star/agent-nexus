@@ -161,30 +161,40 @@ class HealthChecker:
         return self.diagnose_skills(skill_ids=None)
 
     def diagnose_skills(
-        self, skill_ids: set[str] | None = None,
+        self,
+        skill_ids: set[str] | None = None,
+        skills: list[SkillRecord] | None = None,
     ) -> dict[str, HealthReport]:
         """Run health diagnostics, optionally filtered to specific skill IDs.
 
         Args:
             skill_ids: If provided, only diagnose skills whose IDs are in
                 this set.  If None, diagnose all active skills.
+            skills: Pre-loaded skill list.  If provided, used directly
+                instead of fetching from the store (avoids redundant query).
 
         Returns:
             Dict mapping skill_id -> HealthReport.
         """
-        active_skills = self._store.get_active_skills()
-        if skill_ids is not None:
-            active_skills = [s for s in active_skills if s.id in skill_ids]
+        if skills is not None:
+            active_skills = skills
+            if skill_ids is not None:
+                active_skills = [s for s in active_skills if s.id in skill_ids]
+        else:
+            active_skills = self._store.get_active_skills()
+            if skill_ids is not None:
+                active_skills = [s for s in active_skills if s.id in skill_ids]
         reports: dict[str, HealthReport] = {}
 
         for skill in active_skills:
+            # Compute rates once — reuse inside check_health via the
+            # evaluate_skill_health path to avoid double computation.
+            rates = SkillRates.from_record(skill)
             suggestions = self.check_health(skill)
-            sel = skill.total_selections
 
             metrics: dict[str, float] = {
-                "total_selections": float(sel),
+                "total_selections": float(skill.total_selections),
             }
-            rates = SkillRates.from_record(skill)
             if rates is not None:
                 metrics["applied_rate"] = rates.applied_rate
                 metrics["completion_rate"] = rates.completion_rate
@@ -211,13 +221,17 @@ class HealthChecker:
     def get_unhealthy(self) -> dict[str, HealthReport]:
         """Return only unhealthy skills (those with suggestions).
 
-        Returns:
-            Dict mapping skill_id -> HealthReport for unhealthy skills.
+        Pre-filters skills with 0 total_selections before running full
+        diagnosis, since skills never selected cannot be unhealthy.
         """
-        all_reports = self.diagnose_all()
+        active_skills = self._store.get_active_skills()
+        candidates = [s for s in active_skills if s.total_selections > 0]
+        if not candidates:
+            return {}
+        reports = self.diagnose_skills(skills=candidates)
         return {
             sid: report
-            for sid, report in all_reports.items()
+            for sid, report in reports.items()
             if not report.is_healthy
         }
 

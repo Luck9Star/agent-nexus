@@ -1701,13 +1701,13 @@ class TestRouteCompositeTaskGraphSetupFailure:
 
     @pytest.mark.asyncio
     async def test_add_task_failure_returns_graceful_result(self) -> None:
-        """TaskGraph.add_task raising does not crash -- returns failed WorkflowResult."""
+        """TaskGraph.add_tasks raising does not crash -- returns failed WorkflowResult."""
         definition = _make_definition()
         pm = _make_process_manager()
         router = PlatformRouter(process_manager=pm)
 
         mock_tg = MagicMock()
-        mock_tg.add_task.side_effect = RuntimeError("DB locked")
+        mock_tg.add_tasks.side_effect = RuntimeError("DB locked")
 
         with patch(
             "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg
@@ -1729,7 +1729,7 @@ class TestRouteCompositeTaskGraphSetupFailure:
         router = PlatformRouter(process_manager=pm)
 
         mock_tg = MagicMock()
-        mock_tg.add_task.side_effect = ValueError("bad task")
+        mock_tg.add_tasks.side_effect = ValueError("bad task")
 
         with patch(
             "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg

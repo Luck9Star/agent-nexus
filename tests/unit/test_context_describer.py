@@ -355,7 +355,7 @@ class TestL1Context:
         r_high = _make_record("s2", "high", selections=500, is_active=True)
         r_mid = _make_record("s3", "mid", selections=100, is_active=True)
 
-        def mock_diagnose_skills(skill_ids=None) -> dict[str, HealthReport]:
+        def mock_diagnose_skills(skill_ids=None, *, skills=None) -> dict[str, HealthReport]:
             return {
                 "s1": _make_health_report("s1", "low", is_healthy=True),
                 "s2": _make_health_report("s2", "high", is_healthy=True),
@@ -480,7 +480,7 @@ class TestL2Context:
         r2 = _make_record("s2", "beta", selections=200)
         r3 = _make_record("s3", "gamma", selections=300)
 
-        def mock_diagnose_skills(skill_ids=None) -> dict[str, HealthReport]:
+        def mock_diagnose_skills(skill_ids=None, *, skills=None) -> dict[str, HealthReport]:
             return {
                 "s1": _make_health_report("s1", "alpha", is_healthy=True),
                 "s2": _make_health_report("s2", "beta", is_healthy=True),

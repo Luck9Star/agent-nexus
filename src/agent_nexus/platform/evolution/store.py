@@ -277,11 +277,11 @@ class EvolutionStore:
                 "DELETE FROM skill_lineage_parents WHERE skill_id = ?",
                 (record.id,),
             )
-            for pid in lin.parent_skill_ids:
-                conn.execute(
+            if lin.parent_skill_ids:
+                conn.executemany(
                     "INSERT INTO skill_lineage_parents (skill_id, parent_id) "
                     "VALUES (?, ?)",
-                    (record.id, pid),
+                    [(record.id, pid) for pid in lin.parent_skill_ids],
                 )
 
     def get_skill_record(self, skill_id: str) -> SkillRecord | None:
@@ -489,7 +489,14 @@ class EvolutionStore:
                     ),
                 )
 
-                # Atomically increment counters for this skill
+            # Validate counter invariants for all judgments, then batch
+            # increment counters grouped by skill_id to avoid per-judgment
+            # UPDATE statements.
+            deltas: dict[str, dict[str, int]] = {}
+            for j in judgments or []:
+                sid = j.get("skill_id")
+                if not sid:
+                    continue
                 selected = bool(j.get("selected", False))
                 applied = bool(j.get("applied", False))
                 completed = bool(j.get("completed", False))
@@ -500,34 +507,38 @@ class EvolutionStore:
                     completed=completed, fell_back=fell_back,
                 )
 
-                sets: list[str] = []
-                params: list[Any] = []
+                d = deltas.setdefault(sid, {"sel": 0, "app": 0, "comp": 0, "fb": 0})
                 if selected:
-                    sets.append("total_selections = total_selections + 1")
+                    d["sel"] += 1
                 if applied:
-                    sets.append("total_applied = total_applied + 1")
+                    d["app"] += 1
                 if completed:
-                    sets.append("total_completions = total_completions + 1")
+                    d["comp"] += 1
                 if fell_back:
-                    sets.append("total_fallbacks = total_fallbacks + 1")
-                if sets:
-                    sets.append("updated_at = ?")
-                    params.append(_now_iso())
-                    params.append(sid)
-                    conn.execute(
-                        f"UPDATE skill_records SET {', '.join(sets)} WHERE id = ?",
-                        tuple(params),
-                    )
-                    # rowcount not checked here: the judgment row is already
-                    # inserted above and the FK constraint on skill_id
-                    # guarantees the skill exists (if PRAGMA foreign_keys=ON).
+                    d["fb"] += 1
+
+            now = _now_iso()
+            for sid, d in deltas.items():
+                conn.execute(
+                    "UPDATE skill_records SET "
+                    "total_selections = total_selections + ?, "
+                    "total_applied = total_applied + ?, "
+                    "total_completions = total_completions + ?, "
+                    "total_fallbacks = total_fallbacks + ?, "
+                    "updated_at = ? WHERE id = ?",
+                    (d["sel"], d["app"], d["comp"], d["fb"], now, sid),
+                )
 
         return analysis_id
 
     def get_analyses_for_task(
         self, task_id: str
     ) -> list[dict[str, Any]]:
-        """Load all analyses for a given task."""
+        """Load all analyses for a given task.
+
+        Fetches all analysis rows first, then batch-loads judgments in
+        a single SQL query to avoid N+1 per-row judgment lookups.
+        """
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT id, task_id, agent_name, analysis, "
@@ -535,7 +546,48 @@ class EvolutionStore:
                 "FROM execution_analyses WHERE task_id = ?",
                 (task_id,),
             ).fetchall()
-            return [self._row_to_analysis_dict(conn, r) for r in rows]
+            if not rows:
+                return []
+
+            # Collect analysis IDs for batch judgment query
+            analysis_ids = [r[0] for r in rows]
+
+            # Single query for all judgments across these analyses
+            placeholders = ",".join("?" * len(analysis_ids))
+            j_rows = conn.execute(
+                f"SELECT id, analysis_id, skill_id, selected, applied, "
+                f"completed, fell_back FROM skill_judgments "
+                f"WHERE analysis_id IN ({placeholders})",
+                tuple(analysis_ids),
+            ).fetchall()
+
+            # Group judgments by analysis_id
+            judgments_by_analysis: dict[str, list[dict[str, Any]]] = {}
+            for r in j_rows:
+                aid = r[1]
+                judgments_by_analysis.setdefault(aid, []).append({
+                    "id": r[0],
+                    "analysis_id": r[1],
+                    "skill_id": r[2],
+                    "selected": bool(r[3]),
+                    "applied": bool(r[4]),
+                    "completed": bool(r[5]),
+                    "fell_back": bool(r[6]),
+                })
+
+            # Build result dicts without per-row queries
+            results: list[dict[str, Any]] = []
+            for r in rows:
+                results.append({
+                    "id": r[0],
+                    "task_id": r[1],
+                    "agent_name": r[2],
+                    "analysis": r[3],
+                    "evolution_suggestions": json.loads(r[4]) if r[4] else [],
+                    "created_at": r[5],
+                    "judgments": judgments_by_analysis.get(r[0], []),
+                })
+            return results
 
     def get_judgments_for_skill(
         self, skill_id: str, limit: int = 50
@@ -693,23 +745,28 @@ class EvolutionStore:
                     # Without this, a partial deactivation + return would be
                     # committed by the _conn context manager on normal exit,
                     # leaving some parents deactivated with no replacement.
-                    for pid in parent_skill_ids:
-                        row = conn.execute(
-                            "SELECT 1 FROM skill_records WHERE id = ?",
-                            (pid,),
-                        ).fetchone()
-                        if row is None:
-                            raise ValueError(
-                                f"Parent skill_id {pid} not found — "
-                                f"cannot deactivate for FIX evolution"
-                            )
+                    if parent_skill_ids:
+                        placeholders = ",".join("?" * len(parent_skill_ids))
+                        found = {
+                            r[0] for r in conn.execute(
+                                f"SELECT id FROM skill_records WHERE id IN ({placeholders})",
+                                tuple(parent_skill_ids),
+                            ).fetchall()
+                        }
+                        for pid in parent_skill_ids:
+                            if pid not in found:
+                                raise ValueError(
+                                    f"Parent skill_id {pid} not found — "
+                                    f"cannot deactivate for FIX evolution"
+                                )
 
                     # All checks passed — deactivate parents atomically.
-                    for pid in parent_skill_ids:
+                    if parent_skill_ids:
+                        now = _now_iso()
                         conn.execute(
-                            "UPDATE skill_records SET is_active = 0, updated_at = ? "
-                            "WHERE id = ?",
-                            (_now_iso(), pid),
+                            f"UPDATE skill_records SET is_active = 0, updated_at = ? "
+                            f"WHERE id IN ({','.join('?' * len(parent_skill_ids))})",
+                            (now, *parent_skill_ids),
                         )
 
                     # Guard: after deactivating parents, if another active
@@ -767,11 +824,11 @@ class EvolutionStore:
                 )
 
                 # Insert lineage parents
-                for pid in parent_skill_ids:
-                    conn.execute(
+                if parent_skill_ids:
+                    conn.executemany(
                         "INSERT INTO skill_lineage_parents "
                         "(skill_id, parent_id) VALUES (?, ?)",
-                        (new_record.id, pid),
+                        [(new_record.id, pid) for pid in parent_skill_ids],
                     )
 
         except sqlite3.IntegrityError:

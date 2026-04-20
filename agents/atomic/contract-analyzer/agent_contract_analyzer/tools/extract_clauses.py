@@ -68,6 +68,19 @@ TYPE_PRIORITY: dict[str, int] = {
     "other": 0,
 }
 
+# Pre-computed lowercase keywords for _classify_type
+TYPE_KEYWORDS_LOWER: dict[str, list[str]] = {
+    ct: [kw.lower() for kw in kws]
+    for ct, kws in TYPE_KEYWORDS.items()
+}
+
+# Pre-compiled obligation patterns (module level)
+_OBLIGATION_RE_CN = re.compile(r"[^。；\n]*[应当应须必须][^。；\n]*[。；]?", re.UNICODE)
+_OBLIGATION_RE_EN = re.compile(
+    r"[^.]*\b(?:shall|must|will|is required to|is obligated to)\b[^.]*\.?",
+    re.IGNORECASE,
+)
+
 
 def _classify_type(text: str) -> str:
     """Classify clause type based on keyword matching with priority tiebreaking."""
@@ -76,8 +89,8 @@ def _classify_type(text: str) -> str:
     best_count = 0
     best_priority = 0
 
-    for clause_type, keywords in TYPE_KEYWORDS.items():
-        count = sum(1 for kw in keywords if kw.lower() in text_lower)
+    for clause_type, keywords_lower in TYPE_KEYWORDS_LOWER.items():
+        count = sum(1 for kw in keywords_lower if kw in text_lower)
         priority = TYPE_PRIORITY.get(clause_type, 0)
         if count > best_count or (count == best_count and count > 0 and priority > best_priority):
             best_count = count
@@ -107,18 +120,13 @@ def _extract_obligations(text: str) -> list[str]:
     obligations: list[str] = []
 
     # Chinese obligation patterns
-    obligation_re_cn = re.compile(r"[^。；\n]*[应当应须必须][^。；\n]*[。；]?", re.UNICODE)
-    for match in obligation_re_cn.finditer(text):
+    for match in _OBLIGATION_RE_CN.finditer(text):
         sentence = match.group(0).strip()
         if len(sentence) > 5:
             obligations.append(sentence)
 
     # English obligation patterns
-    obligation_re_en = re.compile(
-        r"[^.]*\b(?:shall|must|will|is required to|is obligated to)\b[^.]*\.?",
-        re.IGNORECASE,
-    )
-    for match in obligation_re_en.finditer(text):
+    for match in _OBLIGATION_RE_EN.finditer(text):
         sentence = match.group(0).strip()
         if len(sentence) > 10:
             obligations.append(sentence)

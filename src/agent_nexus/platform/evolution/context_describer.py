@@ -51,16 +51,23 @@ class EvolutionContextDescriber:
     # L0: Summary (~30 tokens)
     # ------------------------------------------------------------------
 
-    def l0_context(self) -> str:
+    def l0_context(
+        self,
+        active_skills: list[SkillRecord] | None = None,
+    ) -> str:
         """Generate L0 context block (~30 tokens).
 
         Summary: total active skills, overall health, evolution count.
+
+        Args:
+            active_skills: Pre-loaded active skills list.  If None, fetched
+                from the store (allows callers to reuse a single query).
 
         Returns:
             Formatted context string, e.g.
             "Evolution: 5 active skills, 2 evolved, avg effective_rate 0.85"
         """
-        active = self._store.get_active_skills()
+        active = active_skills if active_skills is not None else self._store.get_active_skills()
         total_active = len(active)
         if total_active == 0:
             return "[Evolution] No active skills"
@@ -88,18 +95,24 @@ class EvolutionContextDescriber:
     # L1: Details (~100 tokens)
     # ------------------------------------------------------------------
 
-    def l1_context(self, skill_ids: list[str] | None = None) -> str:
+    def l1_context(
+        self,
+        skill_ids: list[str] | None = None,
+        active_skills: list[SkillRecord] | None = None,
+    ) -> str:
         """Generate L1 context block (~100 tokens).
 
         Details: per-skill metrics and health for top skills.
 
         Args:
             skill_ids: Optional filter; if None, includes all active skills.
+            active_skills: Pre-loaded active skills list.  If None, fetched
+                from the store (allows callers to reuse a single query).
 
         Returns:
             Formatted markdown context string with a table of skills.
         """
-        active = self._store.get_active_skills()
+        active = active_skills if active_skills is not None else self._store.get_active_skills()
 
         if skill_ids is not None:
             id_set = set(skill_ids)
@@ -111,9 +124,9 @@ class EvolutionContextDescriber:
         # Sort by total_selections descending (top skills first)
         active.sort(key=lambda s: s.total_selections, reverse=True)
 
-        # Build health reports only for filtered skills
-        active_id_set = {s.id for s in active}
-        reports = self._health.diagnose_skills(active_id_set)
+        # Build health reports, passing the already-filtered list to
+        # avoid diagnose_skills fetching get_active_skills() again.
+        reports = self._health.diagnose_skills(skills=active)
 
         lines: list[str] = ["[Evolution Skill Metrics]"]
         lines.append(
@@ -141,19 +154,25 @@ class EvolutionContextDescriber:
     # L2: Full (~300 tokens)
     # ------------------------------------------------------------------
 
-    def l2_context(self, skill_ids: list[str] | None = None) -> str:
+    def l2_context(
+        self,
+        skill_ids: list[str] | None = None,
+        active_skills: list[SkillRecord] | None = None,
+    ) -> str:
         """Generate L2 context block (~300 tokens).
 
         Full: lineage, judgments, health for all or specified skills.
 
         Args:
             skill_ids: Optional filter; if None, includes all active skills.
+            active_skills: Pre-loaded active skills list.  If None, fetched
+                from the store (allows callers to reuse a single query).
 
         Returns:
             Formatted markdown context string with lineage tree,
             health details, and evolution history.
         """
-        active = self._store.get_active_skills()
+        active = active_skills if active_skills is not None else self._store.get_active_skills()
 
         if skill_ids is not None:
             id_set = set(skill_ids)
@@ -165,9 +184,9 @@ class EvolutionContextDescriber:
         # Sort by total_selections descending
         active.sort(key=lambda s: s.total_selections, reverse=True)
 
-        # Build health reports only for filtered skills
-        active_id_set = {s.id for s in active}
-        reports = self._health.diagnose_skills(active_id_set)
+        # Build health reports, passing the already-filtered list to
+        # avoid diagnose_skills fetching get_active_skills() again.
+        reports = self._health.diagnose_skills(skills=active)
 
         parts: list[str] = []
 

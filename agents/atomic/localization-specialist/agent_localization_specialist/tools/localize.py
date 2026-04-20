@@ -11,6 +11,16 @@ import re
 from agent_localization_specialist.models import LocalizationResult
 
 
+def _preserve_case(match: re.Match, replacement: str) -> str:
+    """Preserve the casing of the original match."""
+    original = match.group(0)
+    if original.isupper():
+        return replacement.upper()
+    if original[0].isupper():
+        return replacement[0].upper() + replacement[1:]
+    return replacement.lower()
+
+
 def localize(
     text: str,
     target_lang: str,
@@ -46,29 +56,17 @@ def localize(
     # Sort glossary entries by key length (longest first) to avoid partial matches
     sorted_entries = sorted(glossary.items(), key=lambda x: len(x[0]), reverse=True)
 
-    for source_term, target_term in sorted_entries:
-        if not source_term:
-            continue
+    # Pre-compile all glossary patterns once
+    compiled = [
+        (re.compile(r"\b" + re.escape(src) + r"\b", re.IGNORECASE), src, tgt)
+        for src, tgt in sorted_entries
+        if src
+    ]
 
-        # Case-insensitive matching with word boundaries
-        pattern = re.compile(
-            r"\b" + re.escape(source_term) + r"\b",
-            re.IGNORECASE,
-        )
-
+    for pattern, source_term, target_term in compiled:
         occurrences = pattern.findall(translated)
         if occurrences:
             matches.append(source_term)
-            # Preserve original casing for the replacement
-            def _preserve_case(match: re.Match, replacement: str = target_term) -> str:
-                """Preserve the casing of the original match."""
-                original = match.group(0)
-                if original.isupper():
-                    return replacement.upper()
-                if original[0].isupper():
-                    return replacement[0].upper() + replacement[1:]
-                return replacement.lower()
-
             translated = pattern.sub(lambda m: _preserve_case(m, target_term), translated)
 
     # Check for terms that might need glossary entries

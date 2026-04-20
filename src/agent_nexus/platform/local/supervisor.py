@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import toml
 from dataclasses import dataclass
@@ -420,8 +421,6 @@ class AgentSupervisor:
         Also forwards API keys from configured providers so agent
         subprocesses can make LLM calls.
         """
-        import os
-
         env: dict[str, str] = {}
 
         # Load platform config for model defaults (cached)

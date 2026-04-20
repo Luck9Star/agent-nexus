@@ -6,6 +6,7 @@ XSS, path traversal, command injection, and hardcoded credentials.
 
 from __future__ import annotations
 
+import bisect
 import re
 from pathlib import Path
 
@@ -167,22 +168,26 @@ def _scan_file(path: Path) -> SecurityScanResult:
     except OSError:
         return SecurityScanResult()
 
-    findings: list[SecurityFinding] = []
-    lines = content.splitlines()
+    # Build line offset table once for O(log n) line-number lookup
+    line_offsets = [0]
+    for i, ch in enumerate(content):
+        if ch == '\n':
+            line_offsets.append(i + 1)
 
-    for line_no, line in enumerate(lines, start=1):
-        for compiled_pattern, category, cwe_id, severity, description, remediation in _COMPILED_RULES:
-            if compiled_pattern.search(line):
-                findings.append(
-                    SecurityFinding(
-                        severity=severity,
-                        category=category,
-                        location=f"{path}:{line_no}",
-                        description=description,
-                        remediation=remediation,
-                        cwe_id=cwe_id,
-                    )
+    findings: list[SecurityFinding] = []
+    for compiled_pattern, category, cwe_id, severity, description, remediation in _COMPILED_RULES:
+        for match in compiled_pattern.finditer(content):
+            line_no = bisect.bisect_right(line_offsets, match.start())
+            findings.append(
+                SecurityFinding(
+                    severity=severity,
+                    category=category,
+                    location=f"{path}:{line_no}",
+                    description=description,
+                    remediation=remediation,
+                    cwe_id=cwe_id,
                 )
+            )
 
     # Sort by severity (most severe first)
     findings.sort(key=lambda f: _severity_rank(f.severity), reverse=True)

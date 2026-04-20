@@ -81,16 +81,17 @@ def _agent_message(**overrides) -> dict:
 
 class TestIPCStreamSend:
     async def test_send_writes_json_lines(self, stream: IPCStream, mock_stdin: MagicMock) -> None:
-        """send() writes JSON + newline to stdin."""
+        """send() writes JSON payload then newline to stdin."""
         msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hello")
         await stream.send(msg)
 
-        mock_stdin.write.assert_called_once()
-        written = mock_stdin.write.call_args[0][0]
-        assert written.endswith(b"\n")
-        parsed = json.loads(written.decode("utf-8").strip())
-        assert parsed["type"] == "chat"
-        assert parsed["content"] == "hello"
+        # Two write calls: payload bytes + newline byte
+        assert mock_stdin.write.call_count == 2
+        payload_call = mock_stdin.write.call_args_list[0]
+        newline_call = mock_stdin.write.call_args_list[1]
+        written = payload_call[0][0]
+        assert written == b'{"type":"chat","content":"hello"}'
+        assert newline_call[0][0] == b"\n"
 
     async def test_send_calls_drain(self, stream: IPCStream, mock_stdin: MagicMock) -> None:
         """send() flushes by calling drain()."""
@@ -103,8 +104,8 @@ class TestIPCStreamSend:
         msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
         await stream.send(msg)
 
-        written = mock_stdin.write.call_args[0][0]
-        parsed = json.loads(written.decode("utf-8").strip())
+        written = mock_stdin.write.call_args_list[0][0][0]
+        parsed = json.loads(written.decode("utf-8"))
         # task_id, conversation_id, ref_id, summary should be absent
         assert "task_id" not in parsed
         assert "conversation_id" not in parsed
@@ -197,8 +198,8 @@ class TestIPCProtocolSendChat:
         """send_chat() creates PlatformToAgent with type=CHAT."""
         await protocol.send_chat("hello agent", conversation_id="conv-1")
 
-        written = mock_stdin.write.call_args[0][0]
-        parsed = json.loads(written.decode("utf-8").strip())
+        written = mock_stdin.write.call_args_list[0][0][0]
+        parsed = json.loads(written.decode("utf-8"))
         assert parsed["type"] == "chat"
         assert parsed["content"] == "hello agent"
         assert parsed["conversation_id"] == "conv-1"
@@ -219,8 +220,8 @@ class TestIPCProtocolSendTask:
         )
         await protocol.send_task(task)
 
-        written = mock_stdin.write.call_args[0][0]
-        parsed = json.loads(written.decode("utf-8").strip())
+        written = mock_stdin.write.call_args_list[0][0][0]
+        parsed = json.loads(written.decode("utf-8"))
         assert parsed["type"] == "task"
         assert parsed["task_id"] == "task-42"
         assert parsed["content"] == "Write tests"
@@ -238,8 +239,8 @@ class TestIPCProtocolSendDataReference:
             size_hint="~10KB",
         )
 
-        written = mock_stdin.write.call_args[0][0]
-        parsed = json.loads(written.decode("utf-8").strip())
+        written = mock_stdin.write.call_args_list[0][0][0]
+        parsed = json.loads(written.decode("utf-8"))
         assert parsed["type"] == "data_reference"
         assert parsed["ref_id"] == "var://output/123"
         assert "doc-writer" in parsed["summary"]
@@ -542,7 +543,7 @@ class TestIPCSendDrainTimeout:
         msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
         await stream.send(msg)
 
-        mock_stdin.write.assert_called_once()
+        assert mock_stdin.write.call_count == 2
 
 
 # ============================================================================

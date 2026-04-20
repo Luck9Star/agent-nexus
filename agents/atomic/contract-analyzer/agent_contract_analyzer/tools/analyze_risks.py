@@ -64,13 +64,17 @@ def _check_keyword_risks(clauses: Sequence[ClauseInfo]) -> list[RiskItem]:
     """Check for keyword-based risks across all clauses."""
     risks: list[RiskItem] = []
 
+    # Pre-compute lowercase content once per clause
+    clause_contents_lower = [c.content.lower() for c in clauses]
+
     for rule in RISK_RULES:
         if not rule["keywords"]:
             continue
 
-        for clause in clauses:
+        for idx, clause in enumerate(clauses):
+            content_lower = clause_contents_lower[idx]
             for keyword in rule["keywords"]:
-                if keyword.lower() in clause.content.lower():
+                if keyword.lower() in content_lower:
                     risks.append(
                         RiskItem(
                             category=rule["category"],

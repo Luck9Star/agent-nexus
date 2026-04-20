@@ -34,6 +34,36 @@ GAP_INDICATORS = {
     ),
 }
 
+# Pre-compiled regexes for gap detection inner checks
+_ROLE_DETAIL_RE = re.compile(
+    r"(?:角色|管理员|普通用户|admin|role|manager|operator|游客|guest)",
+    re.IGNORECASE,
+)
+_ERROR_DETAIL_RE = re.compile(
+    r"(?:错误|异常|失败|失败处理|error|exception|fail|retry|重试)",
+    re.IGNORECASE,
+)
+_PERF_DETAIL_RE = re.compile(
+    r"(?:秒|ms|毫秒|性能指标|QPS|TPS|延迟|latency|throughput)",
+    re.IGNORECASE,
+)
+_AUTH_RE = re.compile(
+    r"(?:登录|注册|认证|授权|权限|auth|login|register|permission)",
+    re.IGNORECASE,
+)
+_AUTH_DETAIL_RE = re.compile(
+    r"(?:密码|OAuth|手机|验证码|token|JWT|SSO|单点登录|password|captcha)",
+    re.IGNORECASE,
+)
+_DATA_RE = re.compile(
+    r"(?:数据|存储|数据库|保存|data|storage|database|save|store)",
+    re.IGNORECASE,
+)
+_DATA_DETAIL_RE = re.compile(
+    r"(?:字段|表|模型|schema|field|table|model|entity|实体)",
+    re.IGNORECASE,
+)
+
 # Priority keywords
 HIGH_PRIORITY_KEYWORDS = [
     "必须", "关键", "核心", "重要", "must", "critical", "essential",
@@ -66,52 +96,31 @@ def _detect_gaps(text: str) -> list[str]:
 
     # Check for missing role/actor definition
     if GAP_INDICATORS["missing_user_role"].search(text):
-        has_role = bool(re.search(
-            r"(?:角色|管理员|普通用户|admin|role|manager|operator|游客|guest)",
-            text, re.IGNORECASE,
-        ))
+        has_role = bool(_ROLE_DETAIL_RE.search(text))
         if not has_role:
             gaps.append("缺少用户角色定义")
 
     # Check for missing error handling mention
     if GAP_INDICATORS["missing_error_handling"].search(text):
-        has_error = bool(re.search(
-            r"(?:错误|异常|失败|失败处理|error|exception|fail|retry|重试)",
-            text, re.IGNORECASE,
-        ))
+        has_error = bool(_ERROR_DETAIL_RE.search(text))
         if not has_error:
             gaps.append("缺少错误处理说明")
 
     # Check for missing performance requirements
     if GAP_INDICATORS["missing_performance"].search(text):
-        has_perf = bool(re.search(
-            r"(?:秒|ms|毫秒|性能指标|QPS|TPS|延迟|latency|throughput)",
-            text, re.IGNORECASE,
-        ))
+        has_perf = bool(_PERF_DETAIL_RE.search(text))
         if not has_perf:
             gaps.append("缺少性能指标定义")
 
     # Check for missing authentication/authorization
-    has_auth = bool(re.search(
-        r"(?:登录|注册|认证|授权|权限|auth|login|register|permission)",
-        text, re.IGNORECASE,
-    ))
-    has_auth_detail = bool(re.search(
-        r"(?:密码|OAuth|手机|验证码|token|JWT|SSO|单点登录|password|captcha)",
-        text, re.IGNORECASE,
-    ))
+    has_auth = bool(_AUTH_RE.search(text))
+    has_auth_detail = bool(_AUTH_DETAIL_RE.search(text))
     if has_auth and not has_auth_detail:
         gaps.append("缺少认证方式详细说明")
 
     # Check for missing data model
-    has_data = bool(re.search(
-        r"(?:数据|存储|数据库|保存|data|storage|database|save|store)",
-        text, re.IGNORECASE,
-    ))
-    has_data_detail = bool(re.search(
-        r"(?:字段|表|模型|schema|field|table|model|entity|实体)",
-        text, re.IGNORECASE,
-    ))
+    has_data = bool(_DATA_RE.search(text))
+    has_data_detail = bool(_DATA_DETAIL_RE.search(text))
     if has_data and not has_data_detail:
         gaps.append("缺少数据模型定义")
 
@@ -144,8 +153,9 @@ def _categorize_priorities(text: str) -> dict[str, list[str]]:
     sentences = [s.strip() for s in sentences if len(s.strip()) > 2]
 
     for sentence in sentences:
-        is_high = any(kw in sentence.lower() for kw in HIGH_PRIORITY_KEYWORDS)
-        is_low = any(kw in sentence.lower() for kw in LOW_PRIORITY_KEYWORDS)
+        s_lower = sentence.lower()
+        is_high = any(kw in s_lower for kw in HIGH_PRIORITY_KEYWORDS)
+        is_low = any(kw in s_lower for kw in LOW_PRIORITY_KEYWORDS)
 
         if is_high:
             priorities["high"].append(sentence)
@@ -153,7 +163,7 @@ def _categorize_priorities(text: str) -> dict[str, list[str]]:
             priorities["low"].append(sentence)
         else:
             # Check medium keywords or default to medium
-            is_medium = any(kw in sentence.lower() for kw in MEDIUM_PRIORITY_KEYWORDS)
+            is_medium = any(kw in s_lower for kw in MEDIUM_PRIORITY_KEYWORDS)
             if is_medium or not is_high:
                 priorities["medium"].append(sentence)
 

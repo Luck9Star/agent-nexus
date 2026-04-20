@@ -200,9 +200,8 @@ def _detect_language(file_path: str, content: str) -> str:
     return "unknown"
 
 
-def _count_lines(content: str) -> tuple[int, int]:
+def _count_lines(lines: list[str]) -> tuple[int, int]:
     """Count lines of code and total lines."""
-    lines = content.split("\n")
     total = len(lines)
     code_lines = 0
     for line in lines:
@@ -241,23 +240,20 @@ def _count_classes(content: str, language: str) -> int:
     return 0
 
 
+_COMPLEXITY_RE = re.compile(r"\b(?:if|elif|else|for|while|and|or|except|case)\b")
+
+
 def _estimate_complexity(content: str, language: str) -> int:
     """Estimate cyclomatic complexity based on decision points."""
-    complexity_keywords = [
-        r"\bif\b", r"\belif\b", r"\belse\b", r"\bfor\b", r"\bwhile\b",
-        r"\band\b", r"\bor\b", r"\bexcept\b", r"\bcase\b",
-    ]
-    total = 1
-    for pattern in complexity_keywords:
-        total += len(re.findall(pattern, content))
+    total = 1 + len(_COMPLEXITY_RE.findall(content))
     return total
 
 
-def _measure_nesting(content: str) -> int:
+def _measure_nesting(lines: list[str]) -> int:
     """Measure maximum nesting depth."""
     max_depth = 0
     current_depth = 0
-    for line in content.split("\n"):
+    for line in lines:
         stripped = line.lstrip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -297,21 +293,22 @@ def _run_rules(content: str, language: str) -> list[CodeIssue]:
     for rule in rules:
         pattern = rule["pattern"]
         assert isinstance(pattern, re.Pattern)
+        severity = rule["severity"]
+        assert isinstance(severity, str)
         for match in pattern.finditer(content):
-            # Find line number via binary search on pre-computed offsets
             line_num = bisect.bisect_right(line_offsets, match.start()) - 1
             issues.append(CodeIssue(
                 line=line_num,
-                severity=rule["severity"],
-                category=rule["category"],
-                message=rule["message"],
-                rule_id=rule["rule_id"],
+                severity=severity,
+                category=rule["category"],  # type: ignore[arg-type]
+                message=rule["message"],     # type: ignore[arg-type]
+                rule_id=rule["rule_id"],     # type: ignore[arg-type]
             ))
 
     return issues
 
 
-def _calculate_avg_function_length(content: str, language: str) -> float:
+def _calculate_avg_function_length(content: str, language: str, lines: list[str] | None = None) -> float:
     """Calculate average function length in lines."""
     if language == "python":
         # Find function start lines
@@ -351,16 +348,19 @@ def analyze_code(file_path: str, language: str = "") -> CodeAnalysis:
     if not language:
         language = _detect_language(file_path, content)
 
+    # Split content once for shared use
+    lines = content.split("\n")
+
     # Calculate metrics
-    loc, total_lines = _count_lines(content)
+    loc, total_lines = _count_lines(lines)
     metrics = CodeMetrics(
         lines_of_code=loc,
         total_lines=total_lines,
         function_count=_count_functions(content, language),
         class_count=_count_classes(content, language),
         max_complexity=_estimate_complexity(content, language),
-        max_nesting_depth=_measure_nesting(content),
-        avg_function_length=_calculate_avg_function_length(content, language),
+        max_nesting_depth=_measure_nesting(lines),
+        avg_function_length=_calculate_avg_function_length(content, language, lines),
         import_count=_count_imports(content, language),
     )
 

@@ -6,8 +6,6 @@ and produces a comprehensive trend report with confidence scoring.
 
 from __future__ import annotations
 
-import re
-
 from agent_market_intelligence_analyst.models import TrendItem, TrendReport
 
 # Trend signal keywords
@@ -157,15 +155,17 @@ def identify_trends(data: str) -> TrendReport:
     trends: list[TrendItem] = []
     seen_names: set[str] = set()
 
+    data_lower = data.lower()
+
     for signal in TREND_SIGNALS:
         keywords = signal["keywords"]
-        hits = sum(1 for kw in keywords if kw.lower() in data.lower())
+        hits = sum(1 for kw in keywords if kw.lower() in data_lower)
 
         if hits >= 1:
             # Collect evidence
             evidence_parts: list[str] = []
             for kw in keywords:
-                if kw.lower() in data.lower():
+                if kw.lower() in data_lower:
                     evidence_parts.append(kw)
 
             # Check for direction override

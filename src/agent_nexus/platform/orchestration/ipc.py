@@ -80,9 +80,9 @@ class IPCStream:
         Must flush after write to ensure agent receives immediately.
         """
         payload = message.model_dump_json(exclude_none=True)
-        line = payload + "\n"
         try:
-            self._stdin.write(line.encode("utf-8"))
+            self._stdin.write(payload.encode("utf-8"))
+            self._stdin.write(b"\n")
         except (BrokenPipeError, ConnectionResetError, OSError) as exc:
             raise IPCConnectionError(f"Agent stdin closed: {exc}") from exc
         try:
@@ -122,18 +122,25 @@ class IPCStream:
             )
 
         try:
-            line = raw.decode("utf-8").strip()
+            raw_stripped = raw.strip()
+        except Exception as exc:
+            raise IPCError(
+                f"Error stripping raw data ({len(raw)} bytes): {exc}"
+            ) from exc
+        if not raw_stripped:
+            raise IPCConnectionError("Agent sent empty line (possible EOF)")
+
+        try:
+            line = raw_stripped.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise IPCError(
                 f"Agent sent non-UTF-8 data ({len(raw)} bytes): {exc}"
             ) from exc
-        if not line:
-            raise IPCConnectionError("Agent sent empty line (possible EOF)")
 
         logger.debug("IPC recv: %.200s", line)
 
         try:
-            data = json.loads(line)
+            data = json.loads(raw_stripped)  # json.loads accepts bytes since Python 3.6
         except json.JSONDecodeError as exc:
             raise IPCError(f"Invalid JSON from agent: {exc}") from exc
 

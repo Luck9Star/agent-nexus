@@ -10,8 +10,6 @@ Uses keyword-based factor extraction and scoring.
 
 from __future__ import annotations
 
-import re
-
 from agent_market_intelligence_analyst.models import MarketAnalysis
 
 # Framework factor definitions with associated keywords
@@ -210,9 +208,8 @@ def _generate_insights(framework: str, scores: dict[str, int]) -> list[str]:
     return insights
 
 
-def _assess_factor(text: str, keywords: list[str], label: str) -> str:
+def _assess_factor(hits: int, label: str) -> str:
     """Generate a brief assessment for a single factor."""
-    hits = _count_keyword_hits(text, keywords)
     if hits >= 5:
         return f"{label}: 影响显著（关键词命中 {hits} 次）"
     elif hits >= 3:
@@ -258,11 +255,14 @@ def analyze_market(data: str, framework: str = "porter") -> MarketAnalysis:
     factors: dict[str, str] = {}
     scores: dict[str, int] = {}
 
+    # Pre-compute lowercase text once
+    text_lower = data.lower()
+
     for factor_key, config in factors_config.items():
         keywords = config["keywords"]
         label = config["label"]
-        factors[factor_key] = _assess_factor(data, keywords, label)
-        hits = _count_keyword_hits(data, keywords)
+        hits = _count_keyword_hits(text_lower, keywords)
+        factors[factor_key] = _assess_factor(hits, label)
         scores[factor_key] = _compute_score(hits, len(keywords))
 
     insights = _generate_insights(framework, scores)

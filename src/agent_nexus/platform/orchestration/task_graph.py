@@ -30,7 +30,7 @@ import json
 import logging
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Generator
 
@@ -66,7 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_task_agent ON tasks(agent);
 class TaskGraph:
     """SQLite-backed task graph with dependency tracking and cycle detection."""
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: str | Path) -> None:
         """Initialize or open existing database.
 
         Uses WAL mode for concurrent read/write access.
@@ -128,7 +128,6 @@ class TaskGraph:
         # In-memory DB: reuse the persistent connection created in __init__.
         if self._mem_conn is not None:
             conn = self._mem_conn
-            conn.execute("PRAGMA foreign_keys=ON")
             if immediate:
                 if not conn.in_transaction:
                     conn.execute("BEGIN IMMEDIATE")
@@ -226,6 +225,93 @@ class TaskGraph:
                     (task.id, dep_id),
                 )
 
+    def add_tasks(self, tasks: list[TaskItem]) -> None:
+        """Batch-add multiple tasks in a single transaction.
+
+        Replaces the O(N^2) pattern of calling ``add_task`` N times where
+        each call opens its own transaction and runs full-table cycle
+        detection.  This method does:
+        1. One ``BEGIN IMMEDIATE`` transaction
+        2. Batch duplicate check: single SELECT for all task IDs
+        3. Batch insert all tasks
+        4. Batch insert all dependencies with ``executemany``
+        5. Single cycle-detection pass after all inserts
+        6. Commit once
+
+        Raises ValueError on validation failure (duplicates, missing deps, cycles).
+        """
+        if not tasks:
+            return
+
+        with self._conn(immediate=True) as conn:
+            # 1. Batch duplicate check
+            task_ids = [t.id for t in tasks]
+            id_set = set(task_ids)
+            if len(id_set) < len(task_ids):
+                dupes = [tid for tid in id_set if task_ids.count(tid) > 1]
+                raise ValueError(f"Duplicate task IDs in batch: {dupes}")
+
+            placeholders = ",".join("?" * len(task_ids))
+            existing = conn.execute(
+                f"SELECT id FROM tasks WHERE id IN ({placeholders})",
+                tuple(task_ids),
+            ).fetchall()
+            if existing:
+                existing_ids = {r[0] for r in existing}
+                raise ValueError(
+                    f"Tasks already exist: {existing_ids}"
+                )
+
+            # 2. Validate all blocked_by references (must exist in DB or in this batch)
+            all_deps: list[tuple[str, str]] = []
+            for task in tasks:
+                for dep_id in dict.fromkeys(task.blocked_by):
+                    # Self-dependency will be caught by cycle detection
+                    if dep_id not in id_set and dep_id != task.id:
+                        # Check if it exists in the DB already
+                        row = conn.execute(
+                            "SELECT 1 FROM tasks WHERE id = ?", (dep_id,)
+                        ).fetchone()
+                        if row is None:
+                            raise ValueError(
+                                f"Task '{task.id}' blocked_by references "
+                                f"non-existent task '{dep_id}'"
+                            )
+                    all_deps.append((task.id, dep_id))
+
+            # 3. Batch insert all tasks
+            task_rows = [
+                (
+                    t.id,
+                    t.description,
+                    t.agent,
+                    t.state.value,
+                    json.dumps(t.vars, default=str),
+                    t.created_at.isoformat(),
+                    t.updated_at.isoformat(),
+                )
+                for t in tasks
+            ]
+            conn.executemany(
+                "INSERT INTO tasks (id, description, agent, state, vars, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                task_rows,
+            )
+
+            # 4. Batch insert dependencies
+            if all_deps:
+                conn.executemany(
+                    "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES (?, ?)",
+                    all_deps,
+                )
+
+            # 5. Single cycle-detection pass
+            cycles = self._detect_cycles_conn(conn)
+            if cycles:
+                raise ValueError(
+                    f"Adding batch tasks would create cycles: {cycles}"
+                )
+
     def start_task(self, task_id: str) -> TaskItem:
         """Transition task to in_progress.
 
@@ -258,7 +344,10 @@ class TaskGraph:
                 (TaskState.IN_PROGRESS.value, now, task_id),
             )
 
-            return self._get_task_conn_required(conn, task_id)
+            # Return updated copy instead of re-querying the DB
+            return task.model_copy(
+                update={"state": TaskState.IN_PROGRESS, "updated_at": now}
+            )
 
     def complete_task(self, task_id: str) -> TaskItem:
         """Transition task to completed.
@@ -282,7 +371,10 @@ class TaskGraph:
                 (TaskState.COMPLETED.value, now, task_id),
             )
 
-            return self._get_task_conn_required(conn, task_id)
+            # Return updated copy instead of re-querying the DB
+            return task.model_copy(
+                update={"state": TaskState.COMPLETED, "updated_at": now}
+            )
 
     def fail_task(self, task_id: str) -> TaskItem:
         """Transition task to failed.
@@ -308,7 +400,10 @@ class TaskGraph:
                 (TaskState.FAILED.value, now, task_id),
             )
 
-            return self._get_task_conn_required(conn, task_id)
+            # Return updated copy instead of re-querying the DB
+            return task.model_copy(
+                update={"state": TaskState.FAILED, "updated_at": now}
+            )
 
     # ------------------------------------------------------------------
     # Queries
@@ -460,42 +555,48 @@ class TaskGraph:
         Uses DFS with visiting/visited two-set technique.
         """
         with self._conn() as conn:
-            all_rows = conn.execute("SELECT id FROM tasks").fetchall()
-            task_ids = [r[0] for r in all_rows]
+            return self._detect_cycles_conn(conn)
 
-            dep_map: dict[str, list[str]] = {tid: [] for tid in task_ids}
-            dep_rows = conn.execute(
-                "SELECT task_id, blocked_by_id FROM task_dependencies"
-            ).fetchall()
-            for task_id, blocked_by_id in dep_rows:
-                dep_map[task_id].append(blocked_by_id)
+    def _detect_cycles_conn(
+        self, conn: sqlite3.Connection,
+    ) -> list[list[str]]:
+        """Detect cycles using an existing connection."""
+        all_rows = conn.execute("SELECT id FROM tasks").fetchall()
+        task_ids = [r[0] for r in all_rows]
 
-            cycles: list[list[str]] = []
-            visiting: set[str] = set()
-            visited: set[str] = set()
+        dep_map: dict[str, list[str]] = {tid: [] for tid in task_ids}
+        dep_rows = conn.execute(
+            "SELECT task_id, blocked_by_id FROM task_dependencies"
+        ).fetchall()
+        for task_id, blocked_by_id in dep_rows:
+            dep_map[task_id].append(blocked_by_id)
 
-            def _dfs(node: str, path: list[str]) -> None:
-                if node in visiting:
-                    # Found a cycle -- extract it from path
-                    cycle_start = path.index(node)
-                    cycles.append(path[cycle_start:])
-                    return
-                if node in visited:
-                    return
+        cycles: list[list[str]] = []
+        visiting: set[str] = set()
+        visited: set[str] = set()
 
-                visiting.add(node)
-                path.append(node)
-                for dep in dep_map.get(node, []):
-                    _dfs(dep, path)
-                path.pop()
-                visiting.discard(node)
-                visited.add(node)
+        def _dfs(node: str, path: list[str]) -> None:
+            if node in visiting:
+                # Found a cycle -- extract it from path
+                cycle_start = path.index(node)
+                cycles.append(path[cycle_start:])
+                return
+            if node in visited:
+                return
 
-            for tid in task_ids:
-                if tid not in visited:
-                    _dfs(tid, [])
+            visiting.add(node)
+            path.append(node)
+            for dep in dep_map.get(node, []):
+                _dfs(dep, path)
+            path.pop()
+            visiting.discard(node)
+            visited.add(node)
 
-            return cycles
+        for tid in task_ids:
+            if tid not in visited:
+                _dfs(tid, [])
+
+        return cycles
 
     def get_snapshot(self) -> TaskGraphSnapshot:
         """Get a full snapshot of the graph state."""
@@ -527,12 +628,27 @@ class TaskGraph:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _batch_load_blocked_by(conn: sqlite3.Connection) -> dict[str, list[str]]:
-        """Load all task_dependencies in one query, keyed by task_id."""
+    def _batch_load_blocked_by(
+        conn: sqlite3.Connection,
+        task_ids: set[str] | None = None,
+    ) -> dict[str, list[str]]:
+        """Load task_dependencies in one query, keyed by task_id.
+
+        When *task_ids* is provided, only load dependencies for those tasks.
+        """
         deps: dict[str, list[str]] = {}
-        for task_id, blocked_by_id in conn.execute(
-            "SELECT task_id, blocked_by_id FROM task_dependencies"
-        ).fetchall():
+        if task_ids:
+            placeholders = ",".join("?" * len(task_ids))
+            rows = conn.execute(
+                f"SELECT task_id, blocked_by_id FROM task_dependencies "
+                f"WHERE task_id IN ({placeholders})",
+                tuple(task_ids),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT task_id, blocked_by_id FROM task_dependencies"
+            ).fetchall()
+        for task_id, blocked_by_id in rows:
             deps.setdefault(task_id, []).append(blocked_by_id)
         return deps
 
@@ -544,8 +660,10 @@ class TaskGraph:
         """Convert multiple task rows to TaskItems with batch-loaded deps.
 
         Uses a single query for ALL blocked_by lists instead of one per row.
+        Filters dependencies to only the task IDs present in *rows*.
         """
-        blocked_map = self._batch_load_blocked_by(conn)
+        row_task_ids = {row[0] for row in rows}
+        blocked_map = self._batch_load_blocked_by(conn, task_ids=row_task_ids)
         results: list[TaskItem] = []
         for row in rows:
             try:

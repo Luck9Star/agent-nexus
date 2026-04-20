@@ -9,6 +9,7 @@ Reference: docs/06 Section 8.5
 from __future__ import annotations
 
 import uuid
+from collections import deque
 from dataclasses import dataclass
 
 from agent_nexus.models.context import (
@@ -102,7 +103,7 @@ class TokenTracker:
         self._session_id = session_id or uuid.uuid4().hex[:12]
         self._total: int = 0
         self._turn: int = 0
-        self._log: list[ContextBudgetLogEntry] = []
+        self._log: deque[ContextBudgetLogEntry] = deque(maxlen=_MAX_LOG_SIZE)
 
     # ------------------------------------------------------------------
     # Public API
@@ -142,10 +143,6 @@ class TokenTracker:
             total_tokens=self._total,
         )
         self._log.append(entry)
-
-        # Trim oldest entries to prevent unbounded growth.
-        if len(self._log) > _MAX_LOG_SIZE:
-            self._log = self._log[-_MAX_LOG_SIZE:]
 
         # Check thresholds and return alert.
         pct = self.usage_pct

@@ -619,11 +619,13 @@ class TestGetTaskConnRequiredRaises:
         with pytest.raises(ValueError, match="disappeared"):
             tg._get_task_conn_required(tg._mem_conn, "nonexistent_id")
 
-    def test_raised_after_concurrent_delete(self) -> None:
-        """Task exists at start of mutation but is deleted before re-read.
+    def test_returns_updated_copy_after_concurrent_delete(self) -> None:
+        """State transition returns updated task even if DB row is deleted after UPDATE.
 
-        Uses a patched _get_task_conn to bypass the initial existence check,
-        allowing the code to reach _get_task_conn_required after UPDATE.
+        Since the transition methods now update the local TaskItem copy
+        instead of re-querying the DB, a concurrent row deletion after
+        UPDATE is no longer an error -- the method returns the updated
+        task object without needing a second DB read.
         """
         import json
         from unittest.mock import patch
@@ -632,20 +634,22 @@ class TestGetTaskConnRequiredRaises:
         tg.add_task(_make_task("V1"))
         tg.start_task("V1")
 
-        # Patch _get_task_conn to return a fake task for the initial check
-        # but delete the real row so _get_task_conn_required fails
+        # Patch _get_task_conn to return the real task for the initial check
+        # but delete the row after, simulating a concurrent delete.
         original_get = tg._get_task_conn
 
         def fake_get(conn, task_id):
             result = original_get(conn, task_id)
             if result is not None and task_id == "V1":
-                # Delete the row so _get_task_conn_required can't find it
                 conn.execute("DELETE FROM tasks WHERE id = 'V1'")
             return result
 
         with patch.object(tg, "_get_task_conn", side_effect=fake_get):
-            with pytest.raises(ValueError, match="disappeared"):
-                tg.complete_task("V1")
+            # Should succeed -- returns the locally-updated copy
+            result = tg.complete_task("V1")
+
+        assert result.state == TaskState.COMPLETED
+        assert result.id == "V1"
 
 
 class TestInMemoryRollback:
