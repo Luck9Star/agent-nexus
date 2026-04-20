@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 import uuid
 from collections import deque
 from typing import Any
@@ -34,6 +35,8 @@ from agent_nexus.platform.orchestration.ipc import (
     IPCConnectionError,
     IPCError,
     IPCTimeoutError,
+    _INTERNAL_CID,
+    _LIST_TOOLS_MSG,
     get_ipc_lock,
 )
 from agent_nexus.platform.gateway.tool_adapter import remove_lock
@@ -190,7 +193,7 @@ class PlatformRouter:
         try:
             sorted_tasks = self._topological_sort_tasks(definition.tasks)
             ctx.task_graph.add_tasks([dsl_task.to_task_item() for dsl_task in sorted_tasks])
-        except Exception as exc:
+        except (ValueError, KeyError, TypeError, RuntimeError, sqlite3.Error) as exc:
             last_error = f"TaskGraph setup failed: {exc}"
             last_error_type = type(exc).__name__
             logger.error(last_error, exc_info=exc)
@@ -227,6 +230,8 @@ class PlatformRouter:
                         # Feed previous phase output into next phase's message
                         message = self._build_phase_message(phase, result)
 
+                    except asyncio.CancelledError:
+                        raise
                     except Exception as exc:
                         last_error = f"Phase {phase.value} failed: {exc}"
                         last_error_type = type(exc).__name__
@@ -304,14 +309,14 @@ class PlatformRouter:
                 await handle.ipc.send_chat(
                     message, conversation_id=conversation_id
                 )
-            except Exception as exc:
+            except (IPCError, OSError, RuntimeError, asyncio.TimeoutError) as exc:
                 logger.warning("IPC send error for agent '%s': %s", atomic_name, exc)
                 return _make_error_result(f"IPC send error: {exc}", type(exc).__name__)
 
             # Wait for final result (progress messages are silently consumed)
             try:
                 response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
-            except Exception as exc:
+            except (IPCError, OSError, RuntimeError, asyncio.TimeoutError) as exc:
                 logger.warning("IPC receive error for agent '%s': %s", atomic_name, exc)
                 return _make_error_result(f"IPC error: {exc}", type(exc).__name__)
 
@@ -355,7 +360,7 @@ class PlatformRouter:
             try:
                 async with get_ipc_lock(name):
                     await handle.ipc.send_chat(
-                        "__list_tools__", conversation_id="__internal__"
+                        _LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID
                     )
                     response = await handle.ipc.receive_until_result(timeout=10.0)
                 if response.type == AgentToPlatformType.ERROR:
@@ -377,7 +382,7 @@ class PlatformRouter:
                                 name, exc,
                             )
                 return []
-            except Exception as exc:
+            except (IPCError, OSError, RuntimeError, asyncio.TimeoutError) as exc:
                 logger.warning("Failed to get tools from agent '%s': %s", name, exc)
                 return []
 
@@ -568,7 +573,7 @@ class PlatformRouter:
                 await handle.ipc.send_chat(message, conversation_id=conversation_id)
             except (IPCConnectionError, IPCTimeoutError, IPCError):
                 raise
-            except Exception as exc:
+            except (OSError, RuntimeError, asyncio.TimeoutError) as exc:
                 return _make_error_result(
                     f"IPC send error for agent '{agent_name}': {exc}",
                     type(exc).__name__,
@@ -578,7 +583,7 @@ class PlatformRouter:
                 response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
             except (IPCConnectionError, IPCTimeoutError, IPCError):
                 raise
-            except Exception as exc:
+            except (OSError, RuntimeError, asyncio.TimeoutError) as exc:
                 return _make_error_result(
                     f"IPC error communicating with agent '{agent_name}': {exc}",
                     type(exc).__name__,

@@ -33,10 +33,8 @@ from agent_nexus.platform.evolution.analyzer import (
     AnalysisResult,
     EvolutionSuggestion,
 )
+from agent_nexus.platform.evolution.health import build_health_suggestions
 from agent_nexus.platform.evolution.thresholds import (
-    RULE_HIGH_FALLBACK,
-    RULE_LOW_COMPLETION,
-    RULE_MODERATE_EFFECTIVE,
     SkillRates,
     evaluate_skill_health,
 )
@@ -182,6 +180,11 @@ class SkillEvolver:
             # attempts should be eligible for retry on next degradation.
             if result.success:
                 self._addressed.setdefault(tool_key, set()).add(skill.id)
+                # Anti-loop guard is non-critical; cap total size to prevent
+                # unbounded growth.  Reset entirely when the cap is exceeded.
+                total = sum(len(s) for s in self._addressed.values())
+                if total > 500:
+                    self._addressed.clear()
             results.append(result)
 
         return results
@@ -417,64 +420,22 @@ class SkillEvolver:
           - effective_rate < 0.55 AND applied_rate > 0.25 -> DERIVED
 
         FIX rules are deduplicated: only the highest-confidence FIX is kept
-        (matching HealthChecker.check_health logic).
+        (matching build_health_suggestions logic).
+
+        Returns only the first (best) suggestion.  For the full list, use
+        build_health_suggestions directly.
         """
         rates = SkillRates.from_record(record)
         if rates is None:
             return None
 
         eval_result = evaluate_skill_health(rates)
-
-        # Track best FIX suggestion (deduplicate: keep highest confidence)
-        best_fix: EvolutionSuggestion | None = None
-
-        # Rule 1: High fallback rate
-        if RULE_HIGH_FALLBACK in eval_result.rules:
-            fix1 = EvolutionSuggestion(
-                evolution_type=EvolutionType.FIX,
-                target_skill_ids=[record.id],
-                direction=(
-                    f"High fallback rate ({rates.fallback_rate:.0%}): "
-                    f"skill is frequently selected but not applied, "
-                    f"suggesting instructions are unclear or outdated"
-                ),
-                confidence=min(rates.fallback_rate, 1.0),
-            )
-            best_fix = fix1
-
-        # Rule 2: Applied often but rarely completes
-        if RULE_LOW_COMPLETION in eval_result.rules:
-            fix2 = EvolutionSuggestion(
-                evolution_type=EvolutionType.FIX,
-                target_skill_ids=[record.id],
-                direction=(
-                    f"Low completion rate ({rates.completion_rate:.0%}) "
-                    f"despite high applied rate ({rates.applied_rate:.0%}): "
-                    f"skill instructions may be incorrect or incomplete"
-                ),
-                confidence=min(rates.applied_rate * (1 - rates.completion_rate), 1.0),
-            )
-            # Keep the FIX with highest confidence
-            if best_fix is None or fix2.confidence > best_fix.confidence:
-                best_fix = fix2
-
-        if best_fix is not None:
-            return best_fix
-
-        # Rule 3: Moderate effectiveness
-        if RULE_MODERATE_EFFECTIVE in eval_result.rules:
-            return EvolutionSuggestion(
-                evolution_type=EvolutionType.DERIVED,
-                target_skill_ids=[record.id],
-                direction=(
-                    f"Moderate effectiveness ({rates.effective_rate:.0%}): "
-                    f"skill works sometimes but could be enhanced with "
-                    f"better error handling or alternative approaches"
-                ),
-                confidence=min(1.0 - rates.effective_rate, 1.0),
-            )
-
-        return None
+        suggestions = build_health_suggestions(
+            skill_id=record.id,
+            rates=rates,
+            eval_result=eval_result,
+        )
+        return suggestions[0] if suggestions else None
 
     @property
     def store(self) -> EvolutionStore:

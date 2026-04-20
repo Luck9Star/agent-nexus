@@ -24,24 +24,13 @@ from agent_nexus.models.evolution import (
     EvolutionType,
     SkillRecord,
 )
+from agent_nexus.platform.evolution.health import build_health_suggestions
 from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.thresholds import (
-    RULE_HIGH_FALLBACK,
-    RULE_LOW_COMPLETION,
-    RULE_MODERATE_EFFECTIVE,
+    EvolutionSuggestion,  # re-exported for backward compatibility
     SkillRates,
     evaluate_skill_health,
 )
-
-
-@dataclass
-class EvolutionSuggestion:
-    """One evolution action suggested by the analyzer."""
-
-    evolution_type: EvolutionType
-    target_skill_ids: list[str] = field(default_factory=list)
-    direction: str = ""
-    confidence: float = 0.0
 
 
 @dataclass
@@ -230,7 +219,6 @@ class ExecutionAnalyzer:
     ) -> list[EvolutionSuggestion]:
         """Generate evolution suggestions based on health metrics."""
         suggestions: list[EvolutionSuggestion] = []
-        fix_skills: set[str] = set()  # skills already flagged for FIX
 
         for skill_id in skill_ids:
             skill = skills_by_id.get(skill_id)
@@ -243,50 +231,12 @@ class ExecutionAnalyzer:
                 continue
 
             eval_result = evaluate_skill_health(rates)
-
-            # Threshold checks from docs/04 — keep only the best FIX per skill
-            best_fix: EvolutionSuggestion | None = None
-
-            if RULE_HIGH_FALLBACK in eval_result.rules:
-                fix1 = EvolutionSuggestion(
-                    evolution_type=EvolutionType.FIX,
-                    target_skill_ids=[skill_id],
-                    direction=(
-                        f"High fallback rate ({rates.fallback_rate:.0%}): "
-                        f"skill is frequently selected but not applied"
-                    ),
-                    confidence=min(rates.fallback_rate, 1.0),
-                )
-                best_fix = fix1
-
-            if RULE_LOW_COMPLETION in eval_result.rules:
-                fix2 = EvolutionSuggestion(
-                    evolution_type=EvolutionType.FIX,
-                    target_skill_ids=[skill_id],
-                    direction=(
-                        f"Low completion rate ({rates.completion_rate:.0%}) "
-                        f"despite high applied rate ({rates.applied_rate:.0%})"
-                    ),
-                    confidence=min(rates.applied_rate * (1 - rates.completion_rate), 1.0),
-                )
-                if best_fix is None or fix2.confidence > best_fix.confidence:
-                    best_fix = fix2
-
-            if best_fix is not None:
-                suggestions.append(best_fix)
-                fix_skills.add(skill_id)
-
-            # DERIVED is lower priority than FIX: skip if already flagged.
-            if RULE_MODERATE_EFFECTIVE in eval_result.rules:
-                suggestions.append(EvolutionSuggestion(
-                    evolution_type=EvolutionType.DERIVED,
-                    target_skill_ids=[skill_id],
-                    direction=(
-                        f"Moderate effectiveness ({rates.effective_rate:.0%}): "
-                        f"could be enhanced with better error handling"
-                    ),
-                    confidence=min(1.0 - rates.effective_rate, 1.0),
-                ))
+            skill_suggestions = build_health_suggestions(
+                skill_id=skill_id,
+                rates=rates,
+                eval_result=eval_result,
+            )
+            suggestions.extend(skill_suggestions)
 
         # CAPTURED suggestion if task succeeded with no skills involved
         if ctx.task_completed and not skill_ids:

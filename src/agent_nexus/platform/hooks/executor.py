@@ -57,6 +57,18 @@ class HookExecutor:
         self._hooks: list[HookDefinition] = hooks or []
         self._allowed_commands: set[str] = set(allowed_commands or [])
         self._http_client: Any = None  # httpx.AsyncClient, lazy-init
+        self._hooks_by_event: dict[HookEvent, list[HookDefinition]] = {}
+        self._build_event_index()
+
+    def _build_event_index(self) -> None:
+        """Build an index from HookEvent to the list of hooks for that event.
+
+        Called once during init.  Since the hook list is immutable after
+        construction, the index stays valid for the lifetime of the executor.
+        """
+        self._hooks_by_event.clear()
+        for hook in self._hooks:
+            self._hooks_by_event.setdefault(hook.event, []).append(hook)
 
     # ------------------------------------------------------------------
     # Construction helpers
@@ -147,9 +159,8 @@ class HookExecutor:
         always match).
         """
         result: list[HookDefinition] = []
-        for hook in self._hooks:
-            if hook.event != event:
-                continue
+        candidates = self._hooks_by_event.get(event, [])
+        for hook in candidates:
             if not hook.enabled:
                 continue
             if matcher is not None and hook.matcher is not None:

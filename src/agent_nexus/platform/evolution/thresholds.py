@@ -6,7 +6,7 @@ Used by health.py, analyzer.py, and evolver.py to avoid duplication.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # Fallback rate > 0.4 triggers FIX
 _FALLBACK_THRESHOLD = 0.4
@@ -20,7 +20,17 @@ _MODERATE_EFFECTIVE_THRESHOLD = 0.55
 _MIN_APPLIED_FOR_DERIVED = 0.25
 
 
-from agent_nexus.models.evolution import SkillRecord
+from agent_nexus.models.evolution import EvolutionType, SkillRecord
+
+
+@dataclass
+class EvolutionSuggestion:
+    """One evolution action suggested by the analyzer or health checker."""
+
+    evolution_type: EvolutionType
+    target_skill_ids: list[str] = field(default_factory=list)
+    direction: str = ""
+    confidence: float = 0.0
 
 
 @dataclass(frozen=True)

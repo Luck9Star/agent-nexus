@@ -21,6 +21,10 @@ import logging
 from dataclasses import dataclass, field
 from agent_nexus.models.agent import AgentManifest
 from agent_nexus.models.ipc import AgentToPlatformType
+from agent_nexus.platform.orchestration.ipc import (
+    _INTERNAL_CID,
+    _LIST_TOOLS_MSG,
+)
 from agent_nexus.platform.orchestration.process_manager import (
     AgentHandle,
     ProcessManager,
@@ -278,7 +282,7 @@ class DeferredAgentRegistry:
 
         try:
             await handle.ipc.send_chat(
-                "__list_tools__", conversation_id="__internal__"
+                _LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID
             )
             response = await handle.ipc.receive_until_result(timeout=10.0)
 

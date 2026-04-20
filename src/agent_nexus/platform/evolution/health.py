@@ -22,14 +22,93 @@ from agent_nexus.models.evolution import (
     SkillRecord,
 )
 from agent_nexus.platform.evolution.store import EvolutionStore
-from agent_nexus.platform.evolution.analyzer import EvolutionSuggestion
 from agent_nexus.platform.evolution.thresholds import (
     RULE_HIGH_FALLBACK,
     RULE_LOW_COMPLETION,
     RULE_MODERATE_EFFECTIVE,
+    EvolutionSuggestion,
+    HealthEvaluation,
     SkillRates,
     evaluate_skill_health,
 )
+
+
+def build_health_suggestions(
+    skill_id: str,
+    rates: SkillRates,
+    eval_result: HealthEvaluation,
+) -> list[EvolutionSuggestion]:
+    """Build evolution suggestions from health evaluation results.
+
+    Applies the three threshold rules from docs/04 Section 6 and returns
+    a list of suggestions.  FIX rules are deduplicated: only the
+    highest-confidence FIX is kept.  DERIVED is included independently.
+
+    This is the single implementation of the 3-rule threshold-to-suggestion
+    logic, shared by HealthChecker, ExecutionAnalyzer, and SkillEvolver.
+
+    Args:
+        skill_id: The skill to generate suggestions for.
+        rates: Pre-computed SkillRates.
+        eval_result: Result of evaluate_skill_health(rates).
+
+    Returns:
+        List of EvolutionSuggestion (empty if healthy).
+    """
+    suggestions: list[EvolutionSuggestion] = []
+
+    # Track best FIX suggestion (deduplicate: keep highest confidence)
+    best_fix: EvolutionSuggestion | None = None
+
+    # Rule 1: High fallback rate
+    if RULE_HIGH_FALLBACK in eval_result.rules:
+        fix1 = EvolutionSuggestion(
+            evolution_type=EvolutionType.FIX,
+            target_skill_ids=[skill_id],
+            direction=(
+                f"High fallback rate ({rates.fallback_rate:.0%}): "
+                f"skill is frequently selected but not applied, "
+                f"suggesting instructions are unclear or outdated"
+            ),
+            confidence=min(rates.fallback_rate, 1.0),
+        )
+        best_fix = fix1
+
+    # Rule 2: Applied often but rarely completes
+    if RULE_LOW_COMPLETION in eval_result.rules:
+        fix2 = EvolutionSuggestion(
+            evolution_type=EvolutionType.FIX,
+            target_skill_ids=[skill_id],
+            direction=(
+                f"Low completion rate ({rates.completion_rate:.0%}) "
+                f"despite high applied rate ({rates.applied_rate:.0%}): "
+                f"skill instructions may be incorrect or incomplete"
+            ),
+            confidence=min(
+                rates.applied_rate * (1 - rates.completion_rate), 1.0
+            ),
+        )
+        # Keep the FIX with highest confidence
+        if best_fix is None or fix2.confidence > best_fix.confidence:
+            best_fix = fix2
+
+    if best_fix is not None:
+        suggestions.append(best_fix)
+
+    # Rule 3: Moderate effectiveness
+    if RULE_MODERATE_EFFECTIVE in eval_result.rules:
+        suggestions.append(EvolutionSuggestion(
+            evolution_type=EvolutionType.DERIVED,
+            target_skill_ids=[skill_id],
+            direction=(
+                f"Moderate effectiveness ({rates.effective_rate:.0%}): "
+                f"skill works sometimes but could be enhanced with "
+                f"better error handling or alternative approaches"
+            ),
+            confidence=min(1.0 - rates.effective_rate, 1.0),
+        ))
+
+    return suggestions
 
 
 @dataclass
@@ -95,66 +174,16 @@ class HealthChecker:
         Returns:
             List of evolution suggestions (empty if healthy).
         """
-        suggestions: list[EvolutionSuggestion] = []
-
         rates = rates or SkillRates.from_record(skill_record)
         if rates is None:
-            return suggestions
+            return []
 
         eval_result = evaluate_skill_health(rates)
-
-        # Track best FIX suggestion (deduplicate: keep highest confidence)
-        best_fix: EvolutionSuggestion | None = None
-
-        # Rule 1: High fallback rate
-        if RULE_HIGH_FALLBACK in eval_result.rules:
-            fix1 = EvolutionSuggestion(
-                evolution_type=EvolutionType.FIX,
-                target_skill_ids=[skill_record.id],
-                direction=(
-                    f"High fallback rate ({rates.fallback_rate:.0%}): "
-                    f"skill is frequently selected but not applied, "
-                    f"suggesting instructions are unclear or outdated"
-                ),
-                confidence=min(rates.fallback_rate, 1.0),
-            )
-            best_fix = fix1
-
-        # Rule 2: Applied often but rarely completes
-        if RULE_LOW_COMPLETION in eval_result.rules:
-            fix2 = EvolutionSuggestion(
-                evolution_type=EvolutionType.FIX,
-                target_skill_ids=[skill_record.id],
-                direction=(
-                    f"Low completion rate ({rates.completion_rate:.0%}) "
-                    f"despite high applied rate ({rates.applied_rate:.0%}): "
-                    f"skill instructions may be incorrect or incomplete"
-                ),
-                confidence=min(
-                    rates.applied_rate * (1 - rates.completion_rate), 1.0
-                ),
-            )
-            # Keep the FIX with highest confidence
-            if best_fix is None or fix2.confidence > best_fix.confidence:
-                best_fix = fix2
-
-        if best_fix is not None:
-            suggestions.append(best_fix)
-
-        # Rule 3: Moderate effectiveness
-        if RULE_MODERATE_EFFECTIVE in eval_result.rules:
-            suggestions.append(EvolutionSuggestion(
-                evolution_type=EvolutionType.DERIVED,
-                target_skill_ids=[skill_record.id],
-                direction=(
-                    f"Moderate effectiveness ({rates.effective_rate:.0%}): "
-                    f"skill works sometimes but could be enhanced with "
-                    f"better error handling or alternative approaches"
-                ),
-                confidence=min(1.0 - rates.effective_rate, 1.0),
-            ))
-
-        return suggestions
+        return build_health_suggestions(
+            skill_id=skill_record.id,
+            rates=rates,
+            eval_result=eval_result,
+        )
 
     def diagnose_all(self) -> dict[str, HealthReport]:
         """Run health diagnostics on all active skills.

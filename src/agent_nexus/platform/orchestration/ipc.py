@@ -29,6 +29,13 @@ from agent_nexus.models.task import TaskItem
 
 logger = logging.getLogger(__name__)
 
+# IPC control message constants — shared across platform components.
+# These are internal protocol strings, not user-facing values.
+_HEARTBEAT_MSG = "__heartbeat__"
+_HEARTBEAT_CID = "__hb__"
+_LIST_TOOLS_MSG = "__list_tools__"
+_INTERNAL_CID = "__internal__"
+
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
@@ -356,7 +363,7 @@ class IPCProtocol:
             True if pong received, False otherwise.
         """
         try:
-            await self.send_chat("__heartbeat__", conversation_id="__hb__")
+            await self.send_chat(_HEARTBEAT_MSG, conversation_id=_HEARTBEAT_CID)
             # Read messages until we find the pong or exhaust attempts.
             # Non-pong messages (e.g. progress) are buffered so they
             # are not lost — callers of receive() / receive_until_result()
