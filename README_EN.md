@@ -6,7 +6,7 @@ English | **[中文](README.md)**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests: 2705](https://img.shields.io/badge/tests-2705_passing-brightgreen.svg)]()
+[![Tests: 2704](https://img.shields.io/badge/tests-2704_passing-brightgreen.svg)]()
 
 Agent Nexus is an **MCP-native** intelligent agent platform built on a four-layer architecture. Users run Agents locally with their own model configuration (OpenAI / Anthropic / Ollama / Chinese providers all supported).
 
@@ -313,6 +313,9 @@ agent-nexus install doc-filler --version 1.2.0
 
 # Install from a direct git URL
 agent-nexus install my-agent --source https://github.com/org/agent-repo.git
+
+# Install from local project directory (development mode)
+agent-nexus install doc-filler --local
 
 # Uninstall an agent
 agent-nexus uninstall doc-filler
@@ -846,7 +849,7 @@ pytest tests/integration/ -v
 pytest tests/e2e/ -v
 ```
 
-Current test coverage: **2705 tests all passing**, covering all platform modules and Agent packages.
+Current test coverage: **2704 tests all passing**, covering all platform modules and Agent packages.
 
 ---
 

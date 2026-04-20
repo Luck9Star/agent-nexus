@@ -6,7 +6,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests: 2705](https://img.shields.io/badge/tests-2705_passing-brightgreen.svg)]()
+[![Tests: 2704](https://img.shields.io/badge/tests-2704_passing-brightgreen.svg)]()
 
 Agent Nexus 是一个 **MCP-native** 的智能体平台，采用四层架构设计。用户在本地运行 Agent，自行配置模型（OpenAI / Anthropic / Ollama / 国产模型均支持）。
 
@@ -313,6 +313,9 @@ agent-nexus install doc-filler --version 1.2.0
 
 # 从 Git URL 直接安装
 agent-nexus install my-agent --source https://github.com/org/agent-repo.git
+
+# 从本地项目目录安装（开发模式）
+agent-nexus install doc-filler --local
 
 # 卸载 Agent
 agent-nexus uninstall doc-filler
@@ -846,7 +849,7 @@ pytest tests/integration/ -v
 pytest tests/e2e/ -v
 ```
 
-当前测试覆盖：**2705 个测试全部通过**，覆盖所有平台模块和 Agent 包。
+当前测试覆盖：**2704 个测试全部通过**，覆盖所有平台模块和 Agent 包。
 
 ---
 
