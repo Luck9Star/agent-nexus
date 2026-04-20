@@ -1,227 +1,227 @@
-# Refactor Protocol — 重构协议
+# Refactor Protocol
 
-> **适用场景**: Rust 重写、模块拆分、抽象提取、API 接口变更、性能优化（改实现不改行为）。
-> **不适用**: 新功能 → 用 feature-dev-protocol；bug 修复 → 用 quality-protocol。
-> **核心原则**: 行为不变 = 测试不动。小步重构，每步可验证。
-
----
-
-## 协议架构
-
-```
-Phase R1: 基线建立 (Baseline)
-  → 输出: 现有测试全绿 + 不变量清单
-
-Phase R2: 接口契约 (Contract)
-  → 输出: 输入/输出契约定义
-
-Phase R3: 小步重构 (Migrate)
-  → 输出: 逐步替换，每步测试绿
-
-Phase R4: 契约验证 (Verify)
-  → 输出: 新实现通过原测试 + 接口兼容
-```
+> **When to use**: Rust rewrite, module splitting, abstraction extraction, API interface changes, performance optimization (change implementation, not behavior).
+> **Not for**: New features → use feature-dev-protocol; bug fixes → use quality-protocol.
+> **Core principle**: Behavior unchanged = tests unchanged. Small steps, each step verifiable.
 
 ---
 
-## Phase R1: 基线建立
+## Protocol Architecture
+
+```
+Phase R1: Baseline Establishment
+  → Output: Existing tests all green + invariants checklist
+
+Phase R2: Interface Contract
+  → Output: Input/output contract definition
+
+Phase R3: Small-Step Migration
+  → Output: Incremental replacement, each step tests green
+
+Phase R4: Contract Verification
+  → Output: New implementation passes original tests + interface compatible
+```
+
+---
+
+## Phase R1: Baseline Establishment
 
 ### SOP
 
-1. **记录测试基线**:
+1. **Record Test Baseline**:
    ```bash
-   uv run pytest tests/ -x -q  # 必须全绿
-   # 记录测试数量
+   uv run pytest tests/ -x -q  # Must all pass
+   # Record test count
    ```
 
-2. **识别不变量** — 列出重构范围内必须保持的行为：
+2. **Identify Invariants** — List behaviors within refactor scope that must be preserved:
    ```markdown
    ## Invariants: [refactor scope]
 
-   - [ ] `add_task()` 返回 task_id，status=READY 或 BLOCKED
-   - [ ] `get_ready()` 只返回 READY 状态且无阻塞依赖的 task
-   - [ ] `close()` 后所有 SQLite 连接已释放
-   - [ ] lockfile.json 格式与现有一致
+   - [ ] `add_task()` returns task_id, status=READY or BLOCKED
+   - [ ] `get_ready()` only returns READY status tasks with no blocking dependencies
+   - [ ] `close()` releases all SQLite connections
+   - [ ] lockfile.json format consistent with existing
    ```
 
-3. **影响分析**:
+3. **Impact Analysis**:
    ```bash
    gitnexus_impact --target [refactor_target] --direction upstream
    ```
-   - d=1 的调用方有哪些？
-   - d=2 的间接依赖有哪些？
-   - 跨语言接口（Python↔Rust）在哪里？
+   - What are the d=1 callers?
+   - What are the d=2 indirect dependencies?
+   - Where are the cross-language interfaces (Python↔Rust)?
 
-4. **识别风险点**:
-   - 是否涉及 Pydantic model 序列化格式？→ 不能改 JSON 结构
-   - 是否涉及 SQLite schema？→ 需要 migration
-   - 是否涉及 IPC 协议？→ 不能改消息格式
-   - 是否涉及 lockfile.json？→ 需要 Python/Rust 兼容性测试
+4. **Identify Risk Points**:
+   - Does it involve Pydantic model serialization format? → Cannot change JSON structure
+   - Does it involve SQLite schema? → Migration needed
+   - Does it involve IPC protocol? → Cannot change message format
+   - Does it involve lockfile.json? → Python/Rust compatibility test needed
 
-### R1 退出条件
+### R1 Exit Conditions
 
-- [ ] 全量测试绿
-- [ ] 不变量清单已列出
-- [ ] gitnexus_impact 已跑，d=1 调用方已识别
-- [ ] 风险点已标注
+- [ ] Full test suite green
+- [ ] Invariants checklist listed
+- [ ] gitnexus_impact run, d=1 callers identified
+- [ ] Risk points annotated
 
 ---
 
-## Phase R2: 接口契约
+## Phase R2: Interface Contract
 
 ### SOP
 
-1. **定义接口契约** — 明确输入/输出不变的部分：
+1. **Define Interface Contract** — Specify which input/output aspects are invariant:
 
-   对于 Python→Python 重构（模块拆分/抽象提取）：
+   For Python→Python refactoring (module splitting/abstraction extraction):
    ```markdown
    ## Contract: [module name]
 
-   ### Public API (不可改)
-   - `def foo(x: str) -> int` — 不变
-   - `async def bar(data: dict) -> list[str]` — 不变
+   ### Public API (immutable)
+   - `def foo(x: str) -> int` — unchanged
+   - `async def bar(data: dict) -> list[str]` — unchanged
 
-   ### Internal API (可改)
-   - `_helper()` → 可重命名/删除/提取
+   ### Internal API (mutable)
+   - `_helper()` → can rename/delete/extract
    ```
 
-   对于 Python→Rust 重写：
+   For Python→Rust rewrite:
    ```markdown
    ## Contract: [crate name]
 
-   ### 文件格式 (必须兼容)
-   - lockfile.json: 读写格式与 Python 版一致
-   - config.toml: 解析结果与 Python 版一致
-   - TOML DAG templates: 解析行为与 Python 版一致
+   ### File Formats (must be compatible)
+   - lockfile.json: read/write format identical to Python version
+   - config.toml: parse results identical to Python version
+   - TOML DAG templates: parse behavior identical to Python version
 
-   ### IPC 消息格式 (必须兼容)
+   ### IPC Message Format (must be compatible)
    - PlatformToAgent JSON schema
    - AgentToPlatform JSON schema
-   - 错误响应格式
+   - Error response format
 
-   ### 行为契约 (必须通过原有测试)
-   - 测试文件 test_xxx.py 全部通过
-   - 边界行为：空输入、超时、进程崩溃
+   ### Behavioral Contract (must pass original tests)
+   - All test files test_xxx.py pass
+   - Boundary behavior: empty input, timeout, process crash
    ```
 
-2. **编写契约测试**（Python→Rust 场景）:
+2. **Write Contract Tests** (Python→Rust scenario):
    ```python
-   # 测试 Python 和 Rust 读写同一 lockfile.json
+   # Test Python and Rust reading/writing same lockfile.json
    def test_lockfile_compatibility():
        py_data = python_write_lockfile(...)
        rs_data = rust_read_lockfile(...)
        assert py_data == rs_data
    ```
 
-3. **契约评审** — 用 code-review-expert 审契约定义
+3. **Contract Review** — Use `/code-review-expert` to review contract definition
 
-### R2 退出条件
+### R2 Exit Conditions
 
-- [ ] 契约定义已输出（Public API / 文件格式 / IPC 消息格式）
-- [ ] 契约测试已编写（跨语言场景）
-- [ ] 契约评审通过
+- [ ] Contract definition output (Public API / File Formats / IPC Message Format)
+- [ ] Contract tests written (cross-language scenario)
+- [ ] Contract review passed
 
 ---
 
-## Phase R3: 小步重构
+## Phase R3: Small-Step Migration
 
 ### SOP
 
-1. **每次只改一个模块** — 不并行改多个模块：
+1. **Change one module at a time** — Do not modify multiple modules in parallel:
    ```
-   Step 1: 改 module_a → 测试 → 提交
-   Step 2: 改 module_b → 测试 → 提交
-   Step 3: 改 module_c → 测试 → 提交
+   Step 1: Change module_a → test → commit
+   Step 2: Change module_b → test → commit
+   Step 3: Change module_c → test → commit
    ```
 
-2. **每步验证**:
+2. **Verify After Each Step**:
    ```bash
-   # 改完后立即验证
+   # Verify immediately after change
    uv run pytest tests/unit/test_changed_module.py -v
    uv run pytest tests/ -x -q
    ```
 
-3. **测试策略**:
-   - **Python→Python**: 原有测试不动，新实现必须通过原测试
-   - **Python→Rust**: 先跑 Python 版测试记录预期，Rust 版必须产出相同结果
-   - **API 变更**: 先加兼容层（旧 API → 新 API），下个版本再删兼容层
+3. **Test Strategy**:
+   - **Python→Python**: Original tests unchanged; new implementation must pass original tests
+   - **Python→Rust**: Run Python tests first to record expectations; Rust must produce identical results
+   - **API Changes**: Add compatibility layer (old API → new API) first, remove in next version
 
-4. **回退策略**: 每步是一个独立 commit，失败时 `git revert` 即可回退
+4. **Rollback Strategy**: Each step is an independent commit; failure → `git revert`
 
-5. **禁止**:
-   - 不同时改实现和测试（改了实现，测试应该不动就能过）
-   - 不同时改多个模块（串行，不并行）
-   - 不在重构中"顺手"加新功能（Feature 和 Refactor 分开）
+5. **Prohibitions**:
+   - Do not change implementation and tests simultaneously (if implementation changes, tests should pass unchanged)
+   - Do not modify multiple modules at once (serial, not parallel)
+   - Do not "opportunistically" add new features during refactoring (Feature and Refactor are separate)
 
-### R3 退出条件
+### R3 Exit Conditions
 
-- [ ] 所有步骤完成
-- [ ] 全量测试绿
-- [ ] 每个 step 是独立 commit
-- [ ] 不变量清单逐项验证通过
+- [ ] All steps complete
+- [ ] Full test suite green
+- [ ] Each step is an independent commit
+- [ ] Invariants checklist verified item by item
 
 ---
 
-## Phase R4: 契约验证
+## Phase R4: Contract Verification
 
 ### SOP
 
-1. **不变量逐项验证**:
+1. **Invariants Verification Item by Item**:
    ```markdown
    ## Invariants Check: [refactor scope]
 
-   - [x] `add_task()` 返回 task_id，status=READY 或 BLOCKED → 测试通过
-   - [x] `get_ready()` 只返回 READY 状态 → 测试通过
-   - [x] `close()` 后连接释放 → 测试通过
+   - [x] `add_task()` returns task_id, status=READY or BLOCKED → test passed
+   - [x] `get_ready()` only returns READY status → test passed
+   - [x] `close()` releases connections → test passed
    ```
 
-2. **d=1 调用方回归** — 对 gitnexus_impact d=1 的每个调用方跑测试
+2. **d=1 Caller Regression** — Run tests for every d=1 caller identified by gitnexus_impact
 
-3. **跨语言兼容性**（Python→Rust 场景）:
-   - Python 写文件，Rust 读 → 一致
-   - Rust 写文件，Python 读 → 一致
-   - 同一输入，两边输出 → 一致
+3. **Cross-Language Compatibility** (Python→Rust scenario):
+   - Python writes file, Rust reads → consistent
+   - Rust writes file, Python reads → consistent
+   - Same input, both sides produce output → consistent
 
-4. **变更集验证**:
+4. **Changeset Verification**:
    ```bash
-   gitnexus_detect_changes  # 确认只改了预期范围
+   gitnexus_detect_changes  # Confirm only expected scope changed
    ```
 
-5. **交接给 Quality Protocol**:
-   - 输出 summary：重构了什么、接口是否变了、兼容性是否验证
+5. **Hand Off to Quality Protocol**:
+   - Output summary: what was refactored, whether interfaces changed, whether compatibility was verified
 
-### R4 退出条件
+### R4 Exit Conditions
 
-- [ ] 全量测试绿
-- [ ] 不变量全部通过
-- [ ] d=1 调用方测试通过
-- [ ] 跨语言兼容性测试通过（如有）
-- [ ] gitnexus_detect_changes 范围正确
-- [ ] 交接 summary 已输出
+- [ ] Full test suite green
+- [ ] All invariants passed
+- [ ] d=1 caller tests passed
+- [ ] Cross-language compatibility tests passed (if applicable)
+- [ ] gitnexus_detect_changes scope correct
+- [ ] Handoff summary output
 
 ---
 
-## Rust 重写专项约束
+## Rust Rewrite Special Constraints
 
-Phase 7 Rust 重写是一个特殊的重构场景，额外约束：
+Phase 7 Rust rewrite is a special refactoring scenario with additional constraints:
 
-### 逐 crate 替换顺序
+### Per-Crate Replacement Order
 
 ```
-ap-core     → 核心类型（纯数据，无 I/O）
-ap-fetcher  → Git 包获取（替换 installer.py）
-ap-runtime  → Agent Supervisor（替换 process_manager.py + supervisor.py）
-ap-gateway  → MCP 网关（替换 gateway.py + deferred_registry.py）
-ap-cli      → CLI（替换 cli.py）
+ap-core     → Core types (pure data, no I/O)
+ap-fetcher  → Git package fetching (replaces installer.py)
+ap-runtime  → Agent Supervisor (replaces process_manager.py + supervisor.py)
+ap-gateway  → MCP Gateway (replaces gateway.py + deferred_registry.py)
+ap-cli      → CLI (replaces cli.py)
 ```
 
-### 替换策略
+### Replacement Strategy
 
-1. **ap-core 先行** — 不涉及运行时，只替换类型定义
-2. **ap-fetcher → ap-runtime → ap-gateway → ap-cli** — 有依赖关系，必须按序
-3. **每个 crate 替换后，Python 版保留但标记 deprecated** — 共存期
+1. **ap-core first** — No runtime involved, only type definitions
+2. **ap-fetcher → ap-runtime → ap-gateway → ap-cli** — Dependencies require this order
+3. **After each crate replacement, Python version retained but marked deprecated** — Coexistence period
 
-### 兼容性测试清单
+### Compatibility Test Checklist
 
 ```markdown
 - [ ] lockfile.json: Python write → Rust read
@@ -231,39 +231,39 @@ ap-cli      → CLI（替换 cli.py）
 - [ ] CLI output: Python format == Rust format
 ```
 
-### 不动的东西
+### What Stays Unchanged
 
-- Agent Runtime（Python）— 永远是 Python
-- IPC 消息格式 — 不改
-- SKILL.md 格式 — 不改
-- TOML DAG template 格式 — 不改
-
----
-
-## 反模式（禁止）
-
-| # | 反模式 | 为什么禁止 |
-|---|--------|-----------|
-| 1 | 改实现的同时改测试 | 失去基线，无法验证行为不变 |
-| 2 | 同时重构多个模块 | 一个失败影响全部，回退困难 |
-| 3 | 重构中"顺手"加功能 | Feature 和 Refactor 混做 = 变更范围失控 |
-| 4 | 不做跨语言兼容性测试 | Python/Rust 共存期，格式不一致 = 数据丢失 |
-| 5 | 删除旧实现前没跑兼容性测试 | 两边必须能读写同一份数据 |
-| 6 | 改 IPC 消息格式 | MCP 协议边界是语言边界，不能动 |
+- Agent Runtime (Python) — Python forever
+- IPC Message Format — Do not change
+- SKILL.md Format — Do not change
+- TOML DAG Template Format — Do not change
 
 ---
 
-## 与其他协议的关系
+## Anti-Patterns (Forbidden)
+
+| # | Anti-Pattern | Why Forbidden |
+|---|-------------|---------------|
+| 1 | Changing implementation and tests simultaneously | Loses baseline, cannot verify behavior unchanged |
+| 2 | Refactoring multiple modules at once | One failure affects all; rollback difficult |
+| 3 | "Opportunistically" adding features during refactoring | Feature + Refactor mixed = change scope uncontrolled |
+| 4 | Skipping cross-language compatibility tests | Python/Rust coexistence period, format mismatch = data loss |
+| 5 | Deleting old implementation before running compatibility tests | Both sides must be able to read/write the same data |
+| 6 | Changing IPC message format | MCP protocol boundary is language boundary, do not touch |
+
+---
+
+## Relationship to Other Protocols
 
 ```
-Refactor Protocol (本文件)
-    │
-    ├── R4 完成后
-    │   └──→ Quality Protocol (quality-protocol.md)
-    │
-    ├── R1 发现需要新功能
-    │   └──→ Feature Dev Protocol (feature-dev-protocol.md)
-    │
-    └── R3 过程中发现 bug
-        └──→ 记录，重构完成后再修（不中途切任务）
+Refactor Protocol (this file)
+    |
+    +-- R4 complete
+    |   +--> Quality Protocol (quality-protocol.md)
+    |
+    +-- R1 discovers new feature needed
+    |   +--> Feature Dev Protocol (feature-dev-protocol.md)
+    |
+    +-- R3 finds bugs during refactoring
+        +--> Record them; fix after refactoring completes (do not switch tasks mid-protocol)
 ```

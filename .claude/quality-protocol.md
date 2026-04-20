@@ -1,4 +1,4 @@
-# 迭代协议 v2
+# Quality Protocol (v2)
 
 > **v1 Lessons (88→133, 76 entries, 2600+ tests)**
 >
