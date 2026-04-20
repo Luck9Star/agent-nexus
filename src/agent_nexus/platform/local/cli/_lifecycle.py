@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -30,9 +31,12 @@ def install_agent(
     source: Optional[str] = typer.Option(
         None, "--source", "-s", help="Git URL (direct install)"
     ),
+    local: bool = typer.Option(
+        False, "--local", "-l", help="Install from local project agents/ directory"
+    ),
 ) -> None:
-    """Install an agent from a package source."""
-    asyncio.run(_install(name, version, source))
+    """Install an agent from a package source or local directory."""
+    asyncio.run(_install(name, version, source, local))
 
 
 def uninstall(name: str = typer.Argument(help="Agent name to uninstall")) -> None:
@@ -104,17 +108,29 @@ def run_agent(
 
 
 async def _install(
-    name: str, version: str | None, source_url: str | None
+    name: str, version: str | None, source_url: str | None, local: bool
 ) -> None:
     """Async install implementation."""
-    from agent_nexus.platform.local.installer import GitInstaller
+    from agent_nexus.platform.local.installer import (
+        AgentNotFoundError,
+        GitInstaller,
+    )
 
     _loader, lockfile, sources, config_dir = _init_managers()
     installer = GitInstaller(sources, lockfile, config_dir)
 
     try:
-        entry = await installer.install(name, version=version, source_url=source_url)
-        typer.echo(f"Installed {name}@{entry.version}")
+        if local:
+            local_path = _resolve_local_agent(name)
+            entry = await installer.install_local(name, local_path)
+            typer.echo(f"Installed {name}@{entry.version} (local)")
+        else:
+            entry = await installer.install(name, version=version, source_url=source_url)
+            typer.echo(f"Installed {name}@{entry.version}")
+    except AgentNotFoundError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        typer.echo("Hint: Use --local to install from the local project directory.")
+        raise typer.Exit(code=1)
     except Exception as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1)
@@ -448,3 +464,41 @@ async def _wait_forever() -> None:
     """Block indefinitely until cancelled."""
     while True:
         await asyncio.sleep(3600)
+
+
+def _resolve_local_agent(name: str) -> Path:
+    """Resolve a local agent path from the current project root.
+
+    Walks up from CWD to find a project root (``pyproject.toml`` or ``.git``),
+    then checks ``agents/atomic/{name}`` and ``agents/composite/{name}``.
+
+    Raises ``typer.Exit`` if the agent cannot be found locally.
+    """
+    cwd = Path.cwd()
+    project_root: Path | None = None
+
+    for parent in [cwd, *cwd.parents]:
+        if (parent / "pyproject.toml").exists() or (parent / ".git").exists():
+            project_root = parent
+            break
+
+    if project_root is None:
+        typer.echo(
+            "Error: Cannot find project root (no pyproject.toml or .git found).",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    # Search both atomic and composite agent directories
+    for subdir in ("atomic", "composite"):
+        candidate = project_root / "agents" / subdir / name
+        if candidate.is_dir():
+            return candidate.resolve()
+
+    typer.echo(
+        f"Error: Agent '{name}' not found locally. Searched:\n"
+        f"  {project_root / 'agents' / 'atomic' / name}\n"
+        f"  {project_root / 'agents' / 'composite' / name}",
+        err=True,
+    )
+    raise typer.Exit(code=1)

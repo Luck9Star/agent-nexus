@@ -303,6 +303,128 @@ class GitInstaller:
         # Re-install with latest version
         return await self.install(agent_name, version=None, source_url=None)
 
+    async def install_local(
+        self,
+        agent_name: str,
+        local_path: Path,
+    ) -> LockfileEntry:
+        """Install an agent from a local directory (dev mode).
+
+        Parameters
+        ----------
+        agent_name:
+            Name of the agent to install.
+        local_path:
+            Absolute path to the agent package directory.
+
+        Returns
+        -------
+        LockfileEntry
+            Entry recorded in the lockfile for the installed agent.
+
+        Raises
+        ------
+        InstallationError
+            Validation or venv creation failed.
+        """
+        import re
+
+        if not re.match(_AGENT_NAME_RE, agent_name):
+            raise InstallationError(
+                f"Invalid agent name: '{agent_name}'. "
+                "Must start with alphanumeric and contain only "
+                "alphanumeric, dots, hyphens, and underscores."
+            )
+
+        if not local_path.is_dir():
+            raise InstallationError(
+                f"Local agent path does not exist: {local_path}"
+            )
+
+        # 1. Validate
+        issues = self._validate_agent_package(local_path)
+        if issues:
+            raise InstallationError(
+                f"Agent '{agent_name}' validation failed: {'; '.join(issues)}"
+            )
+
+        _created_paths: list[Path] = []
+        try:
+            # 2. Copy to agents dir
+            dest = self._agents_dir / agent_name
+            if dest.exists():
+                shutil.rmtree(dest)
+            shutil.copytree(local_path, dest)
+            _created_paths.append(dest)
+            logger.info("Local agent files copied to %s", dest)
+
+            # 3. Read manifest
+            manifest_dict = self._read_manifest(dest)
+            try:
+                manifest = AgentManifest(**manifest_dict) if manifest_dict else None
+            except Exception as exc:
+                raise InstallationError(
+                    f"Agent '{agent_name}' has invalid manifest data: {exc}"
+                ) from exc
+            agent_type = manifest.type if manifest else AgentType.ATOMIC
+            manifest_version = manifest.version if manifest else "0.0.0"
+
+            # 4. Create venv if needed
+            venv_path = await self._create_venv(agent_name, dest)
+            if venv_path:
+                _created_paths.append(venv_path)
+
+            # 5. Try to get commit SHA from the local project repo
+            commit_sha = await self._get_local_commit_sha(local_path)
+
+            # 6. Update lockfile
+            entry = LockfileEntry(
+                version=manifest_version,
+                source="local",
+                commit_sha=commit_sha,
+                agent_type=agent_type,
+                installed_at=datetime.now(timezone.utc),
+                venv_path=str(venv_path) if venv_path else "",
+                dependencies=manifest.pip_dependencies if manifest else [],
+            )
+            self._lockfile.add_entry_by_name(agent_name, entry)
+
+            logger.info(
+                "Local agent installed: %s@%s (source=local)",
+                agent_name,
+                entry.version,
+            )
+            return entry
+
+        except Exception:
+            for path in reversed(_created_paths):
+                try:
+                    if path.is_dir():
+                        shutil.rmtree(path, ignore_errors=True)
+                    elif path.exists():
+                        path.unlink()
+                except Exception:
+                    logger.debug("Rollback: failed to remove %s", path, exc_info=True)
+            logger.warning("Local install of '%s' failed; cleaned up.", agent_name)
+            raise
+
+    async def _get_local_commit_sha(self, agent_path: Path) -> str:
+        """Get git HEAD SHA from the project repo containing agent_path.
+
+        Falls back to 'latest' if not in a git repo.
+        """
+        try:
+            result = await self._run_git_capture(
+                ["rev-parse", "HEAD"],
+                cwd=agent_path,
+            )
+            sha = result.strip()
+            if len(sha) >= 40:
+                return sha[:40]
+        except Exception:
+            logger.debug("Could not get git SHA for local path %s", agent_path)
+        return "latest"
+
     def get_installed_version(self, agent_name: str) -> str | None:
         """Return the currently installed version from the lockfile."""
         entry = self._lockfile.get_entry(agent_name)

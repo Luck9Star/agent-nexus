@@ -184,7 +184,7 @@ class TestInstall:
             installer_instance = GitInstallerCls.return_value
             installer_instance.install = AsyncMock(return_value=entry)
 
-            await _install("my-agent", None, None)
+            await _install("my-agent", None, None, False)
 
         installer_instance.install.assert_awaited_once_with(
             "my-agent", version=None, source_url=None
@@ -208,7 +208,7 @@ class TestInstall:
             )
 
             with pytest.raises(click.exceptions.Exit) as exc_info:
-                await _install("bad-agent", "1.0.0", "https://example.com/repo")
+                await _install("bad-agent", "1.0.0", "https://example.com/repo", False)
 
         assert exc_info.value.exit_code == 1
         calls = _echo_calls(echo_mock)
