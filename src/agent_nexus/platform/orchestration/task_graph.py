@@ -105,7 +105,8 @@ class TaskGraph:
             self._mem_conn = None
 
     def __del__(self) -> None:
-        self.close()
+        if hasattr(self, "_mem_conn"):
+            self.close()
 
     @contextmanager
     def _conn(
