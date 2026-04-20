@@ -212,6 +212,11 @@ class PlatformRouter:
                 error_type=type(exc).__name__,
             )
 
+        # Pre-compute role→agent mapping once (deterministic across phases)
+        role_agents: dict[str, list[str]] = {}
+        for name, agent_def in definition.agents.items():
+            role_agents.setdefault(agent_def.role, []).append(name)
+
         # 3. Execute phases
         try:
             async def _run_phases() -> None:
@@ -219,7 +224,7 @@ class PlatformRouter:
                 for phase in _PHASE_ORDER:
                     ctx.current_phase = phase
                     try:
-                        result = await self._execute_phase(ctx, phase, definition, message)
+                        result = await self._execute_phase(ctx, phase, definition, message, role_agents=role_agents)
                         phase_results[phase] = result
                         completed += 1
 
@@ -415,6 +420,8 @@ class PlatformRouter:
         phase: WorkflowPhase,
         definition: OrchestrationDefinition,
         message: str,
+        *,
+        role_agents: dict[str, list[str]] | None = None,
     ) -> str:
         """Execute a single workflow phase.
 
@@ -426,17 +433,25 @@ class PlatformRouter:
 
         For research and implementation: run assigned agents in parallel.
         For synthesis and verification: run single agent.
+
+        Args:
+            role_agents: Pre-computed role→agent-names mapping.  When provided
+                (by ``route_composite``), the list comprehension is skipped.
+                When ``None`` (legacy / tests), the map is computed on the fly.
         """
         tg = ctx.task_graph
         if tg is None:
             raise RuntimeError("TaskGraph not initialized in context")
 
         role = self._phase_to_role(phase)
-        phase_agents = [
-            name
-            for name, agent_def in definition.agents.items()
-            if agent_def.role == role
-        ]
+        if role_agents is not None:
+            phase_agents = list(role_agents.get(role, []))
+        else:
+            phase_agents = [
+                name
+                for name, agent_def in definition.agents.items()
+                if agent_def.role == role
+            ]
 
         if not phase_agents:
             # Fallback: if no agents have the matching role, use root tasks
@@ -528,11 +543,7 @@ class PlatformRouter:
         async with lock:
             try:
                 await handle.ipc.send_chat(message, conversation_id=conversation_id)
-            except IPCConnectionError:
-                raise
-            except IPCTimeoutError:
-                raise
-            except IPCError:
+            except (IPCConnectionError, IPCTimeoutError, IPCError):
                 raise
             except Exception as exc:
                 raise RuntimeError(
@@ -541,11 +552,7 @@ class PlatformRouter:
 
             try:
                 response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
-            except IPCConnectionError:
-                raise
-            except IPCTimeoutError:
-                raise
-            except IPCError:
+            except (IPCConnectionError, IPCTimeoutError, IPCError):
                 raise
             except Exception as exc:
                 raise RuntimeError(

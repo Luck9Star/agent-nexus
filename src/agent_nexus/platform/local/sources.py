@@ -45,14 +45,21 @@ class SourceManager:
     def __init__(self, sources_path: Path) -> None:
         self._path = sources_path
         self._sources: list[SourceEntry] = []
-        self._load()
+        self._loaded = False
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
+    def _ensure_loaded(self) -> None:
+        """Lazily load sources.yaml on first use."""
+        if not self._loaded:
+            self._load()
+            self._loaded = True
+
     def add_source(self, entry: SourceEntry) -> None:
         """Add or update a source entry and save."""
+        self._ensure_loaded()
         # Remove existing entry with same name
         self._sources = [s for s in self._sources if s.name != entry.name]
         self._sources.append(entry)
@@ -64,6 +71,7 @@ class SourceManager:
 
         Returns ``True`` if the source existed (and was removed).
         """
+        self._ensure_loaded()
         before = len(self._sources)
         self._sources = [s for s in self._sources if s.name != name]
         if len(self._sources) < before:
@@ -74,6 +82,7 @@ class SourceManager:
 
     def list_sources(self) -> list[SourceEntry]:
         """Return all sources sorted by priority (official first)."""
+        self._ensure_loaded()
         return sorted(self._sources, key=self._source_priority)
 
     def save(self) -> None:
@@ -83,6 +92,7 @@ class SourceManager:
         atomically swap it into place.  This avoids corruption if the
         process crashes mid-write.
         """
+        self._ensure_loaded()
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
         payload: dict[str, Any] = {
@@ -127,6 +137,7 @@ class SourceManager:
 
         Returns a list of ``(source, index_entry)`` tuples for each match.
         """
+        self._ensure_loaded()
         results: list[tuple[SourceEntry, IndexEntry]] = []
         for source in self.list_sources():
             index = self._load_source_index(source)
@@ -149,6 +160,7 @@ class SourceManager:
 
         Searches sources in priority order (official first).
         """
+        self._ensure_loaded()
         for source in self.list_sources():
             index = self._load_source_index(source)
             if index is None:
@@ -164,6 +176,7 @@ class SourceManager:
 
     def get_official_source(self) -> SourceEntry | None:
         """Return the official source entry, or ``None`` if not configured."""
+        self._ensure_loaded()
         for source in self._sources:
             if source.name == "official":
                 return source

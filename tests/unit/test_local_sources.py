@@ -197,6 +197,7 @@ class TestSourceEntryValidation:
         _write_sources(path, [{"type": "git", "url": "https://example.com/r.git"}])
         sm = SourceManager(path)
         # Falls back to official when no valid entries
+        sm._ensure_loaded()
         assert len(sm._sources) == 1
         assert sm._sources[0].name == "official"
 

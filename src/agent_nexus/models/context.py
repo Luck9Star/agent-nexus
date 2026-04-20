@@ -104,6 +104,9 @@ class ContextBudget(FrozenModel):
         return self
 
 
+_DEFAULT_CONTEXT_BUDGET = ContextBudget()
+
+
 class TokenUsage(BaseModel):
     """Session-scoped token usage tracking.
 
@@ -148,7 +151,7 @@ class TokenUsage(BaseModel):
             None -- within budget
         """
         if budget is None:
-            budget = ContextBudget()
+            budget = _DEFAULT_CONTEXT_BUDGET
 
         if context_window <= 0:
             logger.warning(

@@ -122,7 +122,7 @@ class EvolutionContextDescriber:
             return "[Evolution] No matching active skills"
 
         # Sort by total_selections descending (top skills first)
-        active.sort(key=lambda s: s.total_selections, reverse=True)
+        active = sorted(active, key=lambda s: s.total_selections, reverse=True)
 
         # Build health reports, passing the already-filtered list to
         # avoid diagnose_skills fetching get_active_skills() again.
@@ -182,7 +182,7 @@ class EvolutionContextDescriber:
             return "[Evolution] No matching active skills"
 
         # Sort by total_selections descending
-        active.sort(key=lambda s: s.total_selections, reverse=True)
+        active = sorted(active, key=lambda s: s.total_selections, reverse=True)
 
         # Build health reports, passing the already-filtered list to
         # avoid diagnose_skills fetching get_active_skills() again.

@@ -105,12 +105,15 @@ class SecurityChecker:
         Args:
             rules: Security rules to apply. If None, uses DEFAULT_RULES.
         """
+        self._regex_rules: list[RegexRule] = []
+        self._structural_rules: list[SecurityRule] = []
         if rules is not None:
             self._rules: list[SecurityRule] = []
             for rule in rules:
                 self.add_rule(rule)
         else:
             self._rules = list(self.DEFAULT_RULES)
+        self._classify_rules()
 
     def add_rule(self, rule: SecurityRule) -> None:
         """Add a security rule to the checker.
@@ -119,6 +122,12 @@ class SecurityChecker:
             rule: SecurityRule instance to add.
         """
         self._rules.append(rule)
+        self._classify_rules()
+
+    def _classify_rules(self) -> None:
+        """Partition self._rules into regex vs structural lists."""
+        self._regex_rules = [r for r in self._rules if isinstance(r, RegexRule)]
+        self._structural_rules = [r for r in self._rules if not isinstance(r, RegexRule)]
 
     @property
     def rules(self) -> list[SecurityRule]:
@@ -168,18 +177,10 @@ class SecurityChecker:
             ]
 
         violations: list[SecurityViolation] = []
-        regex_rules: list[RegexRule] = []
-        structural_rules: list[SecurityRule] = []
-
-        for rule in self._rules:
-            if isinstance(rule, RegexRule):
-                regex_rules.append(rule)
-            else:
-                structural_rules.append(rule)
 
         # Structural rules: per-node
         for node in ast.walk(tree):
-            for rule in structural_rules:
+            for rule in self._structural_rules:
                 try:
                     violations.extend(rule.check(node))
                 except Exception:
@@ -192,7 +193,7 @@ class SecurityChecker:
                     continue
 
         # Regex rules: once on full source
-        for rule in regex_rules:
+        for rule in self._regex_rules:
             try:
                 violations.extend(rule.check_source(code))
             except Exception:

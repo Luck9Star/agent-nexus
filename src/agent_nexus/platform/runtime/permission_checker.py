@@ -71,6 +71,13 @@ _DANGEROUS_COMMAND_PATTERNS: tuple[str, ...] = (
     "scp ",
 )
 
+# Pre-compiled regex patterns derived from _DANGEROUS_COMMAND_PATTERNS.
+_COMPILED_DANGEROUS_PATTERNS: list[re.Pattern[str]] = []
+
+for _raw in _DANGEROUS_COMMAND_PATTERNS:
+    _escaped = re.escape(_raw.strip())
+    _COMPILED_DANGEROUS_PATTERNS.append(re.compile(rf"(?:^|[|&;])\s*{_escaped}\b"))
+
 
 def _expand_user(path: str) -> str:
     """Expand ~ and resolve to absolute canonical path.
@@ -357,10 +364,7 @@ class PermissionChecker:
         ``"perform_rm_analysis"`` or ``"info --curl-option"``.
         """
         stripped = command.strip().lower()
-        for pattern in _DANGEROUS_COMMAND_PATTERNS:
-            escaped = re.escape(pattern.strip())
-            # Match at command start or after shell operators
-            cmd_re = rf'(?:^|[|&;])\s*{escaped}\b'
-            if re.search(cmd_re, stripped):
+        for pattern in _COMPILED_DANGEROUS_PATTERNS:
+            if pattern.search(stripped):
                 return True
         return False

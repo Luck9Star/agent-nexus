@@ -8,6 +8,7 @@ from agent_nexus.platform.evolution.health import (
     HealthChecker,
     HealthReport,
 )
+from agent_nexus.platform.evolution.thresholds import SkillRates
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +361,10 @@ class TestHealthSummaryCaptured:
         # Monkey-patch check_health to inject a CAPTURED suggestion
         original = checker.check_health
 
-        def patched(skill_record: SkillRecord) -> list[EvolutionSuggestion]:
+        def patched(
+            skill_record: SkillRecord,
+            rates: SkillRates | None = None,
+        ) -> list[EvolutionSuggestion]:
             if skill_record.id == "sk-cap":
                 return [EvolutionSuggestion(
                     evolution_type=EvolutionType.CAPTURED,
@@ -368,7 +372,7 @@ class TestHealthSummaryCaptured:
                     direction="test captured",
                     confidence=0.8,
                 )]
-            return original(skill_record)
+            return original(skill_record, rates=rates)
 
         checker.check_health = patched  # type: ignore[assignment]
         summary = checker.get_health_summary()

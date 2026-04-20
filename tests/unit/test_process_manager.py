@@ -671,6 +671,12 @@ def _iter17_make_mock_process(pid: int = 12345, returncode=None) -> MagicMock:
     proc.stdout = AsyncMock()
     proc.stdout.read = AsyncMock(return_value=b"")
     proc.stdout.readline = AsyncMock(return_value=b"")
+    # Synchronous mock transport so sync_close() doesn't produce
+    # unawaited coroutines from AsyncMock auto-creation.
+    _mock_transport = MagicMock()
+    _mock_transport.is_closing = MagicMock(return_value=False)
+    _mock_transport.close = MagicMock()
+    proc.stdout._transport = _mock_transport
 
     mock_stderr = AsyncMock()
     mock_stderr.readline = AsyncMock(return_value=b"")

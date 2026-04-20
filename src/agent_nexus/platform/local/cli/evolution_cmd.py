@@ -112,13 +112,23 @@ def evolution_history(
     """Show version lineage for a skill."""
     engine, store = _get_engine()
     try:
-        # Find skill by name or ID
-        skills = engine.store.get_all_skills()
+        # Find skill by name (indexed query) or by ID (direct lookup).
+        # Uses get_versions(name) which hits idx_sr_name instead of
+        # loading all skill records.
         skill_id = None
-        for s in skills:
-            if s.name == skill_name or s.id == skill_name:
-                skill_id = s.id
-                break
+
+        # Try as UUID first (direct ID lookup)
+        skill = engine.store.get_skill_record(skill_name)
+        if skill is not None:
+            skill_id = skill.id
+        else:
+            # Try as name (indexed query, returns all versions)
+            versions = engine.store.get_versions(skill_name)
+            if versions:
+                # Pick the active one if available, otherwise latest generation
+                active = [v for v in versions if v.is_active]
+                target = active[0] if active else versions[-1]
+                skill_id = target.id
 
         if skill_id is None:
             typer.echo(f"Skill '{skill_name}' not found.", err=True)

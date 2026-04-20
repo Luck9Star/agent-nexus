@@ -319,7 +319,8 @@ class EvolutionStore:
                 f"FROM skill_records WHERE id IN ({placeholders})",
                 tuple(skill_ids),
             ).fetchall()
-            parents = self._batch_load_parents(conn)
+            found_ids = {row[0] for row in rows}
+            parents = self._batch_load_parents(conn, found_ids)
             result: dict[str, SkillRecord] = {}
             for row in rows:
                 record = self._row_to_record(conn, row, parents)
@@ -336,7 +337,8 @@ class EvolutionStore:
                 "total_fallbacks, created_at, updated_at "
                 "FROM skill_records WHERE is_active = 1"
             ).fetchall()
-            parents = self._batch_load_parents(conn)
+            active_ids = {row[0] for row in rows}
+            parents = self._batch_load_parents(conn, active_ids)
             return self._rows_to_records(conn, rows, parents)
 
     def get_all_skills(self) -> list[SkillRecord]:
@@ -349,7 +351,8 @@ class EvolutionStore:
                 "total_fallbacks, created_at, updated_at "
                 "FROM skill_records"
             ).fetchall()
-            parents = self._batch_load_parents(conn)
+            all_ids = {row[0] for row in rows}
+            parents = self._batch_load_parents(conn, all_ids)
             return self._rows_to_records(conn, rows, parents)
 
     def deactivate_skill(self, skill_id: str) -> bool:
@@ -374,12 +377,12 @@ class EvolutionStore:
                 "ORDER BY lineage_generation ASC",
                 (name,),
             ).fetchall()
-            parents = self._batch_load_parents(conn)
+            version_ids = {row[0] for row in rows}
+            parents = self._batch_load_parents(conn, version_ids)
             return self._rows_to_records(conn, rows, parents)
 
     # ------------------------------------------------------------------
     # Atomic counter increments
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _validate_counter_invariants(
@@ -1192,12 +1195,30 @@ class EvolutionStore:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _batch_load_parents(conn: sqlite3.Connection) -> dict[str, list[str]]:
-        """Load all skill_lineage_parents in one query, keyed by skill_id."""
+    def _batch_load_parents(
+        conn: sqlite3.Connection,
+        skill_ids: set[str] | None = None,
+    ) -> dict[str, list[str]]:
+        """Load skill_lineage_parents, optionally filtered by skill_ids.
+
+        When *skill_ids* is provided, only parents for those skills are
+        loaded using an IN clause.  When None, the full table is loaded
+        (required for BFS ancestry traversal where the needed IDs are
+        not known up front).
+        """
         parents: dict[str, list[str]] = {}
-        for skill_id, parent_id in conn.execute(
-            "SELECT skill_id, parent_id FROM skill_lineage_parents"
-        ).fetchall():
+        if skill_ids:
+            placeholders = ",".join("?" * len(skill_ids))
+            rows = conn.execute(
+                f"SELECT skill_id, parent_id FROM skill_lineage_parents "
+                f"WHERE skill_id IN ({placeholders})",
+                tuple(skill_ids),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT skill_id, parent_id FROM skill_lineage_parents"
+            ).fetchall()
+        for skill_id, parent_id in rows:
             parents.setdefault(skill_id, []).append(parent_id)
         return parents
 

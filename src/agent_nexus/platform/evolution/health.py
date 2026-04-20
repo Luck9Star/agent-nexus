@@ -75,7 +75,9 @@ class HealthChecker:
         self._store = store
 
     def check_health(
-        self, skill_record: SkillRecord
+        self,
+        skill_record: SkillRecord,
+        rates: SkillRates | None = None,
     ) -> list[EvolutionSuggestion]:
         """Evaluate health of a single skill and return suggestions.
 
@@ -87,13 +89,15 @@ class HealthChecker:
 
         Args:
             skill_record: The skill to evaluate.
+            rates: Pre-computed SkillRates to avoid double computation.
+                If None, computed from skill_record.
 
         Returns:
             List of evolution suggestions (empty if healthy).
         """
         suggestions: list[EvolutionSuggestion] = []
 
-        rates = SkillRates.from_record(skill_record)
+        rates = rates or SkillRates.from_record(skill_record)
         if rates is None:
             return suggestions
 
@@ -187,10 +191,10 @@ class HealthChecker:
         reports: dict[str, HealthReport] = {}
 
         for skill in active_skills:
-            # Compute rates once — reuse inside check_health via the
-            # evaluate_skill_health path to avoid double computation.
+            # Compute rates once and pass into check_health to avoid
+            # redundant SkillRates.from_record() call.
             rates = SkillRates.from_record(skill)
-            suggestions = self.check_health(skill)
+            suggestions = self.check_health(skill, rates=rates)
 
             metrics: dict[str, float] = {
                 "total_selections": float(skill.total_selections),

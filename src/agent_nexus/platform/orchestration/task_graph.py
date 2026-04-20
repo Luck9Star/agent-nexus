@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from collections import deque
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -248,7 +249,12 @@ class TaskGraph:
             task_ids = [t.id for t in tasks]
             id_set = set(task_ids)
             if len(id_set) < len(task_ids):
-                dupes = [tid for tid in id_set if task_ids.count(tid) > 1]
+                seen: set[str] = set()
+                dupes: list[str] = []
+                for tid in task_ids:
+                    if tid in seen and tid not in dupes:
+                        dupes.append(tid)
+                    seen.add(tid)
                 raise ValueError(f"Duplicate task IDs in batch: {dupes}")
 
             placeholders = ",".join("?" * len(task_ids))
@@ -782,9 +788,9 @@ class TaskGraph:
         visited: set[str] = set()
 
         # BFS from blocked_by_ids backwards through their dependencies
-        queue = list(blocked_by_ids)
+        queue = deque(blocked_by_ids)
         while queue:
-            node = queue.pop(0)
+            node = queue.popleft()
             if node == task_id:
                 return True
             if node in visited:

@@ -1404,7 +1404,6 @@ class TestCLI:
 
     def test_search_with_results(self) -> None:
         """search command shows matching agents."""
-        mock_lockfile = MagicMock(spec=LockfileManager)
         mock_sources = MagicMock(spec=SourceManager)
         index_entry = IndexEntry(
             name="doc-filler",
@@ -1415,11 +1414,16 @@ class TestCLI:
         )
         official = SourceEntry(name="official", type="git", url="https://example.com/r.git")
         mock_sources.search_agents.return_value = [(official, index_entry)]
-        mock_loader = MagicMock()
 
+        # _search uses a local import of SourceManager, so patching
+        # the class on the source module works because the local import
+        # resolves to the patched class at call time.
         with patch(
-            "agent_nexus.platform.local.cli._lifecycle._init_managers",
-            return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
+            "agent_nexus.platform.local.sources.SourceManager",
+            return_value=mock_sources,
+        ), patch(
+            "agent_nexus.platform.local.cli._lifecycle._get_config_dir",
+            return_value=Path("/tmp/cfg"),
         ):
             result = runner.invoke(app, ["search", "doc"])
             assert "doc-filler" in result.output

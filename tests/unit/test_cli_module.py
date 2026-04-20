@@ -1018,12 +1018,12 @@ class TestSearchAgents:
     @pytest.mark.asyncio
     async def test_no_results(self) -> None:
         """Search with no matching agents → 'No agents found' message."""
-        mocks, _, sources_mock, _ = _mock_managers()
-
+        sources_mock = MagicMock()
         sources_mock.search_agents.return_value = []
 
         with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.sources.SourceManager", return_value=sources_mock),
+            patch("agent_nexus.platform.local.cli._lifecycle._get_config_dir", return_value=Path("/tmp/cfg")),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             from agent_nexus.platform.local.cli._lifecycle import _search
@@ -1035,8 +1035,6 @@ class TestSearchAgents:
     @pytest.mark.asyncio
     async def test_matching_results(self) -> None:
         """Search finds matching agent → displays name, type, version."""
-        mocks, _, sources_mock, _ = _mock_managers()
-
         source_entry = MagicMock()
         source_entry.name = "official"
 
@@ -1046,10 +1044,12 @@ class TestSearchAgents:
         index_entry.version = "1.0.0"
         index_entry.type = MagicMock(value="atomic")
 
+        sources_mock = MagicMock()
         sources_mock.search_agents.return_value = [(source_entry, index_entry)]
 
         with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.sources.SourceManager", return_value=sources_mock),
+            patch("agent_nexus.platform.local.cli._lifecycle._get_config_dir", return_value=Path("/tmp/cfg")),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             from agent_nexus.platform.local.cli._lifecycle import _search
@@ -1062,12 +1062,12 @@ class TestSearchAgents:
     @pytest.mark.asyncio
     async def test_source_index_none_skipped(self) -> None:
         """Source with empty results is handled gracefully."""
-        mocks, _, sources_mock, _ = _mock_managers()
-
+        sources_mock = MagicMock()
         sources_mock.search_agents.return_value = []
 
         with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.sources.SourceManager", return_value=sources_mock),
+            patch("agent_nexus.platform.local.cli._lifecycle._get_config_dir", return_value=Path("/tmp/cfg")),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             from agent_nexus.platform.local.cli._lifecycle import _search

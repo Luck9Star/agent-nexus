@@ -16,7 +16,7 @@ from typing import Optional
 import typer
 
 from agent_nexus.models.distribution import LockfileEntry
-from agent_nexus.platform.local.cli._shared import _init_managers
+from agent_nexus.platform.local.cli._shared import _get_config_dir, _init_managers
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +240,10 @@ async def _list_agents() -> None:
 
 async def _search(query: str) -> None:
     """Async search implementation."""
-    _loader, lockfile, sources, _config_dir = _init_managers()
+    from agent_nexus.platform.local.sources import SourceManager
+
+    config_dir = _get_config_dir()
+    sources = SourceManager(config_dir / "sources.yaml")
 
     results: list[dict] = []
     for source, entry in sources.search_agents(query):

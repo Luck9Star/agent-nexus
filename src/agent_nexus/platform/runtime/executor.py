@@ -233,7 +233,7 @@ class IPythonExecutor:
 
         try:
             # Snapshot namespace before execution to detect new variables
-            pre_keys = set(self.namespace_keys())
+            pre_keys = self._namespace_key_set()
 
             transformed = shell.transform_cell(code)
             self._exec_done.clear()  # Thread is about to start
@@ -351,12 +351,20 @@ class IPythonExecutor:
 
         Excludes IPython internal names (In, Out, exit, quit, etc.).
         """
+        return sorted(self._namespace_key_set())
+
+    def _namespace_key_set(self) -> set[str]:
+        """Return user-defined namespace keys as an unsorted set.
+
+        For internal use where sorting is unnecessary (e.g. set difference
+        in _detect_new_variables).  Avoids the overhead of sorted().
+        """
         ns = self._shell.user_ns if self._shell is not None else self._pending_injects
-        return sorted(
+        return {
             k for k in ns
             if k not in _IPYTHON_INTERNALS
             and not k.startswith("_")
-        )
+        }
 
     def _detect_new_variables(self, pre_keys: set[str]) -> list[str]:
         """Detect variables created since the last execution.
@@ -364,5 +372,5 @@ class IPythonExecutor:
         Args:
             pre_keys: Set of namespace keys snapshot before execution.
         """
-        current = set(self.namespace_keys())
+        current = self._namespace_key_set()
         return sorted(current - pre_keys)

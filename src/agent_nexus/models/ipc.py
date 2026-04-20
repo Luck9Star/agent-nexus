@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from enum import StrEnum
-import json
 from typing import Any
 
 from pydantic import Field, field_validator, model_validator
@@ -51,6 +50,25 @@ class PlatformToAgent(FrozenModel):
     summary: str | None = None
 
 
+def _estimate_size(v: Any, _depth: int = 0) -> int:
+    """Estimate serialized size without full json.dumps allocation."""
+    if _depth > 10:  # prevent pathological nesting
+        return len(str(v))
+    if isinstance(v, str):
+        return len(v)
+    if isinstance(v, dict):
+        return sum(_estimate_size(k, _depth + 1) + _estimate_size(val, _depth + 1) + 4 for k, val in v.items())
+    if isinstance(v, (list, tuple)):
+        return sum(_estimate_size(item, _depth + 1) + 2 for item in v)
+    if isinstance(v, bool):
+        return 5
+    if isinstance(v, int):
+        return len(str(v))
+    if isinstance(v, float):
+        return 10
+    return len(str(v))
+
+
 class AgentToPlatform(FrozenModel):
     """Message from Agent subprocess to Platform Router (stdout).
 
@@ -78,8 +96,8 @@ class AgentToPlatform(FrozenModel):
     @classmethod
     def _validate_output_size(cls, v):
         if v is not None:
-            serialized = json.dumps(v, default=str)
-            if len(serialized) > 65536:
+            size = _estimate_size(v)
+            if size > 65536:
                 raise ValueError("output exceeds maximum serialized size of 65536 bytes")
         return v
 

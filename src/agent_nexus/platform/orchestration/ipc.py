@@ -140,7 +140,7 @@ class IPCStream:
         logger.debug("IPC recv: %.200s", line)
 
         try:
-            data = json.loads(raw_stripped)  # json.loads accepts bytes since Python 3.6
+            data = json.loads(line)  # reuse decoded string instead of raw bytes
         except json.JSONDecodeError as exc:
             raise IPCError(f"Invalid JSON from agent: {exc}") from exc
 
