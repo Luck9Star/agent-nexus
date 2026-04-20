@@ -34,13 +34,13 @@ def create_mcp_server() -> object:
     coordinator = QualityGateCoordinator()
 
     @mcp.tool()
-    def run_gate(code_path: str, config: dict[str, Any] | None = None) -> dict:
+    async def run_gate(code_path: str, config: dict[str, Any] | None = None) -> dict:
         """Run the quality gate pipeline for a code path.
 
         Executes security scanning, code review, and test generation in parallel,
         then makes a pass/fail decision based on configurable thresholds.
         """
-        result = coordinator.run_gate(code_path, config)
+        result = await coordinator.run_gate_async(code_path, config)
         return result.model_dump()
 
     return mcp

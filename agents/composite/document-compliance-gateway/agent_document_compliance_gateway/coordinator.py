@@ -284,6 +284,12 @@ class ComplianceCoordinator:
             jurisdictions = []
         return asyncio.run(self._check_compliance_async(document, jurisdictions))
 
+    async def check_compliance_async(self, document: str, jurisdictions: list[str] | None = None) -> ComplianceResult:
+        """Async version of check_compliance for use inside an existing event loop."""
+        if jurisdictions is None:
+            jurisdictions = []
+        return await self._check_compliance_async(document, jurisdictions)
+
     async def _check_compliance_async(self, document: str, jurisdictions: list[str]) -> ComplianceResult:
         try:
             composition = self.load_composition()

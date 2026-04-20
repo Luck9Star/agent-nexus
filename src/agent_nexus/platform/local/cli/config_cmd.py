@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
+import shutil
 import subprocess
 from typing import Any
 
@@ -62,9 +62,13 @@ def config_edit() -> None:
         typer.echo(f"Config file not found at {config_path}. Run 'agent-nexus init' first.")
         raise typer.Exit(code=1)
 
-    editor = os.environ.get("EDITOR", "vi")
+    editor_name = os.environ.get("EDITOR", "vi")
+    editor = shutil.which(editor_name)
+    if not editor:
+        typer.echo(f"Editor '{editor_name}' not found in PATH.", err=True)
+        raise typer.Exit(code=1)
     typer.echo(f"Opening {config_path} in {editor}...")
-    subprocess.call(shlex.split(editor) + [str(config_path)])
+    subprocess.call([editor, str(config_path)])
 
 
 @config_app.command("validate")

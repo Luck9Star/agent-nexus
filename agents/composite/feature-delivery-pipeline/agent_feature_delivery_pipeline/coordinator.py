@@ -267,6 +267,10 @@ class FeatureDeliveryCoordinator:
         """
         return asyncio.run(self._run_pipeline_async(spec))
 
+    async def run_pipeline_async(self, spec: str) -> PipelineResult:
+        """Async version of run_pipeline for use inside an existing event loop."""
+        return await self._run_pipeline_async(spec)
+
     async def _run_pipeline_async(self, spec: str) -> PipelineResult:
         try:
             composition = self.load_composition()

@@ -167,6 +167,16 @@ class DocumentationSuiteCoordinator:
             target_langs = ["en"]
         return asyncio.run(self._generate_docs_async(code_path, target_langs))
 
+    async def generate_docs_async(
+        self,
+        code_path: str,
+        target_langs: list[str] | None = None,
+    ) -> DocumentationResult:
+        """Async version of generate_docs for use inside an existing event loop."""
+        if target_langs is None:
+            target_langs = ["en"]
+        return await self._generate_docs_async(code_path, target_langs)
+
     async def _generate_docs_async(
         self,
         code_path: str,

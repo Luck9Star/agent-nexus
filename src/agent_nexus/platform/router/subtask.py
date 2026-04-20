@@ -159,7 +159,7 @@ class SubtaskController:
                 try:
                     results[index] = await coro
                 except BaseException as exc:
-                    if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError)):
+                    if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError, SystemExit, GeneratorExit, MemoryError)):
                         raise
                     results[index] = exc
                     failed.set()

@@ -32,12 +32,12 @@ def create_mcp_server() -> object:
     coordinator = ComplianceCoordinator()
 
     @mcp.tool()
-    def check_compliance(document: str, jurisdictions: list[str] | None = None) -> dict:
+    async def check_compliance(document: str, jurisdictions: list[str] | None = None) -> dict:
         """Run compliance check across legal, accessibility, and localization dimensions.
 
         Returns checks for each dimension, cross-dimension conflicts, and recommendations.
         """
-        result = coordinator.check_compliance(document, jurisdictions)
+        result = await coordinator.check_compliance_async(document, jurisdictions)
         return result.model_dump()
 
     return mcp

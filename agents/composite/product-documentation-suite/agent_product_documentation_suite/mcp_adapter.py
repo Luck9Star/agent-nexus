@@ -35,7 +35,7 @@ def create_mcp_server() -> object:
     coordinator = DocumentationSuiteCoordinator()
 
     @mcp.tool()
-    def generate_docs(
+    async def generate_docs(
         code_path: str,
         target_langs: list[str] | None = None,
     ) -> dict:
@@ -47,7 +47,7 @@ def create_mcp_server() -> object:
             code_path: Path to the source code file.
             target_langs: Language codes for localization (default: ["en"]).
         """
-        result = coordinator.generate_docs(
+        result = await coordinator.generate_docs_async(
             code_path=code_path,
             target_langs=target_langs,
         )

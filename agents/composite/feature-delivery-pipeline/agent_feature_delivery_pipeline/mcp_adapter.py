@@ -33,13 +33,13 @@ def create_mcp_server() -> object:
     coordinator = FeatureDeliveryCoordinator()
 
     @mcp.tool()
-    def run_pipeline(spec: str) -> dict:
+    async def run_pipeline(spec: str) -> dict:
         """Execute the feature delivery pipeline for a requirement specification.
 
         Runs requirements analysis, then parallel API doc generation,
         test suite generation, and code review. Returns aggregated results.
         """
-        result = coordinator.run_pipeline(spec)
+        result = await coordinator.run_pipeline_async(spec)
         return result.model_dump()
 
     return mcp

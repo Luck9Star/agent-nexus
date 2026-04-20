@@ -35,7 +35,7 @@ def create_mcp_server() -> object:
     coordinator = CompetitiveIntelCoordinator()
 
     @mcp.tool()
-    def generate_briefing(
+    async def generate_briefing(
         query: str,
         target_langs: list[str] | None = None,
         template_path: str | None = None,
@@ -51,7 +51,7 @@ def create_mcp_server() -> object:
             template_path: Optional .docx template path.
             framework: Analysis framework (porter/swot/pestel).
         """
-        result = coordinator.generate_briefing(
+        result = await coordinator.generate_briefing_async(
             query=query,
             target_langs=target_langs,
             template_path=template_path,

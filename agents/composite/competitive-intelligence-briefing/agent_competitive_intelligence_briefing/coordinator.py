@@ -152,6 +152,18 @@ class CompetitiveIntelCoordinator:
             target_langs = ["en"]
         return asyncio.run(self._generate_briefing_async(query, target_langs, template_path, framework))
 
+    async def generate_briefing_async(
+        self,
+        query: str,
+        target_langs: list[str] | None = None,
+        template_path: str | None = None,
+        framework: str = "porter",
+    ) -> BriefingResult:
+        """Async version of generate_briefing for use inside an existing event loop."""
+        if target_langs is None:
+            target_langs = ["en"]
+        return await self._generate_briefing_async(query, target_langs, template_path, framework)
+
     async def _generate_briefing_async(
         self,
         query: str,

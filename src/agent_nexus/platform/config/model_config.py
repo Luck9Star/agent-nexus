@@ -115,13 +115,32 @@ class ModelConfigManager:
                     return tier_model
 
         # 4. Config default
-        default = self._config.models.default or DEFAULT_MODEL_STRING
+        default = self._config.models.default
+        if default:
+            logger.debug(
+                "Model for '%s' resolved from config default: %s",
+                agent_name,
+                default,
+            )
+            return default
+
+        # 5. DEFAULT_MODEL env var fallback
+        default_env = os.environ.get("DEFAULT_MODEL")
+        if default_env:
+            logger.debug(
+                "Model for '%s' resolved from DEFAULT_MODEL env: %s",
+                agent_name,
+                default_env,
+            )
+            return default_env
+
+        # 6. Built-in constant
         logger.debug(
-            "Model for '%s' resolved from config default: %s",
+            "Model for '%s' resolved from DEFAULT_MODEL_STRING: %s",
             agent_name,
-            default,
+            DEFAULT_MODEL_STRING,
         )
-        return default
+        return DEFAULT_MODEL_STRING
 
     def get_provider_config(self, provider_name: str) -> ProviderConfig:
         """Get provider configuration by name.
@@ -214,8 +233,25 @@ class ModelConfigManager:
         tuple[str, str]
             ``(provider_name, model_name)``.  If no colon is present,
             provider defaults to ``"openai"``.
+
+        Raises
+        ------
+        ValueError
+            If *model_string* is empty, or the resulting provider or
+            model name is empty (e.g. ``"openai:"`` or ``":gpt-4o"``).
         """
+        if not model_string or not model_string.strip():
+            raise ValueError("model_string must not be empty")
+
         if ":" in model_string:
             provider, model_name = model_string.split(":", 1)
-            return provider, model_name
-        return "openai", model_string
+            if not provider.strip():
+                raise ValueError(
+                    f"Provider part is empty in model string: {model_string!r}"
+                )
+            if not model_name.strip():
+                raise ValueError(
+                    f"Model name part is empty in model string: {model_string!r}"
+                )
+            return provider.strip(), model_name.strip()
+        return "openai", model_string.strip()

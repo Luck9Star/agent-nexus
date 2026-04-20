@@ -266,6 +266,11 @@ class OrchestrationDSL:
                         f"Task '{task.id}' blocked_by unknown task '{dep_id}'"
                     )
 
+        # 2b. Self-reference check
+        for task in definition.tasks:
+            if task.id in task.blocked_by:
+                errors.append(f"Task '{task.id}' cannot block itself")
+
         # 3. Cycle detection (DFS with visiting/visited sets)
         task_map = {t.id: t for t in definition.tasks}
         cycles = self._detect_cycles(task_map)

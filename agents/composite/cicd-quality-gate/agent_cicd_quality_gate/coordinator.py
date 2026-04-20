@@ -200,15 +200,14 @@ def _make_gate_decision(
     for check in checks:
         total_score += check.score
 
-        if not check.passed:
+        if check.agent == "security-scanner" and check.score < thresholds["security_threshold"]:
+            blockers.append(f"Security score {check.score} below threshold {thresholds['security_threshold']}")
+        elif check.agent == "code-reviewer" and check.score < thresholds["review_threshold"]:
+            blockers.append(f"Review score {check.score} below threshold {thresholds['review_threshold']}")
+        elif not check.passed:
             blockers.append(f"{check.agent}: {', '.join(check.findings)}")
         elif check.findings:
             warnings.append(f"{check.agent}: {', '.join(check.findings)}")
-
-        if check.agent == "security-scanner" and check.score < thresholds["security_threshold"]:
-            blockers.append(f"Security score {check.score} below threshold {thresholds['security_threshold']}")
-        if check.agent == "code-reviewer" and check.score < thresholds["review_threshold"]:
-            blockers.append(f"Review score {check.score} below threshold {thresholds['review_threshold']}")
 
     gate_score = total_score / len(checks) if checks else 0.0
     overall_passed = len(blockers) == 0
@@ -219,8 +218,6 @@ def _convert_security(r: dict[str, Any]) -> GateCheck:
     score = r.get("risk_score", 100.0)
     findings = r.get("vulnerabilities", [])
     passed = score >= 70.0 and len(findings) == 0
-    if findings and score >= 70.0:
-        passed = True
     return GateCheck(
         agent="security-scanner",
         passed=passed,
@@ -233,8 +230,6 @@ def _convert_review(r: dict[str, Any]) -> GateCheck:
     score = r.get("quality_score", 100.0)
     findings = r.get("issues", [])
     passed = score >= 70.0 and len(findings) == 0
-    if findings and score >= 70.0:
-        passed = True
     return GateCheck(
         agent="code-reviewer",
         passed=passed,
@@ -249,8 +244,6 @@ def _convert_test(r: dict[str, Any]) -> GateCheck:
     score = coverage * 100
     findings = [f"{failing} failing tests"] if failing > 0 else []
     passed = score >= 70.0 and len(findings) == 0
-    if findings and score >= 70.0:
-        passed = True
     return GateCheck(
         agent="test-suite-generator",
         passed=passed,
@@ -263,8 +256,6 @@ def _convert_default(r: dict[str, Any]) -> GateCheck:
     score = r.get("score", 100.0)
     findings = r.get("findings", [])
     passed = score >= 70.0 and len(findings) == 0
-    if findings and score >= 70.0:
-        passed = True
     return GateCheck(
         agent=r.get("agent", "unknown"),
         passed=passed,
@@ -320,6 +311,12 @@ class QualityGateCoordinator:
         if config is None:
             config = {}
         return asyncio.run(self._run_gate_async(code_path, config))
+
+    async def run_gate_async(self, code_path: str, config: dict[str, Any] | None = None) -> GateResult:
+        """Async version of run_gate for use inside an existing event loop."""
+        if config is None:
+            config = {}
+        return await self._run_gate_async(code_path, config)
 
     async def _run_gate_async(self, code_path: str, config: dict[str, Any]) -> GateResult:
         try:
