@@ -172,6 +172,8 @@
 | 蓝军2-agent最终验证 iter130: P0=0 P1=1 fixed | supervisor stop_agent discard _started_agents + 2 regression tests = 2602 tests | 2026-04-20 | iter130 |
 | 蓝军3-agent深度穿透 iter131: 16 findings cross-validated | P1: route_chat composite drops error/error_type(1 fix) + P2: docstring fix + 14 false positives + 1 regression test = 2603 tests | 2026-04-20 | iter131 |
 | 蓝军3-agent全新角度 iter132: import+fuzz+exception safety | ctx.close()异常安全(1) + gateway IPC错误清理(1) + content_snapshot类型警告(1) + 58 fuzz tests = 2665 tests | 2026-04-20 | iter132 |
+| iter133: 退出条件验证 + 模式队列审计 | 6/6 exit conditions verified + 8/8 priority levels fully scanned = 2665 tests | 2026-04-20 | iter133 |
+| P5 测试warnings清理 iter133b | gc.collect() RuntimeWarning抑制 + ProcessManager.__del__ 广异常兜底 + 2 regression tests = 2667 tests | 2026-04-20 | iter133b |
 
 ### 待清模式
 

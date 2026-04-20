@@ -1,6 +1,7 @@
 """Shared test fixtures for agent-nexus tests."""
 
 import gc
+import warnings
 from pathlib import Path
 
 import pytest
@@ -63,4 +64,6 @@ def shared_runtime(_shared_runtime):
 def _gc_force_collect():
     """Force garbage collection after every test."""
     yield
-    gc.collect()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        gc.collect()

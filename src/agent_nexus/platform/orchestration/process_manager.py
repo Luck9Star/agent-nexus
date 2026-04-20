@@ -532,9 +532,15 @@ class ProcessManager:
         This safety net handles cases where the event loop crashes
         without calling stop_all().
         """
-        for name, handle in list(self._agents.items()):
-            if handle.process.returncode is None:
-                try:
+        try:
+            agents = list(self._agents.items())
+        except Exception:
+            return
+        for _name, handle in agents:
+            try:
+                if handle.process.returncode is None:
                     handle.process.kill()
-                except ProcessLookupError:
-                    pass
+            except (ProcessLookupError, OSError):
+                pass
+            except Exception:
+                pass

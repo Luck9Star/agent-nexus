@@ -620,9 +620,35 @@ class TestProcessManagerDel:
         mock_proc.kill.assert_called_once()
 
 
-# ============================================================================
-# Iteration 17 merge: TestProcessManagerLock
-# ============================================================================
+# iter133 regression: __del__ handles interpreter shutdown gracefully
+class TestProcessManagerDelRobustness:
+    """__del__ must handle exceptions during interpreter shutdown gracefully."""
+
+    def test_del_agents_attr_missing(self) -> None:
+        """__del__ returns silently when _agents is already collected."""
+        pm = ProcessManager()
+        del pm._agents  # simulate interpreter GC having collected the dict
+        pm.__del__()  # must not raise
+
+    def test_del_handle_attr_error(self) -> None:
+        """__del__ skips handles whose .process raises RuntimeError."""
+        from agent_nexus.platform.orchestration.process_manager import AgentHandle
+
+        pm = ProcessManager()
+        mock_proc = MagicMock(spec=asyncio.subprocess.Process)
+        mock_proc.returncode = None
+        # Make .kill() raise OSError to test broad except path
+        mock_proc.kill.side_effect = OSError("bad file descriptor")
+        handle = AgentHandle(
+            name="broken",
+            process=mock_proc,
+            ipc=MagicMock(),
+            start_command=["echo"],
+            start_cwd=None,
+            start_env={},
+        )
+        pm._agents["broken"] = handle
+        pm.__del__()  # must not raise — OSError caught by broad except
 
 
 _SUBPROCESS_PATCH = (
