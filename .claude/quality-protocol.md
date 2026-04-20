@@ -310,8 +310,9 @@ End-to-end runtime behavior, not just static file checks:
 |-------|-------------|-------|-------|---------|--------|
 | B1-1 | Error propagation + Resource leaks | 0 | 0 | N/A | EVALUATED-NOT_DEFECT |
 | B1-2 | State machine + Concurrency safety | 0 | 0 | N/A | EVALUATED-NOT_DEFECT |
+| B2 | Security escape vectors (adversarial) | 3 | 0 | 0% | FIXED — builtins/pdb imports + __builtins__ Name access |
 
-**Phase B conclusion**: 2 consecutive rounds with P0/P1=0. Triggers Phase C.
+**Phase B note**: B2 found 3 P0 security bypass vectors via exhaustive 27-vector adversarial test. All 3 fixed, regression-free.
 
 ### Module Heatmap
 
@@ -341,6 +342,7 @@ End-to-end runtime behavior, not just static file checks:
 |--------|-----------|----------|-----|-------------------|
 | Phase A1 (2026-04-21) | 2710 (baseline) | 1 (__main__.py) | 0 | — |
 | Phase B1 (2026-04-21) | 2710 (no change) | 0 | 0 | 0.00 |
+| Cycle 8 (2026-04-21) | 2710 (no change) | 2 (security bypass + __del__) | 0 | 0.00 |
 
 ### Phase C Verification (2026-04-21)
 
