@@ -19,6 +19,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
+from pydantic import create_model
 
 from agent_nexus.models.agent import AgentManifest
 from agent_nexus.platform.gateway.deferred_registry import DeferredAgentRegistry
@@ -312,6 +313,20 @@ class MCPGateway:
 
             self._registered_agents.add(agent_name)
 
+    def _cleanup_agent_registration(self, agent_name: str) -> None:
+        """Clean up stale registration state for a dead agent.
+
+        Removes the agent from the registered set, discards all its
+        tool names, and releases the IPC lock.  Safe to call from the
+        ``_invoke`` closure — no lock acquisition (avoids deadlock
+        with the non-reentrant ``_reg_lock``).
+        """
+        self._registered_agents.discard(agent_name)
+        adapters = self._registry.get_tool_adapters(agent_name)
+        for ad in adapters:
+            self._registered_tool_names.discard(ad.full_name)
+        remove_lock(agent_name)
+
     def _make_tool_func(
         self, adapter: McpToolAdapter, *, registered_name: str | None = None,
     ) -> Any:
@@ -343,13 +358,7 @@ class MCPGateway:
                 # reacquiring _reg_lock here would deadlock if
                 # _register_agent_tools still holds it (asyncio.Lock
                 # is non-reentrant).
-                self._registered_agents.discard(adapter.agent_name)
-                # Clean up all tool names for this agent so re-registration
-                # does not trigger false collision-detection suffixes.
-                adapters = self._registry.get_tool_adapters(adapter.agent_name)
-                for ad in adapters:
-                    self._registered_tool_names.discard(ad.full_name)
-                remove_lock(adapter.agent_name)
+                self._cleanup_agent_registration(adapter.agent_name)
                 return f"Error: agent '{adapter.agent_name}' process has died"
 
             try:
@@ -360,12 +369,7 @@ class MCPGateway:
                 # adapter.execute() normally swallows all exceptions
                 # internally — reaching here means a transport-layer
                 # failure (BrokenPipeError, IncompleteReadError, etc).
-                self._registered_agents.discard(adapter.agent_name)
-                # Clean up tool names so re-registration does not
-                # trigger false collision-detection suffixes.
-                adapters = self._registry.get_tool_adapters(adapter.agent_name)
-                for ad in adapters:
-                    self._registered_tool_names.discard(ad.full_name)
+                self._cleanup_agent_registration(adapter.agent_name)
                 return (
                     f"Error: IPC failed for agent "
                     f"'{adapter.agent_name}' [{type(exc).__name__}]: {exc}"
@@ -386,11 +390,7 @@ class MCPGateway:
                 "ProcessNotAliveError",
             ):
                 try:
-                    self._registered_agents.discard(adapter.agent_name)
-                    adapters = self._registry.get_tool_adapters(adapter.agent_name)
-                    for ad in adapters:
-                        self._registered_tool_names.discard(ad.full_name)
-                    remove_lock(adapter.agent_name)
+                    self._cleanup_agent_registration(adapter.agent_name)
                 except Exception:
                     logger.debug(
                         "Failed to clean up dead agent '%s' registration",
@@ -422,8 +422,6 @@ class MCPGateway:
             return None
 
         try:
-            from pydantic import create_model
-
             properties = schema.get("properties", {})
             required = set(schema.get("required", []))
             fields: dict[str, Any] = {}

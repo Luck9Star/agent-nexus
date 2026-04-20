@@ -80,6 +80,8 @@ class DeferredAgentRegistry:
         self._core_agents: dict[str, AgentInfo] = {}
         self._deferred_agents: dict[str, AgentInfo] = {}
         self._tool_adapters: dict[str, list[McpToolAdapter]] = {}
+        # Reverse index: full_name -> McpToolAdapter for O(1) lookup
+        self._tool_by_name: dict[str, McpToolAdapter] = {}
         self._lock = asyncio.Lock()
 
     def _get_lock(self) -> asyncio.Lock:
@@ -238,6 +240,9 @@ class DeferredAgentRegistry:
                 for s in tool_schemas
             ]
             self._tool_adapters[name] = adapters
+            # Populate reverse index for O(1) get_tool_adapter lookups
+            for adapter in adapters:
+                self._tool_by_name[adapter.full_name] = adapter
 
             logger.info(
                 "Activated agent '%s' with %d tools", name, len(tool_schemas)
@@ -410,11 +415,7 @@ class DeferredAgentRegistry:
         Returns:
             The matching adapter, or None.
         """
-        for adapters in self._tool_adapters.values():
-            for adapter in adapters:
-                if adapter.full_name == full_name:
-                    return adapter
-        return None
+        return self._tool_by_name.get(full_name)
 
     def get_tool_adapters(self, agent_name: str) -> list[McpToolAdapter]:
         """Return all tool adapters registered for a given agent.

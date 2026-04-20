@@ -1878,6 +1878,7 @@ class TestBuildCommandUnsafeName:
         sup._max_restarts = 3
         sup._restart_trackers = {}
         sup._started_agents = set()
+        sup._resolved_packages = {}
         return sup
 
     def _make_entry(self) -> LockfileEntry:

@@ -15,6 +15,7 @@ from typing import Optional
 
 import typer
 
+from agent_nexus.models.distribution import LockfileEntry
 from agent_nexus.platform.local.cli._shared import _init_managers
 
 logger = logging.getLogger(__name__)
@@ -185,19 +186,33 @@ async def _update(name: str | None, all_agents: bool) -> None:
         typer.echo("Specify an agent name or use --all.")
         raise typer.Exit(code=1)
 
+    async def _update_one(a_name: str):
+        return await installer.update(a_name)
+
+    semaphore = asyncio.Semaphore(4)  # limit concurrent git operations
+
+    async def _bounded_update(a_name: str):
+        async with semaphore:
+            return await _update_one(a_name)
+
+    results = await asyncio.gather(
+        *[_bounded_update(n) for n in agents_to_update],
+        return_exceptions=True,
+    )
+
     updated_count = 0
-    for agent_name in agents_to_update:
-        try:
-            entry = await installer.update(agent_name)
-            if entry:
-                typer.echo(f"Updated {agent_name}@{entry.version}")
-                updated_count += 1
+    for agent_name, result in zip(agents_to_update, results):
+        if isinstance(result, BaseException):
+            if isinstance(result, AgentNotFoundError):
+                typer.echo(f"Agent '{agent_name}' is not installed.", err=True)
             else:
-                typer.echo(f"{agent_name} is already up to date.")
-        except AgentNotFoundError:
-            typer.echo(f"Agent '{agent_name}' is not installed.", err=True)
-        except Exception as exc:
-            typer.echo(f"Error updating {agent_name}: {exc}", err=True)
+                typer.echo(f"Error updating {agent_name}: {result}", err=True)
+        elif result:
+            entry: LockfileEntry = result  # type: ignore[assignment]
+            typer.echo(f"Updated {agent_name}@{entry.version}")
+            updated_count += 1
+        else:
+            typer.echo(f"{agent_name} is already up to date.")
 
     typer.echo(f"Updated {updated_count}/{len(agents_to_update)} agent(s).")
 

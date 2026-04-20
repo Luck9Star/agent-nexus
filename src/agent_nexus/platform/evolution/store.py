@@ -517,7 +517,6 @@ class EvolutionStore:
                 if fell_back:
                     d["fb"] += 1
 
-            now = _now_iso()
             for sid, d in deltas.items():
                 conn.execute(
                     "UPDATE skill_records SET "
@@ -996,24 +995,25 @@ class EvolutionStore:
             if agent_name:
                 # Escape LIKE wildcards to prevent unintended matches
                 escaped = agent_name.replace("%", "\\%").replace("_", "\\_")
-                rows = conn.execute(
-                    "SELECT total_selections, total_applied, "
-                    "total_completions, total_fallbacks "
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(total_selections), 0), "
+                    "COALESCE(SUM(total_applied), 0), "
+                    "COALESCE(SUM(total_completions), 0), "
+                    "COALESCE(SUM(total_fallbacks), 0) "
                     "FROM skill_records WHERE is_active = 1 "
                     "AND (directory LIKE ? ESCAPE '\\' OR directory = ?)",
                     (f"agents/{escaped}/%", f"agents/{escaped}"),
-                ).fetchall()
+                ).fetchone()
             else:
-                rows = conn.execute(
-                    "SELECT total_selections, total_applied, "
-                    "total_completions, total_fallbacks "
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(total_selections), 0), "
+                    "COALESCE(SUM(total_applied), 0), "
+                    "COALESCE(SUM(total_completions), 0), "
+                    "COALESCE(SUM(total_fallbacks), 0) "
                     "FROM skill_records WHERE is_active = 1"
-                ).fetchall()
+                ).fetchone()
 
-            total_sel = sum(r[0] for r in rows)
-            total_app = sum(r[1] for r in rows)
-            total_comp = sum(r[2] for r in rows)
-            total_fb = sum(r[3] for r in rows)
+            total_sel, total_app, total_comp, total_fb = row
 
             return EvolutionMetrics(
                 total_selections=total_sel,
@@ -1292,40 +1292,3 @@ class EvolutionStore:
                 )
         return records
 
-    @staticmethod
-    def _row_to_analysis_dict(
-        conn: sqlite3.Connection,
-        row: tuple[Any, ...],
-    ) -> dict[str, Any]:
-        """Convert an execution_analyses row to a dict."""
-        analysis_id = row[0]
-        result: dict[str, Any] = {
-            "id": row[0],
-            "task_id": row[1],
-            "agent_name": row[2],
-            "analysis": row[3],
-            "evolution_suggestions": json.loads(row[4]) if row[4] else [],
-            "created_at": row[5],
-        }
-
-        # Load judgments
-        j_rows = conn.execute(
-            "SELECT id, analysis_id, skill_id, selected, applied, "
-            "completed, fell_back FROM skill_judgments "
-            "WHERE analysis_id = ?",
-            (analysis_id,),
-        ).fetchall()
-        result["judgments"] = [
-            {
-                "id": r[0],
-                "analysis_id": r[1],
-                "skill_id": r[2],
-                "selected": bool(r[3]),
-                "applied": bool(r[4]),
-                "completed": bool(r[5]),
-                "fell_back": bool(r[6]),
-            }
-            for r in j_rows
-        ]
-
-        return result

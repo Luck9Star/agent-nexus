@@ -81,8 +81,8 @@ class IPCStream:
         """
         payload = message.model_dump_json(exclude_none=True)
         try:
-            self._stdin.write(payload.encode("utf-8"))
-            self._stdin.write(b"\n")
+            data = payload.encode("utf-8") + b"\n"
+            self._stdin.write(data)
         except (BrokenPipeError, ConnectionResetError, OSError) as exc:
             raise IPCConnectionError(f"Agent stdin closed: {exc}") from exc
         try:

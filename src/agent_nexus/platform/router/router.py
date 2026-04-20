@@ -347,12 +347,10 @@ class PlatformRouter:
             return registry.get_tools_for_llm()
 
         # Fallback: query running agents directly via IPC (legacy path)
-        tools: list[dict] = []
-        seen_names: set[str] = set()
-        for name in self._pm.list_running():
+        async def _fetch_tools_from_agent(name: str) -> list[dict]:
             handle = self._pm.get_agent(name)
             if handle is None or not handle.is_alive:
-                continue
+                return []
             try:
                 await handle.ipc.send_chat(
                     "__list_tools__", conversation_id="__internal__"
@@ -360,43 +358,46 @@ class PlatformRouter:
                 response = await handle.ipc.receive_until_result(timeout=10.0)
                 if response.type == AgentToPlatformType.ERROR:
                     logger.warning(
-                        "Agent '%s' returned error during tool "
-                        "discovery: %s",
-                        name,
-                        response.error or "unknown error",
+                        "Agent '%s' returned error during tool discovery: %s",
+                        name, response.error or "unknown error",
                     )
-                    continue
+                    return []
                 if response.content:
                     content = response.content
                     if isinstance(content, str):
                         try:
                             parsed = json.loads(content)
                             if isinstance(parsed, list):
-                                for tool in parsed:
-                                    tool_name = tool.get("name", "")
-                                    if not tool_name:
-                                        logger.warning(
-                                            "Tool from agent '%s' has no "
-                                            "'name' key, skipping",
-                                            name,
-                                        )
-                                        continue
-                                    if tool_name in seen_names:
-                                        logger.warning(
-                                            "Tool name collision: '%s' from agent '%s' "
-                                            "already registered, skipping",
-                                            tool_name, name,
-                                        )
-                                        continue
-                                    seen_names.add(tool_name)
-                                    tools.append(tool)
+                                return parsed
                         except (json.JSONDecodeError, ValueError) as exc:
                             logger.warning(
-                                "Agent '%s' returned invalid JSON tool "
-                                "definitions: %s", name, exc,
+                                "Agent '%s' returned invalid JSON tool definitions: %s",
+                                name, exc,
                             )
+                return []
             except Exception as exc:
                 logger.warning("Failed to get tools from agent '%s': %s", name, exc)
+                return []
+
+        tools: list[dict] = []
+        seen_names: set[str] = set()
+        all_agent_tools = await asyncio.gather(
+            *[_fetch_tools_from_agent(name) for name in self._pm.list_running()],
+        )
+        for tool_list in all_agent_tools:
+            for tool in tool_list:
+                tool_name = tool.get("name", "")
+                if not tool_name:
+                    logger.warning("Tool from agent has no 'name' key, skipping")
+                    continue
+                if tool_name in seen_names:
+                    logger.warning(
+                        "Tool name collision: '%s' already registered, skipping",
+                        tool_name,
+                    )
+                    continue
+                seen_names.add(tool_name)
+                tools.append(tool)
 
         return tools
 

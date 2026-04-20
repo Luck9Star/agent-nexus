@@ -85,13 +85,10 @@ class TestIPCStreamSend:
         msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hello")
         await stream.send(msg)
 
-        # Two write calls: payload bytes + newline byte
-        assert mock_stdin.write.call_count == 2
-        payload_call = mock_stdin.write.call_args_list[0]
-        newline_call = mock_stdin.write.call_args_list[1]
-        written = payload_call[0][0]
-        assert written == b'{"type":"chat","content":"hello"}'
-        assert newline_call[0][0] == b"\n"
+        # Single write call: payload bytes + newline byte combined
+        assert mock_stdin.write.call_count == 1
+        written = mock_stdin.write.call_args[0][0]
+        assert written == b'{"type":"chat","content":"hello"}\n'
 
     async def test_send_calls_drain(self, stream: IPCStream, mock_stdin: MagicMock) -> None:
         """send() flushes by calling drain()."""
@@ -543,7 +540,7 @@ class TestIPCSendDrainTimeout:
         msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
         await stream.send(msg)
 
-        assert mock_stdin.write.call_count == 2
+        assert mock_stdin.write.call_count == 1
 
 
 # ============================================================================
