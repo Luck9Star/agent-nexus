@@ -349,7 +349,7 @@ class MCPGateway:
                 return f"Error: agent '{adapter.agent_name}' not available"
 
             # Health check: clean up stale registration if process died
-            if info.handle is not None and not info.handle.is_alive:
+            if not info.handle.is_alive:
                 # No lock: set.discard is atomic under GIL, and
                 # reacquiring _reg_lock here would deadlock if
                 # _register_agent_tools still holds it (asyncio.Lock
@@ -437,7 +437,8 @@ class MCPGateway:
         for prop_name, prop_def in properties.items():
             if not isinstance(prop_def, dict):
                 continue
-            py_type = type_map.get(prop_def.get("type"), str)
+            type_str = prop_def.get("type")
+            py_type = type_map.get(type_str, str) if isinstance(type_str, str) else str
             annotations[prop_name] = py_type
 
             if prop_name in required:

@@ -28,6 +28,7 @@ from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.gateway.tool_adapter import (
     DEFAULT_IPC_EXECUTE_TIMEOUT,
 )
+from agent_nexus.platform.utils import make_error_result as _make_error_result
 from agent_nexus.platform.orchestration.dsl import OrchestrationDefinition
 from agent_nexus.platform.orchestration.ipc import (
     IPCConnectionError,
@@ -64,11 +65,6 @@ _PHASE_ROLE_MAP: dict[WorkflowPhase, str] = {
     WorkflowPhase.implementation: "worker",
     WorkflowPhase.verification: "verification",
 }
-
-
-def _make_error_result(error: str, error_type: str) -> dict[str, Any]:
-    """Construct a standardized error result dict."""
-    return {"output": "", "success": False, "error": error, "error_type": error_type}
 
 
 class PlatformRouter:

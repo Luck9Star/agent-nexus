@@ -16,6 +16,7 @@ Reference: docs/06-mcp-communication.md Section 8.8
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 from dataclasses import dataclass, field
 from agent_nexus.models.agent import AgentManifest
@@ -431,20 +432,20 @@ class DeferredAgentRegistry:
     def get_agent_info(self, name: str) -> AgentInfo | None:
         """Look up agent info by name across all tiers.
 
-        When an agent exists in both core and deferred dicts, returns
-        the activated entry (the one with runtime state).  A dormant
-        deferred entry without tool_schemas/handle is not preferred
-        over a functional core entry.
+        Priority: activated deferred > core > dormant deferred.
+        An activated deferred agent (tools discovered, process running)
+        is preferred over a core entry; otherwise core wins.
         """
-        deferred = self._deferred_agents.get(name)
-        core = self._core_agents.get(name)
-        if deferred is not None and core is not None:
-            if deferred.is_activated:
-                return deferred
-            return core
-        if deferred is not None:
-            return deferred
-        return core
+        # Check deferred first — if activated, it takes priority.
+        deferred_info = self._deferred_agents.get(name)
+        if deferred_info is not None and deferred_info.is_activated:
+            return deferred_info
+        # Core agents always available.
+        core_info = self._core_agents.get(name)
+        if core_info is not None:
+            return core_info
+        # Dormant deferred (not activated).
+        return deferred_info
 
     def list_all_agents(self) -> list[AgentInfo]:
         """Return info for all registered agents (core + deferred)."""
@@ -517,19 +518,15 @@ class DeferredAgentRegistry:
         query_words = query.lower().split()
         scored: list[tuple[int, AgentManifest]] = []
 
-        all_agents: dict[str, AgentManifest] = {}
-        for info in self._core_agents.values():
-            all_agents[info.name] = info.manifest
-        for info in self._deferred_agents.values():
-            all_agents[info.name] = info.manifest
-
-        for name, manifest in all_agents.items():
+        for info in itertools.chain(
+            self._core_agents.values(), self._deferred_agents.values()
+        ):
             search_text = (
-                f"{name} {manifest.description}".lower()
+                f"{info.name} {info.manifest.description}".lower()
             )
             score = sum(1 for w in query_words if w in search_text)
             if score > 0:
-                scored.append((score, manifest))
+                scored.append((score, info.manifest))
 
         scored.sort(key=lambda x: -x[0])
         # Clamp to non-negative; 0 means "return nothing".

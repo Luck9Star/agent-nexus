@@ -46,16 +46,26 @@ class SourceManager:
         self._path = sources_path
         self._sources: list[SourceEntry] = []
         self._loaded = False
+        # mtime-based cache to avoid re-parsing unchanged files
+        self._cache_mtime: float = 0.0
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def _ensure_loaded(self) -> None:
-        """Lazily load sources.yaml on first use."""
-        if not self._loaded:
-            self._load()
-            self._loaded = True
+        """Lazily load sources.yaml on first use, or when file mtime changes."""
+        try:
+            current_mtime = os.path.getmtime(self._path)
+        except OSError:
+            current_mtime = 0.0
+
+        if self._loaded and current_mtime == self._cache_mtime:
+            return
+
+        self._load()
+        self._loaded = True
+        self._cache_mtime = current_mtime
 
     def add_source(self, entry: SourceEntry) -> None:
         """Add or update a source entry and save."""
@@ -128,6 +138,11 @@ class SourceManager:
             except OSError:
                 pass
             raise
+        # Update cache mtime so _ensure_loaded() sees the file as current
+        try:
+            self._cache_mtime = os.path.getmtime(self._path)
+        except OSError:
+            self._cache_mtime = 0.0
         logger.debug("Sources saved to %s", self._path)
 
     def search_agents(self, query: str) -> list[tuple[SourceEntry, IndexEntry]]:
@@ -230,7 +245,14 @@ class SourceManager:
             except Exception as exc:
                 logger.warning("Skipping invalid source entry %s: %s", item, exc)
 
-        self._sources = entries if entries else [_OFFICIAL_SOURCE]
+        # If the YAML list was non-empty but all entries failed validation,
+        # the file is likely corrupt — fall back to defaults.
+        # An explicitly empty list (sources: []) is preserved as-is.
+        if sources_list and not entries:
+            logger.warning("All source entries invalid, using defaults")
+            self._sources = [_OFFICIAL_SOURCE]
+        else:
+            self._sources = entries
 
     def _get_cache_path(self, source: SourceEntry) -> Path:
         """Compute cache path matching GitInstaller._get_cache_path."""

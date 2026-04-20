@@ -23,8 +23,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 from agent_nexus.models.hooks import (
     AggregatedHookResult,
     HookDefinition,
@@ -385,6 +383,8 @@ class HookExecutor:
             "context": context,
             "hook_type": hook.type,
         }
+        import httpx
+
         timeout = httpx.Timeout(hook.timeout_seconds)
 
         start = time.monotonic()

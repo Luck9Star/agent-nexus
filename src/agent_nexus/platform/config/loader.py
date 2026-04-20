@@ -47,6 +47,11 @@ class ConfigLoader:
 
     def __init__(self, config_dir: Path | None = None) -> None:
         self.config_dir = config_dir or DEFAULT_CONFIG_DIR
+        # mtime-based caches to avoid re-reading unchanged files
+        self._config_cache: PlatformConfig | None = None
+        self._config_cache_mtime: float = 0.0
+        self._sources_cache: list[SourceEntry] | None = None
+        self._sources_cache_mtime: float = 0.0
 
     # ------------------------------------------------------------------
     # Public API
@@ -59,8 +64,22 @@ class ConfigLoader:
         1. Environment variable overrides (``AGENT_MODEL``, ``DEFAULT_MODEL``)
         2. Values from ``config.toml``
         3. Built-in defaults from :data:`DEFAULT_PROVIDERS`
+
+        Results are cached based on the file's mtime — repeated calls
+        return the same object until the file is modified.
         """
         config_path = self.config_dir / CONFIG_FILE
+
+        # mtime-based cache check
+        try:
+            mtime = os.path.getmtime(config_path)
+        except OSError:
+            mtime = 0.0
+
+        if self._config_cache is not None and mtime == self._config_cache_mtime:
+            logger.debug("Returning cached config (mtime unchanged)")
+            return self._config_cache
+
         raw: dict[str, Any] = {}
 
         try:
@@ -105,18 +124,36 @@ class ConfigLoader:
             config.models.default,
             list(config.models.providers.keys()),
         )
+        self._config_cache = config
+        self._config_cache_mtime = mtime
         return config
 
     def load_sources(self) -> list[SourceEntry]:
         """Load ``sources.yaml`` and return validated source entries.
 
         Returns an empty list when the file does not exist.
+
+        Results are cached based on the file's mtime -- repeated calls
+        return the same list until the file is modified.
         """
         sources_path = self.config_dir / SOURCES_FILE
 
+        # mtime-based cache check
+        try:
+            mtime = os.path.getmtime(sources_path)
+        except OSError:
+            mtime = 0.0
+
+        if self._sources_cache is not None and mtime == self._sources_cache_mtime:
+            logger.debug("Returning cached sources (mtime unchanged)")
+            return self._sources_cache
+
         if not sources_path.exists():
             logger.debug("Sources file not found at %s", sources_path)
-            return []
+            entries: list[SourceEntry] = []
+            self._sources_cache = entries
+            self._sources_cache_mtime = mtime
+            return entries
 
         logger.debug("Loading sources from %s", sources_path)
         try:
@@ -158,6 +195,8 @@ class ConfigLoader:
                 logger.warning("Skipping invalid source entry %s: %s", item, exc)
 
         logger.info("Loaded %d source(s)", len(entries))
+        self._sources_cache = entries
+        self._sources_cache_mtime = mtime
         return entries
 
     def ensure_config_dir(self) -> Path:

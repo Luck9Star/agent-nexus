@@ -20,6 +20,7 @@ import uuid
 from typing import Any
 
 from agent_nexus.models.ipc import AgentToPlatformType
+from agent_nexus.platform.utils import make_error_result as _make_error_result
 from agent_nexus.platform.orchestration.ipc import IPCError, get_ipc_lock
 from agent_nexus.platform.orchestration.process_manager import AgentHandle
 
@@ -40,16 +41,6 @@ _NON_ALNUM_RE = re.compile(r"[^a-zA-Z0-9_]")
 def _sanitize(name: str) -> str:
     """Replace non-alphanumeric characters with underscore."""
     return _NON_ALNUM_RE.sub("_", name)
-
-
-# ---------------------------------------------------------------------------
-# Error result helper (shared pattern with router — keep in sync)
-# ---------------------------------------------------------------------------
-
-
-def _make_error_result(error: str, error_type: str) -> dict[str, Any]:
-    """Construct a standardized error result dict."""
-    return {"output": "", "success": False, "error": error, "error_type": error_type}
 
 
 # ---------------------------------------------------------------------------
