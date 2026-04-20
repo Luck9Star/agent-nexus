@@ -278,6 +278,32 @@ Phase C is executed by an independent agent (not one that participated in Phase 
 - [x] Agent SKILL.md: all 16 agents have SKILL.md
 - [x] Cross-refs: 3/5 composite valid; 2 reference planned-but-unimplemented agents (not runtime bugs)
 
+### Behavioral Verification (Cycle 7, 2026-04-21)
+
+End-to-end runtime behavior, not just static file checks:
+
+- [x] 17 core module imports: all succeed with correct paths
+- [x] TaskGraph lifecycle: pending→start_task→complete_task/fail_task enforced; cycle detection at insertion
+- [x] PythonRuntime: async execute, variable persistence, error capture (1/0 → success=False)
+- [x] SecurityChecker→Runtime pipeline: safe code executes, blocked code (subprocess/eval) rejected before execution
+- [x] IPC round-trip: PlatformToAgent/AgentToPlatform serialize→deserialize preserves all fields
+- [x] AgentToPlatform.is_success: True for result/progress, False for error
+- [x] PermissionChecker: DEFAULT→requires_confirmation, FULL_AUTO→allow, denied_tools→block even in FULL_AUTO
+- [x] OrchestrationDSL→TaskGraph pipeline: parse TOML → validate → convert to TaskItem → add_tasks → lifecycle
+- [x] 5/5 composite compositions: parse, validate, convert to TaskGraph, run full lifecycle
+- [x] EvolutionStore: save_skill_record/get_skill_record/get_all_skills verified
+- [x] ModelConfigManager: resolve_model/parse_model_string verified
+- [x] MCPGateway: register_agent/run_stdio/run_sse/stop verified
+- [x] TokenTracker: record_usage/remaining_budget/total_tokens verified
+- [x] SkillLoader: load_agent_skills/parse_file/parse_string verified
+- [x] CLI commands: version/doctor/list/env/config show/runtime status/evolution status all execute correctly
+- [x] 16 agent manifests: all parse with correct name/version/type/description
+- [x] 10 atomic agent entry points: import path/class name/methods/return types all consistent
+- [x] 5 composite agents: all coordinators importable with correct class names
+- [x] Bug fixed: TaskGraph.__del__ crash when __init__ fails (hasattr guard)
+- [x] Artifacts cleaned: sub-agent tests/ and uv.lock removed
+- [x] 2710 tests pass, pyright 0 errors/warnings
+
 ### Phase B Convergence History
 
 | Round | Audit Angle | P0/P1 | P2/P3 | FP Rate | Status |
