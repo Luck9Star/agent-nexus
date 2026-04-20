@@ -328,6 +328,10 @@ class MCPGateway:
         """
         display_name = registered_name or adapter.full_name
 
+        # Build a dynamic Pydantic model from the agent's input schema
+        # so FastMCP generates correct inputSchema for MCP clients.
+        input_model = self._build_input_model(adapter, display_name)
+
         async def _invoke(**kwargs: Any) -> str:
             info = self._registry.get_agent_info(adapter.agent_name)
             if info is None or info.handle is None:
@@ -399,7 +403,59 @@ class MCPGateway:
         _invoke.__name__ = display_name
         _invoke.__doc__ = adapter.description or f"Call {display_name}"
 
+        # Attach dynamic input model so FastMCP produces correct inputSchema
+        if input_model is not None:
+            _invoke.__annotations__["kwargs"] = input_model
+
         return _invoke
+
+    def _build_input_model(
+        self, adapter: McpToolAdapter, display_name: str,
+    ) -> type | None:
+        """Build a Pydantic model from the adapter's JSON-schema input.
+
+        Returns ``None`` if the schema is empty or cannot be converted,
+        in which case FastMCP falls back to ``**kwargs: Any`` (empty schema).
+        """
+        schema = adapter._input_schema
+        if not schema or "properties" not in schema:
+            return None
+
+        try:
+            from pydantic import create_model
+
+            properties = schema.get("properties", {})
+            required = set(schema.get("required", []))
+            fields: dict[str, Any] = {}
+            for prop_name, prop_def in properties.items():
+                if not isinstance(prop_def, dict):
+                    continue
+                prop_type = str  # default to string
+                if prop_def.get("type") == "integer":
+                    prop_type = int
+                elif prop_def.get("type") == "number":
+                    prop_type = float
+                elif prop_def.get("type") == "boolean":
+                    prop_type = bool
+                elif prop_def.get("type") == "array":
+                    prop_type = list
+                elif prop_def.get("type") == "object":
+                    prop_type = dict
+                if prop_name in required:
+                    fields[prop_name] = (prop_type, ...)
+                else:
+                    default = prop_def.get("default")
+                    fields[prop_name] = (prop_type, default)
+
+            model_name = f"{display_name}_Input"
+            return create_model(model_name, **fields)
+        except Exception:
+            logger.debug(
+                "Failed to build input model for %s, falling back to empty schema",
+                display_name,
+                exc_info=True,
+            )
+            return None
 
     # ------------------------------------------------------------------
     # Runtime

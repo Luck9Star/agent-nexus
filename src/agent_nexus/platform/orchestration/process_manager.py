@@ -540,7 +540,14 @@ class ProcessManager:
                 dead.append(name)
                 self._agents.pop(name, None)
 
-                # Cancel background drain task
+                # Cancel background drain task.
+                # Note: we cancel without awaiting because this is a
+                # synchronous method.  The drain coroutine will receive
+                # CancelledError on the next event loop tick.  We close
+                # the transport *after* cancellation — the process is
+                # already dead so the OS closed the remote end; any
+                # remaining reads in the drain task will get EOF/BrokenPipe
+                # which the drain task's exception handler already catches.
                 drain_task = handle.drain_task
                 if drain_task is not None and not drain_task.done():
                     drain_task.cancel()
