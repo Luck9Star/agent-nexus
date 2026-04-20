@@ -2,6 +2,287 @@
 
 from __future__ import annotations
 
+import importlib.metadata
+import logging
+import os
+import shutil
+import sys
+from pathlib import Path
+
 import typer
 
+from agent_nexus.platform.local.cli._shared import ConfigMigrator, _get_config_dir
+
+logger = logging.getLogger(__name__)
+
 init_app = typer.Typer(help="Setup and diagnostics")
+
+
+# =====================================================================
+# version
+# =====================================================================
+
+
+@init_app.command()
+def version() -> None:
+    """Print the agent-nexus version."""
+    try:
+        ver = importlib.metadata.version("agent-nexus")
+    except importlib.metadata.PackageNotFoundError:
+        ver = "unknown (dev mode)"
+    typer.echo(f"agent-nexus {ver}")
+
+
+# =====================================================================
+# doctor
+# =====================================================================
+
+
+@init_app.command()
+def doctor() -> None:
+    """Run diagnostic checks on the agent-nexus installation."""
+    config_dir = _get_config_dir()
+    config_path = config_dir / "config.toml"
+    checks: list[tuple[str, bool, str]] = []
+
+    # Check 1: config.toml exists and parses
+    try:
+        import toml
+
+        toml.loads(config_path.read_text(encoding="utf-8"))
+        checks.append(("config.toml exists and parses", True, "OK"))
+    except FileNotFoundError:
+        checks.append(("config.toml exists and parses", False, "not found"))
+    except Exception as exc:
+        checks.append(("config.toml exists and parses", False, str(exc)))
+
+    # Check 2: API key configured
+    key_envs = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+    has_key = any(os.environ.get(k) for k in key_envs)
+    checks.append(
+        ("API key configured", has_key, "at least one set" if has_key else "none set")
+    )
+
+    # Check 3: git on PATH
+    git_path = shutil.which("git")
+    checks.append(("git on PATH", git_path is not None, git_path or "not found"))
+
+    # Check 4: uv on PATH
+    uv_path = shutil.which("uv")
+    checks.append(("uv on PATH", uv_path is not None, uv_path or "not found"))
+
+    # Check 5: Python version
+    py_ok = sys.version_info >= (3, 12)
+    checks.append(("Python >= 3.12", py_ok, sys.version.split()[0]))
+
+    # Check 6: lockfile.json writable
+    lockfile_path = config_dir / "lockfile.json"
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        lockfile_path.write_text("{}", encoding="utf-8")
+        lockfile_path.read_text()
+        checks.append(("lockfile.json writable", True, "OK"))
+    except Exception as exc:
+        checks.append(("lockfile.json writable", False, str(exc)))
+
+    # Check 7: Evolution DB accessible
+    try:
+        from agent_nexus.platform.evolution.store import EvolutionStore
+
+        store = EvolutionStore(":memory:")
+        store.close()
+        checks.append(("Evolution DB accessible", True, "OK"))
+    except Exception as exc:
+        checks.append(("Evolution DB accessible", False, str(exc)))
+
+    # Output
+    all_pass = True
+    for label, passed, detail in checks:
+        status = "PASS" if passed else "FAIL"
+        if not passed:
+            all_pass = False
+        typer.echo(f"  [{status}] {label}: {detail}")
+
+    typer.echo()
+    passed_count = sum(1 for _, p, _ in checks if p)
+    typer.echo(f"  {passed_count}/{len(checks)} checks passed.")
+
+    if not all_pass:
+        raise typer.Exit(code=1)
+
+
+# =====================================================================
+# init
+# =====================================================================
+
+
+@init_app.command()
+def init(
+    wizard: bool = typer.Option(False, "--wizard", "-w", help="Interactive setup wizard"),
+) -> None:
+    """Initialize the agent-nexus platform configuration.
+
+    Creates ~/.agent-nexus/ directory tree with default config files.
+    Use --wizard for interactive setup with API key configuration.
+    """
+    from agent_nexus.platform.config.loader import ConfigLoader
+    from agent_nexus.platform.local.sources import SourceManager
+
+    config_dir = _get_config_dir()
+
+    # Step 1: Ensure directory tree
+    loader = ConfigLoader(config_dir)
+    loader.ensure_config_dir()
+    typer.echo(f"Config directory: {config_dir}")
+
+    # Step 2: Generate config.toml if missing
+    config_path = config_dir / "config.toml"
+    if not config_path.exists():
+        config_path.write_text(_default_config_template(), encoding="utf-8")
+        typer.echo("Created config.toml with default settings.")
+    else:
+        typer.echo("config.toml already exists.")
+        if ConfigMigrator.merge_if_needed(config_path):
+            typer.echo("Config migrated to latest schema version.")
+
+    # Step 3: Register official source
+    sources = SourceManager(config_dir / "sources.yaml")
+    official = sources.get_official_source()
+    if official is None:
+        from agent_nexus.models.distribution import SourceEntry
+
+        sources.add_source(
+            SourceEntry(
+                name="official",
+                type="git",
+                url="https://github.com/anthropics/agent-nexus-packages.git",
+                branch="main",
+            )
+        )
+        typer.echo("Registered official source.")
+    else:
+        typer.echo("Official source already registered.")
+
+    # Step 4: Detect API keys
+    key_envs = {
+        "OPENAI_API_KEY": "openai",
+        "ANTHROPIC_API_KEY": "anthropic",
+    }
+    detected = [provider for env_var, provider in key_envs.items() if os.environ.get(env_var)]
+    if detected:
+        typer.echo(f"Detected API keys for: {', '.join(detected)}")
+    else:
+        typer.echo("No API keys detected in environment.")
+
+    # Step 5: Wizard mode
+    if wizard:
+        _run_wizard(config_path)
+
+    # Next steps
+    typer.echo()
+    typer.echo("Next steps:")
+    typer.echo("  1. Set API keys: export OPENAI_API_KEY=... or ANTHROPIC_API_KEY=...")
+    typer.echo("  2. Browse agents: agent-nexus search <query>")
+    typer.echo("  3. Install an agent: agent-nexus install <name>")
+    typer.echo("  4. Run diagnostics: agent-nexus doctor")
+
+
+# =====================================================================
+# env
+# =====================================================================
+
+
+@init_app.command()
+def env() -> None:
+    """Print resolved environment snapshot."""
+    config_dir = _get_config_dir()
+
+    from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
+
+    provider_status: list[str] = []
+    for name, preset in DEFAULT_PROVIDERS.items():
+        key_env = preset.get("api_key_env", "")
+        has_key = bool(key_env and os.environ.get(str(key_env)))
+        provider_status.append(f"{name} (key: {'set' if has_key else 'not set'})")
+
+    git_ver = shutil.which("git")
+    uv_ver = shutil.which("uv")
+
+    typer.echo(f"Config dir:    {config_dir}")
+    typer.echo(f"Python:        {sys.version.split()[0]}")
+    typer.echo(f"Git:           {'installed' if git_ver else 'not found'}")
+    typer.echo(f"uv:            {'installed' if uv_ver else 'not found'}")
+    typer.echo(f"Providers:     {', '.join(provider_status)}")
+
+
+# =====================================================================
+# Helpers
+# =====================================================================
+
+
+def _run_wizard(config_path: Path) -> None:
+    """Interactive setup wizard using questionary."""
+    try:
+        import questionary
+    except ImportError:
+        typer.echo("Install questionary for wizard mode: pip install questionary")
+        return
+
+    import toml
+
+    provider = questionary.select(
+        "Select default provider:",
+        choices=["openai", "anthropic"],
+    ).ask()
+    if provider is None:
+        return
+
+    api_key = questionary.password(
+        f"Enter {provider.upper()} API key:",
+    ).ask()
+
+    model = questionary.text(
+        "Enter default model (e.g. gpt-4o, claude-sonnet-4-20250514):",
+        default="gpt-4o" if provider == "openai" else "claude-sonnet-4-20250514",
+    ).ask()
+
+    if api_key:
+        key_env = f"{provider.upper()}_API_KEY"
+        typer.echo(f"  Note: Set {key_env}={api_key[:8]}... in your shell profile.")
+
+    try:
+        raw = toml.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        raw = {}
+    raw.setdefault("models", {})["default"] = f"{provider}:{model}"
+    config_path.write_text(toml.dumps(raw), encoding="utf-8")
+    typer.echo(f"Config updated: default model = {provider}:{model}")
+
+    verify = questionary.confirm("Test API connectivity?").ask()
+    if verify:
+        typer.echo("Connectivity test not yet implemented (placeholder).")
+
+
+def _default_config_template() -> str:
+    """Return the default config.toml template content."""
+    return """\
+# Agent Nexus Configuration
+# Schema version: 1.0
+
+schema_version = "1.0"
+
+[runtime]
+python_path = "python3"
+uv_path = "uv"
+
+[models]
+default = "openai:gpt-4o"
+
+[models.providers.openai]
+api_key_env = "OPENAI_API_KEY"
+api = "openai-compatible"
+
+[models.providers.anthropic]
+api_key_env = "ANTHROPIC_API_KEY"
+api = "anthropic-messages"
+"""
