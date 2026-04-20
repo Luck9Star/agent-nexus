@@ -1133,6 +1133,12 @@ class EvolutionStore:
                     # Validate all values are strings (Pydantic requirement)
                     if all(isinstance(v, str) for v in loaded.values()):
                         snapshot = loaded
+                    else:
+                        non_str = [k for k, v in loaded.items() if not isinstance(v, str)]
+                        logger.warning(
+                            "content_snapshot for skill '%s' has non-string values in keys %s, discarding snapshot",
+                            skill_id, non_str,
+                        )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 logger.warning(
                     "Corrupted content_snapshot for skill '%s': %s",

@@ -3248,3 +3248,83 @@ class TestToolAdapterErrorTypeConsistency:
         result = await adapter.execute(handle, {"x": 1})
         assert result["success"] is False
         assert result["error_type"] == "AgentError"
+
+
+# iter132 regression: dead-agent cleanup on IPC error in result dict
+class TestGatewayIPCCleanup:
+    """gateway._invoke must clean up dead-agent registrations when
+    tool_adapter.execute() returns error_type indicating IPC failure."""
+
+    @pytest.mark.asyncio
+    async def test_ipc_connection_error_triggers_cleanup(
+        self, gateway: MCPGateway
+    ) -> None:
+        """BrokenPipeError in result dict triggers registration cleanup."""
+        manifest = _make_manifest("clean_agent")
+        await gateway.register_agent(manifest, deferred=False)
+        info = gateway.registry.get_agent_info("clean_agent")
+        assert info is not None
+
+        mock_handle = _mock_agent_handle("clean_agent", alive=True)
+        # execute() catches BrokenPipeError and returns error dict
+        mock_handle.ipc.send_chat.side_effect = BrokenPipeError("pipe closed")
+        info.handle = mock_handle
+
+        schema = _make_tool_schema("tool1")
+        adapter = McpToolAdapter(server_name="clean_agent", tool_schema=schema)
+        gateway.registry._tool_adapters["clean_agent"] = [adapter]
+
+        # Pre-register so cleanup can remove them
+        gateway._registered_agents.add("clean_agent")
+        gateway._registered_tool_names.add(adapter.full_name)
+
+        func = gateway._make_tool_func(adapter)
+        result = await func(x=1)
+        assert "Error" in result
+        # Agent and tool names should be cleaned up
+        assert "clean_agent" not in gateway._registered_agents
+        assert adapter.full_name not in gateway._registered_tool_names
+
+
+# ============================================================================
+# iter132 regression: _invoke cleanup exception safety (gateway.py)
+# ============================================================================
+
+
+class TestInvokeCleanupExceptionSafety:
+    """Cleanup in _invoke error_type branch must not prevent error return."""
+
+    @pytest.mark.asyncio
+    async def test_cleanup_failure_does_not_prevent_error_return(self) -> None:
+        """If cleanup raises after IPC error detection, error message still returned."""
+        pm = MagicMock(spec=ProcessManager)
+        router = MagicMock()
+        gw = MCPGateway(pm, router)
+
+        manifest = _make_manifest("cleanup-agent")
+        await gw.register_agent(manifest, deferred=False)
+
+        info = gw.registry.get_agent_info("cleanup-agent")
+        assert info is not None
+        alive_handle = _mock_agent_handle("cleanup-agent", alive=True)
+        info.handle = alive_handle
+        info.tool_schemas = [{"name": "fail_tool", "description": "Fails"}]
+
+        schema = _make_tool_schema("fail_tool", "Fails")
+        adapter = McpToolAdapter(server_name="cleanup-agent", tool_schema=schema)
+        gw.registry._tool_adapters["cleanup-agent"] = [adapter]
+
+        # Execute returns IPC error — triggers cleanup branch
+        with patch.object(
+            adapter, "execute", new_callable=AsyncMock,
+            return_value={"success": False, "error": "IPC broken", "error_type": "IPCConnectionError"},
+        ):
+            # Make get_tool_adapters raise to simulate registry inconsistency
+            with patch.object(
+                gw.registry, "get_tool_adapters", side_effect=RuntimeError("registry corrupt"),
+            ):
+                func = gw._make_tool_func(adapter)
+                result = await func(x=1)
+
+        # Error message must still be returned despite cleanup failure
+        assert "Error" in result

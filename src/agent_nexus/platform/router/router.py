@@ -189,7 +189,10 @@ class PlatformRouter:
             last_error = f"TaskGraph setup failed: {exc}"
             last_error_type = type(exc).__name__
             logger.error(last_error, exc_info=exc)
-            ctx.close()
+            try:
+                ctx.close()
+            except Exception:
+                logger.debug("Failed to close context after TaskGraph error", exc_info=True)
             return WorkflowResult(
                 success=False,
                 final_output="",
@@ -233,7 +236,10 @@ class PlatformRouter:
                 last_error_type = "TimeoutError"
                 logger.error(last_error)
         finally:
-            ctx.close()
+            try:
+                ctx.close()
+            except Exception:
+                logger.debug("Failed to close context after composite workflow", exc_info=True)
 
         # 4. Build final result
         success = completed == total

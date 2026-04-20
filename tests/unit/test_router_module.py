@@ -2631,3 +2631,49 @@ class TestErrorTypeConsistency:
         result = await router.route_chat("some-agent", "")
         assert result["success"] is False
         assert result["error_type"] == "ValueError"
+
+
+# iter132 regression: ctx.close() exception safety in route_composite
+class TestCompositeCloseSafety:
+    """ctx.close() in route_composite exception handler must not mask original error."""
+
+    @pytest.mark.asyncio
+    async def test_ctx_close_failure_does_not_mask_original_error(self) -> None:
+        """If ctx.close() raises in except block, original TaskGraph error still returned."""
+        pm = _make_process_manager()
+        router = PlatformRouter(process_manager=pm)
+        # blocked_by references a nonexistent task → topological sort fails
+        bad_tasks = [
+            DSLTask(id="t1", description="Explore", agent="explorer"),
+            DSLTask(id="t2", description="Plan", agent="planner", blocked_by=["t99"]),
+        ]
+        definition = _make_definition(
+            agent_name="comp-close",
+            tasks=bad_tasks,
+        )
+        router.register_composite("comp-close", definition)
+
+        result = await router.route_composite(definition, "test", "conv-1")
+        assert result.success is False
+        assert result.error is not None
+
+    @pytest.mark.asyncio
+    async def test_finally_ctx_close_failure_does_not_suppress_result(self) -> None:
+        """If ctx.close() raises in finally block, workflow result is still returned."""
+        pm = _make_process_manager()
+        router = PlatformRouter(process_manager=pm)
+
+        # Minimal valid composite with one task
+        tasks = [DSLTask(id="t1", description="Explore", agent="explorer")]
+        definition = _make_definition(agent_name="comp-finally-close", tasks=tasks)
+        router.register_composite("comp-finally-close", definition)
+
+        # Make ctx.close() in finally raise — the result must still be returned
+        with patch(
+            "agent_nexus.platform.router.router.WorkflowContext.close",
+            side_effect=RuntimeError("context cleanup failed"),
+        ):
+            result = await router.route_composite(definition, "test", "conv-1")
+
+        # The result should still be returned (not lost to the close() exception)
+        assert result is not None

@@ -368,6 +368,31 @@ class MCPGateway:
                 )
             if result["success"]:
                 return result["output"]
+            # If the error indicates the agent process is dead
+            # (IPC/connection failure), clean up stale registration
+            # so get_tools() reflects reality immediately instead of
+            # waiting for the next _invoke call's is_alive check.
+            error_type = result.get("error_type", "")
+            if error_type in (
+                "IPCConnectionError",
+                "IPCTimeoutError",
+                "IPCError",
+                "BrokenPipeError",
+                "ConnectionResetError",
+                "ProcessNotAliveError",
+            ):
+                try:
+                    self._registered_agents.discard(adapter.agent_name)
+                    adapters = self._registry.get_tool_adapters(adapter.agent_name)
+                    for ad in adapters:
+                        self._registered_tool_names.discard(ad.full_name)
+                    remove_lock(adapter.agent_name)
+                except Exception:
+                    logger.debug(
+                        "Failed to clean up dead agent '%s' registration",
+                        adapter.agent_name,
+                        exc_info=True,
+                    )
             return f"Error: {result.get('error', 'unknown failure')}"
 
         # Set function metadata for FastMCP schema generation
