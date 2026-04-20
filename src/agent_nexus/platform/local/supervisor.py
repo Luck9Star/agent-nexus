@@ -391,9 +391,11 @@ class AgentSupervisor:
                 agent_main = agent_dir / "main.py"
                 if agent_main.exists():
                     return [str(venv_python), str(agent_main)]
-                # Try module invocation with discovered package name
+                # Try <pkg>/main.py with discovered package name
                 if pkg_name:
-                    return [str(venv_python), "-m", pkg_name]
+                    pkg_main = agent_dir / pkg_name / "main.py"
+                    if pkg_main.exists():
+                        return [str(venv_python), str(pkg_main)]
                 return None
 
         # Strategy 2: fallback to python3 <agent_dir>/<pkg>/main.py

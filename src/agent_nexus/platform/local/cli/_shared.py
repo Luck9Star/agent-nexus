@@ -30,6 +30,34 @@ def _get_config_dir() -> Path:
     return DEFAULT_CONFIG_DIR
 
 
+def _load_dot_env(config_dir: Path) -> None:
+    """Load environment variables from <config_dir>/.env if it exists.
+
+    Only sets variables that are not already present in os.environ.
+    Supports simple KEY=VALUE lines; ignores comments and blank lines.
+    """
+    env_file = config_dir / ".env"
+    if not env_file.is_file():
+        return
+    try:
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            # Support both "KEY=VALUE" and "export KEY=VALUE"
+            if stripped.startswith("export "):
+                stripped = stripped[7:].strip()
+            if "=" not in stripped:
+                continue
+            key, _, value = stripped.partition("=")
+            key = key.strip()
+            value = value.strip().strip("\"'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except Exception:
+        logger.debug("Failed to load .env file", exc_info=True)
+
+
 def _init_managers(
     config_dir: Path | None = None,
 ) -> tuple:
@@ -42,6 +70,8 @@ def _init_managers(
     from agent_nexus.platform.local.sources import SourceManager
 
     _config_dir = config_dir or _get_config_dir()
+    _load_dot_env(_config_dir)
+
     loader = ConfigLoader(_config_dir)
     loader.ensure_config_dir()
 

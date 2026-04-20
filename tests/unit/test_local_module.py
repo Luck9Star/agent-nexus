@@ -1092,7 +1092,7 @@ class TestAgentSupervisor:
         cmd = supervisor._build_command("test-agent", entry)
         assert cmd is not None
         assert str(tmp_path / "venv" / "bin" / "python") in cmd[0]
-        assert cmd == [str(tmp_path / "venv" / "bin" / "python"), "-m", "agent_test"]
+        assert cmd == [str(tmp_path / "venv" / "bin" / "python"), str(agent_dir / "agent_test" / "main.py")]
 
     def test_build_command_venv_with_root_main_py(self, tmp_path: Path) -> None:
         """_build_command prefers root main.py over package discovery."""
