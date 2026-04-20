@@ -205,13 +205,17 @@ class OrchestrationDSL:
 
     # -- public API ---------------------------------------------------------
 
-    def parse_file(self, path: Path) -> OrchestrationDefinition:
+    def parse_file(self, path: str | Path) -> OrchestrationDefinition:
         """Parse TOML file into OrchestrationDefinition.
+
+        Args:
+            path: Path to TOML file. Accepts both ``str`` and ``Path``.
 
         Raises:
             DSLSyntaxError: on TOML syntax or structural errors.
             DSLValidationError: on semantic validation errors.
         """
+        path = Path(path)
         if not path.exists():
             raise DSLSyntaxError(f"TOML file not found: {path}")
         try:
@@ -297,9 +301,20 @@ class OrchestrationDSL:
     def _parse(self, raw: dict[str, Any]) -> OrchestrationDefinition:
         """Parse raw TOML dict into OrchestrationDefinition.
 
+        Supports two TOML formats:
+        - **Canonical** (``[goal]``, ``[[agents]]``, ``[[tasks]]``): used by
+          OrchestrationDSL templates and the platform router.
+        - **Composition** (``[composition]``, ``[tasks.X]``): used by the
+          five official composite agents.  Auto-detected by the presence
+          of a top-level ``[composition]`` table.
+
         Structural validation happens here (required sections).
         Semantic validation is deferred to validate().
         """
+        # Auto-detect composition format ([composition] table present)
+        if isinstance(raw.get("composition"), dict):
+            return self._parse_composition_format(raw)
+
         # -- [goal] --
         goal_section = raw.get("goal")
         if not isinstance(goal_section, dict):
@@ -423,6 +438,137 @@ class OrchestrationDSL:
         if result.errors:
             raise DSLValidationError(
                 "DSL validation failed:\n" + "\n".join(f"  - {e}" for e in result.errors)
+            )
+
+        return definition
+
+    def _parse_composition_format(self, raw: dict[str, Any]) -> OrchestrationDefinition:
+        """Parse the ``[composition]`` / ``[tasks.X]`` TOML format.
+
+        This is the format used by the five official composite agents::
+
+            [composition]
+            name = "feature-delivery-pipeline"
+            description = "..."
+
+            [tasks.task1]
+            name = "requirements-analysis"
+            agent = "requirements-analyzer"
+            blocked_by = []
+
+        It is auto-detected when a top-level ``[composition]`` table is
+        present.  The method converts it to the canonical
+        :class:`OrchestrationDefinition` by:
+
+        1. Mapping ``[composition].description`` → *goal*,
+           ``[composition].name`` → *agent_name*.
+        2. Converting the ``[tasks.X]`` dict-of-tables into a flat list
+           of :class:`DSLTask` objects (key *X* becomes ``task.id``,
+           ``name`` becomes ``task.description``).
+        3. Inferring :class:`DSLAgent` entries from unique ``agent``
+           values across all tasks.
+
+        Raises:
+            DSLSyntaxError: on structural errors.
+            DSLValidationError: on semantic validation errors.
+        """
+        composition = raw.get("composition", {})
+        if not isinstance(composition, dict):
+            raise DSLSyntaxError("[composition] must be a table")
+
+        goal = composition.get("description", "")
+        if not goal or not isinstance(goal, str):
+            raise DSLSyntaxError(
+                "[composition].description must be a non-empty string"
+            )
+        agent_name = composition.get("name", "")
+        if not agent_name or not isinstance(agent_name, str):
+            raise DSLSyntaxError(
+                "[composition].name must be a non-empty string"
+            )
+
+        # -- [tasks.X] (dict-of-tables) → list of DSLTask --
+        raw_tasks = raw.get("tasks", {})
+        if not isinstance(raw_tasks, dict):
+            raise DSLSyntaxError("[tasks] must be a table of task definitions")
+
+        tasks: list[DSLTask] = []
+        seen_task_ids: set[str] = set()
+        agent_names_seen: set[str] = set()
+
+        for task_id, task_def in raw_tasks.items():
+            if not isinstance(task_def, dict):
+                raise DSLSyntaxError(f"tasks.{task_id} must be a table")
+            if task_id in seen_task_ids:
+                raise DSLSyntaxError(f"Duplicate task id: '{task_id}'")
+            seen_task_ids.add(task_id)
+
+            name = task_def.get("name", task_id)
+            if not isinstance(name, str) or not name:
+                name = task_id
+            agent = task_def.get("agent", "")
+            if not isinstance(agent, str) or not agent:
+                raise DSLSyntaxError(
+                    f"tasks.{task_id}.agent must be a non-empty string"
+                )
+            agent_names_seen.add(agent)
+
+            blocked_by = task_def.get("blocked_by", [])
+            if not isinstance(blocked_by, list):
+                raise DSLSyntaxError(
+                    f"tasks.{task_id}.blocked_by must be a list"
+                )
+            for dep_idx, dep in enumerate(blocked_by):
+                if not isinstance(dep, str) or not dep:
+                    raise DSLSyntaxError(
+                        f"tasks.{task_id}.blocked_by[{dep_idx}] must be a "
+                        f"non-empty string, got {dep!r}"
+                    )
+
+            tasks.append(
+                DSLTask(
+                    id=task_id,
+                    description=name,
+                    agent=agent,
+                    blocked_by=list(blocked_by),
+                )
+            )
+
+        # -- Infer [[agents]] from unique agent references --
+        agents: dict[str, DSLAgent] = {}
+        for aname in sorted(agent_names_seen):
+            agents[aname] = DSLAgent(name=aname, description="")
+
+        # -- [tool_loading] (optional, rare in composition format) --
+        raw_tl = raw.get("tool_loading", {})
+        if not isinstance(raw_tl, dict):
+            raise DSLSyntaxError("[tool_loading] must be a table")
+        tl_strategy = raw_tl.get("strategy", "lazy")
+        tl_preload = raw_tl.get("preload_agents", [])
+        if not isinstance(tl_preload, list):
+            raise DSLSyntaxError("[tool_loading].preload_agents must be a list")
+        try:
+            tool_loading = DSLToolLoading(
+                strategy=tl_strategy,
+                preload_agents=list(tl_preload),
+            )
+        except ValueError as exc:
+            raise DSLSyntaxError(f"[tool_loading]: {exc}") from exc
+
+        definition = OrchestrationDefinition(
+            goal=goal,
+            agent_name=agent_name,
+            agents=agents,
+            tasks=tasks,
+            tool_loading=tool_loading,
+        )
+
+        # Run validation (same as canonical path)
+        result = self.validate(definition)
+        if result.errors:
+            raise DSLValidationError(
+                "DSL validation failed:\n"
+                + "\n".join(f"  - {e}" for e in result.errors)
             )
 
         return definition
