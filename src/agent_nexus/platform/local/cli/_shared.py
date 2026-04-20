@@ -51,7 +51,14 @@ def _load_dot_env(config_dir: Path) -> None:
                 continue
             key, _, value = stripped.partition("=")
             key = key.strip()
-            value = value.strip().strip("\"'")
+            value = value.strip()
+            # Strip balanced outer quotes: "foo" -> foo, 'bar' -> bar
+            # but "foo'bar" stays as-is (unbalanced).
+            if len(value) >= 2 and (
+                (value.startswith('"') and value.endswith('"'))
+                or (value.startswith("'") and value.endswith("'"))
+            ):
+                value = value[1:-1]
             if key and key not in os.environ:
                 os.environ[key] = value
     except Exception:

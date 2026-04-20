@@ -136,7 +136,7 @@ class TaskGraph:
                 yield conn
                 conn.commit()
             except Exception:
-                logger.exception("DB commit failed in memory-DB context")
+                logger.debug("DB commit failed in memory-DB context", exc_info=True)
                 conn.rollback()
                 raise
             return
@@ -153,7 +153,7 @@ class TaskGraph:
             yield conn
             conn.commit()
         except Exception:
-            logger.exception("DB commit failed in file-DB context")
+            logger.debug("DB commit failed in file-DB context", exc_info=True)
             conn.rollback()
             raise
         finally:
