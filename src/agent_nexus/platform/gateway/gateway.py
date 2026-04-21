@@ -82,9 +82,9 @@ class MCPGateway:
 
     def _setup_core_tools(self) -> None:
         """Register gateway-level tools that are always available."""
-        self._mcp.tool(self._search_and_activate)
-        self._mcp.tool(self._list_agents)
-        self._mcp.tool(self._agent_info)
+        self._mcp.tool(self._search_and_activate, name="search_and_activate")
+        self._mcp.tool(self._list_agents, name="list_agents")
+        self._mcp.tool(self._agent_info, name="agent_info")
 
     async def _search_and_activate(self, query: str) -> str:
         """Search agents by query and activate matching ones.
