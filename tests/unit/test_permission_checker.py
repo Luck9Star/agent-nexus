@@ -601,6 +601,22 @@ class TestFnmatchRecursiveSuffixBranches:
         assert _fnmatch_recursive("/tmp/bar/x/y", "/tmp/**/bar/**")
 
 
+class TestCheckToolEmpty:
+    """Empty tool_name rejection."""
+
+    def test_empty_tool_name_denied(self) -> None:
+        checker = _checker(mode=PermissionMode.FULL_AUTO)
+        d = checker.check_tool("")
+        assert not d.allowed
+        assert "Empty tool name" in d.reason
+
+    def test_whitespace_tool_name_denied(self) -> None:
+        checker = _checker(mode=PermissionMode.FULL_AUTO)
+        d = checker.check_tool("   ")
+        assert not d.allowed
+        assert "Empty tool name" in d.reason
+
+
 class TestCheckCommandEmpty:
     """Line 266: empty command rejection."""
 

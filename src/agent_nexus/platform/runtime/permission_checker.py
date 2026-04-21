@@ -235,6 +235,13 @@ class PermissionChecker:
             3. Read-only tool exemption
             4. Mode baseline (PLAN / FULL_AUTO / DEFAULT)
         """
+        # 0. Reject empty tool names
+        if not tool_name or not tool_name.strip():
+            return PermissionDecision(
+                allowed=False,
+                reason="Empty tool name is not permitted",
+            )
+
         # 1. denied_tools — immediate deny
         if _matches_any_pattern(tool_name, self._config.denied_tools):
             return PermissionDecision(
