@@ -424,6 +424,51 @@ Independent agent scanned from 2 unused angles (input boundaries + security esca
 | 10 | 0 (static) | 0 | 3 (DRY+perf) | 3676 |
 | **11** | **42** | **3** | **3** | **3676** |
 
+### Cycle 17 — Performance Optimization + Functional Re-verification (2026-04-21)
+
+**Focus**: Performance audit, code simplification, and full functional re-verification.
+
+**Performance Deep Audit** (3 parallel agents):
+- Hot path analysis (IPC, Router, TaskGraph, ProcessManager) — 12 findings
+- Memory/allocation patterns (unbounded structures, caching, lifecycle) — 18 findings
+- SQLite/I/O patterns (indexes, WAL, blocking sync ops) — 9 findings
+
+**Applied Fixes**:
+
+| # | File | Fix | Impact |
+|---|------|-----|--------|
+| 1 | `ipc.py` | Avoid throwaway Lock allocation in `get_ipc_lock()` (setdefault → get+if) | Medium — eliminates per-request allocation |
+| 2 | `task_graph.py` | Add composite index `(state, created_at)` for `get_ready_tasks()` | Medium — eliminates in-memory sort |
+| 3 | `store.py` | Extract `_SKILL_COLUMNS` constant (7→1 definition) | Low — DRY, prevents column drift |
+| 4 | `task_graph.py` | Extract `_TASK_COLUMNS` constants (5→2 definitions) | Low — DRY |
+| 5 | `store.py` + `task_graph.py` | Extract shared `sqlite_connection()` to `utils.py` (~80 lines DRY) | Low — maintainability |
+| 6 | `ipc.py` | Simplify `receive()` — `json.loads` accepts bytes directly | Low — cleaner code |
+| 7 | `router.py` | Remove 2 misleading `remove_lock()` calls + unused import | Low — correctness |
+| 8 | `runtime.py` | Replace if/elif with `_TYPE_FORMATTERS` dispatch dict | Low — extensibility |
+
+**Functional Re-verification** (all via live execution):
+
+| Component | Checks | Result |
+|-----------|--------|--------|
+| CLI: 15 commands | version, doctor, list, env, config, runtime, evolution, sources, run | ALL PASS (7/7 doctor, 4 agents listed) |
+| Atomic Agents: 11 | manifest parse, tools, capabilities, description | ALL PASS |
+| Composite Agents: 5 | manifest parse, composition.toml | ALL PASS |
+| Python Runtime: 10 | inject/retrieve, callable, types, error capture, security, state, reset, describe | ALL PASS |
+| MCP Gateway: 3 tools | search_and_activate, list_agents, agent_info schemas | ALL PASS |
+| Core imports: 12 | all platform modules importable | ALL PASS |
+
+**Documented but not fixed** (deferred — architectural or low ROI):
+
+| # | Finding | Impact | Why deferred |
+|---|---------|--------|-------------|
+| 1 | SQLite ops are sync in async paths | HIGH | Requires wrapping in `asyncio.to_thread()` — large refactor |
+| 2 | SecurityChecker AST no cache | HIGH | `lru_cache` adds complexity; only matters for repeated identical code |
+| 3 | EvolutionStore unbounded queries | MEDIUM | Needs pagination API design |
+| 4 | Process spawn latency | HIGH | Architectural — requires pre-warmed agent pool |
+| 5 | `_cleanup_dead` O(N) per health_check | MEDIUM | Behavior change risk (reverted once) |
+
+**Test suite**: 2889+ passed (targeted), 207 pass for modified modules
+
 ---
 
 ## Migration Guide
