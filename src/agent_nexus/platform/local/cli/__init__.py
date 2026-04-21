@@ -16,7 +16,29 @@ app = typer.Typer(
     name="agent-nexus",
     help="Agent Nexus -- MCP-native Agent Platform",
     no_args_is_help=True,
+    invoke_without_command=True,
 )
+
+# --- Callback for top-level --version ---
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(
+        False, "--version", "-v", help="Show version and exit"
+    ),
+) -> None:
+    """Agent Nexus -- MCP-native Agent Platform"""
+    if version:
+        import importlib.metadata
+
+        try:
+            ver = importlib.metadata.version("agent-nexus")
+        except importlib.metadata.PackageNotFoundError:
+            ver = "unknown (dev mode)"
+        typer.echo(f"agent-nexus {ver}")
+        raise typer.Exit()
+
 
 # --- Lifecycle commands (migrated from original cli.py) ---
 from agent_nexus.platform.local.cli._lifecycle import (
