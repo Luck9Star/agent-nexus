@@ -65,6 +65,15 @@ _DEFAULT_FORBIDDEN_FUNCTIONS = [
     "delattr",  # can remove safety-related attributes
 ]
 
+# Qualified method calls that should be blocked regardless of import.
+# Format: (module_name, method_name) — matches obj.attr where obj.id
+# matches module_name.  This avoids false positives on generic names
+# like "run" or "call" while still blocking subprocess.run(), os.system(), etc.
+_DEFAULT_FORBIDDEN_QUALIFIED_CALLS: dict[str, set[str]] = {
+    "os": {"system", "popen", "spawnl", "spawnv", "spawnle", "spawnve"},
+    "subprocess": {"call", "run", "Popen", "check_output", "check_call"},
+}
+
 _DEFAULT_FORBIDDEN_ATTRIBUTES = [
     "__subclasses__",
     "__globals__",
@@ -98,7 +107,10 @@ class SecurityChecker:
 
     DEFAULT_RULES: list[SecurityRule] = [
         ImportRule(forbidden=_DEFAULT_FORBIDDEN_IMPORTS),
-        FunctionRule(forbidden=_DEFAULT_FORBIDDEN_FUNCTIONS),
+        FunctionRule(
+            forbidden=_DEFAULT_FORBIDDEN_FUNCTIONS,
+            qualified_calls=_DEFAULT_FORBIDDEN_QUALIFIED_CALLS,
+        ),
         AttributeRule(forbidden=_DEFAULT_FORBIDDEN_ATTRIBUTES),
         RegexRule(
             patterns=_DEFAULT_REGEX_PATTERNS,

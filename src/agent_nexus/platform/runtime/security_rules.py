@@ -121,10 +121,20 @@ class FunctionRule(SecurityRule):
     Checks ast.Call nodes and resolves the function name from
     ast.Name, ast.Attribute, and nested ast.Call patterns.
     Also handles getattr(obj, 'eval') pattern.
+
+    Supports qualified-call blocking: ``qualified_calls`` maps
+    module-name to set of forbidden method names, e.g.
+    ``{"os": {"system", "popen"}}`` blocks ``os.system()`` but not
+    ``pipeline.run()``.
     """
 
-    def __init__(self, forbidden: list[str] | set[str]) -> None:
+    def __init__(
+        self,
+        forbidden: list[str] | set[str],
+        qualified_calls: dict[str, set[str]] | None = None,
+    ) -> None:
         self.forbidden: set[str] = set(forbidden)
+        self.qualified_calls: dict[str, set[str]] = qualified_calls or {}
 
     def check(self, node: ast.AST) -> list[SecurityViolation]:
         violations: list[SecurityViolation] = []
@@ -164,8 +174,26 @@ class FunctionRule(SecurityRule):
                     )
                 )
 
-            # Note: getattr() is now blocked entirely via FunctionRule,
-            # so per-attribute getattr detection is no longer needed.
+            # Qualified-call check: block os.system(), subprocess.run(), etc.
+            # without false-positive on generic names like pipeline.run().
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in self.qualified_calls
+                and node.func.attr in self.qualified_calls[node.func.value.id]
+            ):
+                qualified = f"{node.func.value.id}.{node.func.attr}"
+                violations.append(
+                    SecurityViolation(
+                        rule_type="function",
+                        node_type="QualifiedCall",
+                        code_snippet=ast.unparse(node),
+                        message=(
+                            f"Forbidden qualified call: "
+                            f"'{qualified}' at line {node.lineno}"
+                        ),
+                    )
+                )
 
         return violations
 
