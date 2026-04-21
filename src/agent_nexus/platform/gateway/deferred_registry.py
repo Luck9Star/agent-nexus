@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import logging
 from dataclasses import dataclass, field
 from agent_nexus.models.agent import AgentManifest
@@ -56,6 +57,7 @@ class AgentInfo:
 
     def __post_init__(self) -> None:
         self._search_text = f"{self.name} {self.manifest.description}".lower()
+        self._search_words: set[str] = set(self._search_text.split())
 
     @property
     def is_activated(self) -> bool:
@@ -299,8 +301,6 @@ class DeferredAgentRegistry:
                 return self._validate_tool_schemas(response.output)
 
             # Fallback: parse content as JSON list
-            import json
-
             if response.content:
                 try:
                     parsed = json.loads(response.content)
@@ -529,8 +529,7 @@ class DeferredAgentRegistry:
         for info in itertools.chain(
             self._core_agents.values(), self._deferred_agents.values()
         ):
-            search_text = info._search_text
-            score = sum(1 for w in query_words if w in search_text)
+            score = sum(1 for w in query_words if w in info._search_words)
             if score > 0:
                 scored.append((score, info.manifest))
 

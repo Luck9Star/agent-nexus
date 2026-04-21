@@ -22,6 +22,7 @@ from typing import Any
 from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.utils import make_error_result as _make_error_result
 from agent_nexus.platform.orchestration.ipc import IPCError, get_ipc_lock
+import agent_nexus.platform.orchestration.ipc as _ipc_mod
 from agent_nexus.platform.orchestration.process_manager import AgentHandle
 
 logger = logging.getLogger(__name__)
@@ -66,8 +67,6 @@ def remove_all_locks() -> None:
 
     Delegates to :func:`ipc.get_ipc_lock`'s internal registry.
     """
-    import agent_nexus.platform.orchestration.ipc as _ipc_mod
-
     _ipc_mod._ipc_lock_registry.clear()
     _ipc_mod._ipc_lock_loop_id = None
 

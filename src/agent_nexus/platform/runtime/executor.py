@@ -67,6 +67,8 @@ class IPythonExecutor:
         # reset()/close() can wait before clearing user_ns.
         self._exec_done: threading.Event = threading.Event()
         self._exec_done.set()  # Initially "done" (no thread running)
+        # Lazily cached IPython capture_output (avoids import-on-every-execution).
+        self._capture_output: Any | None = None
         self._closed: bool = False  # Prevents shell re-creation after close()
 
     async def _require_shell(self) -> Any:
@@ -320,10 +322,11 @@ class IPythonExecutor:
         """
         if self._shell is None:
             raise RuntimeError("_run_cell_sync called before shell initialization")
-        from IPython.utils.capture import capture_output  # pyright: ignore[reportMissingImports]
-
+        if self._capture_output is None:
+            from IPython.utils.capture import capture_output  # pyright: ignore[reportMissingImports]
+            self._capture_output = capture_output
         try:
-            with capture_output() as captured:
+            with self._capture_output() as captured:
                 result = self._shell.run_cell(transformed, store_history=False)
             return result, captured.stdout, captured.stderr
         finally:

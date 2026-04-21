@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS context_budget_log (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cbl_agent ON context_budget_log(agent_name);
+CREATE INDEX IF NOT EXISTS idx_cbl_agent_created
+    ON context_budget_log(agent_name, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS agent_records (
     agent_id TEXT PRIMARY KEY,
@@ -503,27 +505,17 @@ class EvolutionStore:
                 ),
             )
 
-            for j in judgments or []:
-                sid = j.get("skill_id")
-                if not sid:
-                    continue
-                j_id = str(uuid.uuid4())
-                conn.execute(
-                    """
-                    INSERT INTO skill_judgments (
-                        id, analysis_id, skill_id,
-                        selected, applied, completed, fell_back
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        j_id,
-                        analysis_id,
-                        sid,
-                        int(j.get("selected", False)),
-                        int(j.get("applied", False)),
-                        int(j.get("completed", False)),
-                        int(j.get("fell_back", False)),
-                    ),
+            judgment_rows = [
+                (str(uuid.uuid4()), analysis_id, j.get("skill_id"),
+                 int(j.get("selected", False)), int(j.get("applied", False)),
+                 int(j.get("completed", False)), int(j.get("fell_back", False)))
+                for j in (judgments or []) if j.get("skill_id")
+            ]
+            if judgment_rows:
+                conn.executemany(
+                    "INSERT INTO skill_judgments (id, analysis_id, skill_id, "
+                    "selected, applied, completed, fell_back) VALUES (?,?,?,?,?,?,?)",
+                    judgment_rows,
                 )
 
             # Validate counter invariants for all judgments, then batch
@@ -767,12 +759,12 @@ class EvolutionStore:
                                 tuple(parent_skill_ids),
                             ).fetchall()
                         }
-                        for pid in parent_skill_ids:
-                            if pid not in found:
-                                raise ValueError(
-                                    f"Parent skill_id {pid} not found — "
-                                    f"cannot deactivate for FIX evolution"
-                                )
+                        missing = set(parent_skill_ids) - found
+                        if missing:
+                            raise ValueError(
+                                f"Parent skill_id(s) not found: {missing} — "
+                                f"cannot deactivate for FIX evolution"
+                            )
 
                     # All checks passed — deactivate parents atomically.
                     if parent_skill_ids:
@@ -933,9 +925,11 @@ class EvolutionStore:
                 tuple(all_ancestor_ids),
             ).fetchall()
 
+            ancestors_ids = {r[0] for r in rows}
+            parents = self._batch_load_parents(conn, ancestors_ids)
             records_by_id: dict[str, SkillRecord] = {}
             for row in rows:
-                record = self._row_to_record(conn, row)
+                record = self._row_to_record(conn, row, parents)
                 records_by_id[record.id] = record
 
             result: dict[str, list[SkillRecord]] = {}
@@ -987,11 +981,11 @@ class EvolutionStore:
                 tuple(visited),
             ).fetchall()
 
+            ancestor_ids = {r[0] for r in rows}
+            parents = self._batch_load_parents(conn, ancestor_ids)
             ancestors: list[SkillRecord] = []
             for row in rows:
-                ancestors.append(
-                    self._row_to_record(conn, row)
-                )
+                ancestors.append(self._row_to_record(conn, row, parents))
 
             ancestors.sort(key=lambda r: r.lineage.generation)
             return ancestors

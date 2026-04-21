@@ -221,10 +221,11 @@ class TaskGraph:
             )
 
             # Insert dependencies (deduplicate to avoid PRIMARY KEY violation)
-            for dep_id in dict.fromkeys(task.blocked_by):
-                conn.execute(
+            deps = [(task.id, dep_id) for dep_id in dict.fromkeys(task.blocked_by)]
+            if deps:
+                conn.executemany(
                     "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES (?, ?)",
-                    (task.id, dep_id),
+                    deps,
                 )
 
     def add_tasks(self, tasks: list[TaskItem]) -> None:
