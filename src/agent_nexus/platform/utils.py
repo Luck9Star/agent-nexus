@@ -160,6 +160,8 @@ def sqlite_connection(
     conn = sqlite3.connect(db_str)
     try:
         conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA synchronous=NORMAL")
         if immediate:
             conn.execute("BEGIN IMMEDIATE")
         yield conn

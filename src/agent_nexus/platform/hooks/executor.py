@@ -398,14 +398,20 @@ class HookExecutor:
         import httpx
 
         # Reuse a long-lived client for connection pooling across hooks.
+        # Use a generous default timeout on the client; per-request timeout
+        # is set on each POST call so hooks with different timeouts work correctly.
         if self._http_client is None or self._http_client.is_closed:
             self._http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(hook.timeout_seconds),
+                timeout=httpx.Timeout(30.0),
             )
 
         start = time.monotonic()
         try:
-            resp = await self._http_client.post(hook.url, json=payload)
+            resp = await self._http_client.post(
+                hook.url,
+                json=payload,
+                timeout=httpx.Timeout(hook.timeout_seconds),
+            )
 
             duration_ms = (time.monotonic() - start) * 1000
             passed = 200 <= resp.status_code < 300

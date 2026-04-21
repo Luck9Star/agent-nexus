@@ -89,11 +89,12 @@ def _correct_skill_ids(
             continue
 
         prefix = raw_id.split("__")[0]
-        candidates = [k for k in known_ids if k.split("__")[0] == prefix]
+        pfx = prefix + "__"
+        candidates = [k for k in known_ids if k.startswith(pfx)]
 
         # Scale max_dist with suffix length to avoid loose matches on short IDs
         # e.g. "x__ab" matching "x__wxyz" at distance 4 is clearly wrong.
-        _suffix = raw_id.split("__", 1)[1]
+        _suffix = raw_id[len(pfx):]
         _suffix_len = len(_suffix)
         if len(candidates) > 20:
             max_dist = 2

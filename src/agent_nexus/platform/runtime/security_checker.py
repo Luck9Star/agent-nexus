@@ -9,7 +9,6 @@ Reference: cave-agent/src/cave_agent/security/checker.py
 from __future__ import annotations
 
 import ast
-import functools
 import logging
 
 from agent_nexus.models.runtime import SecurityViolation
@@ -134,6 +133,8 @@ class SecurityChecker:
         else:
             self._rules = list(self.DEFAULT_RULES)
         self._classify_rules()
+        self._cache: dict[str, tuple[SecurityViolation, ...]] = {}
+        self._cache_max = 128
 
     def add_rule(self, rule: SecurityRule) -> None:
         """Add a security rule to the checker.
@@ -201,16 +202,20 @@ class SecurityChecker:
 
         return list(self._check_cached(code))
 
-    @functools.lru_cache(maxsize=128)
     def _check_cached(self, code: str) -> tuple[SecurityViolation, ...]:
         """Cached AST walk + rule application.
 
-        Caller is responsible for handling empty code and syntax errors
-        before calling this method, since those should not be cached.
+        Per-instance cache avoids the memory leak and cross-instance
+        contamination that @lru_cache on a method causes (the class-level
+        descriptor retains strong references to ``self``).
 
         Returns:
-            Tuple of SecurityViolation objects (hashable for lru_cache).
+            Tuple of SecurityViolation objects.
         """
+        cached = self._cache.get(code)
+        if cached is not None:
+            return cached
+
         tree = ast.parse(code)
 
         violations: list[SecurityViolation] = []
@@ -240,8 +245,14 @@ class SecurityChecker:
                     exc_info=True,
                 )
 
-        return tuple(violations)
+        result = tuple(violations)
+
+        # Evict oldest entry if cache is full (FIFO eviction).
+        if len(self._cache) >= self._cache_max:
+            self._cache.pop(next(iter(self._cache)))
+        self._cache[code] = result
+        return result
 
     def clear_cache(self) -> None:
-        """Clear the internal LRU cache. Useful for test cleanup."""
-        self._check_cached.cache_clear()
+        """Clear the internal cache. Useful for test cleanup."""
+        self._cache.clear()

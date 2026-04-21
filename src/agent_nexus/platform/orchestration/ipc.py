@@ -133,22 +133,21 @@ class IPCStream:
         if not raw.strip():
             raise IPCConnectionError("Agent sent empty line (possible EOF)")
 
-        # Validate UTF-8 before json.loads — the stdlib swallows
-        # UnicodeDecodeError inside json.loads, making it impossible
-        # to distinguish encoding errors from malformed JSON.
+        # Decode UTF-8 first to distinguish encoding errors from JSON syntax
+        # errors.  json.loads(bytes) also decodes internally but wraps encoding
+        # failures in JSONDecodeError, losing the ability to give a clear
+        # "non-UTF-8" diagnostic.
+        logger.debug("IPC recv: %.200s", raw[:200])
+
         try:
-            raw.decode("utf-8")
+            text = raw.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise IPCError(
                 f"Agent sent non-UTF-8 data ({len(raw)} bytes): {exc}"
             ) from exc
 
-        # json.loads accepts bytes directly and handles leading/trailing
-        # whitespace, so no intermediate .strip() or .decode() is needed.
-        logger.debug("IPC recv: %.200s", raw[:200])
-
         try:
-            data = json.loads(raw)
+            data = json.loads(text)
         except json.JSONDecodeError as exc:
             raise IPCError(f"Invalid JSON from agent: {exc}") from exc
 

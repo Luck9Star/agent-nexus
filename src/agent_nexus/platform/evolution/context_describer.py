@@ -12,7 +12,7 @@ Reference: docs/04 Section 6.8
 from __future__ import annotations
 
 import logging
-from agent_nexus.models.evolution import SkillRecord
+from agent_nexus.models.evolution import EvolutionMetrics, SkillRecord
 from agent_nexus.platform.evolution.health import HealthChecker, HealthReport
 from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.thresholds import SkillRates
@@ -54,6 +54,7 @@ class EvolutionContextDescriber:
     def l0_context(
         self,
         active_skills: list[SkillRecord] | None = None,
+        metrics: EvolutionMetrics | None = None,
     ) -> str:
         """Generate L0 context block (~30 tokens).
 
@@ -62,6 +63,8 @@ class EvolutionContextDescriber:
         Args:
             active_skills: Pre-loaded active skills list.  If None, fetched
                 from the store (allows callers to reuse a single query).
+            metrics: Pre-loaded evolution metrics.  If None, fetched from the
+                store (allows callers to reuse a single query).
 
         Returns:
             Formatted context string, e.g.
@@ -78,10 +81,10 @@ class EvolutionContextDescriber:
         )
 
         # Compute aggregate effective rate (scoped to agent if available)
-        metrics = self._store.get_metrics(agent_name=self._agent_name)
+        m = metrics if metrics is not None else self._store.get_metrics(agent_name=self._agent_name)
         eff_rate = (
-            metrics.total_completions / metrics.total_selections
-            if metrics.total_selections > 0
+            m.total_completions / m.total_selections
+            if m.total_selections > 0
             else 0.0
         )
 

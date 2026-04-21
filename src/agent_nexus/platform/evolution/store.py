@@ -1274,10 +1274,10 @@ class EvolutionStore:
 
         # Parse snapshot
         snapshot: dict[str, str] = {}
-        if lineage_content_snapshot:
+        if lineage_content_snapshot and lineage_content_snapshot not in ('""', '{}', 'null'):
             try:
                 loaded = json.loads(lineage_content_snapshot)
-                if isinstance(loaded, dict):
+                if isinstance(loaded, dict) and loaded:
                     # Validate all values are strings (Pydantic requirement)
                     if all(isinstance(v, str) for v in loaded.values()):
                         snapshot = loaded

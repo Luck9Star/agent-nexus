@@ -22,6 +22,19 @@ from .security_checker import SecurityChecker
 
 logger = logging.getLogger(__name__)
 
+# Module-level lock to prevent sys.stdout cross-contamination between
+# concurrent IPythonExecutor instances.  sys.stdout is process-global, so
+# without this, two executors redirecting stdout simultaneously would capture
+# each other's output.  Using threading.Lock (not asyncio.Lock) to avoid
+# event-loop binding issues across test fixtures that create new loops.
+#
+# NOTE: Not currently used because threading.Lock blocks the event loop and
+# asyncio.Lock fails across test event loops.  The per-instance _exec_lock
+# prevents concurrent access within a single executor.  Cross-executor
+# contamination only occurs when multiple executors share a process, which
+# doesn't happen in production (each agent is a subprocess).
+# _global_exec_lock = threading.Lock()
+
 # User namespace keys that are IPython internals, not user variables
 _IPYTHON_INTERNALS = frozenset({
     "In", "Out", "exit", "quit", "get_ipython",
@@ -228,6 +241,10 @@ class IPythonExecutor:
         # Step 2: Execute (shell created lazily here)
         # Serialize: only one thread may access the non-thread-safe
         # InteractiveShell at a time.
+        # NOTE: sys.stdout is process-global; if multiple IPythonExecutor
+        # instances exist in the same process (non-production scenario),
+        # concurrent executions may cross-contaminate output.  In production,
+        # each agent subprocess has exactly one executor, so this is safe.
         async with self._exec_lock:
             return await self._execute_inner(code, timeout)
 
