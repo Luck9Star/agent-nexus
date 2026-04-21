@@ -7,8 +7,9 @@ Conditions (from docs/04):
 
 Actions:
   1. Create new agent manifest from skill metadata
-  2. Generate minimal agent.py skeleton
-  3. Register as Atomic Agent
+  2. Generate proper Python package with __init__.py, agent.py, mcp_adapter.py
+  3. Generate pyproject.toml with hatch build config
+  4. Register as Atomic Agent
 """
 
 from __future__ import annotations
@@ -23,6 +24,24 @@ import yaml
 
 from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.utils import AGENT_NAME_RE
+
+
+def _agent_name_to_package(agent_name: str) -> str:
+    """Convert agent name to Python package directory name.
+
+    Examples: ``code-reviewer`` -> ``agent_code_reviewer``,
+    ``test-suite-generator`` -> ``agent_test_suite_generator``.
+    """
+    return "agent_" + agent_name.replace("-", "_")
+
+
+def _to_class_name(agent_name: str) -> str:
+    """Convert agent name to PascalCase class name (without Agent suffix).
+
+    Examples: ``code-reviewer`` -> ``CodeReviewer``,
+    ``test-suite-generator`` -> ``TestSuiteGenerator``.
+    """
+    return "".join(part.capitalize() for part in agent_name.split("-"))
 
 
 @dataclass
@@ -73,7 +92,7 @@ class AgentPromoter:
         agents_root: Path | None = None,
     ) -> None:
         self._store = store
-        self._agents_root = (agents_root or Path("agents/atomic")).resolve()
+        self._agents_root = Path(agents_root or "agents/atomic").resolve()
 
     def find_candidates(self) -> list[PromotionCandidate]:
         """Scan active skills and find promotion candidates.
@@ -121,10 +140,11 @@ class AgentPromoter:
     ) -> PromotionResult:
         """Promote a skill to a standalone Atomic Agent.
 
-        Generates:
-          1. Agent manifest (agent.toml)
-          2. Entry point (agent.py)
-          3. Skill file copy (SKILL.md)
+        Generates the full package structure matching other agents:
+          1. Agent manifest (agent-manifest.yaml)
+          2. Python package directory with __init__.py, agent.py, mcp_adapter.py
+          3. pyproject.toml with hatch build config
+          4. SKILL.md
 
         Args:
             candidate: The promotion candidate.
@@ -140,6 +160,8 @@ class AgentPromoter:
             )
 
         agent_dir = self._agents_root / agent_name
+        pkg_name = _agent_name_to_package(agent_name)
+        pkg_dir = agent_dir / pkg_name
 
         # Track whether the directory existed BEFORE we started so we
         # can decide cleanup scope on failure.  A pre-existing directory
@@ -148,6 +170,7 @@ class AgentPromoter:
         preexisting = agent_dir.exists()
         try:
             agent_dir.mkdir(parents=True, exist_ok=True)
+            pkg_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             return PromotionResult(
                 success=False,
@@ -163,11 +186,29 @@ class AgentPromoter:
             self._atomic_write(manifest_path, manifest_content)
             written_files.append(manifest_path)
 
-            # Generate entry point
+            # Generate __init__.py (package root)
+            init_content = self._generate_init_py(candidate, pkg_name)
+            init_path = pkg_dir / "__init__.py"
+            self._atomic_write(init_path, init_content)
+            written_files.append(init_path)
+
+            # Generate agent.py inside package (entry point)
             entry_content = self._generate_entry_point(candidate)
-            entry_path = agent_dir / "agent.py"
+            entry_path = pkg_dir / "agent.py"
             self._atomic_write(entry_path, entry_content)
             written_files.append(entry_path)
+
+            # Generate mcp_adapter.py inside package
+            mcp_content = self._generate_mcp_adapter(candidate, pkg_name)
+            mcp_path = pkg_dir / "mcp_adapter.py"
+            self._atomic_write(mcp_path, mcp_content)
+            written_files.append(mcp_path)
+
+            # Generate pyproject.toml
+            pyproject_content = self._generate_pyproject(candidate, pkg_name)
+            pyproject_path = agent_dir / "pyproject.toml"
+            self._atomic_write(pyproject_path, pyproject_content)
+            written_files.append(pyproject_path)
 
             # Generate skill file
             skill_content = self._generate_skill_md(candidate)
@@ -197,6 +238,91 @@ class AgentPromoter:
             agent_directory=str(agent_dir),
             manifest_path=str(manifest_path),
             entry_point_path=str(entry_path),
+        )
+
+    def _generate_init_py(
+        self, candidate: PromotionCandidate, pkg_name: str
+    ) -> str:
+        """Generate __init__.py for the promoted agent package."""
+        class_name = _to_class_name(candidate.skill_name)
+        return (
+            f'"""agent-{candidate.skill_name} — Auto-promoted agent.\n'
+            f'\n'
+            f'{candidate.skill_name} agent, auto-promoted from skill '
+            f'{candidate.skill_id}.\n'
+            f'"""\n'
+            f'\n'
+            f'from {pkg_name}.agent import {class_name}Agent\n'
+            f'\n'
+            f'__all__ = [\n'
+            f'    "{class_name}Agent",\n'
+            f']\n'
+        )
+
+    def _generate_mcp_adapter(
+        self, candidate: PromotionCandidate, pkg_name: str
+    ) -> str:
+        """Generate mcp_adapter.py for the promoted agent."""
+        return (
+            f'"""MCP adapter — expose {candidate.skill_name} as an MCP Server.\n'
+            f'\n'
+            f'Requires the ``fastmcp`` package.\n'
+            f'"""\n'
+            f'\n'
+            f'from __future__ import annotations\n'
+            f'\n'
+            f'\n'
+            f'def create_mcp_server() -> object:\n'
+            f'    """Create and return a FastMCP server for {candidate.skill_name}."""\n'
+            f'    from fastmcp import FastMCP\n'
+            f'\n'
+            f'    mcp = FastMCP("{candidate.skill_name}")\n'
+            f'\n'
+            f'    @mcp.tool()\n'
+            f'    def run(task: str, context: dict | None = None) -> str:\n'
+            f'        """Execute the {candidate.skill_name} agent task."""\n'
+            f'        from {pkg_name}.agent import {candidate.skill_name.replace("-", "_")}_run\n'
+            f'        return {candidate.skill_name.replace("-", "_")}_run(task, context)\n'
+            f'\n'
+            f'    return mcp\n'
+        )
+
+    def _generate_pyproject(
+        self, candidate: PromotionCandidate, pkg_name: str
+    ) -> str:
+        """Generate pyproject.toml with hatch build config."""
+        return (
+            f'[project]\n'
+            f'name = "agent-{candidate.skill_name}"\n'
+            f'version = "0.1.0"\n'
+            f'description = "Auto-promoted from skill {candidate.skill_id}"\n'
+            f'requires-python = ">=3.12"\n'
+            f'dependencies = [\n'
+            f'    "pydantic>=2.0",\n'
+            f']\n'
+            f'\n'
+            f'[project.optional-dependencies]\n'
+            f'full = [\n'
+            f'    "fastmcp>=2.0",\n'
+            f']\n'
+            f'dev = [\n'
+            f'    "pytest>=8.0",\n'
+            f'    "pytest-asyncio>=0.23",\n'
+            f']\n'
+            f'\n'
+            f'[build-system]\n'
+            f'requires = ["hatchling"]\n'
+            f'build-backend = "hatchling.build"\n'
+            f'\n'
+            f'[tool.hatch.build.targets.wheel]\n'
+            f'packages = ["{pkg_name}"]\n'
+            f'\n'
+            f'[tool.ruff]\n'
+            f'target-version = "py312"\n'
+            f'line-length = 100\n'
+            f'\n'
+            f'[tool.ruff.lint]\n'
+            f'select = ["E", "F", "I", "N", "UP", "B", "SIM"]\n'
         )
 
     @staticmethod
@@ -254,6 +380,7 @@ class AgentPromoter:
         self, candidate: PromotionCandidate
     ) -> str:
         """Generate a minimal agent.py skeleton for the promoted agent."""
+        class_name = _to_class_name(candidate.skill_name)
         return (
             f'"""Auto-promoted agent: {candidate.skill_name}.\n'
             f'\n'
@@ -263,18 +390,28 @@ class AgentPromoter:
             f'"""\n'
             f'\n'
             f'\n'
-            f'async def run(task: str, context: dict | None = None) -> str:\n'
-            f'    """Execute the agent task.\n'
+            f'class {class_name}Agent:\n'
+            f'    """Auto-promoted agent from skill {candidate.skill_id}."""\n'
             f'\n'
-            f'    Args:\n'
-            f'        task: Task description.\n'
-            f'        context: Optional context dictionary.\n'
+            f'    async def run(self, task: str, context: dict | None = None) -> str:\n'
+            f'        """Execute the agent task.\n'
             f'\n'
-            f'    Returns:\n'
-            f'        Task result as string.\n'
-            f'    """\n'
-            f'    # NOTE: Implement agent logic based on promoted skill\n'
-            f'    return f"Agent {candidate.skill_name!r} executed: {{task}}"\n'
+            f'        Args:\n'
+            f'            task: Task description.\n'
+            f'            context: Optional context dictionary.\n'
+            f'\n'
+            f'        Returns:\n'
+            f'            Task result as string.\n'
+            f'        """\n'
+            f'        # NOTE: Implement agent logic based on promoted skill\n'
+            f'        return f"Agent {candidate.skill_name!r} executed: {{task}}"\n'
+            f'\n'
+            f'\n'
+            f'async def {candidate.skill_name.replace("-", "_")}_run('
+            f'task: str, context: dict | None = None) -> str:\n'
+            f'    """Module-level entry point for MCP adapter."""\n'
+            f'    agent = {class_name}Agent()\n'
+            f'    return await agent.run(task, context)\n'
         )
 
     def _generate_skill_md(
