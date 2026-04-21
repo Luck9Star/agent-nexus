@@ -8,6 +8,11 @@ model_config:
   fallback: "standard"
   max_turns: 15
 
+capabilities: [static-analysis, anti-pattern-detection, review-report]
+
+mcp:
+  tools: [analyze_code, check_patterns, generate_review]
+
 permissions:
   mode: default
   allowed_tools: [file_read, file_write, grep, glob]

@@ -8,6 +8,11 @@ model_config:
   fallback: "lightweight"
   max_turns: 10
 
+capabilities: [endpoint-extraction, schema-inference, openapi-generation]
+
+mcp:
+  tools: [extract_endpoints, infer_schema, generate_openapi]
+
 permissions:
   mode: default
   allowed_tools: [file_read, file_write, grep, glob]

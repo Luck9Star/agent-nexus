@@ -7,6 +7,11 @@ model_config:
   recommended: "lightweight"
   fallback: "standard"
 
+capabilities: [accessibility-audit, html-checking, remediation-guidance]
+
+mcp:
+  tools: [audit_content, check_html, generate_remediation]
+
 permissions:
   mode: default
   allowed_tools: [file_read, file_write, grep, glob]

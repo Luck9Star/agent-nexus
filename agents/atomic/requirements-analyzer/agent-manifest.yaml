@@ -8,6 +8,11 @@ model_config:
   fallback: "standard"
   max_turns: 12
 
+capabilities: [requirement-analysis, structured-specification, question-generation]
+
+mcp:
+  tools: [analyze_requirements, generate_questions, build_specification]
+
 permissions:
   mode: default
   allowed_tools: [file_read, file_write, grep, glob]

@@ -7,6 +7,11 @@ model_config:
   recommended: "premium"
   fallback: "standard"
 
+capabilities: [clause-extraction, risk-analysis, compliance-checking]
+
+mcp:
+  tools: [extract_clauses, analyze_risks, check_compliance]
+
 permissions:
   mode: default
   allowed_tools: [file_read, file_write, grep, glob]

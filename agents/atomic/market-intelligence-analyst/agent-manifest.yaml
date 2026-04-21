@@ -7,6 +7,11 @@ model_config:
   recommended: "standard"
   fallback: "lightweight"
 
+capabilities: [market-analysis, trend-identification, briefing-generation]
+
+mcp:
+  tools: [analyze_market, identify_trends, generate_briefing]
+
 permissions:
   mode: default
   allowed_tools: [file_read, file_write, grep, glob]
