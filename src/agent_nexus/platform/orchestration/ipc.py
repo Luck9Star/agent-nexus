@@ -429,4 +429,8 @@ def get_ipc_lock(agent_name: str) -> asyncio.Lock:
             _ipc_lock_registry.clear()
             _ipc_lock_loop_id = current_loop_id
 
-    return _ipc_lock_registry.setdefault(agent_name, asyncio.Lock())
+    lock = _ipc_lock_registry.get(agent_name)
+    if lock is None:
+        lock = asyncio.Lock()
+        _ipc_lock_registry[agent_name] = lock
+    return lock

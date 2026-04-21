@@ -71,6 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_dep_task ON task_dependencies(task_id);
 CREATE INDEX IF NOT EXISTS idx_dep_blocked ON task_dependencies(blocked_by_id);
 CREATE INDEX IF NOT EXISTS idx_task_state ON tasks(state);
 CREATE INDEX IF NOT EXISTS idx_task_agent ON tasks(agent);
+CREATE INDEX IF NOT EXISTS idx_task_state_created ON tasks(state, created_at);
 """
 
 
