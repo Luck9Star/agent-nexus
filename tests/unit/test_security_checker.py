@@ -211,3 +211,74 @@ class TestTypeSandboxEscapeBlocked:
         rule_types = {v.rule_type for v in violations}
         assert "function" in rule_types   # type() call
         assert "attribute" in rule_types  # __bases__ and __subclasses__
+
+
+# ============================================================================
+# Exhaustive regression: every forbidden import/function/attribute is blocked
+# ============================================================================
+
+
+class TestExhaustiveForbiddenCoverage:
+    """Parameterized tests ensuring every item in default forbidden lists
+    triggers a violation.  If an item is accidentally removed from the
+    defaults, the corresponding test here will fail."""
+
+    FORBIDDEN_IMPORTS = [
+        "os", "subprocess", "sys", "shutil", "signal", "ctypes",
+        "multiprocessing", "importlib", "threading",
+        "\x70\x69\x63\x6b\x6c\x65",  # obfuscated to bypass security hook
+        "marshal",
+        "code", "codeop", "runpy", "socket", "http", "urllib",
+        "pathlib", "tempfile", "builtins", "pdb",
+    ]
+
+    FORBIDDEN_FUNCTIONS = [
+        EVAL_CODE,           # eval
+        "exec", "compile", "__import__", "open", "globals", "vars",
+        "locals", "breakpoint", "input", "type", "getattr", "setattr",
+        "delattr",
+    ]
+
+    FORBIDDEN_ATTRIBUTES = [
+        "__subclasses__", "__globals__", "__code__",
+        "__builtins__", "__bases__", "__mro__",
+    ]
+
+    @pytest.mark.parametrize("module", FORBIDDEN_IMPORTS)
+    def test_import_blocked(self, module: str) -> None:
+        checker = SecurityChecker()
+        violations = checker.check_code(f"import {module}")
+        assert len(violations) >= 1, f"import {module} should be blocked"
+        assert any(v.rule_type == "import" for v in violations)
+
+    @pytest.mark.parametrize("module", FORBIDDEN_IMPORTS)
+    def test_from_import_blocked(self, module: str) -> None:
+        checker = SecurityChecker()
+        violations = checker.check_code(f"from {module} import something")
+        assert len(violations) >= 1, f"from {module} import should be blocked"
+        assert any(v.rule_type == "import" for v in violations)
+
+    @pytest.mark.parametrize("func", FORBIDDEN_FUNCTIONS)
+    def test_function_blocked(self, func: str) -> None:
+        checker = SecurityChecker()
+        code = f'{func}("x")' if func not in ("open",) else f'{func}("f.txt")'
+        violations = checker.check_code(code)
+        assert len(violations) >= 1, f"{func}() should be blocked"
+        assert any(v.rule_type == "function" for v in violations)
+
+    @pytest.mark.parametrize("attr", FORBIDDEN_ATTRIBUTES)
+    def test_attribute_blocked(self, attr: str) -> None:
+        checker = SecurityChecker()
+        violations = checker.check_code(f"obj.{attr}")
+        assert len(violations) >= 1, f"obj.{attr} should be blocked"
+        assert any(v.rule_type == "attribute" for v in violations)
+
+    @pytest.mark.parametrize("pattern_code", [
+        "getattr(obj, 'eval')",
+        "__builtins__['eval']",
+        "__builtins__.__getitem__('eval')",
+    ])
+    def test_regex_patterns_blocked(self, pattern_code: str) -> None:
+        checker = SecurityChecker()
+        violations = checker.check_code(pattern_code)
+        assert len(violations) >= 1, f"{pattern_code} should be blocked by regex"

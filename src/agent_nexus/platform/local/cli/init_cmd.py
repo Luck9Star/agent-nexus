@@ -258,7 +258,7 @@ def env() -> None:
 def _run_wizard(config_path: Path) -> None:
     """Interactive setup wizard using questionary."""
     try:
-        import questionary
+        import questionary  # pyright: ignore[reportMissingImports]
     except ImportError:
         typer.echo("Install questionary for wizard mode: pip install questionary")
         return

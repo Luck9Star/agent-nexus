@@ -337,6 +337,7 @@ class IPythonExecutor:
         if self._capture_output is None:
             from IPython.utils.capture import capture_output  # pyright: ignore[reportMissingImports]
             self._capture_output = capture_output
+        assert self._capture_output is not None  # guaranteed after init above
         try:
             with self._capture_output() as captured:
                 result = self._shell.run_cell(transformed, store_history=False)
