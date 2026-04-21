@@ -764,19 +764,16 @@ class TestRunMcpMode:
         assert exc_info.value.exit_code == 1
 
     @pytest.mark.asyncio
-    async def test_start_agent_fails(self) -> None:
-        """supervisor.start_agent returns False → error exit."""
+    async def test_build_command_fails(self) -> None:
+        """supervisor._build_command returns None → error exit."""
         mocks, lockfile_mock, _, _ = _mock_managers()
         lockfile_mock.get_entry.return_value = _make_lockfile_entry()
 
         supervisor_mock = MagicMock()
-        supervisor_mock.start_agent = AsyncMock(return_value=False)
-        pm_mock = MagicMock()
-        pm_mock.get_agent.return_value = None
+        supervisor_mock._build_command.return_value = None
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
@@ -787,33 +784,29 @@ class TestRunMcpMode:
         assert exc_info.value.exit_code == 1
 
     @pytest.mark.asyncio
-    async def test_mcp_start_success_cancelled(self) -> None:
-        """Successful MCP start → _wait_forever runs → CancelledError stops cleanly."""
+    async def test_mcp_execvpe_success(self) -> None:
+        """MCP mode execs into agent process with correct env."""
         mocks, lockfile_mock, _, _ = _mock_managers()
         lockfile_mock.get_entry.return_value = _make_lockfile_entry()
 
         supervisor_mock = MagicMock()
-        supervisor_mock.start_agent = AsyncMock(return_value=True)
-        supervisor_mock.stop_agent = AsyncMock()
-        pm_mock = MagicMock()
-        handle_mock = MagicMock()
-        handle_mock.pid = 12345
-        pm_mock.get_agent.return_value = handle_mock
-
-        async def _cancel_wait():
-            raise asyncio.CancelledError()
+        supervisor_mock._build_command.return_value = ["python", "main.py"]
+        supervisor_mock._build_env.return_value = {"AGENT_HOME": "/tmp"}
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli._lifecycle._wait_forever", side_effect=_cancel_wait),
+            patch("agent_nexus.platform.local.cli._lifecycle.os.execvpe") as mock_exec,
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
             await _run("test-agent", "mcp", "stdio")
 
-        supervisor_mock.stop_agent.assert_called_once_with("test-agent")
+        mock_exec.assert_called_once()
+        call_args = mock_exec.call_args
+        assert call_args[0][0] == "python"
+        assert call_args[0][1] == ["python", "main.py"]
+        assert call_args[0][2]["AGENT_MODE"] == "mcp"
 
 
 class TestRunRouterMode:
@@ -1344,34 +1337,29 @@ class TestRunFinallyStopsAgent:
     """Regression: _run uses finally to stop agent even on unexpected exceptions."""
 
     @pytest.mark.asyncio
-    async def test_mcp_mode_stops_agent_on_unexpected_error(self) -> None:
-        """MCP mode stops agent even when _wait_forever raises RuntimeError."""
+    async def test_mcp_mode_execvpe_filenotfound(self) -> None:
+        """MCP mode execvpe raises FileNotFoundError → exit 1."""
         mocks, lockfile_mock, _, _ = _mock_managers()
         lockfile_mock.get_entry.return_value = _make_lockfile_entry()
 
         supervisor_mock = MagicMock()
-        supervisor_mock.start_agent = AsyncMock(return_value=True)
-        supervisor_mock.stop_agent = AsyncMock()
-        pm_mock = MagicMock()
-        handle_mock = MagicMock()
-        handle_mock.pid = 12345
-        pm_mock.get_agent.return_value = handle_mock
-
-        async def _raise_runtime():
-            raise RuntimeError("unexpected crash")
+        supervisor_mock._build_command.return_value = ["nonexistent_bin", "main.py"]
+        supervisor_mock._build_env.return_value = {}
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
             patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli._lifecycle._wait_forever", side_effect=_raise_runtime),
+            patch(
+                "agent_nexus.platform.local.cli._lifecycle.os.execvpe",
+                side_effect=FileNotFoundError("not found"),
+            ),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
-            with pytest.raises(RuntimeError, match="unexpected crash"):
+            with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "mcp", "stdio")
 
-        supervisor_mock.stop_agent.assert_called_once_with("test-agent")
+        assert exc_info.value.exit_code == 1
 
     @pytest.mark.asyncio
     async def test_router_mode_stops_gateway_on_unexpected_error(self) -> None:

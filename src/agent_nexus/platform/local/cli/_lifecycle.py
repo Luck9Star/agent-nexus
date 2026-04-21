@@ -408,32 +408,39 @@ async def _run(name: str, mode: str, transport: str, extra_args: list[str] | Non
         raise typer.Exit(code=1)
 
     if mode == "mcp":
-        pm = ProcessManager()
+        # MCP stdio standalone: exec directly into the agent process so
+        # the FastMCP server owns stdin/stdout for JSON-RPC framing.
+        # Using ProcessManager with piped I/O would prevent the MCP
+        # client from communicating with the agent.
         supervisor = AgentSupervisor(
-            process_manager=pm,
+            process_manager=ProcessManager(),
             lockfile_manager=lockfile,
             config_loader=_loader,
             config_dir=config_dir,
         )
 
-        typer.echo(f"Starting agent '{name}' in MCP standalone mode...")
-
-        ok = await supervisor.start_agent(name)
-        if not ok:
-            typer.echo(f"Failed to start agent '{name}'.", err=True)
+        command = supervisor._build_command(name, entry)
+        if not command:
+            typer.echo(
+                f"Could not resolve command for agent '{name}'.",
+                err=True,
+            )
             raise typer.Exit(code=1)
 
-        handle = pm.get_agent(name)
-        pid_str = str(handle.pid) if handle else "unknown"
-        typer.echo(f"Agent '{name}' started (pid: {pid_str}).")
-        typer.echo("Press Ctrl+C to stop.")
+        env = supervisor._build_env(name, entry)
+        env["AGENT_MODE"] = "mcp"
+
+        spawn_env = os.environ.copy()
+        spawn_env.update(env)
 
         try:
-            await _wait_forever()
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            typer.echo("\nStopping agent...")
-        finally:
-            await supervisor.stop_agent(name)
+            os.execvpe(command[0], command, spawn_env)
+        except FileNotFoundError:
+            typer.echo(f"Command not found: {command[0]}", err=True)
+            raise typer.Exit(code=1)
+        except OSError as exc:
+            typer.echo(f"Failed to exec agent: {exc}", err=True)
+            raise typer.Exit(code=1)
 
     elif mode == "router":
         try:
@@ -462,7 +469,10 @@ async def _run(name: str, mode: str, transport: str, extra_args: list[str] | Non
         router = PlatformRouter(pm)
         gateway = MCPGateway(pm, router)
 
-        typer.echo(f"Starting agent '{name}' in router mode ({transport})...")
+        typer.echo(
+            f"Starting agent '{name}' in router mode ({transport})...",
+            err=True,
+        )
 
         try:
             if transport == "sse":
@@ -470,7 +480,7 @@ async def _run(name: str, mode: str, transport: str, extra_args: list[str] | Non
             else:
                 await gateway.run_stdio()
         except (KeyboardInterrupt, asyncio.CancelledError):
-            typer.echo("\nShutting down...")
+            typer.echo("\nShutting down...", err=True)
         finally:
             await gateway.stop()
 

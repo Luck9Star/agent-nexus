@@ -379,6 +379,51 @@ Independent agent scanned from 2 unused angles (input boundaries + security esca
 - [x] Test suite: 3676 passed in 185s (was 201s before — ~8% faster from sleep removal)
 - [x] Replaced duplicated inline DFS in 2 coordinators with shared `detect_cycles_dfs` from platform utils
 
+### Cycle 11 — Dynamic Runtime Verification (2026-04-21)
+
+**Methodology shift**: Static analysis (Cycles 1-10) → Dynamic runtime execution.
+
+**Approach**: Actually run every CLI command, agent, runtime component, and MCP protocol interaction. Verify real output, not code structure.
+
+**Findings**:
+
+| # | Component | Finding | Severity | Fix |
+|---|-----------|---------|----------|-----|
+| 1 | MCP stdio mode | `typer.echo()` writes to stdout in MCP mode, corrupting JSON-RPC framing | P0 | All MCP mode messages redirected to stderr |
+| 2 | MCP standalone mode | Uses `ProcessManager` with piped stdin/stdout → agent's FastMCP never receives client input | P0 | Replaced with `os.execvpe` (agent owns stdin/stdout directly) |
+| 3 | Router mode | Same stdout pollution as #1 | P1 | Messages redirected to stderr |
+
+**Verification Matrix** (all tested via live execution):
+
+| Component | Commands/Tests | Result |
+|-----------|---------------|--------|
+| CLI: version, doctor, list, info, env, config, sources | 20+ commands | ALL PASS |
+| CLI: runtime status/ps, evolution status/list/health/metrics | 8 commands | ALL PASS |
+| CLI: run (mcp/router/cli modes) | 3 modes tested | PASS (after fix) |
+| Python Runtime: IPythonExecutor | execute, inject, retrieve, reset, state persistence | ALL PASS |
+| Python Runtime: SecurityChecker | 10 code patterns (safe + unsafe) | ALL PASS |
+| Python Runtime: PermissionChecker | DEFAULT/FULL_AUTO/PLAN modes | ALL PASS |
+| Python Runtime: PythonRuntime wrapper | var/function inject, describe, reset | ALL PASS |
+| Python Runtime: TokenTracker | record_usage, total, remaining, reset | ALL PASS |
+| Atomic Agents: code-reviewer, doc-filler, requirements-analyzer | CLI mode execution | ALL PASS |
+| Composite Agents: ProductDocumentationSuite | generate_docs | PASS (5 artifacts) |
+| Composite Agents: DocumentComplianceGateway | check_compliance | PASS (3 checks, score 75.0) |
+| Composite Agents: CompetitiveIntelCoordinator | generate_briefing | PASS (analysis + localizations) |
+| MCP Protocol: initialize | JSON-RPC handshake | PASS (after fix) |
+| MCP Protocol: tools/list | 3 tools registered | PASS |
+| MCP Protocol: tools/call | analyze_code invoked | PASS |
+| Gateway: MCPGateway | 3 core tools registered | PASS |
+| Router: PlatformRouter | 6 public methods | PASS |
+
+**Test suite**: 3676 passed (2820 platform + 856 agent), 0 failed
+
+**Convergence data**:
+
+| Cycle | Dynamic Tests | Bugs Found | Fixes Applied | Tests |
+|-------|--------------|------------|---------------|-------|
+| 10 | 0 (static) | 0 | 3 (DRY+perf) | 3676 |
+| **11** | **42** | **3** | **3** | **3676** |
+
 ---
 
 ## Migration Guide
