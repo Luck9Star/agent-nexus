@@ -11,7 +11,11 @@ from pathlib import Path
 
 import typer
 
-from agent_nexus.platform.local.cli._shared import ConfigMigrator, _get_config_dir
+from agent_nexus.platform.local.cli._shared import (
+    ConfigMigrator,
+    _get_config_dir,
+    _load_dot_env,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +48,10 @@ def doctor() -> None:
     config_dir = _get_config_dir()
     config_path = config_dir / "config.toml"
     checks: list[tuple[str, bool, str]] = []
+
+    # Load .env before checking API keys so that keys stored in
+    # ~/.agent-nexus/.env are visible to os.environ.get() below.
+    _load_dot_env(config_dir)
 
     # Check 1: config.toml exists and parses
     try:
@@ -220,13 +228,16 @@ def init(
 def env() -> None:
     """Print resolved environment snapshot."""
     config_dir = _get_config_dir()
+    _load_dot_env(config_dir)
 
-    from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
+    from agent_nexus.platform.config.loader import ConfigLoader
+
+    loader = ConfigLoader(config_dir)
+    cfg = loader.load_config()
 
     provider_status: list[str] = []
-    for name, preset in DEFAULT_PROVIDERS.items():
-        key_env = preset.get("api_key_env", "")
-        has_key = bool(key_env and os.environ.get(str(key_env)))
+    for name, preset in cfg.models.providers.items():
+        has_key = bool(preset.api_key_env and os.environ.get(preset.api_key_env))
         provider_status.append(f"{name} (key: {'set' if has_key else 'not set'})")
 
     git_ver = shutil.which("git")
