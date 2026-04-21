@@ -360,6 +360,7 @@ class AgentPromoter:
             "type": "atomic",
             "description": f"Auto-promoted from skill {candidate.skill_id}",
             "version": "0.1.0",
+            "capabilities": ["general-purpose"],
             "permissions": {
                 "mode": "default",
                 "allowed_tools": ["file_read", "grep", "glob"],

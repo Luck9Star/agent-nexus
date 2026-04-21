@@ -2,6 +2,8 @@ name: good-skill
 type: atomic
 description: Auto-promoted from skill sk-1
 version: 0.1.0
+capabilities:
+- general-purpose
 permissions:
   mode: default
   allowed_tools:
