@@ -72,8 +72,10 @@ def _run_cli() -> None:
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
+        except Exception as e:
+            # Catches BadZipFile, PackageNotFoundError (python-docx),
+            # and any other file-format errors gracefully.
+            print(f"Error: Invalid template file: {e}", file=sys.stderr)
             sys.exit(1)
 
     elif args.command == "fill":
@@ -88,7 +90,14 @@ def _run_cli() -> None:
             values=values,
             output_path=args.output,
         )
-        result = agent.fill(request)
+        try:
+            result = agent.fill(request)
+        except FileNotFoundError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error: Failed to fill template: {e}", file=sys.stderr)
+            sys.exit(1)
         print(json.dumps(result.model_dump(), indent=2, ensure_ascii=False))
 
     else:

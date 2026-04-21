@@ -20,14 +20,16 @@ import pytest
 
 from agent_document_compliance_gateway.coordinator import (
     ComplianceCoordinator,
+    _compute_overall_score,
+    _detect_conflicts,
+    _generate_recommendations,
+    _simulate_agent_check,
+)
+from agent_nexus.models.composition import (
     Composition,
     CompositionError,
     CompositionTask,
-    _compute_overall_score,
-    _detect_conflicts,
     _detect_cycles,
-    _generate_recommendations,
-    _simulate_agent_check,
 )
 from agent_document_compliance_gateway.models import (
     CheckStatus,

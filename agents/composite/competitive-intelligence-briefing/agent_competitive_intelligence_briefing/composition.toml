@@ -1,0 +1,18 @@
+[composition]
+name = "competitive-intelligence-briefing"
+description = "竞争情报简报生成流水线：Market Intel → Doc Filler → Localization"
+
+[tasks.task1]
+name = "市场数据分析"
+agent = "market-intelligence-analyst"
+blocked_by = []
+
+[tasks.task2]
+name = "报告模板填充"
+agent = "doc-filler"
+blocked_by = ["task1"]
+
+[tasks.task3]
+name = "报告本地化"
+agent = "localization-specialist"
+blocked_by = ["task2"]

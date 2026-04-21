@@ -23,6 +23,7 @@ from agent_competitive_intelligence_briefing.models import (
     BriefingResult,
     PipelineStep,
 )
+from agent_nexus.platform.utils import detect_cycles_dfs, resolve_composition_path
 
 # ---------------------------------------------------------------------------
 # Simulated Atomic Agent helpers (POC -- no real subprocesses)
@@ -309,6 +310,8 @@ class CompetitiveIntelCoordinator:
     def parse_composition(toml_path: str) -> dict:
         """Parse a composition.toml file and return its structure.
 
+        Delegates to the shared Composition model for parsing.
+
         Args:
             toml_path: Path to the composition.toml file.
 
@@ -334,7 +337,7 @@ class CompetitiveIntelCoordinator:
         - composition section exists with name and description.
         - At least one task defined.
         - Each task has name, agent, and blocked_by.
-        - No circular dependencies (basic check).
+        - No circular dependencies (via shared detect_cycles_dfs).
         - All blocked_by references point to existing tasks.
 
         Args:
@@ -345,7 +348,6 @@ class CompetitiveIntelCoordinator:
         """
         errors: list[str] = []
 
-        # Check composition section
         comp = data.get("composition")
         if not comp:
             errors.append("Missing [composition] section")
@@ -354,7 +356,6 @@ class CompetitiveIntelCoordinator:
         if "name" not in comp:
             errors.append("composition.name is required")
 
-        # Check tasks
         tasks = data.get("tasks", {})
         if not tasks:
             errors.append("No tasks defined in [tasks] section")
@@ -379,31 +380,15 @@ class CompetitiveIntelCoordinator:
                         f"Task '{task_id}' references unknown dependency '{dep}'"
                     )
 
-            # Check for self-dependency
             if task_id in blocked_by:
                 errors.append(f"Task '{task_id}' cannot depend on itself")
 
-        # Cycle detection via DFS
-        WHITE, GRAY, BLACK = 0, 1, 2
-        color = {tid: WHITE for tid in task_ids}
-
-        def _has_cycle(tid: str) -> bool:
-            color[tid] = GRAY
-            for dep in tasks[tid].get("blocked_by", []):
-                if dep not in task_ids:
-                    continue
-                if color[dep] == GRAY:
-                    return True
-                if color[dep] == WHITE and _has_cycle(dep):
-                    return True
-            color[tid] = BLACK
-            return False
-
-        for tid in task_ids:
-            if color[tid] == WHITE:
-                if _has_cycle(tid):
-                    errors.append(
-                        f"Circular dependency detected involving '{tid}'"
-                    )
+        # Shared cycle detection from platform utils
+        cycles = detect_cycles_dfs(
+            task_ids,
+            lambda tid: [d for d in tasks[tid].get("blocked_by", []) if d in task_ids],
+        )
+        for cycle in cycles:
+            errors.append(f"Circular dependency detected: {' -> '.join(cycle)}")
 
         return errors

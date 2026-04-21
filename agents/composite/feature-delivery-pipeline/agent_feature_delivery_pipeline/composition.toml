@@ -1,0 +1,23 @@
+[composition]
+name = "feature-delivery-pipeline"
+description = "需求驱动并行生成 API 文档、测试套件和代码审查"
+
+[tasks.task1]
+name = "requirements-analysis"
+agent = "requirements-analyzer"
+blocked_by = []
+
+[tasks.task2]
+name = "api-doc-generation"
+agent = "api-doc-generator"
+blocked_by = ["task1"]
+
+[tasks.task3]
+name = "test-suite-generation"
+agent = "test-suite-generator"
+blocked_by = ["task1"]
+
+[tasks.task4]
+name = "code-review"
+agent = "code-reviewer"
+blocked_by = ["task1"]

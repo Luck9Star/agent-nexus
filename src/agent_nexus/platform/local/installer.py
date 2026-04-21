@@ -170,7 +170,7 @@ class GitInstaller:
                 ) from exc
 
             # 4. Validate
-            issues = self._validate_agent_package(agent_dir)
+            issues, manifest_dict = self._validate_agent_package(agent_dir)
             if issues:
                 raise InstallationError(
                     f"Agent '{agent_name}' validation failed: {'; '.join(issues)}"
@@ -184,8 +184,7 @@ class GitInstaller:
             _created_paths.append(dest)
             logger.info("Agent files copied to %s", dest)
 
-            # 6. Read manifest for metadata
-            manifest_dict = self._read_manifest(dest)
+            # 6. Parse manifest
             try:
                 manifest = AgentManifest(**manifest_dict) if manifest_dict else None
             except Exception as exc:
@@ -336,7 +335,7 @@ class GitInstaller:
             )
 
         # 1. Validate
-        issues = self._validate_agent_package(local_path)
+        issues, manifest_dict = self._validate_agent_package(local_path)
         if issues:
             raise InstallationError(
                 f"Agent '{agent_name}' validation failed: {'; '.join(issues)}"
@@ -352,8 +351,7 @@ class GitInstaller:
             _created_paths.append(dest)
             logger.info("Local agent files copied to %s", dest)
 
-            # 3. Read manifest
-            manifest_dict = self._read_manifest(dest)
+            # 3. Parse manifest
             try:
                 manifest = AgentManifest(**manifest_dict) if manifest_dict else None
             except Exception as exc:
@@ -508,10 +506,12 @@ class GitInstaller:
     # Internal: validation
     # ------------------------------------------------------------------
 
-    def _validate_agent_package(self, agent_dir: Path) -> list[str]:
+    def _validate_agent_package(self, agent_dir: Path) -> tuple[list[str], dict]:
         """Validate an agent package.
 
-        Returns a list of issues (empty means valid).
+        Returns a tuple of (issues list, parsed manifest dict).
+        An empty issues list means valid.  The manifest dict may be
+        empty if the file is missing or unparseable.
 
         Checks:
         1. ``agent-manifest.yaml`` exists and is parseable
@@ -519,6 +519,7 @@ class GitInstaller:
         3. Basic manifest structure has required fields
         """
         issues: list[str] = []
+        manifest_data: dict = {}
 
         # 1. agent-manifest.yaml
         manifest_path = agent_dir / "agent-manifest.yaml"
@@ -530,12 +531,13 @@ class GitInstaller:
                 if not isinstance(manifest, dict):
                     issues.append("agent-manifest.yaml is not a valid mapping")
                 else:
+                    manifest_data = manifest
                     for field in ("name", "version", "type"):
                         if field not in manifest:
                             issues.append(
                                 f"agent-manifest.yaml missing required field: {field}"
                             )
-                    if "type" in manifest and manifest["type"] not in ("atomic", "composite"):
+                    if "type" in manifest and manifest["type"] not in {t.value for t in AgentType}:
                         issues.append(f"Invalid agent type: {manifest['type']}")
             except yaml.YAMLError as exc:
                 issues.append(f"agent-manifest.yaml parse error: {exc}")
@@ -544,7 +546,7 @@ class GitInstaller:
         if not (agent_dir / "SKILL.md").exists():
             issues.append("Missing SKILL.md")
 
-        return issues
+        return issues, manifest_data
 
     def _read_manifest(self, agent_dir: Path) -> dict:
         """Read and return the agent manifest as a raw dict."""

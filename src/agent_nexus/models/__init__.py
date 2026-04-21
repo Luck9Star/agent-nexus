@@ -105,6 +105,13 @@ from agent_nexus.models.hooks import (
     HookType,
 )
 
+# composition.py — Shared composition data models
+from agent_nexus.models.composition import (
+    Composition,
+    CompositionError,
+    CompositionTask,
+)
+
 __all__ = [
     # agent.py
     "AgentDefinition",
@@ -174,4 +181,8 @@ __all__ = [
     "HookEvent",
     "HookExecution",
     "HookType",
+    # composition.py
+    "Composition",
+    "CompositionError",
+    "CompositionTask",
 ]

@@ -46,6 +46,19 @@ from agent_nexus.platform.orchestration.task_graph import TaskGraph
 from .subtask import SubtaskController
 from .workflow import WorkflowContext, WorkflowPhase, WorkflowResult
 
+class AgentExecutionError(Exception):
+    """Raised when an agent interaction fails with a non-IPC error.
+
+    Carries ``error`` (human-readable message) and ``error_type`` (exception
+    class name) so callers can reconstruct error dicts for aggregation.
+    """
+
+    def __init__(self, error: str, error_type: str = "AgentError") -> None:
+        self.error = error
+        self.error_type = error_type
+        super().__init__(error)
+
+
 logger = logging.getLogger(__name__)
 
 # Default phases in execution order
@@ -67,6 +80,21 @@ _PHASE_ROLE_MAP: dict[WorkflowPhase, str] = {
     WorkflowPhase.synthesis: "plan",
     WorkflowPhase.implementation: "worker",
     WorkflowPhase.verification: "verification",
+}
+
+_PHASE_MESSAGE_TEMPLATES: dict[WorkflowPhase, tuple[str, str]] = {
+    WorkflowPhase.research: (
+        "Research Results",
+        "Based on the above research, create an implementation plan.",
+    ),
+    WorkflowPhase.synthesis: (
+        "Implementation Plan",
+        "Execute the above plan.",
+    ),
+    WorkflowPhase.implementation: (
+        "Implementation Output",
+        "Verify the above implementation is correct and complete.",
+    ),
 }
 
 
@@ -304,6 +332,15 @@ class PlatformRouter:
         # calls from interleaving responses on the same handle.
         lock = get_ipc_lock(atomic_name)
         async with lock:
+            # Recheck liveness after acquiring lock -- agent may have died
+            # during lock wait.  Without this check we waste the full IPC
+            # timeout on a dead process.
+            if not handle.is_alive:
+                return _make_error_result(
+                    f"Agent '{atomic_name}' process died while waiting for lock",
+                    "ProcessNotAliveError",
+                )
+
             # Send chat message via IPC
             try:
                 await handle.ipc.send_chat(
@@ -490,17 +527,9 @@ class PlatformRouter:
         else:
             # Single agent execution (synthesis, verification)
             agent_name = phase_agents[0]
-            result = await self._execute_single_agent(
+            return await self._execute_single_agent(
                 agent_name, phase_message, ctx.conversation_id
             )
-            if isinstance(result, dict):
-                # Error dict from _execute_single_agent — raise so the
-                # phase-level exception handler in route_composite
-                # records the failure and stops the workflow.
-                raise RuntimeError(
-                    result.get("error") or "Unknown agent error"
-                )
-            return result
 
     async def _execute_parallel_agents(
         self,
@@ -522,14 +551,19 @@ class PlatformRouter:
                 seen.add(n)
                 unique_names.append(n)
 
-        async def _run_agent(name: str) -> str:
+        async def _run_agent(name: str) -> str | dict:
             cid = f"{conversation_id}__{name}__{uuid.uuid4().hex[:8]}"
-            return await self._subtask.run_with_retry(
-                coro_factory=lambda n=name, c=cid: self._execute_single_agent(
-                    n, message, c
-                ),
-                timeout=DEFAULT_IPC_EXECUTE_TIMEOUT,
-            )
+            try:
+                return await self._subtask.run_with_retry(
+                    coro_factory=lambda n=name, c=cid: self._execute_single_agent(
+                        n, message, c
+                    ),
+                    timeout=DEFAULT_IPC_EXECUTE_TIMEOUT,
+                )
+            except AgentExecutionError as exc:
+                # Convert to error dict for _aggregate_results.
+                # Not re-raised so other parallel agents are not cancelled.
+                return _make_error_result(exc.error, exc.error_type)
 
         coros = [_run_agent(name) for name in unique_names]
         return await self._subtask.run_parallel(coros)
@@ -539,26 +573,25 @@ class PlatformRouter:
         agent_name: str,
         message: str,
         conversation_id: str,
-    ) -> str | dict:
+    ) -> str:
         """Execute a single agent interaction via IPC.
 
         Sends the message, waits for a final result, returns the content.
 
         Returns:
-            ``str`` on success (the response content), or a ``dict`` with
-            ``output``, ``success``, ``error``, and ``error_type`` keys on
-            failure.  This matches the error-dict pattern used by
-            ``route_to_atomic`` and ``McpToolAdapter.execute``, ensuring
-            composite workflow callers never need to catch RuntimeError.
+            ``str`` on success (the response content).
 
         Raises:
+            AgentExecutionError: agent-level failures (not found, not alive,
+                agent error response, non-IPC send/receive errors).  Callers
+                that need an error dict can catch this and convert.
             IPCConnectionError, IPCTimeoutError, IPCError: propagated
-            directly so callers can distinguish infrastructure-level IPC
-            failures from agent-level errors.
+                directly so callers can distinguish infrastructure-level IPC
+                failures from agent-level errors.
         """
         handle = self._pm.get_agent(agent_name)
         if handle is None or not handle.is_alive:
-            return _make_error_result(
+            raise AgentExecutionError(
                 f"Agent '{agent_name}' not found or not alive",
                 "ProcessNotAliveError",
             )
@@ -574,7 +607,7 @@ class PlatformRouter:
             except (IPCConnectionError, IPCTimeoutError, IPCError):
                 raise
             except (OSError, RuntimeError, asyncio.TimeoutError) as exc:
-                return _make_error_result(
+                raise AgentExecutionError(
                     f"IPC send error for agent '{agent_name}': {exc}",
                     type(exc).__name__,
                 )
@@ -584,13 +617,13 @@ class PlatformRouter:
             except (IPCConnectionError, IPCTimeoutError, IPCError):
                 raise
             except (OSError, RuntimeError, asyncio.TimeoutError) as exc:
-                return _make_error_result(
+                raise AgentExecutionError(
                     f"IPC error communicating with agent '{agent_name}': {exc}",
                     type(exc).__name__,
                 )
 
             if response.type == AgentToPlatformType.ERROR:
-                return _make_error_result(
+                raise AgentExecutionError(
                     f"Agent '{agent_name}' error: {response.error or 'unknown'}",
                     "AgentError",
                 )
@@ -617,27 +650,10 @@ class PlatformRouter:
         Implementation gets the synthesis plan.
         Verification gets implementation results.
         """
-        if phase == WorkflowPhase.research:
-            # Next is synthesis -- pass research findings
-            return (
-                "## Research Results\n\n"
-                + phase_result
-                + "\n\nBased on the above research, create an implementation plan."
-            )
-        elif phase == WorkflowPhase.synthesis:
-            # Next is implementation -- pass the plan
-            return (
-                "## Implementation Plan\n\n"
-                + phase_result
-                + "\n\nExecute the above plan."
-            )
-        elif phase == WorkflowPhase.implementation:
-            # Next is verification -- pass implementation output
-            return (
-                "## Implementation Output\n\n"
-                + phase_result
-                + "\n\nVerify the above implementation is correct and complete."
-            )
+        template = _PHASE_MESSAGE_TEMPLATES.get(phase)
+        if template:
+            heading, instruction = template
+            return f"## {heading}\n\n{phase_result}\n\n{instruction}"
         return phase_result
 
     @staticmethod

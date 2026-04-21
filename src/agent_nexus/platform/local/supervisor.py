@@ -198,7 +198,7 @@ class AgentSupervisor:
             return False
 
         cwd = self._resolve_agent_dir(agent_name)
-        env = self._build_env(agent_name, entry)
+        env = self._build_env(agent_name, entry, agent_dir=cwd)
 
         try:
             handle = await self._pm.start_agent(
@@ -280,26 +280,24 @@ class AgentSupervisor:
         """Check for dead agents and restart them.
 
         Iterates over all agents known to the process manager.  Agents
-        whose process has died are restarted, subject to the per-agent
-        ``max_restarts`` limit to prevent infinite restart loops.
+        whose process has died are restarted in parallel via
+        ``asyncio.gather``, subject to the per-agent ``max_restarts``
+        limit to prevent infinite restart loops.
 
         Returns
         -------
         list[str]
             Names of agents that were successfully restarted.
         """
-        restarted: list[str] = []
-
-        # Check all agents in lockfile for liveness
+        # Phase 1: identify dead agents that need restarting
         lockfile = self._lockfile.load()
+        dead_agents: list[str] = []
         for agent_name in lockfile.agents:
             # Skip agents that were never explicitly started this session
             if agent_name not in self._started_agents:
                 continue
 
             handle = self._pm.get_agent(agent_name)
-
-            # Agent is not running if no handle or process is dead
             is_alive = handle is not None and handle.is_alive
             if is_alive:
                 continue
@@ -324,9 +322,27 @@ class AgentSupervisor:
                 tracker.count,
                 tracker.max_restarts,
             )
+            dead_agents.append(agent_name)
 
-            ok = await self.start_agent(agent_name)
-            if ok:
+        # Phase 2: restart all dead agents in parallel
+        if not dead_agents:
+            return []
+
+        results = await asyncio.gather(
+            *(self.start_agent(name) for name in dead_agents),
+            return_exceptions=True,
+        )
+
+        restarted: list[str] = []
+        for agent_name, result in zip(dead_agents, results):
+            if isinstance(result, BaseException):
+                logger.error(
+                    "Failed to restart agent '%s' [%s]: %s",
+                    agent_name,
+                    type(result).__name__,
+                    result,
+                )
+            elif result:
                 restarted.append(agent_name)
 
         return restarted
@@ -395,6 +411,15 @@ class AgentSupervisor:
                 if pkg_main and pkg_main.exists():
                     return [str(venv_python), str(pkg_main)]
                 return None
+
+        # No venv — warn if the agent declares dependencies via pyproject.toml,
+        # as the agent will likely fail at runtime with missing imports.
+        if not entry.venv_path and (agent_dir / "pyproject.toml").exists():
+            logger.warning(
+                "Agent '%s' has pyproject.toml but no venv — dependencies "
+                "may not be installed. Re-install the agent to create a venv.",
+                agent_name,
+            )
 
         # Strategy 2: system python3 <agent_dir>/<pkg>/main.py
         if pkg_main and pkg_main.exists():
@@ -485,16 +510,40 @@ class AgentSupervisor:
         return self._config_dir / "agents" / agent_name
 
     def _build_env(
-        self, agent_name: str, entry: LockfileEntry
+        self,
+        agent_name: str,
+        entry: LockfileEntry,
+        *,
+        agent_dir: Path | None = None,
     ) -> dict[str, str]:
         """Build extra environment variables for the agent subprocess.
 
-        Includes model configuration from the platform config so agents
-        can pick up model settings without reading config files directly.
+        Platform-injected env vars (agent identity + runtime context):
+
+        - ``AGENT_NAME`` — canonical agent name (e.g. ``doc-filler``).
+        - ``AGENT_DIR`` — absolute path to the agent's install root
+          (e.g. ``~/.agent-nexus/agents/doc-filler``).  Agents use this
+          to locate composition.toml, configs, and other bundled files
+          without relying on ``__file__`` traversal.
+        - ``AGENT_MODEL`` — default model from platform config.
+
         Also forwards API keys from configured providers so agent
         subprocesses can make LLM calls.
+
+        Args:
+            agent_dir: Pre-resolved agent install directory.  When supplied
+                the caller has already resolved the path via
+                ``_resolve_agent_dir`` and it is reused here to avoid a
+                redundant filesystem look-up.  Falls back to calling
+                ``_resolve_agent_dir`` internally when *None*.
         """
         env: dict[str, str] = {}
+
+        # Inject agent identity — agents must NOT guess their install path
+        env["AGENT_NAME"] = agent_name
+        if agent_dir is None:
+            agent_dir = self._resolve_agent_dir(agent_name)
+        env["AGENT_DIR"] = str(agent_dir)
 
         # Load platform config for model defaults (cached)
         try:

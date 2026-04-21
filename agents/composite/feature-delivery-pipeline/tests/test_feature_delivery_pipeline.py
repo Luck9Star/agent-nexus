@@ -20,12 +20,14 @@ from unittest.mock import patch
 import pytest
 
 from agent_feature_delivery_pipeline.coordinator import (
+    FeatureDeliveryCoordinator,
+    _simulate_agent_execution,
+)
+from agent_nexus.models.composition import (
     Composition,
     CompositionError,
     CompositionTask,
-    FeatureDeliveryCoordinator,
     _detect_cycles,
-    _simulate_agent_execution,
 )
 from agent_feature_delivery_pipeline.models import (
     PipelineResult,

@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import uuid
+from pathlib import Path
 
 import toml
 
@@ -23,6 +24,7 @@ from agent_product_documentation_suite.models import (
     DocArtifact,
     DocumentationResult,
 )
+from agent_nexus.platform.utils import detect_cycles_dfs, resolve_composition_path
 
 # ---------------------------------------------------------------------------
 # Simulated Atomic Agent helpers (POC -- no real subprocesses)
@@ -299,7 +301,7 @@ class DocumentationSuiteCoordinator:
         - composition section exists with name and description.
         - At least one task defined.
         - Each task has name, agent, and blocked_by.
-        - No circular dependencies (basic check).
+        - No circular dependencies (via shared detect_cycles_dfs).
         - All blocked_by references point to existing tasks.
 
         Args:
@@ -345,27 +347,12 @@ class DocumentationSuiteCoordinator:
             if task_id in blocked_by:
                 errors.append(f"Task '{task_id}' cannot depend on itself")
 
-        # Cycle detection via DFS
-        WHITE, GRAY, BLACK = 0, 1, 2
-        color = {tid: WHITE for tid in task_ids}
-
-        def _has_cycle(tid: str) -> bool:
-            color[tid] = GRAY
-            for dep in tasks[tid].get("blocked_by", []):
-                if dep not in task_ids:
-                    continue
-                if color[dep] == GRAY:
-                    return True
-                if color[dep] == WHITE and _has_cycle(dep):
-                    return True
-            color[tid] = BLACK
-            return False
-
-        for tid in task_ids:
-            if color[tid] == WHITE:
-                if _has_cycle(tid):
-                    errors.append(
-                        f"Circular dependency detected involving '{tid}'"
-                    )
+        # Shared cycle detection from platform utils
+        cycles = detect_cycles_dfs(
+            task_ids,
+            lambda tid: [d for d in tasks[tid].get("blocked_by", []) if d in task_ids],
+        )
+        for cycle in cycles:
+            errors.append(f"Circular dependency detected: {' -> '.join(cycle)}")
 
         return errors

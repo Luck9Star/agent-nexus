@@ -6,6 +6,8 @@ and localization-specialist in a full-parallel DAG pattern with conflict detecti
 
 from agent_document_compliance_gateway.coordinator import (
     ComplianceCoordinator,
+)
+from agent_nexus.models.composition import (
     Composition,
     CompositionError,
     CompositionTask,

@@ -80,7 +80,7 @@ class TestInstallerInstall:
         inst, _, lf = _make_installer(tmp_path)
         # Patch internals to avoid actual git/venv operations
         with patch.object(inst, "_sparse_clone", new_callable=AsyncMock) as mock_clone, \
-             patch.object(inst, "_validate_agent_package", return_value=[]), \
+             patch.object(inst, "_validate_agent_package", return_value=([], {})), \
              patch.object(inst, "_create_venv", new_callable=AsyncMock, return_value=None), \
              patch.object(inst, "_get_commit_sha", new_callable=AsyncMock, return_value="a" * 40), \
              patch("shutil.copytree"), \
@@ -123,7 +123,7 @@ class TestInstallerInstall:
         dest = inst._agents_dir / "test-agent"
 
         with patch.object(inst, "_sparse_clone", new_callable=AsyncMock, return_value=agent_dir), \
-             patch.object(inst, "_validate_agent_package", return_value=[]), \
+             patch.object(inst, "_validate_agent_package", return_value=([], {})), \
              patch.object(inst, "_read_manifest", return_value=None), \
              patch.object(inst, "_create_venv", new_callable=AsyncMock, side_effect=OSError("venv boom")), \
              patch.object(inst, "_get_commit_sha", new_callable=AsyncMock, return_value="a" * 40):
@@ -144,7 +144,7 @@ class TestInstallerInstall:
         dest = inst._agents_dir / "test-agent"
 
         with patch.object(inst, "_sparse_clone", new_callable=AsyncMock, return_value=agent_dir), \
-             patch.object(inst, "_validate_agent_package", return_value=["missing SKILL.md"]):
+             patch.object(inst, "_validate_agent_package", return_value=(["missing SKILL.md"], {})):
 
             with pytest.raises(InstallationError, match="validation failed"):
                 await inst.install("test-agent", source_url="https://example.com/repo.git")
@@ -258,15 +258,19 @@ class TestInstallerManifestValidation:
             encoding="utf-8",
         )
 
+        # _validate_agent_package now returns the manifest dict.
+        # Simulate a manifest with an invalid name that will fail
+        # AgentManifest(**manifest_dict) validation.
+        bad_manifest = {"name": "has spaces", "version": "1.0.0", "type": "atomic"}
+
         with patch.object(inst, "_sparse_clone", new_callable=AsyncMock, return_value=agent_dir), \
-             patch.object(inst, "_validate_agent_package", return_value=[]), \
+             patch.object(inst, "_validate_agent_package", return_value=([], bad_manifest)), \
              patch.object(inst, "_create_venv", new_callable=AsyncMock, return_value=None), \
              patch.object(inst, "_get_commit_sha", new_callable=AsyncMock, return_value="a" * 40), \
              patch("shutil.copytree"), \
              patch("shutil.rmtree"):
 
-            # _read_manifest reads from dest, returns dict with name="has spaces"
-            # AgentManifest(**dict) fails validation, wrapped in InstallationError
+            # AgentManifest(**bad_manifest) fails validation, wrapped in InstallationError
             with pytest.raises(InstallationError, match="invalid manifest data"):
                 await inst.install(
                     "bad-manifest",
@@ -284,7 +288,7 @@ class TestInstallerValidation:
         agent_dir = tmp_path / "pkg"
         agent_dir.mkdir()
         (agent_dir / "SKILL.md").write_text("# x\n", encoding="utf-8")
-        issues = inst._validate_agent_package(agent_dir)
+        issues, _ = inst._validate_agent_package(agent_dir)
         assert any("manifest" in i.lower() for i in issues)
 
     def test_validate_rejects_missing_skill_md(self, tmp_path: Path) -> None:
@@ -294,7 +298,7 @@ class TestInstallerValidation:
         (agent_dir / "agent-manifest.yaml").write_text(
             "name: x\nversion: 1.0.0\ntype: atomic\n", encoding="utf-8"
         )
-        issues = inst._validate_agent_package(agent_dir)
+        issues, _ = inst._validate_agent_package(agent_dir)
         assert any("SKILL" in i for i in issues)
 
     def test_validate_passes_valid_package(self, tmp_path: Path) -> None:
@@ -305,7 +309,7 @@ class TestInstallerValidation:
             "name: x\nversion: 1.0.0\ntype: atomic\n", encoding="utf-8"
         )
         (agent_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
-        issues = inst._validate_agent_package(agent_dir)
+        issues, _ = inst._validate_agent_package(agent_dir)
         assert issues == []
 
     def test_validate_rejects_invalid_type(self, tmp_path: Path) -> None:
@@ -316,7 +320,7 @@ class TestInstallerValidation:
             "name: x\nversion: 1.0.0\ntype: super-duper\n", encoding="utf-8"
         )
         (agent_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
-        issues = inst._validate_agent_package(agent_dir)
+        issues, _ = inst._validate_agent_package(agent_dir)
         assert any("Invalid agent type" in i for i in issues)
 
 

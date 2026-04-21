@@ -252,7 +252,10 @@ class TestSupervisorBuildEnv:
         sup, _, _, cfg = _make_supervisor(tmp_path)
         cfg.load_config.side_effect = PermissionError("config not readable")
         env = sup._build_env("test", _make_entry())
-        assert env == {}
+        # AGENT_NAME and AGENT_DIR are always injected
+        assert env["AGENT_NAME"] == "test"
+        assert "AGENT_DIR" in env
+        assert "AGENT_MODEL" not in env
 
 
 class TestSupervisorBuildCommandVenvFallback:

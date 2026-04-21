@@ -5,10 +5,12 @@ and test-suite-generator in a full-parallel DAG pattern with quality gate decisi
 """
 
 from agent_cicd_quality_gate.coordinator import (
+    QualityGateCoordinator,
+)
+from agent_nexus.models.composition import (
     Composition,
     CompositionError,
     CompositionTask,
-    QualityGateCoordinator,
 )
 from agent_cicd_quality_gate.models import (
     GateCheck,

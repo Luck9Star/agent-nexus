@@ -80,7 +80,7 @@ class TaskGraph:
         self._db_path = db_path
         self._mem_conn: sqlite3.Connection | None = None
         if str(self._db_path) == ":memory:":
-            self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
+            self._mem_conn = sqlite3.connect(":memory:")
         self._init_db()
 
     def _init_db(self) -> None:
@@ -114,7 +114,8 @@ class TaskGraph:
     ) -> Generator[sqlite3.Connection, None, None]:
         """Context manager for DB connections.
 
-        Uses check_same_thread=False for async compatibility.
+        Shares a single connection for ``:memory:`` databases;
+        file-based DBs open a fresh connection per operation.
 
         For ``:memory:`` databases the same persistent connection is
         yielded every time (sqlite3.connect(":memory:") creates a new
@@ -145,7 +146,6 @@ class TaskGraph:
         # File-based DB: open a fresh connection per operation.
         conn = sqlite3.connect(
             str(self._db_path),
-            check_same_thread=False,
         )
         try:
             conn.execute("PRAGMA foreign_keys=ON")

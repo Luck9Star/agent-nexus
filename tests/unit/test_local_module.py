@@ -541,7 +541,7 @@ class TestGitInstaller:
         assert _url_to_source_name("") == "direct"
 
     def test_validate_agent_package_valid(self, tmp_path: Path) -> None:
-        """_validate_agent_package returns empty list for valid package."""
+        """_validate_agent_package returns empty issues and manifest dict for valid package."""
         installer = GitInstaller(
             MagicMock(spec=SourceManager),
             MagicMock(spec=LockfileManager),
@@ -551,7 +551,7 @@ class TestGitInstaller:
         manifest = {"name": "test-agent", "version": "1.0.0", "type": "atomic"}
         _write_yaml(tmp_path / "pkg" / "agent-manifest.yaml", manifest)
         (tmp_path / "pkg" / "SKILL.md").write_text("# Test Agent", encoding="utf-8")
-        issues = installer._validate_agent_package(tmp_path / "pkg")
+        issues, _ = installer._validate_agent_package(tmp_path / "pkg")
         assert issues == []
 
     def test_validate_agent_package_missing_manifest(self, tmp_path: Path) -> None:
@@ -564,7 +564,7 @@ class TestGitInstaller:
         pkg_dir = tmp_path / "pkg"
         pkg_dir.mkdir()
         (pkg_dir / "SKILL.md").write_text("# Test", encoding="utf-8")
-        issues = installer._validate_agent_package(pkg_dir)
+        issues, _ = installer._validate_agent_package(pkg_dir)
         assert "Missing agent-manifest.yaml" in issues
 
     def test_validate_agent_package_missing_skill_md(self, tmp_path: Path) -> None:
@@ -578,7 +578,7 @@ class TestGitInstaller:
         pkg_dir.mkdir()
         manifest = {"name": "a", "version": "1.0.0", "type": "atomic"}
         _write_yaml(pkg_dir / "agent-manifest.yaml", manifest)
-        issues = installer._validate_agent_package(pkg_dir)
+        issues, _ = installer._validate_agent_package(pkg_dir)
         assert "Missing SKILL.md" in issues
 
     def test_validate_agent_package_missing_required_fields(self, tmp_path: Path) -> None:
@@ -592,7 +592,7 @@ class TestGitInstaller:
         pkg_dir.mkdir()
         _write_yaml(pkg_dir / "agent-manifest.yaml", {"name": "a"})  # missing version, type
         (pkg_dir / "SKILL.md").write_text("# X", encoding="utf-8")
-        issues = installer._validate_agent_package(pkg_dir)
+        issues, _ = installer._validate_agent_package(pkg_dir)
         assert any("version" in i for i in issues)
         assert any("type" in i for i in issues)
 
@@ -608,7 +608,7 @@ class TestGitInstaller:
         manifest = {"name": "a", "version": "1.0.0", "type": "hybrid"}
         _write_yaml(pkg_dir / "agent-manifest.yaml", manifest)
         (pkg_dir / "SKILL.md").write_text("# X", encoding="utf-8")
-        issues = installer._validate_agent_package(pkg_dir)
+        issues, _ = installer._validate_agent_package(pkg_dir)
         assert any("Invalid agent type" in i for i in issues)
 
     def test_validate_agent_package_non_mapping_manifest(self, tmp_path: Path) -> None:
@@ -622,7 +622,7 @@ class TestGitInstaller:
         pkg_dir.mkdir()
         (pkg_dir / "agent-manifest.yaml").write_text("- list\n- not\n- dict", encoding="utf-8")
         (pkg_dir / "SKILL.md").write_text("# X", encoding="utf-8")
-        issues = installer._validate_agent_package(pkg_dir)
+        issues, _ = installer._validate_agent_package(pkg_dir)
         assert any("not a valid mapping" in i for i in issues)
 
     def test_read_manifest_valid(self, tmp_path: Path) -> None:
@@ -1763,7 +1763,10 @@ class TestSupervisorEnvForwarding:
             commit_sha="a" * 40,
             agent_type="atomic",
         ))
-        assert env == {}
+        assert env["AGENT_NAME"] == "test-agent"
+        assert "AGENT_DIR" in env
+        # Config failure should not set AGENT_MODEL or API keys
+        assert "AGENT_MODEL" not in env
 
     def test_provider_without_api_key_env(self) -> None:
         """Provider with empty api_key_env should not forward anything."""
@@ -1796,7 +1799,8 @@ class TestSupervisorEnvForwarding:
             agent_type="atomic",
         ))
         assert env["AGENT_MODEL"] == "ollama:llama3"
-        assert len(env) == 1
+        # AGENT_NAME and AGENT_DIR are always present; no API key forwarded
+        assert "test_api_key_env" not in env
 
 
 # ============================================================================
@@ -1950,8 +1954,10 @@ class TestSupervisorConfigLoadLogsError:
                 agent_type="atomic",
             ))
 
-        # env should be empty (no crash), but error should be logged
-        assert env == {}
+        # env should have AGENT_NAME/AGENT_DIR but no model config (no crash)
+        assert env["AGENT_NAME"] == "test-agent"
+        assert "AGENT_DIR" in env
+        assert "AGENT_MODEL" not in env
         assert "Failed to load config" in caplog.text
 
 
@@ -2474,9 +2480,10 @@ class TestSupervisorBuildEnvLogsError:
                 agent_type="atomic",
             ))
 
-        assert env == {}
+        assert env["AGENT_NAME"] == "my-agent"
+        assert "AGENT_DIR" in env
+        assert "AGENT_MODEL" not in env
         assert "Failed to load config" in caplog.text
-        # Verify it is actually at ERROR level, not just WARNING
         error_records = [
             r for r in caplog.records
             if r.levelname == "ERROR" and "Failed to load config" in r.message
@@ -2599,7 +2606,7 @@ class TestGitInstallerInstall:
         installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
         # Make _validate_agent_package fail
         installer._validate_agent_package = MagicMock(
-            return_value=["Missing agent-manifest.yaml"]
+            return_value=(["Missing agent-manifest.yaml"], {})
         )
 
         with pytest.raises(InstallationError, match="validation failed"):
@@ -2831,7 +2838,7 @@ class TestGitInstallerValidateYaml:
         )
         (pkg_dir / "SKILL.md").write_text("# Test", encoding="utf-8")
 
-        issues = installer._validate_agent_package(pkg_dir)
+        issues, _ = installer._validate_agent_package(pkg_dir)
         assert any("parse error" in i for i in issues)
 
 
@@ -3454,7 +3461,7 @@ class TestInstallerRollbackCleanupPaths:
         # Validation passes but _create_venv will fail later
         # Actually make validation fail to trigger rollback with dest dir
         installer._validate_agent_package = MagicMock(
-            return_value=["Missing agent-manifest.yaml"]
+            return_value=(["Missing agent-manifest.yaml"], {})
         )
 
         with pytest.raises(InstallationError, match="validation failed"):
@@ -3480,7 +3487,7 @@ class TestInstallerRollbackCleanupPaths:
 
         installer._sparse_clone = AsyncMock(return_value=fake_dir)
         installer._validate_agent_package = MagicMock(
-            return_value=["Missing agent-manifest.yaml"]
+            return_value=(["Missing agent-manifest.yaml"], {})
         )
 
         # Patch shutil.rmtree to always raise OSError
@@ -3510,7 +3517,7 @@ class TestInstallerRollbackCleanupPaths:
         installer._sparse_clone = AsyncMock(return_value=fake_dir)
         # Make validation fail to trigger rollback
         installer._validate_agent_package = MagicMock(
-            return_value=["Missing agent-manifest.yaml"]
+            return_value=(["Missing agent-manifest.yaml"], {})
         )
 
         # The rollback iterates _created_paths. The first path added is `dest` (a dir).
@@ -3592,7 +3599,7 @@ class TestInstallRollbackAfterCopy:
         _write_yaml(fake_agent_dir / "agent-manifest.yaml", manifest)
 
         installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
-        installer._validate_agent_package = MagicMock(return_value=[])
+        installer._validate_agent_package = MagicMock(return_value=([], {}))
         # Fail AFTER copy by making _create_venv raise
         installer._create_venv = AsyncMock(side_effect=RuntimeError("venv boom"))
 
@@ -3620,7 +3627,7 @@ class TestInstallRollbackAfterCopy:
         _write_yaml(fake_agent_dir / "agent-manifest.yaml", manifest)
 
         installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
-        installer._validate_agent_package = MagicMock(return_value=[])
+        installer._validate_agent_package = MagicMock(return_value=([], {}))
 
         # _create_venv succeeds, adding venv_path to _created_paths
         fake_venv = config_dir / "venvs" / "rb2-agent"
@@ -3661,7 +3668,7 @@ class TestInstallRollbackUnlinkFilePath:
         _write_yaml(fake_agent_dir / "agent-manifest.yaml", manifest)
 
         installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
-        installer._validate_agent_package = MagicMock(return_value=[])
+        installer._validate_agent_package = MagicMock(return_value=([], {}))
 
         # Create a real file to use as a fake venv_path return value.
         # _create_venv normally returns a directory, but we return a file
@@ -3757,7 +3764,7 @@ class TestInstallRollbackCleanupFailure:
         _write_yaml(fake_agent_dir / "agent-manifest.yaml", manifest)
 
         installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
-        installer._validate_agent_package = MagicMock(return_value=[])
+        installer._validate_agent_package = MagicMock(return_value=([], {}))
 
         # _create_venv raises so dest is in _created_paths but rollback runs
         installer._create_venv = AsyncMock(side_effect=RuntimeError("venv fail"))

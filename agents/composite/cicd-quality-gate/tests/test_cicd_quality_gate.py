@@ -19,13 +19,15 @@ from unittest.mock import patch
 import pytest
 
 from agent_cicd_quality_gate.coordinator import (
+    QualityGateCoordinator,
+    _make_gate_decision,
+    _simulate_agent_check,
+)
+from agent_nexus.models.composition import (
     Composition,
     CompositionError,
     CompositionTask,
-    QualityGateCoordinator,
     _detect_cycles,
-    _make_gate_decision,
-    _simulate_agent_check,
 )
 from agent_cicd_quality_gate.models import (
     GateCheck,

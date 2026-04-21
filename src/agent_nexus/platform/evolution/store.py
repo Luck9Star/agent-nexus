@@ -229,7 +229,7 @@ class EvolutionStore:
             # Reuse a single connection for :memory: databases
             if self._memory_conn is None:
                 self._memory_conn = sqlite3.connect(
-                    ":memory:", check_same_thread=False,
+                    ":memory:",
                 )
                 self._memory_conn.execute("PRAGMA foreign_keys=ON")
             with self._run_transaction(self._memory_conn, immediate=immediate):
@@ -237,7 +237,6 @@ class EvolutionStore:
         else:
             conn = sqlite3.connect(
                 str(self._db_path),
-                check_same_thread=False,
             )
             try:
                 conn.execute("PRAGMA foreign_keys=ON")

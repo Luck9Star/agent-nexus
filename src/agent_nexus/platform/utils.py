@@ -18,6 +18,18 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Error types indicating agent process death (IPC/connection failures).
+# Shared between Router (producer) and Gateway (consumer).
+IPC_FATAL_ERROR_TYPES: frozenset[str] = frozenset({
+    "IPCConnectionError",
+    "IPCTimeoutError",
+    "IPCError",
+    "BrokenPipeError",
+    "ConnectionResetError",
+    "ProcessNotAliveError",
+})
+
+
 def make_error_result(error: str, error_type: str) -> dict[str, Any]:
     """Construct a standardized error result dict.
 
@@ -75,3 +87,30 @@ def detect_cycles_dfs(
         _dfs(node, [])
 
     return cycles
+
+
+def resolve_composition_path(caller_file: str) -> Path | None:
+    """Resolve composition.toml using platform protocol.
+
+    Resolution order:
+    1. ``AGENT_DIR`` env var (platform-injected install root).
+    2. ``<caller_dir>/composition.toml`` (bundled in wheel).
+    3. ``<caller_parent>/composition.toml`` (dev mode).
+
+    Args:
+        caller_file: The ``__file__`` of the calling coordinator module.
+    """
+    import os
+    caller_dir = Path(caller_file).parent
+    agent_dir = os.environ.get("AGENT_DIR")
+    if agent_dir:
+        candidate = Path(agent_dir) / "composition.toml"
+        if candidate.exists():
+            return candidate
+    pkg_path = caller_dir / "composition.toml"
+    if pkg_path.exists():
+        return pkg_path
+    dev_path = caller_dir.parent / "composition.toml"
+    if dev_path.exists():
+        return dev_path
+    return None

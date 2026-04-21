@@ -30,6 +30,7 @@ from agent_nexus.platform.gateway.tool_adapter import (
 )
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
 from agent_nexus.platform.orchestration.ipc import IPCError
+from agent_nexus.platform.utils import IPC_FATAL_ERROR_TYPES
 
 if TYPE_CHECKING:
     from agent_nexus.platform.router.router import PlatformRouter
@@ -44,6 +45,33 @@ _JSON_SCHEMA_TYPE_MAP: dict[str, type] = {
     "array": list,
     "object": dict,
 }
+
+
+def _resolve_json_schema_type(prop_def: dict) -> tuple[type, bool]:
+    """Resolve a JSON Schema property definition to a Python type.
+
+    Handles ``anyOf`` / ``oneOf`` (nullable types) by extracting the
+    first non-null type and returning an ``Optional`` annotation.
+
+    Returns:
+        ``(py_type, is_nullable)`` tuple.
+    """
+    type_str = prop_def.get("type")
+    if isinstance(type_str, str):
+        py_type = _JSON_SCHEMA_TYPE_MAP.get(type_str, str)
+        return py_type, False
+
+    # Handle anyOf / oneOf (e.g. [{"type": "string"}, {"type": "null"}])
+    for combiner_key in ("anyOf", "oneOf"):
+        variants = prop_def.get(combiner_key)
+        if isinstance(variants, list):
+            non_null = [v for v in variants if isinstance(v, dict) and v.get("type") != "null"]
+            has_null = any(isinstance(v, dict) and v.get("type") == "null" for v in variants)
+            if non_null:
+                inner = _JSON_SCHEMA_TYPE_MAP.get(non_null[0].get("type", ""), str)
+                return inner, bool(has_null)
+
+    return str, False
 
 
 # ---------------------------------------------------------------------------
@@ -402,14 +430,7 @@ class MCPGateway:
             # so get_tools() reflects reality immediately instead of
             # waiting for the next _invoke call's is_alive check.
             error_type = result.get("error_type", "")
-            if error_type in (
-                "IPCConnectionError",
-                "IPCTimeoutError",
-                "IPCError",
-                "BrokenPipeError",
-                "ConnectionResetError",
-                "ProcessNotAliveError",
-            ):
+            if error_type in IPC_FATAL_ERROR_TYPES:
                 try:
                     self._cleanup_agent_registration(adapter.agent_name)
                 except Exception:
@@ -455,16 +476,19 @@ class MCPGateway:
         for prop_name, prop_def in properties.items():
             if not isinstance(prop_def, dict):
                 continue
-            type_str = prop_def.get("type")
-            py_type = _JSON_SCHEMA_TYPE_MAP.get(type_str, str) if isinstance(type_str, str) else str
-            annotations[prop_name] = py_type
+            py_type, is_nullable = _resolve_json_schema_type(prop_def)
+            if is_nullable:
+                effective_type = py_type | None  # type: ignore[assignment]
+            else:
+                effective_type = py_type
+            annotations[prop_name] = effective_type
 
             if prop_name in required:
                 params.append(
                     inspect.Parameter(
                         prop_name,
                         inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        annotation=py_type,
+                        annotation=effective_type,
                     )
                 )
             else:
@@ -473,7 +497,7 @@ class MCPGateway:
                     inspect.Parameter(
                         prop_name,
                         inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        annotation=py_type,
+                        annotation=effective_type,
                         default=default,
                     )
                 )
