@@ -9,6 +9,7 @@ Reference: cave-agent/src/cave_agent/security/checker.py
 from __future__ import annotations
 
 import ast
+import functools
 import logging
 
 from agent_nexus.models.runtime import SecurityViolation
@@ -159,6 +160,9 @@ class SecurityChecker:
         Parses the code into an AST and applies all security rules
         to detect issues. Returns empty list if no violations found.
 
+        Empty code and syntax errors are handled before the cache lookup
+        since they are cheap and should not pollute the LRU cache.
+
         Args:
             code: Python source code string to analyze.
 
@@ -175,7 +179,7 @@ class SecurityChecker:
             ]
 
         try:
-            tree = ast.parse(code)
+            ast.parse(code)
         except SyntaxError as e:
             return [
                 SecurityViolation(
@@ -194,6 +198,20 @@ class SecurityChecker:
                     message=f"Parse error: {e}",
                 )
             ]
+
+        return list(self._check_cached(code))
+
+    @functools.lru_cache(maxsize=128)
+    def _check_cached(self, code: str) -> tuple[SecurityViolation, ...]:
+        """Cached AST walk + rule application.
+
+        Caller is responsible for handling empty code and syntax errors
+        before calling this method, since those should not be cached.
+
+        Returns:
+            Tuple of SecurityViolation objects (hashable for lru_cache).
+        """
+        tree = ast.parse(code)
 
         violations: list[SecurityViolation] = []
 
@@ -222,4 +240,8 @@ class SecurityChecker:
                     exc_info=True,
                 )
 
-        return violations
+        return tuple(violations)
+
+    def clear_cache(self) -> None:
+        """Clear the internal LRU cache. Useful for test cleanup."""
+        self._check_cached.cache_clear()

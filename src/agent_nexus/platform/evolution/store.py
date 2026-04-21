@@ -344,22 +344,42 @@ class EvolutionStore:
                 result[record.id] = record
             return result
 
-    def get_active_skills(self) -> list[SkillRecord]:
-        """Load all active skill records."""
+    def get_active_skills(
+        self, *, limit: int | None = None, offset: int = 0,
+    ) -> list[SkillRecord]:
+        """Load active skill records, optionally paginated.
+
+        Args:
+            limit: Maximum number of records to return.  ``None`` returns all.
+            offset: Number of records to skip (only used when *limit* is set).
+        """
         with self._conn() as conn:
-            rows = conn.execute(
-                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE is_active = 1"
-            ).fetchall()
+            sql = f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE is_active = 1"
+            params: list[Any] = []
+            if limit is not None:
+                sql += " LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
+            rows = conn.execute(sql, params if params else ()).fetchall()
             active_ids = {row[0] for row in rows}
             parents = self._batch_load_parents(conn, active_ids)
             return self._rows_to_records(conn, rows, parents)
 
-    def get_all_skills(self) -> list[SkillRecord]:
-        """Load all skill records (including inactive)."""
+    def get_all_skills(
+        self, *, limit: int | None = None, offset: int = 0,
+    ) -> list[SkillRecord]:
+        """Load all skill records (including inactive), optionally paginated.
+
+        Args:
+            limit: Maximum number of records to return.  ``None`` returns all.
+            offset: Number of records to skip (only used when *limit* is set).
+        """
         with self._conn() as conn:
-            rows = conn.execute(
-                f"SELECT {_SKILL_COLUMNS} FROM skill_records"
-            ).fetchall()
+            sql = f"SELECT {_SKILL_COLUMNS} FROM skill_records"
+            params: list[Any] = []
+            if limit is not None:
+                sql += " LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
+            rows = conn.execute(sql, params if params else ()).fetchall()
             all_ids = {row[0] for row in rows}
             parents = self._batch_load_parents(conn, all_ids)
             return self._rows_to_records(conn, rows, parents)

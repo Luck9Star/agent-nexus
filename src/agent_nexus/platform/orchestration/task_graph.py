@@ -26,6 +26,7 @@ SQLite schema:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
@@ -570,6 +571,30 @@ class TaskGraph:
             group_ids = [[t.id for t in group] for group in groups]
 
             return TaskGraphSnapshot(tasks=tasks, parallel_groups=group_ids)
+
+    # ------------------------------------------------------------------
+    # Async wrappers — offload sync SQLite calls to a worker thread
+    # ------------------------------------------------------------------
+
+    async def aget_task(self, task_id: str) -> TaskItem | None:
+        """Async wrapper — avoids blocking the event loop."""
+        return await asyncio.to_thread(self.get_task, task_id)
+
+    async def aget_ready_tasks(self) -> list[TaskItem]:
+        """Async wrapper — avoids blocking the event loop."""
+        return await asyncio.to_thread(self.get_ready_tasks)
+
+    async def aget_blocked_tasks(self) -> list[TaskItem]:
+        """Async wrapper — avoids blocking the event loop."""
+        return await asyncio.to_thread(self.get_blocked_tasks)
+
+    async def aget_parallel_groups(self) -> list[list[TaskItem]]:
+        """Async wrapper — avoids blocking the event loop."""
+        return await asyncio.to_thread(self.get_parallel_groups)
+
+    async def aget_snapshot(self) -> TaskGraphSnapshot:
+        """Async wrapper — avoids blocking the event loop."""
+        return await asyncio.to_thread(self.get_snapshot)
 
     def clear(self) -> None:
         """Clear all tasks (for testing).
