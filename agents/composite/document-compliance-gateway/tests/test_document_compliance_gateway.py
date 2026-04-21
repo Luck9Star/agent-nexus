@@ -433,7 +433,7 @@ class TestComplianceCoordinator:
     def test_load_composition(self, coordinator: ComplianceCoordinator) -> None:
         comp = coordinator.load_composition()
         assert comp.name == "document-compliance-gateway"
-        assert len(comp.tasks) == 4
+        assert len(comp.tasks) == 3  # task4 (conflict-detector) removed: agent not yet created
 
     def test_check_compliance_success(self, coordinator: ComplianceCoordinator) -> None:
         result = coordinator.check_compliance("测试文档内容", jurisdictions=["CN", "EU"])

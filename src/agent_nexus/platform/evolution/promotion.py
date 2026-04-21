@@ -211,6 +211,8 @@ class AgentPromoter:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(content)
+                fh.flush()
+                os.fsync(fh.fileno())
             os.replace(tmp_path, str(path))
         except BaseException:
             try:

@@ -17,6 +17,7 @@ import typer
 
 from agent_nexus.models.distribution import LockfileEntry
 from agent_nexus.platform.local.cli._shared import _get_config_dir, _init_managers
+from agent_nexus.platform.utils import AGENT_NAME_RE
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +273,9 @@ async def _search(query: str) -> None:
 
 async def _info(name: str) -> None:
     """Async info implementation."""
+    if not AGENT_NAME_RE.match(name):
+        typer.echo(f"Invalid agent name: {name!r}", err=True)
+        raise typer.Exit(code=1)
     import yaml
 
     _loader, lockfile, _sources, config_dir = _init_managers()
@@ -348,6 +352,14 @@ async def _sources(
         if not name or not url:
             typer.echo("--name and --url are required for adding a source.")
             raise typer.Exit(code=1)
+        # Validate URL scheme before creating the source entry
+        from agent_nexus.platform.local.installer import _validate_git_url
+        try:
+            _validate_git_url(url)
+        except ValueError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(code=1)
+
         entry = SourceEntry(
             name=name,
             type=source_type or "git",
@@ -530,6 +542,9 @@ def _resolve_local_agent(name: str) -> Path:
 
     Raises ``typer.Exit`` if the agent cannot be found locally.
     """
+    if not AGENT_NAME_RE.match(name):
+        typer.echo(f"Invalid agent name: {name!r}", err=True)
+        raise typer.Exit(code=1)
     cwd = Path.cwd()
     project_root: Path | None = None
 

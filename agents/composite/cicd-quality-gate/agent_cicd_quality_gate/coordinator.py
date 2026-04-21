@@ -23,7 +23,7 @@ _AGENT_RESULTS: dict[str, dict[str, Any]] = {
         "scan_summary": "No critical vulnerabilities found",
     },
     "code-reviewer": {
-        "issues": ["Minor: function too long"],
+        "issues": [],
         "quality_score": 88.0,
         "review_summary": "Code quality acceptable with minor improvements",
     },

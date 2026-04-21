@@ -80,3 +80,33 @@ class TestEvolutionMetrics:
             result = runner.invoke(app, ["evolution", "metrics"])
             assert result.exit_code == 0
             assert "100" in result.output
+
+
+class TestPromotePathTraversalRejection:
+    """Verify that path-traversal skill IDs are rejected in evolution promote."""
+
+    TRAVERSAL_IDS = [
+        "../../etc/cron.d/backdoor",
+        "../hidden",
+        "/absolute/path",
+        "name;rm -rf",
+    ]
+
+    @pytest.mark.parametrize("traversal_id", TRAVERSAL_IDS)
+    def test_promote_rejects_traversal(self, traversal_id: str) -> None:
+        result = runner.invoke(app, ["evolution", "promote", traversal_id])
+        assert result.exit_code != 0
+        assert "invalid" in result.output.lower()
+
+    def test_promote_accepts_valid_skill_id(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Valid skill IDs pass the traversal guard."""
+        config_dir = tmp_path / ".agent-nexus"
+        config_dir.mkdir()
+        (config_dir / "config.toml").write_text('schema_version = "1.0"\n')
+        monkeypatch.setenv("AGENT_NEXUS_HOME", str(config_dir))
+
+        engine = _make_mock_engine()
+        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=engine):
+            # "my-skill" is valid — should pass validation
+            result = runner.invoke(app, ["evolution", "promote", "my-skill"])
+            assert "invalid" not in result.output.lower()

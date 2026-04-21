@@ -1416,3 +1416,82 @@ class TestRunFinallyStopsAgent:
                 await _run("test-agent", "cli", "stdio")
 
         assert exc_info.value.exit_code == 1
+
+
+# ============================================================================
+# Path traversal rejection tests
+# ============================================================================
+
+
+class TestPathTraversalRejection:
+    """Verify that path-traversal names are rejected at CLI-level entry points."""
+
+    TRAVERSAL_NAMES = [
+        "../../etc/cron.d/backdoor",
+        "../hidden",
+        "/absolute/path",
+        ".dotstart",
+        "space name",
+        "name;rm -rf",
+    ]
+
+    # --- _info validation ---
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("traversal_name", TRAVERSAL_NAMES)
+    async def test_info_rejects_traversal(self, traversal_name: str) -> None:
+        """_info rejects names with path traversal characters."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+
+        with (
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
+        ):
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _info(traversal_name)
+
+        assert exc_info.value.exit_code == 1
+        calls = _echo_calls(echo_mock)
+        assert any("invalid" in c.lower() for c in calls)
+        # Must NOT reach lockfile.get_entry
+        lockfile_mock.get_entry.assert_not_called()
+
+    # --- _sources add URL validation ---
+
+    @pytest.mark.asyncio
+    async def test_sources_add_rejects_file_url(self) -> None:
+        """_sources add rejects file:// URLs."""
+        mocks, _, sources_mock, _ = _mock_managers()
+
+        with (
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
+        ):
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _sources("add", "evil", "file:///etc/passwd", "git")
+
+        assert exc_info.value.exit_code == 1
+        calls = _echo_calls(echo_mock)
+        assert any("invalid" in c.lower() for c in calls)
+        # Must NOT create a SourceEntry
+        sources_mock.add_source.assert_not_called()
+
+    # --- valid names still work ---
+
+    @pytest.mark.asyncio
+    async def test_info_valid_name_not_rejected(self) -> None:
+        """_info with a valid name reaches lockfile.get_entry (not blocked by guard)."""
+        mocks, lockfile_mock, _, _ = _mock_managers()
+        lockfile_mock.get_entry.return_value = None
+
+        with (
+            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
+            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
+        ):
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _info("my-agent")
+
+        # "my-agent" passes validation, so get_entry IS called
+        lockfile_mock.get_entry.assert_called_once_with("my-agent")
+        # Exit code 1 is from "not installed" check, not from validation
+        assert exc_info.value.exit_code == 1

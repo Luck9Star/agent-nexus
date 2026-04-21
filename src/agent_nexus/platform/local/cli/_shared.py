@@ -18,6 +18,13 @@ import toml
 logger = logging.getLogger(__name__)
 
 
+_BLOCKED_ENV_VARS = frozenset({
+    "PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH",
+    "PYTHONHOME", "HOME", "USER", "SHELL", "IFS",
+    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
+})
+
+
 def _get_config_dir() -> Path:
     """Resolve the platform config directory.
 
@@ -59,6 +66,9 @@ def _load_dot_env(config_dir: Path) -> None:
                 or (value.startswith("'") and value.endswith("'"))
             ):
                 value = value[1:-1]
+            if key in _BLOCKED_ENV_VARS:
+                logger.warning("Ignoring blocked env var from .env: %s", key)
+                continue
             if key and key not in os.environ:
                 os.environ[key] = value
     except Exception:

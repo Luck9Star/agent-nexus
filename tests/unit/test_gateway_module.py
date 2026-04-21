@@ -1065,7 +1065,7 @@ class TestMCPGatewayMakeToolFunc:
     async def test_func_handles_transport_race_exception(
         self, gateway: MCPGateway
     ) -> None:
-        """Non-ConnectionError transport failures also caught (broadened catch)."""
+        """OSError transport failures caught by narrowed except tuple."""
         manifest = _make_manifest("transport_race_agent")
         await gateway.register_agent(manifest, deferred=False)
         info = gateway.registry.get_agent_info("transport_race_agent")
@@ -1075,7 +1075,7 @@ class TestMCPGatewayMakeToolFunc:
 
         schema = _make_tool_schema("tool")
         adapter = McpToolAdapter(server_name="transport_race_agent", tool_schema=schema)
-        adapter.execute = AsyncMock(side_effect=RuntimeError("event loop closed"))  # type: ignore[method-assign]
+        adapter.execute = AsyncMock(side_effect=OSError("broken pipe"))  # type: ignore[method-assign]
         gateway.registry._tool_adapters["transport_race_agent"] = [adapter]
 
         func = gateway._make_tool_func(adapter)
@@ -1083,6 +1083,27 @@ class TestMCPGatewayMakeToolFunc:
         assert "Error" in result
         assert "IPC failed" in result
         assert "transport_race_agent" not in gateway._registered_agents
+
+    async def test_func_propagates_programming_errors(
+        self, gateway: MCPGateway
+    ) -> None:
+        """Programming errors (TypeError, AttributeError) propagate
+        instead of being swallowed as IPC errors."""
+        manifest = _make_manifest("prog_err_agent")
+        await gateway.register_agent(manifest, deferred=False)
+        info = gateway.registry.get_agent_info("prog_err_agent")
+        assert info is not None
+        mock_handle = _mock_agent_handle("prog_err_agent", alive=True)
+        info.handle = mock_handle
+
+        schema = _make_tool_schema("tool")
+        adapter = McpToolAdapter(server_name="prog_err_agent", tool_schema=schema)
+        adapter.execute = AsyncMock(side_effect=TypeError("bad arg type"))  # type: ignore[method-assign]
+        gateway.registry._tool_adapters["prog_err_agent"] = [adapter]
+
+        func = gateway._make_tool_func(adapter)
+        with pytest.raises(TypeError, match="bad arg type"):
+            await func(x=1)
 
 
 # ============================================================================

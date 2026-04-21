@@ -439,7 +439,7 @@ class TestQualityGateCoordinator:
     def test_load_composition(self, coordinator: QualityGateCoordinator) -> None:
         comp = coordinator.load_composition()
         assert comp.name == "cicd-quality-gate"
-        assert len(comp.tasks) == 4
+        assert len(comp.tasks) == 3  # task4 (quality-gate-decider) removed: agent not yet created
 
     def test_run_gate_pass(self, coordinator: QualityGateCoordinator) -> None:
         result = coordinator.run_gate("/path/to/code", {})

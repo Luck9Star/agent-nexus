@@ -29,6 +29,7 @@ from agent_nexus.platform.gateway.tool_adapter import (
     remove_lock,
 )
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
+from agent_nexus.platform.orchestration.ipc import IPCError
 
 if TYPE_CHECKING:
     from agent_nexus.platform.router.router import PlatformRouter
@@ -375,12 +376,10 @@ class MCPGateway:
 
             try:
                 result = await adapter.execute(info.handle, kwargs)
-            except Exception as exc:
-                # Handle race: process may have died between is_alive
-                # check and IPC send.  Broad catch because
-                # adapter.execute() normally swallows all exceptions
-                # internally — reaching here means a transport-layer
-                # failure (BrokenPipeError, IncompleteReadError, etc).
+            except (OSError, ConnectionError, asyncio.TimeoutError, IPCError) as exc:
+                # Transport-level failure: process died between is_alive
+                # check and IPC send.  adapter.execute() handles IPCError
+                # internally — reaching here means a low-level OS failure.
                 self._cleanup_agent_registration(adapter.agent_name)
                 return (
                     f"Error: IPC failed for agent "

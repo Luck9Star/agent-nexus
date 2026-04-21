@@ -8,6 +8,7 @@ import os
 import typer
 
 from agent_nexus.platform.local.cli._shared import _init_managers
+from agent_nexus.platform.utils import AGENT_NAME_RE
 
 runtime_app = typer.Typer(help="Runtime management")
 
@@ -104,6 +105,10 @@ async def _make_supervisor():
 
 
 async def _start_one(name: str) -> None:
+    if not AGENT_NAME_RE.match(name):
+        typer.echo(f"Invalid agent name: {name!r}", err=True)
+        raise typer.Exit(code=1)
+
     supervisor, config_dir, pm = await _make_supervisor()
 
     ok = await supervisor.start_agent(name)
@@ -133,6 +138,10 @@ async def _start_all() -> None:
 
 
 async def _stop_one(name: str) -> None:
+    if not AGENT_NAME_RE.match(name):
+        typer.echo(f"Invalid agent name: {name!r}", err=True)
+        raise typer.Exit(code=1)
+
     supervisor, config_dir, _pm = await _make_supervisor()
 
     ok = await supervisor.stop_agent(name)
@@ -162,6 +171,10 @@ async def _stop_all() -> None:
 
 
 async def _restart_agent(name: str) -> None:
+    if not AGENT_NAME_RE.match(name):
+        typer.echo(f"Invalid agent name: {name!r}", err=True)
+        raise typer.Exit(code=1)
+
     supervisor, config_dir, pm = await _make_supervisor()
 
     ok = await supervisor.stop_agent(name)
@@ -225,6 +238,10 @@ async def _status() -> None:
 
 
 def _show_logs(name: str, num_lines: int) -> None:
+    if not AGENT_NAME_RE.match(name):
+        typer.echo(f"Invalid agent name: {name!r}", err=True)
+        raise typer.Exit(code=1)
+
     _loader, lockfile, _sources, config_dir = _init_managers()
     log_path = config_dir / "logs" / f"{name}.log"
 

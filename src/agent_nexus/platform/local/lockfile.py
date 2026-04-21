@@ -150,6 +150,8 @@ class LockfileManager:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(content)
+                fh.flush()
+                os.fsync(fh.fileno())
             os.replace(tmp_path, str(self._path))
             logger.debug("Lockfile saved atomically to %s", self._path)
         except BaseException:

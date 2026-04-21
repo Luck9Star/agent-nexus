@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Generator
 import typer
 
 from agent_nexus.platform.local.cli._shared import _get_config_dir
+from agent_nexus.platform.utils import AGENT_NAME_RE
 
 if TYPE_CHECKING:
     from agent_nexus.platform.evolution.engine import EvolutionEngine
@@ -199,6 +200,10 @@ def evolution_promote(
     skill_id: str = typer.Argument(help="Skill ID to promote to agent"),
 ) -> None:
     """Promote a skill candidate to a standalone agent."""
+    if not AGENT_NAME_RE.match(skill_id):
+        typer.echo(f"Invalid skill ID: {skill_id!r}", err=True)
+        raise typer.Exit(code=1)
+
     from agent_nexus.platform.evolution.promotion import PromotionCandidate
 
     with _engine_context() as engine:
