@@ -242,12 +242,10 @@ class TestDescribeTypes:
         desc = shared_runtime.describe_types(level="schema")
         assert "Python type: dict" in desc
 
-    def test_unknown_level_falls_back_to_names(self, shared_runtime) -> None:
+    def test_unknown_level_raises_value_error(self, shared_runtime) -> None:
         self._inject_types(shared_runtime)
-        desc = shared_runtime.describe_types(level="nonexistent_level")
-        # Should fall back to "names" behavior
-        assert "User" in desc
-        assert "Item" in desc
+        with pytest.raises(ValueError, match="Unknown type description level"):
+            shared_runtime.describe_types(level="nonexistent_level")
 
     def test_empty(self, shared_runtime) -> None:
         assert shared_runtime.describe_types() == ""

@@ -36,9 +36,19 @@ from pathlib import Path
 from typing import Any, Generator
 
 from agent_nexus.models.task import TaskGraphSnapshot, TaskItem, TaskState
-from agent_nexus.platform.utils import detect_cycles_dfs, now_iso as _now_iso
+from agent_nexus.platform.utils import (
+    detect_cycles_dfs,
+    now_iso as _now_iso,
+    sqlite_connection,
+)
 
 logger = logging.getLogger(__name__)
+
+_TASK_COLUMNS = "id, description, agent, state, vars, created_at, updated_at"
+"""Column list for tasks SELECT queries — single source of truth."""
+
+_TASK_COLUMNS_T = "t.id, t.description, t.agent, t.state, t.vars, t.created_at, t.updated_at"
+"""Aliased column list for tasks SELECT queries using table alias 't'."""
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -114,51 +124,15 @@ class TaskGraph:
     ) -> Generator[sqlite3.Connection, None, None]:
         """Context manager for DB connections.
 
-        Shares a single connection for ``:memory:`` databases;
-        file-based DBs open a fresh connection per operation.
-
-        For ``:memory:`` databases the same persistent connection is
-        yielded every time (sqlite3.connect(":memory:") creates a new
-        empty DB each call, so sharing is mandatory).
-
-        For file-based databases a fresh connection is opened per
-        operation and closed afterwards.
-
-        Args:
-            immediate: If True, use BEGIN IMMEDIATE for write serialization.
-                Prevents TOCTOU races in read-then-write mutation methods.
+        Delegates to :func:`sqlite_connection` for standardised setup,
+        teardown, and transaction handling.
         """
-        # In-memory DB: reuse the persistent connection created in __init__.
-        if self._mem_conn is not None:
-            conn = self._mem_conn
-            if immediate:
-                if not conn.in_transaction:
-                    conn.execute("BEGIN IMMEDIATE")
-            try:
-                yield conn
-                conn.commit()
-            except Exception:
-                logger.debug("DB commit failed in memory-DB context", exc_info=True)
-                conn.rollback()
-                raise
-            return
-
-        # File-based DB: open a fresh connection per operation.
-        conn = sqlite3.connect(
-            str(self._db_path),
-        )
-        try:
-            conn.execute("PRAGMA foreign_keys=ON")
-            if immediate:
-                conn.execute("BEGIN IMMEDIATE")
+        with sqlite_connection(
+            self._db_path,
+            immediate=immediate,
+            persistent_conn=self._mem_conn,
+        ) as conn:
             yield conn
-            conn.commit()
-        except Exception:
-            logger.debug("DB commit failed in file-DB context", exc_info=True)
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
 
     # ------------------------------------------------------------------
     # Mutations
@@ -437,8 +411,7 @@ class TaskGraph:
         with self._conn() as conn:
             # Single query: pending tasks with zero unresolved blockers
             rows = conn.execute(
-                "SELECT t.id, t.description, t.agent, t.state, t.vars, "
-                "t.created_at, t.updated_at "
+                f"SELECT {_TASK_COLUMNS_T} "
                 "FROM tasks t "
                 "WHERE t.state = ? "
                 "AND NOT EXISTS ("
@@ -455,8 +428,7 @@ class TaskGraph:
         with self._conn() as conn:
             # Single query: pending tasks with at least one unresolved blocker
             rows = conn.execute(
-                "SELECT DISTINCT t.id, t.description, t.agent, t.state, t.vars, "
-                "t.created_at, t.updated_at "
+                f"SELECT DISTINCT {_TASK_COLUMNS_T} "
                 "FROM tasks t "
                 "JOIN task_dependencies td ON td.task_id = t.id "
                 "JOIN tasks bt ON td.blocked_by_id = bt.id "
@@ -533,8 +505,7 @@ class TaskGraph:
             # Batch-load group tasks in one pass instead of per-task queries
             placeholders = ",".join("?" for _ in group_ids)
             group_rows = conn.execute(
-                "SELECT id, description, agent, state, vars, created_at, updated_at "
-                f"FROM tasks WHERE id IN ({placeholders})",
+                f"SELECT {_TASK_COLUMNS} FROM tasks WHERE id IN ({placeholders})",
                 group_ids,
             ).fetchall()
             group_tasks = self._rows_to_tasks(conn, group_rows)
@@ -589,8 +560,7 @@ class TaskGraph:
         """Get a full snapshot of the graph state."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT id, description, agent, state, vars, created_at, updated_at "
-                "FROM tasks ORDER BY created_at"
+                f"SELECT {_TASK_COLUMNS} FROM tasks ORDER BY created_at"
             ).fetchall()
 
             tasks = self._rows_to_tasks(conn, rows)
@@ -722,8 +692,7 @@ class TaskGraph:
     ) -> TaskItem | None:
         """Get task using an existing connection."""
         row = conn.execute(
-            "SELECT id, description, agent, state, vars, created_at, updated_at "
-            "FROM tasks WHERE id = ?",
+            f"SELECT {_TASK_COLUMNS} FROM tasks WHERE id = ?",
             (task_id,),
         ).fetchone()
         if row is None:

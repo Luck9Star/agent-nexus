@@ -39,7 +39,6 @@ from agent_nexus.platform.orchestration.ipc import (
     _LIST_TOOLS_MSG,
     get_ipc_lock,
 )
-from agent_nexus.platform.gateway.tool_adapter import remove_lock
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
@@ -321,11 +320,9 @@ class PlatformRouter:
         """
         handle = self._pm.get_agent(atomic_name)
         if handle is None:
-            remove_lock(atomic_name)
             return _make_error_result(f"Agent '{atomic_name}' not found", "KeyError")
 
         if not handle.is_alive:
-            remove_lock(atomic_name)
             return _make_error_result(f"Agent '{atomic_name}' process is not alive", "ProcessNotAliveError")
 
         # Serialize send+receive per agent to prevent concurrent IPC

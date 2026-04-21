@@ -177,6 +177,37 @@ class PythonRuntime:
             lines.append(f"  - {func.name}{async_marker}{sig}: {func.description}")
         return "\n".join(lines)
 
+    def _format_type_names(self) -> str:
+        """L0: type names only."""
+        return ", ".join(self._types.keys())
+
+    def _format_type_summary(self) -> str:
+        """L0 extended: names + descriptions."""
+        lines: list[str] = []
+        for t in self._types.values():
+            lines.append(f"  - {t.name}: {t.description}")
+        return "\n".join(lines)
+
+    def _format_type_schema(self) -> str:
+        """L2: full JSON Schema for each type."""
+        parts: list[str] = []
+        for t in self._types.values():
+            header = f"  {t.name}"
+            if t.description:
+                header += f": {t.description}"
+            parts.append(header)
+            if t.json_schema:
+                parts.append(f"    Schema: {json.dumps(t.json_schema, indent=2)}")
+            elif t.python_type:
+                parts.append(f"    Python type: {t.python_type}")
+        return "\n".join(parts)
+
+    _TYPE_FORMATTERS: dict[str, Any] = {
+        "names": _format_type_names,
+        "summary": _format_type_summary,
+        "schema": _format_type_schema,
+    }
+
     def describe_types(self, level: str = "names") -> str:
         """Describe registered types at the given detail level.
 
@@ -188,29 +219,19 @@ class PythonRuntime:
 
         Returns:
             Formatted string for LLM context injection.
+
+        Raises:
+            ValueError: If *level* is not one of "names", "summary", "schema".
         """
         if not self._types:
             return ""
-        if level == "names":
-            return ", ".join(self._types.keys())
-        elif level == "summary":
-            lines: list[str] = []
-            for t in self._types.values():
-                lines.append(f"  - {t.name}: {t.description}")
-            return "\n".join(lines)
-        elif level == "schema":
-            parts: list[str] = []
-            for t in self._types.values():
-                header = f"  {t.name}"
-                if t.description:
-                    header += f": {t.description}"
-                parts.append(header)
-                if t.json_schema:
-                    parts.append(f"    Schema: {json.dumps(t.json_schema, indent=2)}")
-                elif t.python_type:
-                    parts.append(f"    Python type: {t.python_type}")
-            return "\n".join(parts)
-        return ", ".join(self._types.keys())
+        formatter = self._TYPE_FORMATTERS.get(level)
+        if formatter is None:
+            raise ValueError(
+                f"Unknown type description level '{level}'; "
+                f"expected one of {sorted(self._TYPE_FORMATTERS)}"
+            )
+        return formatter(self)
 
     # ── Internal helpers ───────────────────────────────────────────────
 

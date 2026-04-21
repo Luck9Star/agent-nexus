@@ -30,7 +30,10 @@ from agent_nexus.models.evolution import (
     SkillOrigin,
     SkillRecord,
 )
-from agent_nexus.platform.utils import now_iso as _now_iso
+from agent_nexus.platform.utils import (
+    now_iso as _now_iso,
+    sqlite_connection,
+)
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -42,6 +45,14 @@ logger = logging.getLogger(__name__)
 
 _SQL_CHUNK_SIZE = 500
 """Max variables per IN clause — stays well below SQLite's SQLITE_MAX_VARIABLE_NUMBER (999)."""
+
+_SKILL_COLUMNS = (
+    "id, name, version, lineage_origin, lineage_generation, "
+    "lineage_content_diff, lineage_content_snapshot, directory, "
+    "is_active, total_selections, total_applied, total_completions, "
+    "total_fallbacks, created_at, updated_at"
+)
+"""Column list for skill_records SELECT queries — single source of truth."""
 
 
 def _chunked_in_fetchall(
@@ -201,49 +212,26 @@ class EvolutionStore:
                 if stmt:
                     conn.execute(stmt)
 
-    @staticmethod
-    @contextmanager
-    def _run_transaction(
-        conn: sqlite3.Connection, *, immediate: bool = False
-    ) -> Generator[sqlite3.Connection, None, None]:
-        """Commit/rollback wrapper shared by memory and file connection paths."""
-        try:
-            if immediate:
-                conn.execute("BEGIN IMMEDIATE")
-            yield conn
-            conn.commit()
-        except sqlite3.Error:
-            logger.exception("Database operation failed in evolution store")
-            conn.rollback()
-            raise
-        except Exception:
-            logger.exception("Unexpected error during DB operation in evolution store")
-            conn.rollback()
-            raise
-
     @contextmanager
     def _conn(
         self, *, immediate: bool = False
     ) -> Generator[sqlite3.Connection, None, None]:
-        if self._is_memory:
-            # Reuse a single connection for :memory: databases
-            if self._memory_conn is None:
-                self._memory_conn = sqlite3.connect(
-                    ":memory:",
-                )
-                self._memory_conn.execute("PRAGMA foreign_keys=ON")
-            with self._run_transaction(self._memory_conn, immediate=immediate):
-                yield self._memory_conn
-        else:
-            conn = sqlite3.connect(
-                str(self._db_path),
-            )
-            try:
-                conn.execute("PRAGMA foreign_keys=ON")
-                with self._run_transaction(conn, immediate=immediate):
-                    yield conn
-            finally:
-                conn.close()
+        """Context manager for DB connections.
+
+        Delegates to :func:`sqlite_connection` for standardised setup,
+        teardown, and transaction handling.
+        """
+        # Lazy-init the in-memory connection on first use.
+        if self._is_memory and self._memory_conn is None:
+            self._memory_conn = sqlite3.connect(":memory:")
+            self._memory_conn.execute("PRAGMA foreign_keys=ON")
+
+        with sqlite_connection(
+            self._db_path,
+            immediate=immediate,
+            persistent_conn=self._memory_conn,
+        ) as conn:
+            yield conn
 
     # ------------------------------------------------------------------
     # Skill Record CRUD
@@ -325,11 +313,7 @@ class EvolutionStore:
         """Load a single skill record by ID."""
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT id, name, version, lineage_origin, lineage_generation, "
-                "lineage_content_diff, lineage_content_snapshot, directory, "
-                "is_active, total_selections, total_applied, total_completions, "
-                "total_fallbacks, created_at, updated_at "
-                "FROM skill_records WHERE id = ?",
+                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE id = ?",
                 (skill_id,),
             ).fetchone()
             if row is None:
@@ -349,11 +333,7 @@ class EvolutionStore:
         with self._conn() as conn:
             rows = _chunked_in_fetchall(
                 conn,
-                "SELECT id, name, version, lineage_origin, lineage_generation, "
-                "lineage_content_diff, lineage_content_snapshot, directory, "
-                "is_active, total_selections, total_applied, total_completions, "
-                "total_fallbacks, created_at, updated_at "
-                "FROM skill_records WHERE id IN ({IN})",
+                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE id IN ({{IN}})",
                 skill_ids,
             )
             found_ids = {row[0] for row in rows}
@@ -368,11 +348,7 @@ class EvolutionStore:
         """Load all active skill records."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT id, name, version, lineage_origin, lineage_generation, "
-                "lineage_content_diff, lineage_content_snapshot, directory, "
-                "is_active, total_selections, total_applied, total_completions, "
-                "total_fallbacks, created_at, updated_at "
-                "FROM skill_records WHERE is_active = 1"
+                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE is_active = 1"
             ).fetchall()
             active_ids = {row[0] for row in rows}
             parents = self._batch_load_parents(conn, active_ids)
@@ -382,11 +358,7 @@ class EvolutionStore:
         """Load all skill records (including inactive)."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT id, name, version, lineage_origin, lineage_generation, "
-                "lineage_content_diff, lineage_content_snapshot, directory, "
-                "is_active, total_selections, total_applied, total_completions, "
-                "total_fallbacks, created_at, updated_at "
-                "FROM skill_records"
+                f"SELECT {_SKILL_COLUMNS} FROM skill_records"
             ).fetchall()
             all_ids = {row[0] for row in rows}
             parents = self._batch_load_parents(conn, all_ids)
@@ -406,11 +378,7 @@ class EvolutionStore:
         """Load all versions of a named skill, sorted by generation."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT id, name, version, lineage_origin, lineage_generation, "
-                "lineage_content_diff, lineage_content_snapshot, directory, "
-                "is_active, total_selections, total_applied, total_completions, "
-                "total_fallbacks, created_at, updated_at "
-                "FROM skill_records WHERE name = ? "
+                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE name = ? "
                 "ORDER BY lineage_generation ASC",
                 (name,),
             ).fetchall()
@@ -948,12 +916,7 @@ class EvolutionStore:
 
             rows = _chunked_in_fetchall(
                 conn,
-                "SELECT id, name, version, lineage_origin, "
-                "lineage_generation, lineage_content_diff, "
-                "lineage_content_snapshot, directory, is_active, "
-                "total_selections, total_applied, total_completions, "
-                "total_fallbacks, created_at, updated_at "
-                "FROM skill_records WHERE id IN ({IN})",
+                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE id IN ({{IN}})",
                 list(all_ancestor_ids),
             )
 
@@ -1004,12 +967,7 @@ class EvolutionStore:
             # Phase 2: Batch-load all ancestor records in one query
             rows = _chunked_in_fetchall(
                 conn,
-                "SELECT id, name, version, lineage_origin, "
-                "lineage_generation, lineage_content_diff, "
-                "lineage_content_snapshot, directory, is_active, "
-                "total_selections, total_applied, total_completions, "
-                "total_fallbacks, created_at, updated_at "
-                "FROM skill_records WHERE id IN ({IN})",
+                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE id IN ({{IN}})",
                 list(visited),
             )
 

@@ -128,26 +128,27 @@ class IPCStream:
                 f"Agent message too large ({len(raw)} bytes, max {_MAX_MESSAGE_SIZE})"
             )
 
-        try:
-            raw_stripped = raw.strip()
-        except Exception as exc:
-            raise IPCError(
-                f"Error stripping raw data ({len(raw)} bytes): {exc}"
-            ) from exc
-        if not raw_stripped:
+        # Whitespace-only lines (e.g. b"\n") indicate the agent sent no
+        # payload — treat as connection issue rather than JSON error.
+        if not raw.strip():
             raise IPCConnectionError("Agent sent empty line (possible EOF)")
 
+        # Validate UTF-8 before json.loads — the stdlib swallows
+        # UnicodeDecodeError inside json.loads, making it impossible
+        # to distinguish encoding errors from malformed JSON.
         try:
-            line = raw_stripped.decode("utf-8")
+            raw.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise IPCError(
                 f"Agent sent non-UTF-8 data ({len(raw)} bytes): {exc}"
             ) from exc
 
-        logger.debug("IPC recv: %.200s", line)
+        # json.loads accepts bytes directly and handles leading/trailing
+        # whitespace, so no intermediate .strip() or .decode() is needed.
+        logger.debug("IPC recv: %.200s", raw[:200])
 
         try:
-            data = json.loads(line)  # reuse decoded string instead of raw bytes
+            data = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise IPCError(f"Invalid JSON from agent: {exc}") from exc
 

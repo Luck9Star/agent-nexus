@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+import sqlite3
 from collections.abc import Callable, Iterable
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
 
 # Agent name pattern: starts with alphanumeric, then alphanumeric/dot/hyphen/underscore
 AGENT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
@@ -87,6 +90,88 @@ def detect_cycles_dfs(
         _dfs(node, [])
 
     return cycles
+
+
+# ---------------------------------------------------------------------------
+# SQLite connection management (shared by TaskGraph, EvolutionStore, etc.)
+# ---------------------------------------------------------------------------
+
+_logger = logging.getLogger(__name__)
+
+@contextmanager
+def sqlite_connection(
+    db_path: str | Path,
+    *,
+    immediate: bool = False,
+    persistent_conn: sqlite3.Connection | None = None,
+) -> Generator[sqlite3.Connection, None, None]:
+    """Context manager that yields a SQLite connection with standard setup.
+
+    Handles both ``:memory:`` and file-based databases:
+
+    * **In-memory**: reuses *persistent_conn* (supplied by the caller, who
+      owns its lifecycle).  ``sqlite3.connect(":memory:")`` creates a fresh
+      database each time, so sharing is mandatory.
+    * **File-based**: opens a fresh connection per invocation and closes it
+      on exit.
+
+    Standard pragmas (``foreign_keys=ON``) are applied automatically.
+    ``journal_mode=WAL`` should be set separately during schema init because
+    it is a persistent database-level setting, not a per-connection one.
+
+    Transaction semantics:
+
+    * If *immediate* is ``True``, ``BEGIN IMMEDIATE`` is issued before
+      yielding — this serialises concurrent writers under WAL mode and
+    prevents TOCTOU races.
+    * On normal exit the connection is committed.
+    * On exception the connection is rolled back.
+
+    Args:
+        db_path: ``":memory:"`` or a file-system path.
+        immediate: Issue ``BEGIN IMMEDIATE`` before yielding.
+        persistent_conn: For ``:memory:`` databases — the long-lived
+            connection to reuse.  Ignored for file-based databases.
+    """
+    db_str = str(db_path)
+    is_memory = db_str == ":memory:"
+
+    if is_memory:
+        # In-memory DB: reuse the persistent connection supplied by the caller.
+        if persistent_conn is None:
+            raise ValueError(
+                "persistent_conn is required for :memory: databases"
+            )
+        conn = persistent_conn
+        if immediate and not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            _logger.debug(
+                "DB commit failed in memory-DB context", exc_info=True
+            )
+            conn.rollback()
+            raise
+        return  # EARLY RETURN — don't fall through to file-based cleanup
+
+    # File-based DB: open a fresh connection per operation.
+    conn = sqlite3.connect(db_str)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        if immediate:
+            conn.execute("BEGIN IMMEDIATE")
+        yield conn
+        conn.commit()
+    except Exception:
+        _logger.debug(
+            "DB commit failed in file-DB context", exc_info=True
+        )
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def resolve_composition_path(caller_file: str) -> Path | None:
