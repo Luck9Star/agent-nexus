@@ -33,6 +33,7 @@ _DEFAULT_FORBIDDEN_IMPORTS = [
     "ctypes",
     "multiprocessing",
     "importlib",
+    "threading",  # daemon threads survive timeout → persistent side effects
     "pickle",
     "marshal",
     "code",
@@ -59,6 +60,9 @@ _DEFAULT_FORBIDDEN_FUNCTIONS = [
     "breakpoint",
     "input",
     "type",  # 3-arg form creates arbitrary classes → MRO sandbox escape
+    "getattr",  # variable second-arg bypasses constant-only detection
+    "setattr",  # can modify injected objects' attributes
+    "delattr",  # can remove safety-related attributes
 ]
 
 _DEFAULT_FORBIDDEN_ATTRIBUTES = [

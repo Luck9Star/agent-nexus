@@ -639,8 +639,10 @@ class TestResetRaceWithTimedOutThread:
         mock_logger.warning.assert_called()
         warn_msg = mock_logger.warning.call_args[0][0]
         assert "still running" in warn_msg
-        # Should still clear timed_out flag
-        assert executor._timed_out is False
+        # When thread is still running, shell is destroyed and _timed_out
+        # remains True — prevents reuse of contaminated shell
+        assert executor._timed_out is True
+        assert executor._shell is None
 
     def test_reset_succeeds_when_wait_returns_true(self) -> None:
         """reset() succeeds cleanly when wait() returns True."""

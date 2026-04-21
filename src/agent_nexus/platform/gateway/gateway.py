@@ -342,6 +342,16 @@ class MCPGateway:
         adapters = self._registry.get_tool_adapters(agent_name)
         for ad in adapters:
             self._registered_tool_names.discard(ad.full_name)
+        # Close IPC streams for the dead handle to release FDs
+        info = self._registry.get_agent_info(agent_name)
+        if info is not None and info.handle is not None:
+            try:
+                info.handle.ipc.stream.close_sync()
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "Failed to close IPC stream during cleanup for '%s'",
+                    agent_name, exc_info=True,
+                )
         remove_lock(agent_name)
 
     def _make_tool_func(

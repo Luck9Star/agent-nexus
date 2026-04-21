@@ -530,6 +530,17 @@ class ProcessManager:
                         logger.info("Force-killed agent '%s'", name)
                     except (ProcessLookupError, OSError):
                         pass
+            # Reap killed processes to prevent zombies
+            for name in names:
+                handle = self._agents.get(name)
+                if handle is not None and handle.process.returncode is None:
+                    try:
+                        await handle.process.wait()
+                    except Exception:  # noqa: BLE001
+                        pass
+                async with self._lock:
+                    if self._agents.get(name) is handle:
+                        self._agents.pop(name, None)
             raise
 
     # ------------------------------------------------------------------

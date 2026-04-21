@@ -164,28 +164,8 @@ class FunctionRule(SecurityRule):
                     )
                 )
 
-            # Detect getattr(obj, 'eval') pattern
-            if (
-                isinstance(node.func, ast.Name)
-                and node.func.id == "getattr"
-                and len(node.args) >= 2
-                and isinstance(node.args[1], ast.Constant)
-            ):
-                attr_value = (
-                    node.args[1].value
-                )
-                if attr_value in self.forbidden:
-                    violations.append(
-                        SecurityViolation(
-                            rule_type="function",
-                            node_type="Call",
-                            code_snippet=ast.unparse(node),
-                            message=(
-                                f"Forbidden dynamic attribute access via getattr: "
-                                f"'{attr_value}' at line {node.lineno}"
-                            ),
-                        )
-                    )
+            # Note: getattr() is now blocked entirely via FunctionRule,
+            # so per-attribute getattr detection is no longer needed.
 
         return violations
 

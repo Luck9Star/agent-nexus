@@ -148,8 +148,20 @@ class IPythonExecutor:
             if not self._exec_done.wait(timeout=5.0):
                 logger.warning(
                     "Timed-out execution thread still running during reset; "
-                    "clearing namespace anyway (race possible)"
+                    "closing shell to prevent contaminated reuse"
                 )
+                # Thread still running — close the shell entirely rather than
+                # allowing new executions on a potentially contaminated namespace.
+                if self._shell is not None:
+                    try:
+                        self._shell.user_ns.clear()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._shell = None
+                self._pending_injects.clear()
+                self._timed_out = True  # keep flag — shell is unusable
+                self._exec_done.set()
+                return
 
         if self._shell is not None:
             # Preserve IPython internals BEFORE clearing
