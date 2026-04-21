@@ -224,6 +224,12 @@ class PythonRuntime:
             ValueError: If *level* is not one of "names", "summary", "schema".
         """
         if not self._types:
+            formatter = self._TYPE_FORMATTERS.get(level)
+            if formatter is None:
+                raise ValueError(
+                    f"Unknown type description level '{level}'; "
+                    f"expected one of {sorted(self._TYPE_FORMATTERS)}"
+                )
             return ""
         formatter = self._TYPE_FORMATTERS.get(level)
         if formatter is None:

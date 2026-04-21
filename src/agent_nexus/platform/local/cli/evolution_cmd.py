@@ -183,6 +183,10 @@ def evolution_fix(
     Note: The current engine runs METRIC_CHECK across all skills.
     Per-skill filtering will be added when the engine supports it.
     """
+    if not AGENT_NAME_RE.match(skill_id):
+        typer.echo(f"Invalid skill ID: {skill_id!r}", err=True)
+        raise typer.Exit(code=1)
+
     from agent_nexus.platform.evolution.evolver import EvolutionTrigger
 
     with _engine_context() as engine:
