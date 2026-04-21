@@ -474,6 +474,37 @@ Independent agent scanned from 2 unused angles (input boundaries + security esca
 
 **Test suite**: 244 passed in affected modules, full suite running
 
+### Cycle 18 — Deep Dynamic Verification (2026-04-21)
+
+**Focus**: Full dynamic execution of all CLI commands, Python runtime edge cases, MCP JSON-RPC protocol, agent manifest/composition integrity.
+
+**4 parallel verification tracks**:
+
+| Track | Dynamic Tests | Pass | Fail | Findings |
+|-------|--------------|------|------|----------|
+| CLI Edge Cases | 43 | 42 | 1 | P2: evolution fix accepts empty skill_id |
+| Python Runtime Deep | 61 | 60 | 1 | LOW: describe_types skips level validation when empty |
+| MCP Protocol JSON-RPC | 126 | 126 | 0 | All adapters, gateway, schemas verified |
+| Agent Manifest + Composition | 253 | 253 | 0 | 11 atomic + 5 composite, all DAGs valid |
+| **Total** | **483** | **481** | **2** | **Both fixed (commit ded8736)** |
+
+**Security verification**: 15/15 bypass attempts correctly blocked (builtins access, type() MRO escape, getattr dynamic dispatch, open/pathlib, etc.)
+
+**CLI edge case coverage**: path traversal (`../../../etc/passwd`), injection (`$(whoami)`), empty strings, invalid modes, missing args — all handled correctly.
+
+**Applied Fixes**:
+
+| # | File | Fix | Severity |
+|---|------|-----|----------|
+| 1 | `evolution_cmd.py` | Add AGENT_NAME_RE validation to `fix` subcommand | P2 |
+| 2 | `runtime.py` | Validate level param in `describe_types` even when types empty | LOW |
+
+**Integration tests**: 69 passed in 383s (including real subprocess IPC, real IPythonExecutor, real composition DAGs)
+
+**Test suite**: 2820 unit + 69 integration = 2889 total, 0 failed
+
+**Stale process cleanup**: Killed 5 orphan pytest processes (67/60/40/20/12 min, 430% CPU wasted). Root cause: `| tail -N` pipe buffering deadlock.
+
 ---
 
 ## Migration Guide
