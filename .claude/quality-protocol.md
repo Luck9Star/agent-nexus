@@ -461,13 +461,18 @@ Independent agent scanned from 2 unused angles (input boundaries + security esca
 
 | # | Finding | Impact | Why deferred |
 |---|---------|--------|-------------|
-| 1 | SQLite ops are sync in async paths | HIGH | Requires wrapping in `asyncio.to_thread()` — large refactor |
-| 2 | SecurityChecker AST no cache | HIGH | `lru_cache` adds complexity; only matters for repeated identical code |
-| 3 | EvolutionStore unbounded queries | MEDIUM | Needs pagination API design |
 | 4 | Process spawn latency | HIGH | Architectural — requires pre-warmed agent pool |
 | 5 | `_cleanup_dead` O(N) per health_check | MEDIUM | Behavior change risk (reverted once) |
 
-**Test suite**: 2889+ passed (targeted), 207 pass for modified modules
+**Previously deferred, now FIXED** (Cycle 17b, commit 32f202f):
+
+| # | Finding | Fix | Impact |
+|---|---------|------|--------|
+| 1 | SQLite ops sync in async paths | `asyncio.to_thread()` wrappers: aget_task, aget_ready_tasks, aget_blocked_tasks, aget_parallel_groups, aget_snapshot | HIGH — eliminates event loop blocking in Router paths |
+| 2 | SecurityChecker AST no cache | `@functools.lru_cache(128)` on `_check_cached()` + `clear_cache()` | HIGH — avoids re-parsing identical code |
+| 3 | EvolutionStore unbounded queries | `limit`/`offset` params on `get_active_skills()` and `get_all_skills()` | MEDIUM — bounded memory usage |
+
+**Test suite**: 244 passed in affected modules, full suite running
 
 ---
 
