@@ -153,15 +153,13 @@ class TestExecutorUsesToThread:
 
     @pytest.mark.asyncio
     async def test_run_cell_sync_returns_execution_result(self, shared_executor) -> None:
-        """_run_cell_sync should return a tuple of (result, stdout, stderr)."""
+        """_run_cell_sync should return an IPython ExecutionResult directly."""
         # Ensure shell is initialized before calling _run_cell_sync
         await shared_executor._require_shell()
-        result, stdout, stderr = shared_executor._run_cell_sync("x = 42")
+        result = shared_executor._run_cell_sync("x = 42")
         # Should be an IPython ExecutionResult-like object
         assert result is not None
         assert shared_executor.get("x") == 42
-        assert isinstance(stdout, str)
-        assert isinstance(stderr, str)
 
     @pytest.mark.asyncio
     async def test_timeout_fires_for_long_running_code(self, shared_executor) -> None:

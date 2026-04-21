@@ -61,8 +61,10 @@ class Composition:
         return groups
 
     @classmethod
-    def from_toml(cls, path: Path) -> Composition:
+    def from_toml(cls, path: Path | str) -> Composition:
         """Parse composition.toml file."""
+        if isinstance(path, str):
+            path = Path(path)
         if not path.exists():
             raise CompositionError(f"composition.toml not found: {path}")
 

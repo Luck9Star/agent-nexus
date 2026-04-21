@@ -9,7 +9,9 @@ Reference: cave-agent/src/cave_agent/runtime/executor.py
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
+import sys
 import threading
 from typing import Any
 
@@ -67,8 +69,6 @@ class IPythonExecutor:
         # reset()/close() can wait before clearing user_ns.
         self._exec_done: threading.Event = threading.Event()
         self._exec_done.set()  # Initially "done" (no thread running)
-        # Lazily cached IPython capture_output (avoids import-on-every-execution).
-        self._capture_output: Any | None = None
         self._closed: bool = False  # Prevents shell re-creation after close()
 
     async def _require_shell(self) -> Any:
@@ -264,12 +264,31 @@ class IPythonExecutor:
 
             transformed = shell.transform_cell(code)
             self._exec_done.clear()  # Thread is about to start
-            result, stdout, _stderr = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self._run_cell_sync, transformed,
-                ),
-                timeout=timeout,
-            )
+
+            # Redirect stdout/stderr in the EVENT LOOP THREAD (not inside
+            # the worker thread) so that asyncio.wait_for can correctly
+            # cancel the coroutine on timeout.  Redirecting inside
+            # asyncio.to_thread deadlocks the cancellation path because
+            # the asyncio internals interact with sys.stdout during cancel.
+            buf_out = io.StringIO()
+            buf_err = io.StringIO()
+            old_out = sys.stdout
+            old_err = sys.stderr
+            sys.stdout = buf_out
+            sys.stderr = buf_err
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self._run_cell_sync, transformed,
+                    ),
+                    timeout=timeout,
+                )
+            finally:
+                sys.stdout = old_out
+                sys.stderr = old_err
+
+            stdout = buf_out.getvalue()
+            _stderr = buf_err.getvalue()
 
             # Collect variables created in this execution
             vars_created = self._detect_new_variables(pre_keys)
@@ -322,26 +341,26 @@ class IPythonExecutor:
                 error=f"Execution error: {e}",
             )
 
-    def _run_cell_sync(self, transformed: str) -> tuple[Any, str, str]:
+    def _run_cell_sync(self, transformed: str) -> Any:
         """Synchronous cell execution for use with asyncio.to_thread.
 
         Precondition: ``self._shell`` must already be initialized (guaranteed
         by ``execute()`` calling ``await _require_shell()`` before dispatching
         to ``asyncio.to_thread``).
 
+        NOTE: stdout/stderr are redirected by the caller (_execute_inner) in
+        the event loop thread *before* dispatching to asyncio.to_thread.
+        This function must NOT redirect stdout/stderr itself — doing so inside
+        the worker thread deadlocks asyncio.wait_for's cancellation path.
+
         Returns:
-            Tuple of (IPython ExecutionResult, captured stdout, captured stderr).
+            IPython ExecutionResult.
         """
         if self._shell is None:
             raise RuntimeError("_run_cell_sync called before shell initialization")
-        if self._capture_output is None:
-            from IPython.utils.capture import capture_output  # pyright: ignore[reportMissingImports]
-            self._capture_output = capture_output
-        assert self._capture_output is not None  # guaranteed after init above
         try:
-            with self._capture_output() as captured:
-                result = self._shell.run_cell(transformed, store_history=False)
-            return result, captured.stdout, captured.stderr
+            result = self._shell.run_cell(transformed, store_history=False)
+            return result
         finally:
             self._exec_done.set()  # Signal thread completion
 
