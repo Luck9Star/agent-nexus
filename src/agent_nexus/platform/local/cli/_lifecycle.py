@@ -160,6 +160,9 @@ async def _uninstall(name: str) -> None:
             typer.echo(f"Uninstalled {name}")
         else:
             typer.echo(f"Agent '{name}' is not installed.")
+            raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
     except Exception as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1)
@@ -216,6 +219,8 @@ async def _update(name: str | None, all_agents: bool) -> None:
             typer.echo(f"{agent_name} is already up to date.")
 
     typer.echo(f"Updated {updated_count}/{len(agents_to_update)} agent(s).")
+    if updated_count == 0 and any(isinstance(r, BaseException) for r in results):
+        raise typer.Exit(code=1)
 
 
 async def _list_agents() -> None:
@@ -377,6 +382,7 @@ async def _sources(
             typer.echo(f"Source '{name}' removed.")
         else:
             typer.echo(f"Source '{name}' not found.")
+            raise typer.Exit(code=1)
 
     else:
         typer.echo(

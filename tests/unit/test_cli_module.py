@@ -243,7 +243,7 @@ class TestUninstall:
 
     @pytest.mark.asyncio
     async def test_not_installed(self) -> None:
-        """Uninstall returns False -- prints 'not installed' message."""
+        """Uninstall returns False -- prints 'not installed' message, exits 1."""
         mocks, _, _, _ = _mock_managers()
 
         with (
@@ -254,7 +254,9 @@ class TestUninstall:
             installer_instance = GitInstallerCls.return_value
             installer_instance.uninstall = AsyncMock(return_value=False)
 
-            await _uninstall("missing-agent")
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _uninstall("missing-agent")
+            assert exc_info.value.exit_code == 1
 
         calls = _echo_calls(echo_mock)
         assert any("not installed" in c for c in calls)
@@ -393,7 +395,9 @@ class TestUpdate:
                 side_effect=AgentNotFoundError("missing-agent")
             )
 
-            await _update("missing-agent", all_agents=False)
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _update("missing-agent", all_agents=False)
+            assert exc_info.value.exit_code == 1
 
         calls = _echo_calls(echo_mock)
         assert any("not installed" in c for c in calls)
@@ -413,7 +417,9 @@ class TestUpdate:
                 side_effect=RuntimeError("network timeout")
             )
 
-            await _update("my-agent", all_agents=False)
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _update("my-agent", all_agents=False)
+            assert exc_info.value.exit_code == 1
 
         calls = _echo_calls(echo_mock)
         assert any("Error updating my-agent: network timeout" in c for c in calls)
@@ -680,7 +686,9 @@ class TestSources:
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
-            await _sources("remove", "missing-source", None, None)
+            with pytest.raises(click.exceptions.Exit) as exc_info:
+                await _sources("remove", "missing-source", None, None)
+            assert exc_info.value.exit_code == 1
 
         calls = _echo_calls(echo_mock)
         assert any("not found" in c for c in calls)
