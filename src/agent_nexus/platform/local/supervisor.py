@@ -354,9 +354,9 @@ class AgentSupervisor:
         """Build the subprocess command for an agent.
 
         Strategy:
-        1. If the agent has a venv, use ``<venv>/bin/python -m <pkg>``.
-        2. Otherwise, try ``uvx <agent_name>``.
-        3. Fallback: ``python3 <agent_dir>/main.py``.
+        1. If the agent has a venv, use ``<venv>/bin/python <main.py>``.
+        2. Otherwise, try ``python3 <agent_dir>/<pkg>/main.py``.
+        3. Fallback: ``uvx <agent_name>``.
         """
         if not AGENT_NAME_RE.match(agent_name):
             logger.warning(
@@ -367,6 +367,10 @@ class AgentSupervisor:
 
         agent_dir = self._resolve_agent_dir(agent_name)
         pkg_name = self._resolve_package_name(agent_name, agent_dir)
+
+        # Compute candidate paths once — reused across all strategies
+        agent_main = agent_dir / "main.py"
+        pkg_main = (agent_dir / pkg_name / "main.py") if pkg_name else None
 
         # Strategy 1: venv python
         if entry.venv_path:
@@ -386,27 +390,19 @@ class AgentSupervisor:
                         venv_python,
                     )
                     return None
-                # Try direct main.py in agent root first
-                agent_main = agent_dir / "main.py"
                 if agent_main.exists():
                     return [str(venv_python), str(agent_main)]
-                # Try <pkg>/main.py with discovered package name
-                if pkg_name:
-                    pkg_main = agent_dir / pkg_name / "main.py"
-                    if pkg_main.exists():
-                        return [str(venv_python), str(pkg_main)]
+                if pkg_main and pkg_main.exists():
+                    return [str(venv_python), str(pkg_main)]
                 return None
 
-        # Strategy 2: fallback to python3 <agent_dir>/<pkg>/main.py
-        if pkg_name:
-            pkg_main = agent_dir / pkg_name / "main.py"
-            if pkg_main.exists():
-                return ["python3", str(pkg_main)]
+        # Strategy 2: system python3 <agent_dir>/<pkg>/main.py
+        if pkg_main and pkg_main.exists():
+            return ["python3", str(pkg_main)]
 
-        # Strategy 3: agent root main.py
-        main_py = agent_dir / "main.py"
-        if main_py.exists() and not main_py.is_symlink():
-            return ["python3", str(main_py)]
+        # Strategy 3: system python3 <agent_dir>/main.py (skip symlinks)
+        if agent_main.exists() and not agent_main.is_symlink():
+            return ["python3", str(agent_main)]
 
         return ["uvx", agent_name]
 

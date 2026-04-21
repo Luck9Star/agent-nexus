@@ -40,6 +40,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_SQL_CHUNK_SIZE = 500
+"""Max variables per IN clause — stays well below SQLite's SQLITE_MAX_VARIABLE_NUMBER (999)."""
+
+
+def _chunked_in_fetchall(
+    conn: sqlite3.Connection,
+    sql_template: str,
+    values: list[str] | tuple[str, ...],
+    extra_params: tuple[Any, ...] = (),
+) -> list[tuple[Any, ...]]:
+    """Execute *sql_template* in chunks, bypassing the SQLite variable limit.
+
+    *sql_template* must contain exactly one ``{IN}`` placeholder (curly-braced
+    literal ``IN``) marking where the ``?, ?, ...`` list should be inserted.
+    *extra_params* are appended after the IN values in every chunk execution.
+
+    Returns the concatenated ``fetchall()`` results from all chunks.
+    """
+    vals = list(values)
+    if not vals:
+        return []
+    all_rows: list[tuple[Any, ...]] = []
+    for i in range(0, len(vals), _SQL_CHUNK_SIZE):
+        chunk = vals[i : i + _SQL_CHUNK_SIZE]
+        ph = ",".join("?" * len(chunk))
+        sql = sql_template.replace("{IN}", ph)
+        all_rows.extend(conn.execute(sql, tuple(chunk) + extra_params).fetchall())
+    return all_rows
+
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS skill_records (
     id TEXT PRIMARY KEY,
@@ -318,16 +347,16 @@ class EvolutionStore:
         """
         if not skill_ids:
             return {}
-        placeholders = ",".join("?" * len(skill_ids))
         with self._conn() as conn:
-            rows = conn.execute(
+            rows = _chunked_in_fetchall(
+                conn,
                 "SELECT id, name, version, lineage_origin, lineage_generation, "
                 "lineage_content_diff, lineage_content_snapshot, directory, "
                 "is_active, total_selections, total_applied, total_completions, "
                 "total_fallbacks, created_at, updated_at "
-                f"FROM skill_records WHERE id IN ({placeholders})",
-                tuple(skill_ids),
-            ).fetchall()
+                "FROM skill_records WHERE id IN ({IN})",
+                skill_ids,
+            )
             found_ids = {row[0] for row in rows}
             parents = self._batch_load_parents(conn, found_ids)
             result: dict[str, SkillRecord] = {}
@@ -581,13 +610,13 @@ class EvolutionStore:
             analysis_ids = [r[0] for r in rows]
 
             # Single query for all judgments across these analyses
-            placeholders = ",".join("?" * len(analysis_ids))
-            j_rows = conn.execute(
-                f"SELECT id, analysis_id, skill_id, selected, applied, "
-                f"completed, fell_back FROM skill_judgments "
-                f"WHERE analysis_id IN ({placeholders})",
-                tuple(analysis_ids),
-            ).fetchall()
+            j_rows = _chunked_in_fetchall(
+                conn,
+                "SELECT id, analysis_id, skill_id, selected, applied, "
+                "completed, fell_back FROM skill_judgments "
+                "WHERE analysis_id IN ({IN})",
+                analysis_ids,
+            )
 
             # Group judgments by analysis_id
             judgments_by_analysis: dict[str, list[dict[str, Any]]] = {}
@@ -644,18 +673,19 @@ class EvolutionStore:
             return {}
         if limit_per_skill < 1:
             limit_per_skill = 1
-        placeholders = ",".join("?" * len(skill_ids))
         with self._conn() as conn:
-            rows = conn.execute(
-                f"SELECT id, analysis_id, skill_id, selected, applied, "
-                f"completed, fell_back FROM ("
-                f"SELECT *, ROW_NUMBER() OVER ("
-                f"PARTITION BY skill_id ORDER BY rowid DESC"
-                f") AS rn FROM skill_judgments "
-                f"WHERE skill_id IN ({placeholders})"
-                f") WHERE rn <= ?",
-                tuple(skill_ids) + (limit_per_skill,),
-            ).fetchall()
+            rows = _chunked_in_fetchall(
+                conn,
+                "SELECT id, analysis_id, skill_id, selected, applied, "
+                "completed, fell_back FROM ("
+                "SELECT *, ROW_NUMBER() OVER ("
+                "PARTITION BY skill_id ORDER BY rowid DESC"
+                ") AS rn FROM skill_judgments "
+                "WHERE skill_id IN ({IN})"
+                ") WHERE rn <= ?",
+                list(skill_ids),
+                extra_params=(limit_per_skill,),
+            )
         result: dict[str, list[dict[str, Any]]] = {sid: [] for sid in skill_ids}
         for r in rows:
             sid = r[2]
@@ -752,12 +782,12 @@ class EvolutionStore:
                     # committed by the _conn context manager on normal exit,
                     # leaving some parents deactivated with no replacement.
                     if parent_skill_ids:
-                        placeholders = ",".join("?" * len(parent_skill_ids))
                         found = {
-                            r[0] for r in conn.execute(
-                                f"SELECT id FROM skill_records WHERE id IN ({placeholders})",
-                                tuple(parent_skill_ids),
-                            ).fetchall()
+                            r[0] for r in _chunked_in_fetchall(
+                                conn,
+                                "SELECT id FROM skill_records WHERE id IN ({IN})",
+                                parent_skill_ids,
+                            )
                         }
                         missing = set(parent_skill_ids) - found
                         if missing:
@@ -769,11 +799,14 @@ class EvolutionStore:
                     # All checks passed — deactivate parents atomically.
                     if parent_skill_ids:
                         now = _now_iso()
-                        conn.execute(
-                            f"UPDATE skill_records SET is_active = 0, updated_at = ? "
-                            f"WHERE id IN ({','.join('?' * len(parent_skill_ids))})",
-                            (now, *parent_skill_ids),
-                        )
+                        for ci in range(0, len(parent_skill_ids), _SQL_CHUNK_SIZE):
+                            chunk = parent_skill_ids[ci : ci + _SQL_CHUNK_SIZE]
+                            ph = ",".join("?" * len(chunk))
+                            conn.execute(
+                                f"UPDATE skill_records SET is_active = 0, updated_at = ? "
+                                f"WHERE id IN ({ph})",
+                                (now, *chunk),
+                            )
 
                     # Guard: after deactivating parents, if another active
                     # skill with the same name still exists (from a
@@ -914,16 +947,16 @@ class EvolutionStore:
             if not all_ancestor_ids:
                 return {sid: [] for sid in skill_ids}
 
-            placeholders = ",".join("?" * len(all_ancestor_ids))
-            rows = conn.execute(
+            rows = _chunked_in_fetchall(
+                conn,
                 "SELECT id, name, version, lineage_origin, "
                 "lineage_generation, lineage_content_diff, "
                 "lineage_content_snapshot, directory, is_active, "
                 "total_selections, total_applied, total_completions, "
                 "total_fallbacks, created_at, updated_at "
-                f"FROM skill_records WHERE id IN ({placeholders})",
-                tuple(all_ancestor_ids),
-            ).fetchall()
+                "FROM skill_records WHERE id IN ({IN})",
+                list(all_ancestor_ids),
+            )
 
             ancestors_ids = {r[0] for r in rows}
             parents = self._batch_load_parents(conn, ancestors_ids)
@@ -970,16 +1003,16 @@ class EvolutionStore:
                 return []
 
             # Phase 2: Batch-load all ancestor records in one query
-            placeholders = ",".join("?" * len(visited))
-            rows = conn.execute(
+            rows = _chunked_in_fetchall(
+                conn,
                 "SELECT id, name, version, lineage_origin, "
                 "lineage_generation, lineage_content_diff, "
                 "lineage_content_snapshot, directory, is_active, "
                 "total_selections, total_applied, total_completions, "
                 "total_fallbacks, created_at, updated_at "
-                f"FROM skill_records WHERE id IN ({placeholders})",
-                tuple(visited),
-            ).fetchall()
+                "FROM skill_records WHERE id IN ({IN})",
+                list(visited),
+            )
 
             ancestor_ids = {r[0] for r in rows}
             parents = self._batch_load_parents(conn, ancestor_ids)
@@ -1206,12 +1239,12 @@ class EvolutionStore:
         """
         parents: dict[str, list[str]] = {}
         if skill_ids:
-            placeholders = ",".join("?" * len(skill_ids))
-            rows = conn.execute(
-                f"SELECT skill_id, parent_id FROM skill_lineage_parents "
-                f"WHERE skill_id IN ({placeholders})",
-                tuple(skill_ids),
-            ).fetchall()
+            rows = _chunked_in_fetchall(
+                conn,
+                "SELECT skill_id, parent_id FROM skill_lineage_parents "
+                "WHERE skill_id IN ({IN})",
+                list(skill_ids),
+            )
         else:
             rows = conn.execute(
                 "SELECT skill_id, parent_id FROM skill_lineage_parents"

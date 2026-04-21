@@ -33,6 +33,9 @@ class LockfileManager:
     def __init__(self, lockfile_path: Path) -> None:
         self._path = lockfile_path
         self._corrupt_detected = False
+        # mtime-based cache to avoid re-reading unchanged lockfile
+        self._cache: Lockfile | None = None
+        self._cache_mtime: float = 0.0
 
     # ------------------------------------------------------------------
     # Public API
@@ -43,24 +46,45 @@ class LockfileManager:
 
         Returns an empty :class:`Lockfile` when the file does not exist or
         cannot be parsed.
+
+        Results are cached based on the file's mtime — repeated calls
+        return the same object until the file is modified.
         """
+        # mtime-based cache: skip disk I/O when file has not changed
+        try:
+            mtime = self._path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+
+        if self._cache is not None and mtime == self._cache_mtime:
+            logger.debug("Returning cached lockfile (mtime unchanged)")
+            return self._cache
+
         if not self._path.exists():
             logger.debug("Lockfile not found at %s, returning empty", self._path)
-            return Lockfile()
+            result = Lockfile()
+            self._cache = result
+            self._cache_mtime = mtime
+            return result
 
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
-            lockfile = Lockfile.model_validate(raw)
-            logger.debug("Loaded lockfile with %d agent(s)", len(lockfile.agents))
+            result = Lockfile.model_validate(raw)
+            logger.debug("Loaded lockfile with %d agent(s)", len(result.agents))
             self._corrupt_detected = False
-            return lockfile
+            self._cache = result
+            self._cache_mtime = mtime
+            return result
         except (json.JSONDecodeError, ValueError, KeyError, TypeError) as exc:
             logger.error(
                 "Corrupt lockfile %s — returning empty agents list: %s",
                 self._path, exc,
             )
             self._corrupt_detected = True
-            return Lockfile()
+            result = Lockfile()
+            self._cache = result
+            self._cache_mtime = mtime
+            return result
 
     @contextmanager
     def _file_lock(self) -> Generator[None, None, None]:
@@ -112,6 +136,9 @@ class LockfileManager:
                 )
             self._corrupt_detected = False
 
+        # Invalidate cache — _save changes the file on disk
+        self._cache = None
+
         payload = lockfile.model_dump(mode="json")
         content = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
 
@@ -136,9 +163,9 @@ class LockfileManager:
     def get_entry(self, agent_name: str) -> LockfileEntry | None:
         """Return the lockfile entry for *agent_name*, or ``None``.
 
-        Reads the lockfile from disk on every call.  For bulk operations
-        prefer :meth:`get_entry_from` to avoid redundant I/O and TOCTOU
-        races.
+        Delegates to :meth:`load` which uses mtime-based caching.
+        For bulk operations prefer :meth:`get_entry_from` to avoid
+        redundant I/O and TOCTOU races.
         """
         return self.load().agents.get(agent_name)
 
