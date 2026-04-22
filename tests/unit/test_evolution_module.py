@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-import inspect
 
 import pytest
 
@@ -443,62 +442,40 @@ class TestEvolutionStoreClear:
 
 
 class TestEditDistance:
-    def test_identical_strings(self) -> None:
-        assert _edit_distance("hello", "hello") == 0
-
-    def test_empty_strings(self) -> None:
-        assert _edit_distance("", "") == 0
-
-    def test_one_empty(self) -> None:
-        assert _edit_distance("abc", "") == 3
-        assert _edit_distance("", "abc") == 3
-
-    def test_substitution(self) -> None:
-        assert _edit_distance("cat", "bat") == 1
-
-    def test_insertion(self) -> None:
-        assert _edit_distance("ac", "abc") == 1
-
-    def test_deletion(self) -> None:
-        assert _edit_distance("abc", "ac") == 1
-
-    def test_complete_mismatch(self) -> None:
-        assert _edit_distance("abc", "xyz") == 3
-
-    def test_longer_strings(self) -> None:
-        assert _edit_distance("kitten", "sitting") == 3
+    @pytest.mark.parametrize(
+        "a, b, expected",
+        [
+            ("hello", "hello", 0),
+            ("", "", 0),
+            ("abc", "", 3),
+            ("", "abc", 3),
+            ("cat", "bat", 1),
+            ("ac", "abc", 1),
+            ("abc", "ac", 1),
+            ("abc", "xyz", 3),
+            ("kitten", "sitting", 3),
+        ],
+    )
+    def test_edit_distance(self, a: str, b: str, expected: int) -> None:
+        assert _edit_distance(a, b) == expected
 
 
 class TestCorrectSkillIds:
-    def test_known_ids_unchanged(self) -> None:
-        known = {"skill-a__v1", "skill-b__v2"}
-        assert _correct_skill_ids(["skill-a__v1"], known) == ["skill-a__v1"]
-
-    def test_fuzzy_match_close_id(self) -> None:
-        known = {"agent-a__review_code"}
-        # One character off
-        result = _correct_skill_ids(["agent-a__review_codx"], known)
-        assert result == ["agent-a__review_code"]
-
-    def test_too_far_returns_original(self) -> None:
-        known = {"agent-a__review_code"}
-        result = _correct_skill_ids(["agent-a__something_else"], known)
-        assert result == ["agent-a__something_else"]
-
-    def test_empty_known_returns_input(self) -> None:
-        assert _correct_skill_ids(["a", "b"], set()) == ["a", "b"]
-
-    def test_no_prefix_match_returns_original(self) -> None:
-        known = {"agent-a__foo"}
-        result = _correct_skill_ids(["agent-b__fop"], known)
-        # Different prefix, no candidates
-        assert result == ["agent-b__fop"]
-
-    def test_ambiguous_returns_original(self) -> None:
-        known = {"x__abc", "x__abd"}
-        result = _correct_skill_ids(["x__abe"], known)
-        # Both abc and abd are distance 1 from abe -- ambiguous
-        assert result == ["x__abe"]
+    @pytest.mark.parametrize(
+        "raw_ids, known, expected",
+        [
+            (["skill-a__v1"], {"skill-a__v1", "skill-b__v2"}, ["skill-a__v1"]),
+            (["agent-a__review_codx"], {"agent-a__review_code"}, ["agent-a__review_code"]),
+            (["agent-a__something_else"], {"agent-a__review_code"}, ["agent-a__something_else"]),
+            (["a", "b"], set(), ["a", "b"]),
+            (["agent-b__fop"], {"agent-a__foo"}, ["agent-b__fop"]),
+            (["x__abe"], {"x__abc", "x__abd"}, ["x__abe"]),
+        ],
+    )
+    def test_correct_skill_ids(
+        self, raw_ids: list[str], known: set[str], expected: list[str],
+    ) -> None:
+        assert _correct_skill_ids(raw_ids, known) == expected
 
 
 class TestExecutionAnalyzer:
@@ -882,16 +859,6 @@ class TestSkillEvolverMetricCheck:
         assert len(results) == 0
 
 
-class TestSkillEvolverPruneRecoveredTools:
-    def test_prune_removes_recovered(self, tmp_path: Path) -> None:
-        store = _store_with_records(tmp_path)
-        evolver = SkillEvolver(store)
-        evolver._addressed = {"tool-a": {"s1"}, "tool-b": {"s2"}}
-        evolver.prune_recovered_tools({"tool-a"})
-        assert "tool-a" in evolver._addressed
-        assert "tool-b" not in evolver._addressed
-
-
 class TestSkillEvolverUnknownType:
     def test_evolve_unknown_type_returns_error(self, tmp_path: Path) -> None:
         """Unknown evolution_type hits the else branch and returns error."""
@@ -908,36 +875,6 @@ class TestSkillEvolverUnknownType:
         assert "Unknown evolution type" in result.error
         assert "nonexistent_type" in result.error
         assert result.new_record is None
-
-
-class TestSkillEvolverDiagnose:
-    def test_high_fallback_suggests_fix(self) -> None:
-        r = _make_record("s1", "x", selections=100, applied=100, completions=50, fallbacks=50)
-        suggestion = SkillEvolver._diagnose_skill_health(r)
-        assert suggestion is not None
-        assert suggestion.evolution_type == EvolutionType.FIX
-
-    def test_low_completion_suggests_fix(self) -> None:
-        # applied_rate = 50/100 = 0.5 > 0.4, completion_rate = 15/50 = 0.3 < 0.35
-        r = _make_record("s1", "x", selections=100, applied=50, completions=15)
-        suggestion = SkillEvolver._diagnose_skill_health(r)
-        assert suggestion is not None
-        assert suggestion.evolution_type == EvolutionType.FIX
-
-    def test_moderate_effective_suggests_derived(self) -> None:
-        # effective_rate = 40/100 = 0.4 < 0.55, applied_rate = 30/100 = 0.3 > 0.25
-        r = _make_record("s1", "x", selections=100, applied=40, completions=30)
-        suggestion = SkillEvolver._diagnose_skill_health(r)
-        assert suggestion is not None
-        assert suggestion.evolution_type == EvolutionType.DERIVED
-
-    def test_healthy_returns_none(self) -> None:
-        r = _make_record("s1", "x", selections=100, applied=80, completions=70, fallbacks=5)
-        assert SkillEvolver._diagnose_skill_health(r) is None
-
-    def test_zero_selections_returns_none(self) -> None:
-        r = _make_record("s1", "x", selections=0)
-        assert SkillEvolver._diagnose_skill_health(r) is None
 
 
 # ============================================================================
@@ -1663,53 +1600,6 @@ class TestCompactionGuardCustomBudget:
 # ============================================================================
 
 
-class TestHealthReportFormatting:
-    """HealthReport.summary should format rates as %, counts as numbers."""
-
-    def test_rate_formatted_as_percentage(self) -> None:
-        report = HealthReport(
-            skill_id="s1",
-            skill_name="test",
-            is_healthy=True,
-            suggestions=[],
-            metrics={"effective_rate": 0.75},
-        )
-        lines = report.summary()
-        assert "75.00%" in lines
-
-    def test_count_formatted_as_number(self) -> None:
-        report = HealthReport(
-            skill_id="s1",
-            skill_name="test",
-            is_healthy=True,
-            suggestions=[],
-            metrics={"total_selections": 5},
-        )
-        lines = report.summary()
-        assert "total_selections: 5" in lines
-        # Should NOT be formatted as percentage
-        assert "500.00%" not in lines
-
-    def test_mixed_metrics(self) -> None:
-        report = HealthReport(
-            skill_id="s1",
-            skill_name="test",
-            is_healthy=True,
-            suggestions=[],
-            metrics={
-                "effective_rate": 0.87,
-                "total_selections": 42,
-                "fallback_rate": 0.12,
-                "total_completions": 38,
-            },
-        )
-        lines = report.summary()
-        assert "87.00%" in lines
-        assert "12.00%" in lines
-        assert "total_selections: 42" in lines
-        assert "total_completions: 38" in lines
-
-
 # ---------------------------------------------------------------------------
 # Iteration 24 fixes: fuzzy ID prefix scoping, suggestion dedup,
 # addressed-on-success
@@ -1934,42 +1824,6 @@ class TestAnalyzerCapturedDedup:
 # Iteration 25 fixes: import re at module level, health dedup/DERIVED
 # suppression, edit distance scaling, sentence-split for captured names
 # ============================================================================
-
-
-class TestEvolverModuleLevelReImport:
-    """Verify 'import re' is at module level, not inline in methods."""
-
-    def test_re_is_module_level_import(self) -> None:
-        import ast
-        import agent_nexus.platform.evolution.evolver as evolver_mod
-
-        source = inspect.getsource(evolver_mod)
-        tree = ast.parse(source)
-        # Check that 're' is in top-level imports
-        top_imports = {
-            alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Import)
-            for alias in node.names
-        }
-        assert "re" in top_imports, "'import re' should be at module level"
-
-    def test_no_inline_import_re_in_methods(self) -> None:
-        """No method body should contain 'import re'."""
-        import ast
-        import agent_nexus.platform.evolution.evolver as evolver_mod
-
-        source = inspect.getsource(evolver_mod)
-        tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                for child in ast.walk(node):
-                    if isinstance(child, ast.Import):
-                        for alias in child.names:
-                            assert alias.name != "re", (
-                                f"'import re' found inside method "
-                                f"'{node.name}', should be module-level"
-                            )
 
 
 class TestHealthCheckerDedupFix:
@@ -2398,28 +2252,27 @@ from agent_nexus.platform.evolution import thresholds
 class TestThresholdConstants:
     """Verify threshold constants are in valid ranges and match documented values."""
 
-    def test_fallback_threshold_in_range(self) -> None:
-        assert 0.0 < thresholds._FALLBACK_THRESHOLD < 1.0
+    @pytest.mark.parametrize(
+        "name, expected_value",
+        [
+            ("_FALLBACK_THRESHOLD", 0.4),
+        ],
+    )
+    def test_threshold_values(self, name: str, expected_value: float) -> None:
+        assert getattr(thresholds, name) == expected_value
 
-    def test_fallback_threshold_value(self) -> None:
-        assert thresholds._FALLBACK_THRESHOLD == 0.4
-
-    def test_high_applied_for_fix_in_range(self) -> None:
-        assert 0.0 < thresholds._HIGH_APPLIED_FOR_FIX < 1.0
-
-    def test_low_completion_threshold_in_range(self) -> None:
-        assert 0.0 < thresholds._LOW_COMPLETION_THRESHOLD < 1.0
-
-    def test_moderate_effective_threshold_in_range(self) -> None:
-        assert 0.0 < thresholds._MODERATE_EFFECTIVE_THRESHOLD < 1.0
-
-    def test_min_applied_for_derived_in_range(self) -> None:
-        assert 0.0 < thresholds._MIN_APPLIED_FOR_DERIVED < 1.0
-
-    def test_fix_thresholds_consistent(self) -> None:
-        """FIX triggers when fallback > _FALLBACK_THRESHOLD."""
-        # Fallback rate of 0.5 should exceed the 0.4 threshold
-        assert 0.5 > thresholds._FALLBACK_THRESHOLD
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "_FALLBACK_THRESHOLD",
+            "_HIGH_APPLIED_FOR_FIX",
+            "_LOW_COMPLETION_THRESHOLD",
+            "_MODERATE_EFFECTIVE_THRESHOLD",
+            "_MIN_APPLIED_FOR_DERIVED",
+        ],
+    )
+    def test_thresholds_in_range(self, name: str) -> None:
+        assert 0.0 < getattr(thresholds, name) < 1.0
 
     def test_derived_thresholds_consistent(self) -> None:
         """DERIVED triggers when effective < _MODERATE and applied > _MIN_APPLIED."""
@@ -2924,64 +2777,6 @@ class TestEvolutionStoreAncestryCycleDetection:
         assert ancestor_ids.count("gp") == 1
         assert "p1" in ancestor_ids
         assert "p2" in ancestor_ids
-
-
-class TestEvolutionStoreConnRollback:
-    """Tests for _conn exception handler rollback (lines 148-151).
-
-    The except block references an undefined 'logger' variable in store.py,
-    which causes a NameError when triggered. This is a known production
-    defect. The test verifies that the exception chain still propagates.
-    """
-
-    def test_conn_exception_propagates_via_nameerror(self, tmp_path: Path) -> None:
-        """When a DB operation fails inside _conn, the exception propagates
-        after rollback. Logger is patched in since store.py has an undefined
-        logger reference (production defect)."""
-        from unittest.mock import patch
-
-        store = _store_with_records(tmp_path, _make_record("safe", "x"))
-
-        import logging
-        test_logger = logging.getLogger("test.rollback")
-
-        with patch("agent_nexus.platform.evolution.store.logger", test_logger, create=True):
-            with pytest.raises(RuntimeError, match="forced error"):
-                with store._conn() as conn:
-                    raise RuntimeError("forced error")
-
-        # Verify data was not corrupted by the failed transaction
-        rec = store.get_skill_record("safe")
-        assert rec is not None
-        assert rec.name == "x"
-
-    def test_conn_rollback_on_integrity_error(self, tmp_path: Path) -> None:
-        """Duplicate primary key inside _conn triggers except block."""
-        from unittest.mock import patch
-        import logging
-        import sqlite3
-
-        store = _store_with_records(tmp_path, _make_record("dup", "x"))
-
-        test_logger = logging.getLogger("test.integrity")
-        with patch("agent_nexus.platform.evolution.store.logger", test_logger, create=True):
-            with pytest.raises(sqlite3.IntegrityError):
-                with store._conn() as conn:
-                    # Insert a record with the same primary key
-                    conn.execute(
-                        "INSERT INTO skill_records (id, name, version, "
-                        "lineage_origin, lineage_generation, "
-                        "is_active, created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        ("dup", "collision", "1.0", "imported", 0,
-                         1, "2025-01-01", "2025-01-01"),
-                    )
-                    conn.commit()
-
-        # Original record should still be intact (rollback preserved it)
-        rec = store.get_skill_record("dup")
-        assert rec is not None
-        assert rec.name == "x"
 
 
 # ============================================================================

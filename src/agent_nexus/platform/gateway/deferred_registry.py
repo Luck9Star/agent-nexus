@@ -213,14 +213,19 @@ class DeferredAgentRegistry:
             # 1. Start subprocess if not running
             if not info.is_running and info.start_command:
                 cwd = Path(info.start_cwd) if info.start_cwd else None
-                handle = await self._pm.start_agent(
-                    name=name,
-                    command=info.start_command,
-                    cwd=cwd,
-                    env=info.start_env or None,
-                )
-                info.handle = handle
-                logger.info("Started subprocess for agent '%s'", name)
+                try:
+                    handle = await self._pm.start_agent(
+                        name=name,
+                        command=info.start_command,
+                        cwd=cwd,
+                        env=info.start_env or None,
+                    )
+                    info.handle = handle
+                    logger.info("Started subprocess for agent '%s'", name)
+                except Exception:
+                    # Clean up handle on start failure so the caller can retry.
+                    info.handle = None
+                    raise
 
             # 2. Discover tools via IPC
             if info.handle is not None and info.handle.is_alive:

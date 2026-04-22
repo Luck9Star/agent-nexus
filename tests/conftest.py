@@ -62,8 +62,16 @@ def shared_runtime(_shared_runtime):
 
 @pytest.fixture(autouse=True)
 def _gc_force_collect():
-    """Force garbage collection after every test."""
+    """Force garbage collection after every test.
+
+    Disabled by default — session-scoped IPython fixtures already share
+    shells, so per-test GC adds ~100s overhead for 2889 tests without
+    meaningful memory benefit.  Set env var FORCE_GC=1 to re-enable.
+    """
     yield
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        gc.collect()
+    import os
+
+    if os.environ.get("FORCE_GC", "").strip() == "1":
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            gc.collect()

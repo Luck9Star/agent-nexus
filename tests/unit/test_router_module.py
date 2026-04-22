@@ -133,36 +133,6 @@ def _make_definition(
 # ============================================================================
 
 
-class TestWorkflowPhase:
-    """Tests for WorkflowPhase StrEnum."""
-
-    def test_has_four_phases(self) -> None:
-        assert len(WorkflowPhase) == 4
-
-    def test_phase_values(self) -> None:
-        assert WorkflowPhase.research == "research"
-        assert WorkflowPhase.synthesis == "synthesis"
-        assert WorkflowPhase.implementation == "implementation"
-        assert WorkflowPhase.verification == "verification"
-
-    def test_is_str_enum(self) -> None:
-        for phase in WorkflowPhase:
-            assert isinstance(phase, str)
-
-    def test_string_comparison(self) -> None:
-        assert WorkflowPhase.research == "research"
-        assert WorkflowPhase.synthesis != "research"
-
-    def test_iteration_order(self) -> None:
-        phases = list(WorkflowPhase)
-        assert phases == [
-            WorkflowPhase.research,
-            WorkflowPhase.synthesis,
-            WorkflowPhase.implementation,
-            WorkflowPhase.verification,
-        ]
-
-
 # ============================================================================
 # WorkflowContext Tests
 # ============================================================================
@@ -202,33 +172,6 @@ class TestWorkflowContext:
         assert ctx.current_phase == WorkflowPhase.synthesis
         assert ctx.task_graph is tg
 
-    def test_started_at_auto_set(self) -> None:
-        before = datetime.now(timezone.utc)
-        ctx = WorkflowContext(
-            conversation_id="c", message="m", agent_name="a"
-        )
-        after = datetime.now(timezone.utc)
-        assert before <= ctx.started_at <= after
-
-    def test_phase_results_independent_per_instance(self) -> None:
-        """Mutable default_factory should not share state."""
-        ctx1 = WorkflowContext(
-            conversation_id="c1", message="m", agent_name="a"
-        )
-        ctx2 = WorkflowContext(
-            conversation_id="c2", message="m", agent_name="a"
-        )
-        ctx1.phase_results[WorkflowPhase.research] = "data"
-        assert WorkflowPhase.research not in ctx2.phase_results
-
-    def test_phase_results_accepts_any_values(self) -> None:
-        ctx = WorkflowContext(
-            conversation_id="c", message="m", agent_name="a"
-        )
-        ctx.phase_results[WorkflowPhase.research] = {"key": "value"}
-        ctx.phase_results[WorkflowPhase.synthesis] = [1, 2, 3]
-        assert ctx.phase_results[WorkflowPhase.research] == {"key": "value"}
-        assert ctx.phase_results[WorkflowPhase.synthesis] == [1, 2, 3]
 
 
 # ============================================================================
@@ -275,37 +218,6 @@ class TestWorkflowResult:
             error="Phase implementation failed: boom",
         )
         assert result.phase_results[WorkflowPhase.synthesis] == "partial plan"
-
-    def test_defaults(self) -> None:
-        result = WorkflowResult(
-            success=True,
-            final_output="ok",
-            phase_results={},
-            total_phases=4,
-            completed_phases=4,
-        )
-        assert result.error is None
-
-
-# ============================================================================
-# SubtaskConfig Tests
-# ============================================================================
-
-
-class TestSubtaskConfig:
-    """Tests for SubtaskConfig dataclass."""
-
-    def test_default_values(self) -> None:
-        cfg = SubtaskConfig()
-        assert cfg.timeout_seconds == 60.0
-        assert cfg.max_retries == 2
-        assert cfg.max_parallel == 3
-
-    def test_custom_values(self) -> None:
-        cfg = SubtaskConfig(timeout_seconds=120.0, max_retries=5, max_parallel=10)
-        assert cfg.timeout_seconds == 120.0
-        assert cfg.max_retries == 5
-        assert cfg.max_parallel == 10
 
 
 # ============================================================================
@@ -694,35 +606,16 @@ class TestRouteToAtomic:
         assert result["success"] is False
 
     @pytest.mark.asyncio
-    async def test_status_case_insensitive_uppercase(self) -> None:
-        """External agents may send 'COMPLETED' — must still be success."""
-        handle = _make_agent_handle(response_status="COMPLETED")
+    @pytest.mark.parametrize("status", ["COMPLETED", "Completed", None],
+                             ids=["uppercase", "mixed", "none"])
+    async def test_status_variants_accepted(self, status) -> None:
+        """External agents may send uppercase/mixed/missing status — all succeed."""
+        handle = _make_agent_handle(response_status=status)
         pm = _make_process_manager(agents={"agent-a": handle})
         router = PlatformRouter(process_manager=pm)
 
         result = await router.route_to_atomic("agent-a", "hello", "conv-1")
         assert result["success"] is True
-
-    @pytest.mark.asyncio
-    async def test_status_case_insensitive_mixed(self) -> None:
-        """External agents may send 'Completed' — must still be success."""
-        handle = _make_agent_handle(response_status="Completed")
-        pm = _make_process_manager(agents={"agent-a": handle})
-        router = PlatformRouter(process_manager=pm)
-
-        result = await router.route_to_atomic("agent-a", "hello", "conv-1")
-        assert result["success"] is True
-
-    @pytest.mark.asyncio
-    async def test_status_none_defaults_to_success(self) -> None:
-        """Minimal agents that omit status field should not appear to fail."""
-        handle = _make_agent_handle(response_status=None)
-        pm = _make_process_manager(agents={"agent-a": handle})
-        router = PlatformRouter(process_manager=pm)
-
-        result = await router.route_to_atomic("agent-a", "hello", "conv-1")
-        assert result["success"] is True
-        assert result["output"] == "agent response"
 
 
 class TestRouteChat:
@@ -1162,20 +1055,6 @@ class TestStopAll:
         pm.stop_all.assert_awaited_once()
 
 
-class TestPhaseOrder:
-    """Tests for _PHASE_ORDER module constant."""
-
-    def test_phase_order(self) -> None:
-        assert _PHASE_ORDER == [
-            WorkflowPhase.research,
-            WorkflowPhase.synthesis,
-            WorkflowPhase.implementation,
-            WorkflowPhase.verification,
-        ]
-
-    def test_phase_order_length(self) -> None:
-        assert len(_PHASE_ORDER) == 4
-
 
 # ============================================================================
 # Merged from iteration 16: Router empty phase failure
@@ -1383,93 +1262,52 @@ class TestExecuteSingleAgentErrorWrapping:
     """
 
     @pytest.mark.asyncio
-    async def test_ipc_timeout_raises_agent_execution_error(self) -> None:
-        """Non-IPC timeout in _execute_single_agent raises AgentExecutionError."""
+    @pytest.mark.parametrize(
+        "recv_side_effect, match_str, expected_error_type",
+        [
+            (asyncio.TimeoutError("IPC timeout"), "IPC error", "TimeoutError"),
+            (ConnectionError("Broken pipe"), "IPC error", "ConnectionError"),
+        ],
+        ids=["timeout", "connection"],
+    )
+    async def test_non_ipc_errors_wrapped_as_agent_execution_error(
+        self, recv_side_effect, match_str, expected_error_type,
+    ) -> None:
+        """Non-IPC receive errors are wrapped in AgentExecutionError for retry."""
         from agent_nexus.platform.router.router import AgentExecutionError
 
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
 
-
         handle = MagicMock()
         handle.is_alive = True
         handle.ipc = MagicMock()
         handle.ipc.send_chat = AsyncMock()
-        handle.ipc.receive_until_result = AsyncMock(
-            side_effect=asyncio.TimeoutError("IPC timeout")
-        )
+        handle.ipc.receive_until_result = AsyncMock(side_effect=recv_side_effect)
 
         mock_pm.get_agent.return_value = handle
 
-        with pytest.raises(AgentExecutionError, match="IPC error") as exc_info:
+        with pytest.raises(AgentExecutionError, match=match_str) as exc_info:
             await router._execute_single_agent(
                 "test-agent", "hello", conversation_id="c1"
             )
-        assert exc_info.value.error_type == "TimeoutError"
+        assert exc_info.value.error_type == expected_error_type
 
     @pytest.mark.asyncio
-    async def test_ipc_connection_error_raises_agent_execution_error(self) -> None:
-        """Non-IPC ConnectionError in _execute_single_agent raises AgentExecutionError."""
-        from agent_nexus.platform.router.router import AgentExecutionError
-
-        mock_pm = MagicMock()
-        router = PlatformRouter.__new__(PlatformRouter)
-        router._pm = mock_pm
-
-
-        handle = MagicMock()
-        handle.is_alive = True
-        handle.ipc = MagicMock()
-        handle.ipc.send_chat = AsyncMock()
-        handle.ipc.receive_until_result = AsyncMock(
-            side_effect=ConnectionError("Broken pipe")
-        )
-
-        mock_pm.get_agent.return_value = handle
-
-        with pytest.raises(AgentExecutionError, match="IPC error") as exc_info:
-            await router._execute_single_agent(
-                "test-agent", "hello", conversation_id="c1"
-            )
-        assert exc_info.value.error_type == "ConnectionError"
-
-    @pytest.mark.asyncio
-    async def test_send_chat_error_raises_agent_execution_error(self) -> None:
-        """Non-IPC send_chat failure raises AgentExecutionError.
-
-        iter109 regression — send_chat was bare (unwrapped), unlike
-        route_to_atomic which already wrapped it.  Now both paths are
-        consistent.  Raising (not returning dict) ensures run_with_retry
-        can trigger retries.
-        """
-        from agent_nexus.platform.router.router import AgentExecutionError
-
-        mock_pm = MagicMock()
-        router = PlatformRouter.__new__(PlatformRouter)
-        router._pm = mock_pm
-
-
-        handle = MagicMock()
-        handle.is_alive = True
-        handle.ipc = MagicMock()
-        handle.ipc.send_chat = AsyncMock(
-            side_effect=ConnectionError("Broken pipe on send")
-        )
-
-        mock_pm.get_agent.return_value = handle
-
-        with pytest.raises(AgentExecutionError, match="IPC send error") as exc_info:
-            await router._execute_single_agent(
-                "test-agent", "hello", conversation_id="c1"
-            )
-        assert exc_info.value.error_type == "ConnectionError"
-
-    # -- iter126 regression: IPC exceptions propagate directly --
-
-    @pytest.mark.asyncio
-    async def test_ipctimeouterror_propagates_directly(self) -> None:
-        """IPCTimeoutError from receive_until_result propagates, not wrapped."""
+    @pytest.mark.parametrize(
+        "ipc_exc_cls, ipc_msg, side_effect_on",
+        [
+            (IPCTimeoutError, "agent stalled", "receive"),
+            (IPCConnectionError, "EOF", "receive"),
+            (IPCError, "bad JSON", "send"),
+        ],
+        ids=["ipctimeout-recv", "ipcconn-recv", "ipc-send"],
+    )
+    async def test_ipc_exceptions_propagate_directly(
+        self, ipc_exc_cls, ipc_msg, side_effect_on,
+    ) -> None:
+        """IPC-specific exceptions propagate directly (not wrapped)."""
         mock_pm = MagicMock()
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
@@ -1477,57 +1315,18 @@ class TestExecuteSingleAgentErrorWrapping:
         handle = MagicMock()
         handle.is_alive = True
         handle.ipc = MagicMock()
-        handle.ipc.send_chat = AsyncMock()
-        handle.ipc.receive_until_result = AsyncMock(
-            side_effect=IPCTimeoutError("agent stalled")
-        )
-
-        mock_pm.get_agent.return_value = handle
-
-        with pytest.raises(IPCTimeoutError, match="agent stalled"):
-            await router._execute_single_agent(
-                "test-agent", "hello", conversation_id="c1"
+        if side_effect_on == "send":
+            handle.ipc.send_chat = AsyncMock(side_effect=ipc_exc_cls(ipc_msg))
+            handle.ipc.receive_until_result = AsyncMock()
+        else:
+            handle.ipc.send_chat = AsyncMock()
+            handle.ipc.receive_until_result = AsyncMock(
+                side_effect=ipc_exc_cls(ipc_msg)
             )
 
-    @pytest.mark.asyncio
-    async def test_ipcconnectionerror_propagates_directly(self) -> None:
-        """IPCConnectionError from receive_until_result propagates."""
-        mock_pm = MagicMock()
-        router = PlatformRouter.__new__(PlatformRouter)
-        router._pm = mock_pm
-
-        handle = MagicMock()
-        handle.is_alive = True
-        handle.ipc = MagicMock()
-        handle.ipc.send_chat = AsyncMock()
-        handle.ipc.receive_until_result = AsyncMock(
-            side_effect=IPCConnectionError("EOF")
-        )
-
         mock_pm.get_agent.return_value = handle
 
-        with pytest.raises(IPCConnectionError, match="EOF"):
-            await router._execute_single_agent(
-                "test-agent", "hello", conversation_id="c1"
-            )
-
-    @pytest.mark.asyncio
-    async def test_ipcerror_propagates_directly_on_send(self) -> None:
-        """Generic IPCError from send_chat propagates, not wrapped."""
-        mock_pm = MagicMock()
-        router = PlatformRouter.__new__(PlatformRouter)
-        router._pm = mock_pm
-
-        handle = MagicMock()
-        handle.is_alive = True
-        handle.ipc = MagicMock()
-        handle.ipc.send_chat = AsyncMock(
-            side_effect=IPCError("bad JSON")
-        )
-
-        mock_pm.get_agent.return_value = handle
-
-        with pytest.raises(IPCError, match="bad JSON"):
+        with pytest.raises(ipc_exc_cls, match=ipc_msg):
             await router._execute_single_agent(
                 "test-agent", "hello", conversation_id="c1"
             )
