@@ -5,15 +5,40 @@
 //! IMPORTANT (F-05 fix): ContextBudget has 10 configurable fields with
 //! cross-field validators, NOT 4 simple fields.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::models::common::utc_now;
+
 /// Tiered context loading levels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Python source: IntEnum — serializes as integers 0-3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ContextLevel {
-    L0Identity,
-    L1Execution,
-    L2Extended,
-    L3Runtime,
+    L0Identity = 0,
+    L1Execution = 1,
+    L2Extended = 2,
+    L3Runtime = 3,
+}
+
+impl Serialize for ContextLevel {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u8(*self as u8)
+    }
+}
+
+impl<'de> Deserialize<'de> for ContextLevel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let v = u8::deserialize(deserializer)?;
+        match v {
+            0 => Ok(Self::L0Identity),
+            1 => Ok(Self::L1Execution),
+            2 => Ok(Self::L2Extended),
+            3 => Ok(Self::L3Runtime),
+            _ => Err(serde::de::Error::custom(format!("invalid ContextLevel: {v}"))),
+        }
+    }
 }
 
 /// Alert levels from token budget checking.
@@ -124,11 +149,11 @@ impl TokenUsage {
         let ratio = if context_window == 0 { return None; } else {
             self.total_tokens() as f64 / context_window as f64
         };
-        if ratio >= budget.session_hard_ceiling {
+        if ratio > budget.session_hard_ceiling {
             Some(BudgetAlertLevel::HardCeiling)
-        } else if ratio >= budget.forced_truncate_threshold {
+        } else if ratio > budget.forced_truncate_threshold {
             Some(BudgetAlertLevel::ForcedTruncate)
-        } else if ratio >= budget.compaction_trigger {
+        } else if ratio > budget.compaction_trigger {
             Some(BudgetAlertLevel::Compaction)
         } else {
             None
@@ -137,15 +162,29 @@ impl TokenUsage {
 }
 
 /// Context budget log entry for compaction observability.
+///
+/// Python source: models/context.py:172-189 `ContextBudgetLogEntry`
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextBudgetLogEntry {
-    pub id: String,
-    pub agent_name: String,
-    pub event_type: String,
-    pub tokens_before: Option<i64>,
-    pub tokens_after: Option<i64>,
-    pub details: Option<String>,
-    pub created_at: String,
+    pub log_id: String,
+    pub agent_id: String,
+    pub session_id: String,
+    #[serde(default)]
+    pub turn_number: u32,
+    #[serde(default)]
+    pub prompt_tokens: u64,
+    #[serde(default)]
+    pub completion_tokens: u64,
+    #[serde(default)]
+    pub layer0_tokens: u64,
+    #[serde(default)]
+    pub layer1_tokens: u64,
+    #[serde(default)]
+    pub total_tokens: u64,
+    #[serde(default)]
+    pub compaction_triggered: bool,
+    #[serde(default = "utc_now")]
+    pub timestamp: DateTime<Utc>,
 }
 
 #[cfg(test)]
@@ -202,5 +241,26 @@ mod tests {
         };
         let budget = ContextBudget::default();
         assert_eq!(usage.check_budget(1000, &budget), None);
+    }
+
+    #[test]
+    fn budget_alert_level_serialization() {
+        assert_eq!(serde_json::to_string(&BudgetAlertLevel::HardCeiling).unwrap(), r#""hard_ceiling""#);
+        assert_eq!(serde_json::to_string(&BudgetAlertLevel::ForcedTruncate).unwrap(), r#""forced_truncate""#);
+        assert_eq!(serde_json::to_string(&BudgetAlertLevel::Compaction).unwrap(), r#""compaction""#);
+    }
+
+    #[test]
+    fn context_level_serializes_as_integer() {
+        assert_eq!(serde_json::to_string(&ContextLevel::L0Identity).unwrap(), "0");
+        assert_eq!(serde_json::to_string(&ContextLevel::L1Execution).unwrap(), "1");
+        assert_eq!(serde_json::to_string(&ContextLevel::L2Extended).unwrap(), "2");
+        assert_eq!(serde_json::to_string(&ContextLevel::L3Runtime).unwrap(), "3");
+    }
+
+    #[test]
+    fn context_level_deserializes_from_integer() {
+        assert_eq!(serde_json::from_str::<ContextLevel>("0").unwrap(), ContextLevel::L0Identity);
+        assert_eq!(serde_json::from_str::<ContextLevel>("3").unwrap(), ContextLevel::L3Runtime);
     }
 }

@@ -1,5 +1,6 @@
 //! Git-based distribution models: PackageSource, SourceEntry, LockfileEntry, InstallationStatus.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -30,7 +31,7 @@ pub enum InstallationStatus {
 pub struct SourceEntry {
     #[serde(default)]
     pub name: String,
-    #[serde(default = "default_git")]
+    #[serde(rename = "type", default = "default_git")]
     pub source_type: String,
     #[serde(default)]
     pub url: String,
@@ -40,6 +41,7 @@ pub struct SourceEntry {
 
 fn default_git() -> String { "git".to_string() }
 fn default_branch() -> String { "main".to_string() }
+fn utc_now() -> DateTime<Utc> { Utc::now() }
 
 impl SourceEntry {
     /// Validate: git-type sources must have non-empty URL.
@@ -65,8 +67,8 @@ pub struct LockfileEntry {
     /// Commit SHA — 40/64 hex chars, or sentinel 'latest'/'head'.
     pub commit_sha: String,
     pub agent_type: AgentType,
-    #[serde(default)]
-    pub installed_at: String,
+    #[serde(default = "utc_now")]
+    pub installed_at: DateTime<Utc>,
     #[serde(default)]
     pub venv_path: String,
     #[serde(default)]
@@ -127,6 +129,7 @@ pub struct PackageSource {
 pub struct IndexEntry {
     pub name: String,
     pub version: String,
+    #[serde(rename = "type")]
     pub agent_type: AgentType,
     #[serde(default)]
     pub description: String,
@@ -181,7 +184,7 @@ mod tests {
             source: "official".into(),
             commit_sha: "abc123def456abc123def456abc123def456abc1".into(),
             agent_type: AgentType::Atomic,
-            installed_at: "2026-04-22T00:00:00Z".into(),
+            installed_at: "2026-04-22T00:00:00Z".parse().unwrap(),
             venv_path: String::new(),
             dependencies: vec![],
         };
@@ -195,7 +198,7 @@ mod tests {
             source: "official".into(),
             commit_sha: "latest".into(),
             agent_type: AgentType::Atomic,
-            installed_at: String::new(),
+            installed_at: Utc::now(),
             venv_path: String::new(),
             dependencies: vec![],
         };
@@ -239,5 +242,32 @@ mod tests {
         assert_eq!(entry.agent_type, AgentType::Atomic);
         assert_eq!(entry.venv_path, "~/.agent-nexus/venvs/doc-filler");
         assert_eq!(entry.dependencies.len(), 1);
+    }
+
+    #[test]
+    fn source_entry_type_field_renamed() {
+        let yaml = r#"
+name: official
+type: git
+url: https://github.com/test/repo
+branch: main
+"#;
+        let entry: SourceEntry = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(entry.source_type, "git");
+        // Verify serialization uses "type" key
+        let serialized = serde_json::to_string(&entry).unwrap();
+        assert!(serialized.contains(r#""type":"git""#));
+        assert!(!serialized.contains("source_type"));
+    }
+
+    #[test]
+    fn index_entry_type_field_renamed() {
+        let json = r#"{"name":"test","version":"1.0.0","type":"atomic","description":"test agent"}"#;
+        let entry: IndexEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.agent_type, AgentType::Atomic);
+        // Verify serialization uses "type" key
+        let serialized = serde_json::to_string(&entry).unwrap();
+        assert!(serialized.contains(r#""type":"atomic""#));
+        assert!(!serialized.contains("agent_type"));
     }
 }

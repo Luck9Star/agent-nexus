@@ -162,13 +162,19 @@ pub struct EvolutionContext {
     #[serde(default)]
     pub task_id: String,
     #[serde(default)]
-    pub skill_ids_used: Vec<String>,
-    #[serde(default)]
     pub task_description: String,
     #[serde(default)]
-    pub task_result: Option<String>,
+    pub task_completed: bool,
     #[serde(default)]
-    pub error_info: Option<String>,
+    pub skill_ids_used: Vec<String>,
+    #[serde(default)]
+    pub skills_applied: Vec<String>,
+    #[serde(default)]
+    pub skills_fell_back: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_error: Option<String>,
 }
 
 #[cfg(test)]

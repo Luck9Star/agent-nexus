@@ -85,13 +85,15 @@ impl HookExecution {
 /// Aggregated result of all hook executions for a single event.
 ///
 /// Python source: models/hooks.py `AggregatedHookResult`
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AggregatedHookResult {
+    pub event: HookEvent,
     #[serde(default)]
     pub results: Vec<HookExecution>,
-    pub should_block: bool,
     #[serde(default)]
-    pub outputs: Vec<String>,
+    pub blocked: bool,
+    #[serde(default)]
+    pub errors: Vec<String>,
 }
 
 impl HookDefinition {

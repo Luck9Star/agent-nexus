@@ -14,7 +14,7 @@ pub mod runtime;
 pub mod task;
 
 // Re-export key types for convenience
-pub use agent::{AgentManifest, AgentType, RunMode, AgentRole, ModelTier};
+pub use agent::{AgentManifest, AgentType, RunMode, AgentRole, ModelTier, SkillDefinition, CommandDef, AgentDefinition, AgentPackage};
 pub use config::{PlatformConfig, ModelConfig, RuntimeConfig, ProviderConfig};
 pub use context::{ContextBudget, ContextLevel, BudgetAlertLevel, TokenUsage};
 pub use distribution::{SourceType, InstallationStatus, SourceEntry, LockfileEntry, Lockfile, PackageSource, IndexEntry};
