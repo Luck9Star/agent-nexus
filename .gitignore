@@ -38,3 +38,15 @@ htmlcov/
 .gitnexus
 .claude/skills/
 AGENTS.md
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Graphify output (generated)
+graphify-out/
+
+# Claude scheduled tasks (runtime state)
+.claude/scheduled_tasks.json
+.claude/scheduled_tasks.lock

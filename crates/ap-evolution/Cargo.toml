@@ -11,10 +11,12 @@ tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+toml = { workspace = true }
 thiserror = { workspace = true }
 rusqlite = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 rstest = { workspace = true }
