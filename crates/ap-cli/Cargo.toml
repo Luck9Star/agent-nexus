@@ -1,0 +1,26 @@
+[package]
+name = "ap-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "agent-nexus"
+path = "src/main.rs"
+
+[dependencies]
+ap-core = { workspace = true }
+ap-runtime = { workspace = true }
+ap-gateway = { workspace = true }
+ap-fetcher = { workspace = true }
+ap-evolution = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+owo-colors = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }

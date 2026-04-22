@@ -1,0 +1,20 @@
+[package]
+name = "ap-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+rusqlite = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+rstest = { workspace = true }
+tokio-test = { workspace = true }
