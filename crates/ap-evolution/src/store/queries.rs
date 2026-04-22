@@ -228,6 +228,10 @@ pub fn insert_context_budget_log(
 }
 
 /// Upsert an agent record.
+///
+/// If an agent with the same `agent_id` already exists, it is updated in place.
+/// If a **different** `agent_id` already uses the same `name`, the insert is
+/// rejected with [`StoreError::DuplicateAgentName`].
 pub fn upsert_agent_record(
     conn: &Connection,
     agent_id: &str,
@@ -237,7 +241,7 @@ pub fn upsert_agent_record(
     orchestration_toml: Option<&str>,
 ) -> Result<(), StoreError> {
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
+    let result = conn.execute(
         "INSERT INTO agent_records (agent_id, name, type, skill_ids, orchestration_toml, is_active, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7)
          ON CONFLICT(agent_id) DO UPDATE SET
@@ -248,8 +252,40 @@ pub fn upsert_agent_record(
             is_active = 1,
             updated_at = excluded.updated_at",
         params![agent_id, name, agent_type, skill_ids, orchestration_toml, now, now],
-    )?;
-    Ok(())
+    );
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(rusqlite::Error::SqliteFailure(err, Some(msg))) => {
+            // SQLite constraint violation: code 19.
+            // If the message mentions the unique index on `name`, surface a
+            // dedicated error so callers can distinguish name-clashes from
+            // other constraint failures.
+            if err.code == rusqlite::ErrorCode::ConstraintViolation
+                && msg.contains("agent_records.name")
+            {
+                // Best-effort: look up the existing agent_id for the name so
+                // the error message is actionable.
+                let existing_id = conn
+                    .query_row(
+                        "SELECT agent_id FROM agent_records WHERE name = ?1 LIMIT 1",
+                        params![name],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .unwrap_or_else(|_| "<unknown>".to_string());
+                Err(StoreError::DuplicateAgentName {
+                    name: name.to_string(),
+                    existing_id,
+                })
+            } else {
+                Err(StoreError::Sqlite(rusqlite::Error::SqliteFailure(
+                    err,
+                    Some(msg),
+                )))
+            }
+        }
+        Err(e) => Err(StoreError::Sqlite(e)),
+    }
 }
 
 /// Get an agent record by name.
@@ -286,11 +322,13 @@ pub fn get_agent_record(
 pub(crate) fn list_tables(conn: &Connection) -> Vec<String> {
     let mut stmt = conn
         .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-        .unwrap();
-    let rows = stmt.query_map([], |row| row.get::<_, String>(0)).unwrap();
+        .expect("prepare list_tables");
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query_map list_tables");
     let mut tables = Vec::new();
     for row in rows {
-        tables.push(row.unwrap());
+        tables.push(row.expect("row in list_tables"));
     }
     tables
 }
@@ -477,6 +515,46 @@ mod tests {
         let conn = test_conn();
         let found = get_agent_record(&conn, "nonexistent").unwrap();
         assert!(found.is_none());
+    }
+
+    #[test]
+    fn upsert_agent_record_rejects_duplicate_name() {
+        let conn = test_conn();
+
+        // Insert first agent
+        upsert_agent_record(
+            &conn,
+            "agent-001",
+            "shared-name",
+            "atomic",
+            "[]",
+            None,
+        )
+        .unwrap();
+
+        // Attempt to insert a second agent with the same name but different agent_id
+        let result = upsert_agent_record(
+            &conn,
+            "agent-002",
+            "shared-name",
+            "composite",
+            r#"["s1"]"#,
+            None,
+        );
+
+        // Should fail with DuplicateAgentName
+        let err = result.expect_err("expected error for duplicate agent name");
+        match err {
+            StoreError::DuplicateAgentName { name, existing_id } => {
+                assert_eq!(name, "shared-name");
+                assert_eq!(existing_id, "agent-001");
+            }
+            other => panic!("expected DuplicateAgentName, got: {other}"),
+        }
+
+        // Verify only one record exists
+        let count = count_rows(&conn, "agent_records").unwrap();
+        assert_eq!(count, 1, "should still have exactly one agent record");
     }
 
     #[test]

@@ -122,12 +122,24 @@ impl ProcessManager {
     }
 
     /// Kill all tracked processes.
+    ///
+    /// Best-effort: continues killing remaining processes even if one fails.
+    /// Returns the last error encountered, if any.
     pub async fn kill_all(&mut self) -> Result<(), ProcessError> {
         let ids: Vec<String> = self.processes.keys().cloned().collect();
+        let mut last_err = None;
         for id in ids {
-            self.kill(&id).await?;
+            if let Some(mut proc) = self.processes.remove(&id) {
+                if let Err(e) = proc.child.kill().await {
+                    warn!("Failed to kill process '{}': {}", id, e);
+                    last_err = Some(ProcessError::Kill(e));
+                }
+            }
         }
-        Ok(())
+        match last_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     /// Extract stdin/stdout handles from a tracked process.
@@ -252,5 +264,36 @@ mod tests {
 
         // Clean up — should succeed (the replacement process)
         pm.kill("dup").await.unwrap();
+    }
+
+    /// F-1: kill_all must attempt to kill ALL processes even if one fails.
+    #[tokio::test]
+    async fn kill_all_continues_after_first_error() {
+        let mut pm = ProcessManager::new();
+
+        // Spawn 3 real processes
+        pm.spawn("p1", "sleep", &["10"]).await.unwrap();
+        pm.spawn("p2", "sleep", &["10"]).await.unwrap();
+        pm.spawn("p3", "sleep", &["10"]).await.unwrap();
+
+        // Kill p2 directly so kill_all will fail on it (already dead)
+        pm.kill("p2").await.unwrap();
+
+        // Re-insert a dead entry manually to simulate a process that fails to kill.
+        // We spawn p2 again so it's tracked, then kill it externally.
+        pm.spawn("p2", "sleep", &["10"]).await.unwrap();
+        // Now manually kill the child behind ProcessManager's back
+        {
+            let proc = pm.processes.get_mut("p2").unwrap();
+            proc.child.kill().await.unwrap();
+        }
+
+        // kill_all should still try to kill p1 and p3 (which are alive)
+        // and encounter an error for p2 (already dead).
+        // The important invariant: all 3 entries are removed from the manager.
+        let _ = pm.kill_all().await;
+
+        // All processes must be removed from the manager
+        assert!(pm.processes.is_empty(), "kill_all must remove all entries, even if some kills failed");
     }
 }

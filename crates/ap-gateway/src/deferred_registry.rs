@@ -185,34 +185,57 @@ impl DeferredAgentRegistry {
     /// Deactivate all agents that have been idle longer than the timeout.
     ///
     /// Returns the number of agents deactivated.
+    ///
+    /// Two-phase approach: collect idle clients under the lock, then shut them
+    /// down outside the lock to avoid blocking all registry operations during I/O.
     pub async fn deactivate_idle(&self) -> usize {
-        let mut agents = self.agents.lock().await;
-        let timeout = self.idle_timeout;
-        let mut count = 0;
-        for slot in agents.values_mut() {
-            if slot.client.is_some() && slot.last_used.elapsed() > timeout {
-                if let Some(client_arc) = slot.client.take() {
-                    let mut client = client_arc.lock().await;
-                    client.shutdown().await;
+        // Phase 1: Collect idle clients and remove from registry (under lock)
+        let to_shutdown: Vec<Arc<tokio::sync::Mutex<Box<dyn McpClient>>>> = {
+            let mut agents = self.agents.lock().await;
+            let timeout = self.idle_timeout;
+            let mut idle_clients = Vec::new();
+            for slot in agents.values_mut() {
+                if slot.client.is_some() && slot.last_used.elapsed() > timeout {
+                    if let Some(client_arc) = slot.client.take() {
+                        idle_clients.push(client_arc);
+                    }
+                    slot.tools.clear();
                 }
-                slot.tools.clear();
-                count += 1;
             }
+            idle_clients
+        }; // Lock dropped here
+
+        let count = to_shutdown.len();
+
+        // Phase 2: Shutdown outside the lock
+        for client_arc in to_shutdown {
+            let mut client = client_arc.lock().await;
+            client.shutdown().await;
         }
+
         count
     }
 
     /// Deactivate a specific agent by name.
+    ///
+    /// Two-phase approach: remove the agent under the lock, then shut it down
+    /// outside the lock to avoid blocking all registry operations during I/O.
     pub async fn deactivate(&self, name: &str) -> Result<(), RegistryError> {
-        let mut agents = self.agents.lock().await;
-        let slot = agents
-            .get_mut(name)
-            .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
-        if let Some(client_arc) = slot.client.take() {
+        // Phase 1: Remove agent and take client Arc (under lock)
+        let client_arc = {
+            let mut agents = self.agents.lock().await;
+            let slot = agents
+                .get_mut(name)
+                .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
+            slot.tools.clear();
+            slot.client.take()
+        }; // Lock dropped here
+
+        // Phase 2: Shutdown outside the lock
+        if let Some(client_arc) = client_arc {
             let mut client = client_arc.lock().await;
             client.shutdown().await;
         }
-        slot.tools.clear();
         Ok(())
     }
 }

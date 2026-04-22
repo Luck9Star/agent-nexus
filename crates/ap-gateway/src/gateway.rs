@@ -2,12 +2,13 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 
 use crate::deferred_registry::{DeferredAgentRegistry, RegistryError};
 use crate::tool_adapter::McpToolAdapter;
@@ -51,6 +52,17 @@ impl axum::response::IntoResponse for GatewayError {
 }
 
 // ---------------------------------------------------------------------------
+// Shutdown state (interior mutability for Arc<Self>)
+// ---------------------------------------------------------------------------
+
+/// Holds the shutdown signal sender and the server task handle.
+#[derive(Default)]
+struct ShutdownState {
+    tx: Option<watch::Sender<bool>>,
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+// ---------------------------------------------------------------------------
 // Config & Gateway
 // ---------------------------------------------------------------------------
 
@@ -76,6 +88,7 @@ pub struct McpGateway {
     registry: Arc<Mutex<DeferredAgentRegistry>>,
     #[allow(dead_code)] // Used for direct namespace lookups in production
     adapter: McpToolAdapter,
+    shutdown: Mutex<ShutdownState>,
 }
 
 impl McpGateway {
@@ -88,6 +101,7 @@ impl McpGateway {
             config,
             registry,
             adapter: McpToolAdapter::new(),
+            shutdown: Mutex::new(ShutdownState::default()),
         }
     }
 
@@ -98,21 +112,49 @@ impl McpGateway {
 
     /// Start the HTTP server. Returns the bound address.
     ///
-    /// The server runs on a background tokio task.
-    pub async fn start(self: Arc<Self>) -> Result<SocketAddr, GatewayError> {
+    /// The server runs on a background tokio task and can be stopped via
+    /// [`Self::shutdown`].
+    pub async fn start(self: &Arc<Self>) -> Result<SocketAddr, GatewayError> {
         let app = Router::new()
             .route("/tools", get(Self::list_tools_handler))
             .route("/tools/call", post(Self::call_tool_handler))
-            .with_state(Arc::clone(&self));
+            .with_state(Arc::clone(self));
 
         let listener = tokio::net::TcpListener::bind(&self.config.listen_addr).await?;
         let addr = listener.local_addr()?;
-        tokio::spawn(async move {
-            if let Err(e) = axum::serve(listener, app).await {
+
+        let (tx, rx) = watch::channel(false);
+        let handle = tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let mut rx = rx;
+                    let _ = rx.changed().await;
+                })
+                .await
+            {
                 tracing::error!("Gateway HTTP server fatal error: {e}");
             }
         });
+
+        // Store the shutdown sender and server handle for later graceful shutdown.
+        let mut state = self.shutdown.lock().await;
+        state.tx = Some(tx);
+        state.handle = Some(handle);
+
         Ok(addr)
+    }
+
+    /// Gracefully shut down the HTTP server.
+    ///
+    /// Signals the server to stop and waits up to 5 seconds for it to finish.
+    pub async fn shutdown(&self) {
+        let mut state = self.shutdown.lock().await;
+        if let Some(tx) = state.tx.take() {
+            let _ = tx.send(true);
+        }
+        if let Some(handle) = state.handle.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+        }
     }
 
     /// Handler for GET /tools: list all tools from all registered agents.
@@ -416,5 +458,44 @@ mod tests {
         let config = GatewayConfig::default();
         assert_eq!(config.listen_addr, "127.0.0.1:0");
         assert_eq!(config.idle_timeout_secs, 300);
+    }
+
+    #[tokio::test]
+    async fn graceful_shutdown_completes() {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        };
+        let gw = Arc::new(McpGateway::new(config));
+        let addr = gw.start().await.unwrap();
+        assert!(addr.port() > 0);
+
+        // Verify server is running
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("http://{addr}/tools"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        // Shut down gracefully
+        gw.shutdown().await;
+
+        // Server should stop — give it a moment, then confirm connection refused.
+        // Use a short timeout to avoid hanging if shutdown didn't work.
+        let result = tokio::time::timeout(Duration::from_secs(3), async {
+            client
+                .get(format!("http://{addr}/tools"))
+                .send()
+                .await
+        })
+        .await;
+
+        // The request should either error (connection refused) or timeout
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Server should have shut down and stopped accepting connections"
+        );
     }
 }

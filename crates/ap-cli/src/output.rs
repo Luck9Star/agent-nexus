@@ -25,7 +25,7 @@ impl OutputFormatter {
                 "status": "ok",
                 "message": msg,
             });
-            println!("{}", serde_json::to_string(&obj).unwrap());
+            println!("{}", serde_json::to_string(&obj).expect("serializing json! literal is infallible"));
         } else {
             println!("{} {}", "✓".green(), msg);
         }
@@ -38,7 +38,7 @@ impl OutputFormatter {
                 "status": "error",
                 "message": msg,
             });
-            eprintln!("{}", serde_json::to_string(&obj).unwrap());
+            eprintln!("{}", serde_json::to_string(&obj).expect("serializing json! literal is infallible"));
         } else {
             eprintln!("{} {}", "✗".red(), msg);
         }
@@ -51,7 +51,7 @@ impl OutputFormatter {
                 "status": "info",
                 "message": msg,
             });
-            println!("{}", serde_json::to_string(&obj).unwrap());
+            println!("{}", serde_json::to_string(&obj).expect("serializing json! literal is infallible"));
         } else {
             println!("{}", msg.dimmed());
         }
@@ -60,7 +60,9 @@ impl OutputFormatter {
     /// Print structured data. In JSON mode, pretty-print; otherwise display a summary.
     pub fn data<T: Serialize>(&self, data: &T) {
         // Always pretty-print JSON for structured data
-        println!("{}", serde_json::to_string_pretty(data).unwrap());
+        let json = serde_json::to_string_pretty(data)
+            .unwrap_or_else(|e| format!("{{\"error\":\"serialization failed: {}\"}}", e));
+        println!("{}", json);
     }
 
     /// Returns whether JSON mode is active.

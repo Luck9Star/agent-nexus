@@ -6,7 +6,7 @@ use rusqlite::{params, Connection};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::models::common::utc_now;
 use crate::models::task::{TaskItem, TaskState};
@@ -100,7 +100,10 @@ impl TaskGraph {
         }
         let blocked_json = serde_json::to_string(&task.blocked_by)
             .map_err(|e| TaskGraphError::Serialization(e.to_string()))?;
-        self.conn.execute(
+        // Wrap INSERT + cycle check in an explicit transaction so that a crash
+        // between INSERT and DELETE never leaves a phantom row.
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
             "INSERT INTO tasks
              (task_id, agent_name, description, state, blocked_by, vars, result, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -117,11 +120,11 @@ impl TaskGraph {
             ],
         )?;
         // Check for newly introduced cycles; rollback if found
-        if self.detect_cycle() {
-            self.conn
-                .execute("DELETE FROM tasks WHERE task_id = ?1", params![task.id])?;
+        if self.detect_cycle_with_conn(&tx)? {
+            tx.rollback()?;
             return Err(TaskGraphError::CycleDetected);
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -229,12 +232,19 @@ impl TaskGraph {
         self.set_state(task_id, new_state)
     }
 
-    /// Detect cycles via DFS with three-color marking.
+    /// Detect cycles via DFS with three-color marking (delegates to connection-agnostic helper).
     pub fn detect_cycle(&self) -> bool {
-        // Load all tasks and build adjacency list
-        let tasks = match self.load_all_tasks() {
+        self.detect_cycle_with_conn(&self.conn).unwrap_or(false)
+    }
+
+    /// Connection-agnostic cycle detection used by both `detect_cycle` and `add_task` transaction.
+    fn detect_cycle_with_conn(
+        &self,
+        conn: &Connection,
+    ) -> Result<bool, TaskGraphError> {
+        let tasks = match Self::load_all_tasks_from_conn(conn) {
             Ok(t) => t,
-            Err(_) => return false,
+            Err(_) => return Ok(false),
         };
 
         let mut name_index: HashMap<String, usize> = HashMap::new();
@@ -283,10 +293,10 @@ impl TaskGraph {
             if !black.contains(&name)
                 && dfs(&name, &tasks, &name_index, &mut white, &mut gray, &mut black)
             {
-                return true;
+                return Ok(true);
             }
         }
-        false
+        Ok(false)
     }
 
     /// Return tasks in topological execution order (Kahn's algorithm).
@@ -344,9 +354,18 @@ impl TaskGraph {
                 if t.state != TaskState::Pending {
                     return false;
                 }
-                // All dependencies must be completed
+                // All dependencies must be completed; warn on dangling references
                 t.blocked_by.iter().all(|dep| {
-                    state_map.get(dep).is_some_and(|&s| s == TaskState::Completed)
+                    match state_map.get(dep) {
+                        Some(&s) => s == TaskState::Completed,
+                        None => {
+                            warn!(
+                                "Task '{}' has dangling blocked_by reference to '{}'",
+                                t.id, dep
+                            );
+                            false
+                        }
+                    }
                 })
             })
             .collect();
@@ -365,7 +384,11 @@ impl TaskGraph {
     // ── Helpers ──────────────────────────────────────────────────────
 
     fn load_all_tasks(&self) -> Result<Vec<TaskItem>, TaskGraphError> {
-        let mut stmt = self.conn.prepare(
+        Self::load_all_tasks_from_conn(&self.conn)
+    }
+
+    fn load_all_tasks_from_conn(conn: &Connection) -> Result<Vec<TaskItem>, TaskGraphError> {
+        let mut stmt = conn.prepare(
             "SELECT task_id, agent_name, description, state, blocked_by, vars, result, created_at, updated_at
              FROM tasks",
         )?;
@@ -712,5 +735,77 @@ mod tests {
         tg.add_task(&simple_task("t3", "c", &[])).unwrap();
         let ready = tg.get_ready_tasks().unwrap();
         assert_eq!(ready.len(), 2); // t1 and t3 have no dependencies
+    }
+
+    /// F-2: add_task rollback on cycle must be atomic — no phantom rows.
+    #[test]
+    fn add_task_rollback_on_cycle_is_atomic() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+
+        // Start with exactly 0 tasks
+        assert!(tg.is_empty());
+
+        // Add t1 and t2, then use raw SQL to make t1 block on t2 (creating a cycle)
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+        tg.add_task(&simple_task("t2", "a", &["t1"])).unwrap();
+        tg.conn
+            .execute(
+                "UPDATE tasks SET blocked_by = ?1 WHERE task_id = 't1'",
+                params![r#"["t2"]"#],
+            )
+            .unwrap();
+
+        // Before: 2 tasks
+        assert_eq!(tg.load_all_tasks().unwrap().len(), 2);
+
+        // Try to add t3 — should fail because the graph already has a cycle
+        let err = tg
+            .add_task(&simple_task("t3", "a", &["t2"]))
+            .unwrap_err();
+        match err {
+            TaskGraphError::CycleDetected => {}
+            other => panic!("expected CycleDetected, got {:?}", other),
+        }
+
+        // After: still exactly 2 tasks — no phantom t3 row
+        assert_eq!(tg.load_all_tasks().unwrap().len(), 2);
+        assert!(tg.get_task("t3").unwrap().is_none());
+    }
+
+    /// F-3: get_ready_tasks must warn on dangling blocked_by references.
+    #[test]
+    fn get_ready_tasks_warns_on_dangling_dependency() {
+        // Install a tracing subscriber that captures log output so we can
+        // verify the warning is emitted.
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        use tracing_subscriber::EnvFilter;
+
+        // Use a no-op guard — we just need the subscriber active during the test.
+        let _guard = tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::new("warn"))
+            .with_test_writer()
+            .try_init();
+
+        let tg = TaskGraph::new_in_memory().unwrap();
+
+        // Insert a task with a valid blocked_by reference
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+
+        // Now use raw SQL to create a task with a dangling dependency
+        // (bypassing add_task validation which would reject it)
+        tg.conn
+            .execute(
+                "INSERT INTO tasks (task_id, agent_name, description, state, blocked_by, vars, result, created_at, updated_at)
+                 VALUES ('dangling', 'a', 'dangling task', 'pending', '[\"ghost\"]', 'null', NULL, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        let ready = tg.get_ready_tasks().unwrap();
+
+        // t1 is ready (no deps), dangling is NOT ready (dangling dep on "ghost")
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].id, "t1");
     }
 }

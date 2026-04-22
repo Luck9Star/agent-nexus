@@ -34,7 +34,7 @@ fn get_from_path(path: &Path, key: &str, output: &OutputFormatter) -> Result<()>
             "key": key,
             "value": value.to_string(),
         });
-        println!("{}", serde_json::to_string_pretty(&obj).unwrap());
+        println!("{}", serde_json::to_string_pretty(&obj).expect("TOML values are always JSON-serializable"));
     } else {
         println!("{} = {}", key, format_toml_value(value));
     }

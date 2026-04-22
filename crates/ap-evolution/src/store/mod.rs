@@ -193,7 +193,7 @@ impl EvolutionStore {
 
     /// List all table names (for testing schema).
     pub fn list_tables(&self) -> Vec<String> {
-        let conn = self.conn().unwrap();
+        let conn = self.conn().expect("lock should not be poisoned");
         queries::list_tables(&conn)
     }
 

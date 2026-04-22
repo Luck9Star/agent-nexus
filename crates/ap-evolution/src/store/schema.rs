@@ -74,7 +74,7 @@ CREATE INDEX IF NOT EXISTS idx_cbl_agent_created
 
 CREATE TABLE IF NOT EXISTS agent_records (
     agent_id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
+    name TEXT NOT NULL UNIQUE,
     type TEXT NOT NULL DEFAULT 'atomic',
     skill_ids TEXT DEFAULT '[]',
     orchestration_toml TEXT,
