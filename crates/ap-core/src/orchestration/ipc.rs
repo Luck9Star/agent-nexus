@@ -71,6 +71,13 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcStream<R, W> {
                 max: MAX_MESSAGE_SIZE,
             });
         }
+        // Strip trailing \n or \r\n that read_until includes
+        if line.last() == Some(&b'\n') {
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+        }
         let msg: T = serde_json::from_slice(&line)?;
         Ok(msg)
     }
@@ -110,6 +117,27 @@ mod tests {
         });
 
         let received = ipc_server.receive::<PlatformToAgent>().await.unwrap();
+        assert_eq!(received.content, "hello");
+        assert_eq!(received.msg_type, PlatformToAgentType::Chat);
+    }
+
+    #[tokio::test]
+    async fn receive_handles_crlf() {
+        // Verifies that receive() correctly strips \r\n before JSON parsing.
+        let (client, server) = duplex(4096);
+        let (read, _write) = tokio::io::split(server);
+        let (_cread, mut cwrite) = tokio::io::split(client);
+
+        // Send a JSON message with \r\n line ending
+        tokio::spawn(async move {
+            let msg = r#"{"type":"chat","content":"hello","conversation_id":null,"task_id":null,"ref_id":null,"summary":null}"#;
+            cwrite.write_all(msg.as_bytes()).await.unwrap();
+            cwrite.write_all(b"\r\n").await.unwrap();
+            cwrite.flush().await.unwrap();
+        });
+
+        let mut ipc = IpcStream::new(read, tokio::io::sink());
+        let received = ipc.receive::<PlatformToAgent>().await.unwrap();
         assert_eq!(received.content, "hello");
         assert_eq!(received.msg_type, PlatformToAgentType::Chat);
     }

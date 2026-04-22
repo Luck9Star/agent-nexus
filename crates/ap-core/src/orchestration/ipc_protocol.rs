@@ -64,8 +64,24 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
     }
 
     /// Receive the next agent response, converting it to an AgentResult.
-    pub async fn receive_result(&mut self, _timeout: Option<f64>) -> Result<AgentResult, IpcError> {
-        let msg: AgentToPlatform = self.stream.receive().await?;
+    /// If a timeout (in seconds) is provided, aborts with IpcError::Timeout on expiry.
+    pub async fn receive_result(&mut self, timeout: Option<f64>) -> Result<AgentResult, IpcError> {
+        let receive_fut = self.stream.receive::<AgentToPlatform>();
+        let msg = match timeout {
+            Some(secs) => {
+                tokio::pin!(receive_fut);
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs_f64(secs),
+                    &mut receive_fut,
+                )
+                .await
+                {
+                    Ok(result) => result?,
+                    Err(_) => return Err(IpcError::Timeout { timeout: secs }),
+                }
+            }
+            None => receive_fut.await?,
+        };
         let success = msg.is_success();
         match msg.msg_type {
             AgentToPlatformType::Result => Ok(AgentResult {

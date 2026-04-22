@@ -21,6 +21,8 @@ pub enum TaskGraphError {
     Serialization(String),
     #[error("Task not found: {0}")]
     NotFound(String),
+    #[error("Task already exists: {0}")]
+    DuplicateTask(String),
     #[error("Cycle detected in task dependencies")]
     CycleDetected,
 }
@@ -69,12 +71,30 @@ impl TaskGraph {
         Ok(())
     }
 
-    /// Insert or replace a task into the graph.
+    /// Insert a task into the graph.
+    ///
+    /// Validates that:
+    /// - No duplicate task_id exists
+    /// - All blocked_by references point to existing tasks
+    /// - The new task does not introduce a cycle
     pub fn add_task(&self, task: &TaskItem) -> Result<(), TaskGraphError> {
+        // Check for duplicate
+        if self.get_task(&task.id)?.is_some() {
+            return Err(TaskGraphError::DuplicateTask(task.id.clone()));
+        }
+        // Validate blocked_by references exist
+        for dep_id in &task.blocked_by {
+            if self.get_task(dep_id)?.is_none() {
+                return Err(TaskGraphError::NotFound(format!(
+                    "blocked_by dependency '{}' not found",
+                    dep_id
+                )));
+            }
+        }
         let blocked_json = serde_json::to_string(&task.blocked_by)
             .map_err(|e| TaskGraphError::Serialization(e.to_string()))?;
         self.conn.execute(
-            "INSERT OR REPLACE INTO tasks
+            "INSERT INTO tasks
              (task_id, agent_name, description, state, blocked_by, vars, result, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
@@ -89,6 +109,12 @@ impl TaskGraph {
                 task.updated_at.to_rfc3339(),
             ],
         )?;
+        // Check for newly introduced cycles; rollback if found
+        if self.detect_cycle() {
+            self.conn
+                .execute("DELETE FROM tasks WHERE task_id = ?1", params![task.id])?;
+            return Err(TaskGraphError::CycleDetected);
+        }
         Ok(())
     }
 
@@ -391,6 +417,66 @@ mod tests {
     }
 
     #[test]
+    fn add_duplicate_task_rejected() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+        let err = tg.add_task(&simple_task("t1", "b", &[])).unwrap_err();
+        match err {
+            TaskGraphError::DuplicateTask(id) => assert_eq!(id, "t1"),
+            other => panic!("expected DuplicateTask, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn add_task_missing_dependency_rejected() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        let err = tg
+            .add_task(&simple_task("t2", "a", &["nonexistent"]))
+            .unwrap_err();
+        match err {
+            TaskGraphError::NotFound(msg) => {
+                assert!(msg.contains("nonexistent"));
+            }
+            other => panic!("expected NotFound, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn add_cycle_creating_task_rejected_and_rolled_back() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+        tg.add_task(&simple_task("t2", "a", &["t1"])).unwrap();
+        // Create a cycle via raw SQL: make t1 block on t2
+        tg.conn
+            .execute(
+                "UPDATE tasks SET blocked_by = ?1 WHERE task_id = 't1'",
+                params![r#"["t2"]"#],
+            )
+            .unwrap();
+        // Now any add_task should detect the existing cycle and rollback
+        let err = tg
+            .add_task(&simple_task("t3", "a", &["t2"]))
+            .unwrap_err();
+        match err {
+            TaskGraphError::CycleDetected => {}
+            other => panic!("expected CycleDetected, got {:?}", other),
+        }
+        // t3 should not have been inserted (rollback)
+        assert!(tg.get_task("t3").unwrap().is_none());
+    }
+
+    #[test]
+    fn valid_chain_inserts_succeed() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+        tg.add_task(&simple_task("t2", "a", &["t1"])).unwrap();
+        tg.add_task(&simple_task("t3", "a", &["t2"])).unwrap();
+        assert!(!tg.detect_cycle());
+        let order = tg.topological_sort().unwrap();
+        assert_eq!(order.len(), 3);
+    }
+
+    #[test]
     fn add_and_get_task() {
         let tg = TaskGraph::new_in_memory().unwrap();
         let task = simple_task("t1", "agent-a", &[]);
@@ -402,10 +488,32 @@ mod tests {
 
     #[test]
     fn detect_cycle() {
+        // With add_task validation, we cannot create a cycle through add_task
+        // because it would be rejected. Instead, verify detect_cycle works
+        // by inserting tasks without deps and using raw SQL to create the cycle.
         let tg = TaskGraph::new_in_memory().unwrap();
-        tg.add_task(&simple_task("t1", "a", &["t2"])).unwrap();
-        tg.add_task(&simple_task("t2", "a", &["t3"])).unwrap();
-        tg.add_task(&simple_task("t3", "a", &["t1"])).unwrap();
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+        tg.add_task(&simple_task("t2", "a", &[])).unwrap();
+        tg.add_task(&simple_task("t3", "a", &[])).unwrap();
+        // Manually create a cycle via raw SQL (bypassing validation)
+        tg.conn
+            .execute(
+                "UPDATE tasks SET blocked_by = ?1 WHERE task_id = 't1'",
+                params![r#"["t2"]"#],
+            )
+            .unwrap();
+        tg.conn
+            .execute(
+                "UPDATE tasks SET blocked_by = ?1 WHERE task_id = 't2'",
+                params![r#"["t3"]"#],
+            )
+            .unwrap();
+        tg.conn
+            .execute(
+                "UPDATE tasks SET blocked_by = ?1 WHERE task_id = 't3'",
+                params![r#"["t1"]"#],
+            )
+            .unwrap();
         assert!(tg.detect_cycle());
     }
 

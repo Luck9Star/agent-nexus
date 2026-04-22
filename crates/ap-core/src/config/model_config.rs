@@ -35,44 +35,58 @@ impl ModelConfigManager {
     /// Format: `"provider:model_name"` or just `"model_name"` (uses default provider).
     /// For providers like Ollama that use colons in model names (e.g. "ollama:qwen2.5-coder:7b"),
     /// only the first colon is used to split provider from model name.
+    ///
+    /// Resolution priority (6 levels, matching Python behaviour):
+    /// 1. Explicit model string passed to resolve()
+    /// 2. _(Agent's own config — handled at call site, not here)_
+    /// 3. Platform default from config
+    /// 4. Environment variable `AGENT_MODEL`
+    /// 5. Environment variable `DEFAULT_MODEL`
+    /// 6. Hardcoded fallback `"openai:gpt-4o"`
     pub fn resolve(&self, model_string: &str) -> Result<ResolvedModel, ModelConfigError> {
+        // Level 1: Explicit model string
         let (provider_name, model_name) = match model_string.split_once(':') {
             Some((p, m)) => (p.to_string(), m.to_string()),
             None => {
-                // No colon: extract provider from default string
+                // Level 3: Platform default
                 let default_provider =
                     self.config.models.default.split(':').next().unwrap_or("openai");
                 (default_provider.to_string(), model_string.to_string())
             }
         };
 
+        // Try to find provider config
         let provider = self.config.models.providers.get(&provider_name);
-        let (base_url, api_key_env, api_type) = match provider {
-            Some(p) => (p.base_url.clone(), p.api_key_env.clone(), p.api),
+        match provider {
+            Some(p) => Ok(ResolvedModel {
+                provider_name,
+                model_name,
+                base_url: p.base_url.clone(),
+                api_key_env: p.api_key_env.clone(),
+                api_type: p.api,
+            }),
             None => {
-                // Try default provider
-                let default = self.config.models.providers.get(
-                    self.config
-                        .models
-                        .default
-                        .split(':')
-                        .next()
-                        .unwrap_or("openai"),
-                );
-                match default {
-                    Some(d) => (d.base_url.clone(), d.api_key_env.clone(), d.api),
-                    None => (String::new(), String::new(), ProviderApiType::default()),
+                // Levels 4-6: Try AGENT_MODEL, DEFAULT_MODEL, hardcoded fallback
+                for ref fb in [
+                    std::env::var("AGENT_MODEL").ok(),
+                    std::env::var("DEFAULT_MODEL").ok(),
+                    Some("openai:gpt-4o".to_string()),
+                ].into_iter().flatten() {
+                    if let Some((fb_provider, _fb_model)) = fb.split_once(':') {
+                        if let Some(p) = self.config.models.providers.get(fb_provider) {
+                            return Ok(ResolvedModel {
+                                provider_name: fb_provider.to_string(),
+                                model_name: model_name.clone(),
+                                base_url: p.base_url.clone(),
+                                api_key_env: p.api_key_env.clone(),
+                                api_type: p.api,
+                            });
+                        }
+                    }
                 }
+                Err(ModelConfigError::ProviderNotFound(provider_name))
             }
-        };
-
-        Ok(ResolvedModel {
-            provider_name,
-            model_name,
-            base_url,
-            api_key_env,
-            api_type,
-        })
+        }
     }
 
     /// Look up an API key from an environment variable name.
@@ -142,12 +156,15 @@ mod tests {
     }
 
     #[test]
-    fn resolve_unknown_provider_returns_default() {
+    fn resolve_unknown_provider_falls_back_to_hardcoded() {
+        // When no env vars are set, unknown provider falls back to hardcoded "openai:gpt-4o"
+        std::env::remove_var("AGENT_MODEL");
+        std::env::remove_var("DEFAULT_MODEL");
         let mgr = ModelConfigManager::new(test_config());
         let resolved = mgr.resolve("unknown:model").unwrap();
-        // Falls back to default provider (openai)
+        // Falls back to hardcoded openai provider
         assert_eq!(resolved.model_name, "model");
-        assert_eq!(resolved.provider_name, "unknown");
+        assert_eq!(resolved.provider_name, "openai");
         assert_eq!(resolved.base_url, "https://api.openai.com/v1");
     }
 
@@ -176,5 +193,60 @@ mod tests {
         assert_eq!(resolved.model_name, "qwen2.5-coder:7b");
         assert_eq!(resolved.api_type, ProviderApiType::Ollama);
         assert!(resolved.api_key_env.is_empty());
+    }
+
+    /// Delegate to the shared lock in config::mod.rs
+    fn with_model_env<F, R>(f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        crate::config::with_model_env(f)
+    }
+
+    #[test]
+    fn resolve_env_var_fallback_agent_model() {
+        with_model_env(|| {
+            // AGENT_MODEL takes priority over DEFAULT_MODEL and hardcoded fallback
+            std::env::set_var("AGENT_MODEL", "deepseek:deepseek-chat");
+            std::env::set_var("DEFAULT_MODEL", "ollama:qwen2.5-coder:7b");
+            let mgr = ModelConfigManager::new(test_config());
+            let resolved = mgr.resolve("nonexistent:model").unwrap();
+            assert_eq!(resolved.provider_name, "deepseek");
+            assert_eq!(resolved.base_url, "https://api.deepseek.com/v1");
+        });
+    }
+
+    #[test]
+    fn resolve_env_var_fallback_default_model() {
+        with_model_env(|| {
+            std::env::set_var("DEFAULT_MODEL", "ollama:qwen2.5-coder:7b");
+            let mgr = ModelConfigManager::new(test_config());
+            let resolved = mgr.resolve("nonexistent:model").unwrap();
+            assert_eq!(resolved.provider_name, "ollama");
+            assert_eq!(resolved.base_url, "http://localhost:11434/v1");
+        });
+    }
+
+    #[test]
+    fn resolve_hardcoded_fallback_when_no_env_vars() {
+        with_model_env(|| {
+            // No env vars, unknown provider -> hardcoded "openai:gpt-4o" fallback
+            let mgr = ModelConfigManager::new(test_config());
+            let resolved = mgr.resolve("nonexistent:model").unwrap();
+            assert_eq!(resolved.provider_name, "openai");
+            assert_eq!(resolved.base_url, "https://api.openai.com/v1");
+        });
+    }
+
+    #[test]
+    fn resolve_known_provider_skips_env_fallback() {
+        with_model_env(|| {
+            // Even with env vars set, a known provider should resolve directly
+            std::env::set_var("AGENT_MODEL", "deepseek:deepseek-chat");
+            let mgr = ModelConfigManager::new(test_config());
+            let resolved = mgr.resolve("openai:gpt-4o").unwrap();
+            assert_eq!(resolved.provider_name, "openai");
+            assert_eq!(resolved.base_url, "https://api.openai.com/v1");
+        });
     }
 }

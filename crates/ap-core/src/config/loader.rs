@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use crate::models::config::PlatformConfig;
+use crate::models::config::{PlatformConfig, ProviderApiType, ProviderConfig};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -36,8 +36,14 @@ impl ConfigLoader {
     }
 
     /// Parse a TOML string into `PlatformConfig`.
+    ///
+    /// After parsing, built-in provider defaults are merged (for any providers
+    /// not already in the config) and environment variable overrides for the
+    /// default model are applied (`AGENT_MODEL` > `DEFAULT_MODEL`).
     pub fn load_from_str(content: &str) -> Result<PlatformConfig, ConfigError> {
-        let config: PlatformConfig = toml::from_str(content)?;
+        let mut config: PlatformConfig = toml::from_str(content)?;
+        apply_builtin_providers(&mut config);
+        apply_env_overrides(&mut config);
         Ok(config)
     }
 
@@ -45,6 +51,75 @@ impl ConfigLoader {
     /// parse error, etc.).
     pub fn load_or_default(path: &Path) -> PlatformConfig {
         Self::load_from_path(path).unwrap_or_default()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Post-load processing
+// ---------------------------------------------------------------------------
+
+/// Merge built-in provider defaults for any providers not already configured.
+///
+/// Mirrors Python's `DEFAULT_PROVIDERS`: openai, anthropic, ollama, deepseek.
+fn apply_builtin_providers(config: &mut PlatformConfig) {
+    let defaults: [(&str, ProviderConfig); 4] = [
+        (
+            "openai",
+            ProviderConfig {
+                base_url: "https://api.openai.com/v1".into(),
+                api_key_env: "OPENAI_API_KEY".into(),
+                api: ProviderApiType::OpenaiCompatible,
+            },
+        ),
+        (
+            "anthropic",
+            ProviderConfig {
+                base_url: "https://api.anthropic.com".into(),
+                api_key_env: "ANTHROPIC_API_KEY".into(),
+                api: ProviderApiType::OpenaiCompatible,
+            },
+        ),
+        (
+            "ollama",
+            ProviderConfig {
+                base_url: "http://localhost:11434/v1".into(),
+                api_key_env: String::new(),
+                api: ProviderApiType::Ollama,
+            },
+        ),
+        (
+            "deepseek",
+            ProviderConfig {
+                base_url: "https://api.deepseek.com/v1".into(),
+                api_key_env: "DEEPSEEK_API_KEY".into(),
+                api: ProviderApiType::OpenaiCompatible,
+            },
+        ),
+    ];
+
+    for (name, provider) in defaults {
+        config
+            .models
+            .providers
+            .entry(name.to_string())
+            .or_insert(provider);
+    }
+}
+
+/// Apply environment variable overrides for the default model.
+///
+/// Priority: `AGENT_MODEL` > `DEFAULT_MODEL` (both must be non-empty).
+fn apply_env_overrides(config: &mut PlatformConfig) {
+    if let Ok(model) = std::env::var("AGENT_MODEL") {
+        if !model.is_empty() {
+            config.models.default = model;
+            return;
+        }
+    }
+    if let Ok(model) = std::env::var("DEFAULT_MODEL") {
+        if !model.is_empty() {
+            config.models.default = model;
+        }
     }
 }
 
@@ -66,19 +141,30 @@ mod tests {
         f
     }
 
+    /// Delegate to the shared lock in config::mod.rs
+    fn with_model_env<F, R>(f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        crate::config::with_model_env(f)
+    }
+
     #[test]
     fn load_minimal_config() {
-        let f = write_temp_toml("");
-        let config = ConfigLoader::load_from_path(f.path()).unwrap();
-        assert_eq!(config.models.default, "openai:gpt-4o");
-        assert_eq!(config.runtime.python_path, "python3");
-        assert_eq!(config.runtime.uv_path, "uv");
+        with_model_env(|| {
+            let f = write_temp_toml("");
+            let config = ConfigLoader::load_from_path(f.path()).unwrap();
+            assert_eq!(config.models.default, "openai:gpt-4o");
+            assert_eq!(config.runtime.python_path, "python3");
+            assert_eq!(config.runtime.uv_path, "uv");
+        });
     }
 
     #[test]
     fn load_full_config() {
-        let f = write_temp_toml(
-            r#"
+        with_model_env(|| {
+            let f = write_temp_toml(
+                r#"
 [runtime]
 python_path = "python3.12"
 uv_path = "/usr/local/bin/uv"
@@ -91,34 +177,40 @@ base_url = "https://api.deepseek.com/v1"
 api_key_env = "DEEPSEEK_API_KEY"
 api = "openai-compatible"
 "#,
-        );
-        let config = ConfigLoader::load_from_path(f.path()).unwrap();
-        assert_eq!(config.runtime.python_path, "python3.12");
-        assert_eq!(config.models.default, "anthropic:claude-sonnet-4-20250514");
-        assert!(config.models.providers.contains_key("deepseek"));
-        let ds = &config.models.providers["deepseek"];
-        assert_eq!(ds.base_url, "https://api.deepseek.com/v1");
-        assert_eq!(ds.api_key_env, "DEEPSEEK_API_KEY");
+            );
+            let config = ConfigLoader::load_from_path(f.path()).unwrap();
+            assert_eq!(config.runtime.python_path, "python3.12");
+            assert_eq!(config.models.default, "anthropic:claude-sonnet-4-20250514");
+            assert!(config.models.providers.contains_key("deepseek"));
+            let ds = &config.models.providers["deepseek"];
+            assert_eq!(ds.base_url, "https://api.deepseek.com/v1");
+            assert_eq!(ds.api_key_env, "DEEPSEEK_API_KEY");
+        });
     }
 
     #[test]
     fn load_missing_file_returns_error() {
-        let result = ConfigLoader::load_from_path(Path::new("/nonexistent/config.toml"));
-        assert!(result.is_err());
+        with_model_env(|| {
+            let result = ConfigLoader::load_from_path(Path::new("/nonexistent/config.toml"));
+            assert!(result.is_err());
+        });
     }
 
     #[test]
     fn load_or_default_missing_file() {
-        let config = ConfigLoader::load_or_default(Path::new("/nonexistent/config.toml"));
-        assert_eq!(config.models.default, "openai:gpt-4o");
-        assert_eq!(config.runtime.python_path, "python3");
+        with_model_env(|| {
+            let config = ConfigLoader::load_or_default(Path::new("/nonexistent/config.toml"));
+            assert_eq!(config.models.default, "openai:gpt-4o");
+            assert_eq!(config.runtime.python_path, "python3");
+        });
     }
 
     #[test]
     fn backward_compat_reads_python_written_config() {
-        // This fixture must be identical to what Python's toml.dump produces
-        let f = write_temp_toml(
-            r#"
+        with_model_env(|| {
+            // This fixture must be identical to what Python's toml.dump produces
+            let f = write_temp_toml(
+                r#"
 [runtime]
 python_path = "python3"
 uv_path = "uv"
@@ -130,18 +222,123 @@ default = "ollama:qwen2.5-coder:7b"
 base_url = "http://localhost:11434/v1"
 api = "ollama"
 "#,
-        );
-        let config = ConfigLoader::load_from_path(f.path()).unwrap();
-        assert_eq!(config.models.default, "ollama:qwen2.5-coder:7b");
-        let ollama = &config.models.providers["ollama"];
-        assert_eq!(ollama.api, ProviderApiType::Ollama);
+            );
+            let config = ConfigLoader::load_from_path(f.path()).unwrap();
+            assert_eq!(config.models.default, "ollama:qwen2.5-coder:7b");
+            let ollama = &config.models.providers["ollama"];
+            assert_eq!(ollama.api, ProviderApiType::Ollama);
+        });
     }
 
     #[test]
     fn load_from_str_roundtrip() {
-        let original = PlatformConfig::default();
-        let toml_str = toml::to_string(&original).unwrap();
-        let loaded = ConfigLoader::load_from_str(&toml_str).unwrap();
-        assert_eq!(original, loaded);
+        with_model_env(|| {
+            // Note: load_from_str now merges built-in providers, so we compare
+            // the fields that survive TOML serialization, not the full PlatformConfig.
+            let original = PlatformConfig::default();
+            let toml_str = toml::to_string(&original).unwrap();
+            let loaded = ConfigLoader::load_from_str(&toml_str).unwrap();
+            assert_eq!(original.runtime, loaded.runtime);
+            assert_eq!(original.models.default, loaded.models.default);
+            // Original has no providers, loaded has built-ins merged in
+            for key in &["openai", "anthropic", "ollama", "deepseek"] {
+                assert!(loaded.models.providers.contains_key(*key));
+            }
+        });
+    }
+
+    #[test]
+    fn builtin_providers_merged_for_minimal_config() {
+        with_model_env(|| {
+            // Loading an empty config should still have all four built-in providers
+            let config = ConfigLoader::load_from_str("").unwrap();
+            assert!(config.models.providers.contains_key("openai"));
+            assert!(config.models.providers.contains_key("anthropic"));
+            assert!(config.models.providers.contains_key("ollama"));
+            assert!(config.models.providers.contains_key("deepseek"));
+            let openai = &config.models.providers["openai"];
+            assert_eq!(openai.base_url, "https://api.openai.com/v1");
+            assert_eq!(openai.api_key_env, "OPENAI_API_KEY");
+        });
+    }
+
+    #[test]
+    fn custom_provider_preserved_and_builtins_merged() {
+        with_model_env(|| {
+            // A config with only a custom provider should also get built-in providers
+            let f = write_temp_toml(
+                r#"
+[models]
+default = "custom:my-model"
+
+[models.providers.custom]
+base_url = "https://custom.example.com/v1"
+api_key_env = "CUSTOM_API_KEY"
+api = "openai-compatible"
+"#,
+            );
+            let config = ConfigLoader::load_from_path(f.path()).unwrap();
+            // Custom provider preserved
+            assert!(config.models.providers.contains_key("custom"));
+            assert_eq!(
+                config.models.providers["custom"].base_url,
+                "https://custom.example.com/v1"
+            );
+            // Built-in providers also present
+            assert!(config.models.providers.contains_key("openai"));
+            assert!(config.models.providers.contains_key("anthropic"));
+            assert!(config.models.providers.contains_key("ollama"));
+            assert!(config.models.providers.contains_key("deepseek"));
+        });
+    }
+
+    #[test]
+    fn user_provider_overrides_builtin_default() {
+        with_model_env(|| {
+            // A user-configured provider with the same name should NOT be overwritten
+            let f = write_temp_toml(
+                r#"
+[models.providers.openai]
+base_url = "https://custom-openai-proxy.example.com/v1"
+api_key_env = "MY_OPENAI_KEY"
+api = "openai-compatible"
+"#,
+            );
+            let config = ConfigLoader::load_from_path(f.path()).unwrap();
+            let openai = &config.models.providers["openai"];
+            assert_eq!(openai.base_url, "https://custom-openai-proxy.example.com/v1");
+            assert_eq!(openai.api_key_env, "MY_OPENAI_KEY");
+        });
+    }
+
+    #[test]
+    fn env_override_agent_model_takes_priority() {
+        with_model_env(|| {
+            std::env::set_var("AGENT_MODEL", "anthropic:claude-sonnet-4-20250514");
+            std::env::set_var("DEFAULT_MODEL", "openai:gpt-4o-mini");
+            let config = ConfigLoader::load_from_str("").unwrap();
+            assert_eq!(config.models.default, "anthropic:claude-sonnet-4-20250514");
+        });
+    }
+
+    #[test]
+    fn env_override_default_model_fallback() {
+        with_model_env(|| {
+            std::env::set_var("DEFAULT_MODEL", "ollama:qwen2.5-coder:7b");
+            let config = ConfigLoader::load_from_str("").unwrap();
+            assert_eq!(config.models.default, "ollama:qwen2.5-coder:7b");
+        });
+    }
+
+    #[test]
+    fn env_override_empty_string_ignored() {
+        with_model_env(|| {
+            // Empty AGENT_MODEL should not override
+            std::env::set_var("AGENT_MODEL", "");
+            std::env::set_var("DEFAULT_MODEL", "deepseek:deepseek-chat");
+            let config = ConfigLoader::load_from_str("").unwrap();
+            // AGENT_MODEL is empty so it should fall through to DEFAULT_MODEL
+            assert_eq!(config.models.default, "deepseek:deepseek-chat");
+        });
     }
 }

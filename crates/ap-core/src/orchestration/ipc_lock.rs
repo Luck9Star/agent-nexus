@@ -22,23 +22,28 @@ impl IpcLockRegistry {
 
     /// Get or create a lock for the given agent.
     /// Evicts the oldest lock if over the limit.
+    /// Uses DashMap::entry() to avoid TOCTOU race between get() and insert().
     pub fn get_or_create(&self, agent_id: &str) -> Arc<Mutex<()>> {
-        if let Some(lock) = self.locks.get(agent_id) {
-            return Arc::clone(lock.value());
-        }
-        let lock = Arc::new(Mutex::new(()));
-        self.locks
-            .insert(agent_id.to_string(), Arc::clone(&lock));
+        use dashmap::mapref::entry::Entry;
 
-        // Evict oldest if over limit
-        let mut order = self.order.lock().unwrap();
-        order.push_back(agent_id.to_string());
-        if order.len() > MAX_LOCKS {
-            if let Some(old_id) = order.pop_front() {
-                self.locks.remove(&old_id);
+        match self.locks.entry(agent_id.to_string()) {
+            Entry::Occupied(e) => Arc::clone(e.get()),
+            Entry::Vacant(e) => {
+                let lock = Arc::new(Mutex::new(()));
+                let cloned = Arc::clone(&lock);
+                e.insert(lock);
+
+                // Evict oldest if over limit
+                let mut order = self.order.lock().unwrap();
+                order.push_back(agent_id.to_string());
+                if order.len() > MAX_LOCKS {
+                    if let Some(old_id) = order.pop_front() {
+                        self.locks.remove(&old_id);
+                    }
+                }
+                cloned
             }
         }
-        lock
     }
 }
 
