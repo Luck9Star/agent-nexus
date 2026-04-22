@@ -110,6 +110,11 @@ impl UvBridge {
             .arg(venv_python);
 
         for req in requirements {
+            if req.starts_with('-') {
+                return Err(UvError::CommandFailed(
+                    format!("Invalid requirement (starts with '-'): {}", req)
+                ));
+            }
             cmd.arg(req);
         }
 
@@ -281,5 +286,20 @@ mod tests {
     fn default_is_uv() {
         let bridge = UvBridge::default();
         assert_eq!(bridge.uv_path, "uv");
+    }
+
+    #[tokio::test]
+    async fn pip_install_rejects_dash_prefixed_requirement() {
+        let bridge = UvBridge::new().with_path("/nonexistent/uv");
+        let dir = tempfile::tempdir().unwrap();
+        let python = dir.path().join("python");
+
+        let result = bridge.pip_install(&python, &["--inject", "malicious"]).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Invalid requirement"),
+            "Expected validation error, got: {err_msg}"
+        );
     }
 }

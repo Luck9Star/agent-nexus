@@ -14,6 +14,8 @@ pub enum InstallerError {
     Io(#[from] std::io::Error),
     #[error("version not found: {0}")]
     VersionNotFound(String),
+    #[error("validation error: {0}")]
+    Validation(String),
 }
 
 /// Git-based agent installer. Clones repos and checks out specific versions.
@@ -39,6 +41,16 @@ impl GitInstaller {
         branch: Option<&str>,
         version: Option<&str>,
     ) -> Result<PathBuf, InstallerError> {
+        // Validate URL scheme: reject dangerous schemes like file://
+        let allowed_schemes = ["https://", "http://", "git://", "ssh://"];
+        let is_local_path = url.starts_with('/') || url.starts_with('.') || url.starts_with('~');
+        if !allowed_schemes.iter().any(|s| url.starts_with(s)) && !is_local_path {
+            return Err(InstallerError::Validation(format!(
+                "Invalid git URL scheme. Allowed: {}, or a local path",
+                allowed_schemes.join(", ")
+            )));
+        }
+
         // Ensure install_dir exists
         std::fs::create_dir_all(&self.install_dir)?;
 
@@ -110,14 +122,29 @@ impl GitInstaller {
         Ok(())
     }
 
-    /// Extract a directory name from a Git URL.
+    /// Extract a directory name from a Git URL, sanitizing unsafe characters.
     fn url_to_dirname(url: &str) -> String {
         let url = url.trim_end_matches('/');
-        url.rsplit('/')
+        let raw = url
+            .rsplit('/')
             .next()
             .unwrap_or("agent")
-            .trim_end_matches(".git")
-            .to_string()
+            .trim_end_matches(".git");
+        let sanitized: String = raw
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        if sanitized.is_empty() {
+            "agent".to_string()
+        } else {
+            sanitized
+        }
     }
 
     /// Clone a repository with the given options.
@@ -275,6 +302,47 @@ mod tests {
         assert_eq!(
             GitInstaller::url_to_dirname("/local/path/agent-repo"),
             "agent-repo"
+        );
+    }
+
+    #[test]
+    fn url_to_dirname_sanitizes_path_traversal() {
+        // Path traversal "../" in URL — we only take the last segment,
+        // and sanitize non-alphanumeric characters
+        let dirname = GitInstaller::url_to_dirname("https://github.com/foo/../evil");
+        assert_eq!(dirname, "evil");
+        assert!(!dirname.contains('/'));
+
+        // Special characters are sanitized
+        let dirname2 = GitInstaller::url_to_dirname("https://github.com/foo/agent@v2");
+        assert_eq!(dirname2, "agent_v2");
+    }
+
+    #[test]
+    fn install_rejects_file_url() {
+        let dest_base = tempfile::tempdir().unwrap();
+        let installer = GitInstaller::new(dest_base.path().to_path_buf());
+
+        let result = installer.install("file:///etc/passwd", None, None);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Invalid git URL scheme"),
+            "Expected scheme validation error, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn install_rejects_unknown_scheme() {
+        let dest_base = tempfile::tempdir().unwrap();
+        let installer = GitInstaller::new(dest_base.path().to_path_buf());
+
+        let result = installer.install("ftp://example.com/repo", None, None);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Invalid git URL scheme"),
+            "Expected scheme validation error, got: {err_msg}"
         );
     }
 

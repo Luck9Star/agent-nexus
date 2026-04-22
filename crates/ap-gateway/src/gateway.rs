@@ -314,7 +314,7 @@ mod tests {
 
         let body: Vec<serde_json::Value> = resp.json().await.unwrap();
         assert_eq!(body.len(), 1);
-        assert_eq!(body[0]["name"], "code_reviewer__review");
+        assert_eq!(body[0]["name"], "code-reviewer___review");
     }
 
     #[tokio::test]
@@ -345,7 +345,7 @@ mod tests {
         let resp = client
             .post(format!("http://{addr}/tools/call"))
             .json(&serde_json::json!({
-                "name": "code_reviewer__review",
+                "name": "code-reviewer___review",
                 "arguments": {"path": "/src/main.rs"}
             }))
             .send()
@@ -377,7 +377,7 @@ mod tests {
         let resp = client
             .post(format!("http://{addr}/tools/call"))
             .json(&serde_json::json!({
-                "name": "reviewer__some_tool",
+                "name": "reviewer___some_tool",
                 "arguments": {}
             }))
             .send()

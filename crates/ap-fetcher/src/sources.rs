@@ -97,22 +97,18 @@ impl SourceManager {
         self.load().unwrap_or_default()
     }
 
-    /// Add a new source entry.
+    /// Add or update a source entry (upsert semantics).
     ///
-    /// Validates the entry, loads existing sources, deduplicates by name,
-    /// appends, and saves.
+    /// Validates the entry, loads existing sources, removes any existing entry
+    /// with the same name (matching Python's upsert behavior), appends, and saves.
     pub fn add(&self, entry: SourceEntry) -> Result<(), SourceError> {
         entry
             .validate()
             .map_err(SourceError::Validation)?;
 
         let mut sources = self.load()?;
-        if sources.iter().any(|s| s.name == entry.name) {
-            return Err(SourceError::Validation(format!(
-                "source with name '{}' already exists",
-                entry.name
-            )));
-        }
+        // Upsert: remove existing entry with same name (matches Python behavior)
+        sources.retain(|s| s.name != entry.name);
         debug!("Adding source: {}", entry.name);
         sources.push(entry);
         self.save(&sources)
@@ -209,16 +205,18 @@ sources:
     }
 
     #[test]
-    fn add_deduplicates_by_name() {
+    fn add_upserts_existing_name() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sources.yaml");
         let mgr = SourceManager::new(path);
 
         mgr.add(make_entry("official", "https://github.com/example/agents")).unwrap();
-        let result = mgr.add(make_entry("official", "https://github.com/other/repo"));
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("already exists"));
+        // Upsert: adding same name replaces the entry
+        mgr.add(make_entry("official", "https://github.com/other/repo")).unwrap();
+
+        let entries = mgr.list();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].url, "https://github.com/other/repo");
     }
 
     #[test]

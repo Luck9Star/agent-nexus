@@ -33,7 +33,7 @@ pub enum RegistryError {
 struct AgentSlot {
     #[allow(dead_code)] // Used for agent metadata lookups in production
     manifest: AgentManifest,
-    client: Option<Box<dyn McpClient>>,
+    client: Option<Arc<tokio::sync::Mutex<Box<dyn McpClient>>>>,
     tools: Vec<ToolInfo>,
     last_used: std::time::Instant,
 }
@@ -109,25 +109,30 @@ impl DeferredAgentRegistry {
         name: &str,
         client_factory: Box<dyn FnOnce() -> Box<dyn McpClient> + Send>,
     ) -> Result<Vec<ToolInfo>, RegistryError> {
-        let mut agents = self.agents.lock().await;
-        let slot = agents
-            .get_mut(name)
-            .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
-
-        // Already active — return cached tools.
-        if slot.client.is_some() {
-            slot.last_used = std::time::Instant::now();
-            return Ok(slot.tools.clone());
+        // Phase 1: Check if already active (under lock)
+        {
+            let agents = self.agents.lock().await;
+            let slot = agents
+                .get(name)
+                .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
+            if slot.client.is_some() {
+                return Ok(slot.tools.clone());
+            }
         }
 
-        // Start the subprocess via the factory.
+        // Phase 2: Create client and list tools (no lock held)
         let client = client_factory();
         let tools = client
             .list_tools()
             .await
             .map_err(|e| RegistryError::ActivationFailed(e.to_string()))?;
 
-        slot.client = Some(client);
+        // Phase 3: Update state (re-acquire lock)
+        let mut agents = self.agents.lock().await;
+        let slot = agents
+            .get_mut(name)
+            .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
+        slot.client = Some(Arc::new(tokio::sync::Mutex::new(client)));
         slot.tools = tools.clone();
         slot.last_used = std::time::Instant::now();
         Ok(tools)
@@ -153,17 +158,19 @@ impl DeferredAgentRegistry {
         tool_name: &str,
         args: serde_json::Value,
     ) -> Result<serde_json::Value, RegistryError> {
-        let mut agents = self.agents.lock().await;
-        let slot = agents
-            .get_mut(name)
-            .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
-
-        let client = slot
-            .client
-            .as_mut()
-            .ok_or_else(|| RegistryError::NotActive(name.to_string()))?;
-
-        slot.last_used = std::time::Instant::now();
+        // Phase 1: Get client Arc and update last_used (brief lock)
+        let client_arc = {
+            let mut agents = self.agents.lock().await;
+            let slot = agents
+                .get_mut(name)
+                .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
+            slot.last_used = std::time::Instant::now();
+            slot.client
+                .clone()
+                .ok_or_else(|| RegistryError::NotActive(name.to_string()))?
+        };
+        // Phase 2: Call tool outside global lock (only per-agent mutex held)
+        let client = client_arc.lock().await;
         client
             .call_tool(tool_name, args)
             .await

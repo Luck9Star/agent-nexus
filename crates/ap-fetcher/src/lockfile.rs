@@ -68,14 +68,14 @@ impl LockfileManager {
     }
 
     /// Add or update an agent entry in the lockfile.
-    pub fn add(&self, name: &str, entry: LockfileEntry) -> Result<(), LockfileError> {
+    pub fn add(&mut self, name: &str, entry: LockfileEntry) -> Result<(), LockfileError> {
         let mut lockfile = self.load()?;
         lockfile.agents.insert(name.to_string(), entry);
         self.save(&lockfile)
     }
 
     /// Remove an agent entry from the lockfile.
-    pub fn remove(&self, name: &str) -> Result<(), LockfileError> {
+    pub fn remove(&mut self, name: &str) -> Result<(), LockfileError> {
         let mut lockfile = self.load()?;
         lockfile.agents.remove(name);
         self.save(&lockfile)
@@ -173,7 +173,7 @@ mod tests {
     fn add_and_read_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lockfile.json");
-        let mgr = LockfileManager::new(path);
+        let mut mgr = LockfileManager::new(path);
 
         let (name, entry) = make_entry("my-agent", "abc123def456abc123def456abc123def456abc1");
         mgr.add(&name, entry).unwrap();
@@ -187,7 +187,7 @@ mod tests {
     fn add_multiple_agents() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lockfile.json");
-        let mgr = LockfileManager::new(path);
+        let mut mgr = LockfileManager::new(path);
 
         let (n1, e1) = make_entry("agent-a", "aaa0000000000000000000000000000000000aaa");
         let (n2, e2) = make_entry("agent-b", "bbb0000000000000000000000000000000000bbb");
@@ -202,7 +202,7 @@ mod tests {
     fn remove_agent() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lockfile.json");
-        let mgr = LockfileManager::new(path);
+        let mut mgr = LockfileManager::new(path);
 
         let (name, entry) = make_entry("to-remove", "ccc0000000000000000000000000000000000ccc");
         mgr.add(&name, entry).unwrap();
@@ -227,7 +227,7 @@ mod tests {
     fn has_checks_existence() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lockfile.json");
-        let mgr = LockfileManager::new(path);
+        let mut mgr = LockfileManager::new(path);
 
         assert!(!mgr.has("agent-x").unwrap());
 
@@ -240,7 +240,7 @@ mod tests {
     fn get_returns_entry() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lockfile.json");
-        let mgr = LockfileManager::new(path);
+        let mut mgr = LockfileManager::new(path);
 
         let (name, entry) = make_entry("agent-y", "eee0000000000000000000000000000000000eee");
         mgr.add(&name, entry.clone()).unwrap();
@@ -257,7 +257,7 @@ mod tests {
     fn save_produces_pretty_json() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lockfile.json");
-        let mgr = LockfileManager::new(path.clone());
+        let mut mgr = LockfileManager::new(path.clone());
 
         let (name, entry) = make_entry("pretty", "fff0000000000000000000000000000000000fff");
         mgr.add(&name, entry).unwrap();
@@ -272,7 +272,7 @@ mod tests {
     fn overwrite_existing_agent() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lockfile.json");
-        let mgr = LockfileManager::new(path);
+        let mut mgr = LockfileManager::new(path);
 
         let (name, mut entry) = make_entry("updatable", "1110000000000000000000000000000000000111");
         mgr.add(&name, entry.clone()).unwrap();
