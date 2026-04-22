@@ -281,6 +281,44 @@ max_turns: 5
 
 角色类型通过 §7.8 的声明式规格 `role` 字段指定。角色预设的工具集可作为白名单起点，开发者可通过 `tools` 字段进一步限制或扩展。
 
+### 7.7.1 Agent 封装厚度指南
+
+> **设计原则**: Agent 的封装厚度应匹配其领域复杂度。过度封装增加维护成本，封装不足则丢失领域价值。
+
+**封装厚度判定矩阵：**
+
+| 封装维度 | 薄封装（Runtime + Skill 即可） | 厚封装（完整 Atomic Agent） |
+|---------|------------------------------|---------------------------|
+| **流程** | 单步调用（prompt → result） | 多阶段管道（analyze → check → review） |
+| **领域知识** | LLM 自身能力即可（如 SWOT 分析） | 需要规则库/标准库（如 OWASP Top 10、WCAG 2.2） |
+| **分发需求** | 仅本机使用 | 需要跨团队安装、版本管理 |
+| **编排需求** | 独立使用 | 被 Composite Agent 编排 |
+| **进化需求** | 无 | 参与自进化（FIX/DERIVED/CAPTURED/Promotion） |
+
+**当前 Agent 封装厚度评估：**
+
+| Agent | 封装厚度 | 理由 |
+|-------|---------|------|
+| code-reviewer | 厚 | 三阶段管道 + 多语言规则库 + 评分系统 |
+| doc-filler | 厚 | 两阶段管道 + 样式继承链 + 模板领域知识 |
+| requirements-analyzer | 厚 | 多轮对话追踪策略 + 交互流程控制 |
+| test-suite-generator | 中厚 | AST 解析 + 每范式测试策略 |
+| security-scanner | 中厚 | OWASP Top 10 模式匹配 + 规则引擎 |
+| accessibility-auditor | 中厚 | WCAG 2.2 AA 87 条标准库 |
+| contract-analyzer | 中 | 条款依赖理解 + 多法域合规（核心是 LLM 能力） |
+| localization-specialist | 薄 | 术语表管理 + 语域识别（核心是 API 翻译调用） |
+| api-doc-generator | 中 | OpenAPI 3.1 标准生成 |
+| market-intelligence-analyst | 薄 | Porter/SWOT/PESTEL 框架化方法论（LLM 本身具备） |
+| good-skill | 薄 | 自进化晋升产物，任务简单 |
+
+**薄封装 Agent 的替代路径**：
+
+对于领域逻辑较薄的 Agent（如 market-intelligence-analyst），可通过以下方式按需生成而非预封装：
+
+1. **Skill + Runtime 直出**：通过 Skill Evolution 的 CAPTURED 模式，从成功的 Runtime 交互中提取 Skill
+2. **动态 Agent**：Runtime + SKILL.md 即可实现"一个 prompt 的专业化"，无需完整的 Agent Package 结构
+3. **自进化晋升**：good-skill 已验证了从 Skill → Agent 的自动晋升路径，薄封装 Agent 可以按需进化而来
+
 ### 7.8 Agent Definition（声明式规格）
 
 #### 7.8.1 声明式 Agent 规格概述

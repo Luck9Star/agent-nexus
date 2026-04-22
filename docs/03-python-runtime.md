@@ -162,6 +162,48 @@ class DocFillerAgent:
     mcp_server = FastMCP("doc-filler")
 ```
 
+### 5.7.1 Runtime 与 Atomic Agent 的关系：基础设施 vs 领域封装
+
+> **核心结论**: Runtime 是通用代码执行引擎，Atomic Agent 是封装了领域知识的业务单元。二者是上下游关系，不是替代关系。
+
+**Python Runtime 做什么：**
+
+```
+Runtime = IPythonExecutor + SecurityChecker + Namespace 管理
+输入: 一段 Python 代码 → 输出: ExecutionResult
+能力: 执行代码、注入变量/函数/类型、AST 安全检查
+局限: 无领域知识、无结构化流程、无外部接口、不可分发
+```
+
+**Atomic Agent 在 Runtime 之上额外做了什么：**
+
+| 能力 | Runtime 有 | Atomic Agent 额外提供 |
+|------|-----------|---------------------|
+| 领域知识（规则库、方法论） | 无 | 有（如 code-reviewer 的多语言安全模式数据库） |
+| 结构化流程（多阶段管道） | 无 | 有（如 analyze→check→review 三阶段） |
+| 可分发（Git 安装/版本管理） | 无 | 有（agent-nexus install） |
+| 可发现（SKILL.md 声明能力） | 无 | 有（index.yaml 索引） |
+| 可编排（Composite Agent DAG） | 无 | 有（blocked_by 依赖图） |
+| MCP Server 暴露（外部框架调用） | 无 | 有（FastMCP per Agent） |
+| 独立测试套件 | 无 | 有（每个 Agent 有 tests/） |
+| 可进化（FIX/DERIVED/CAPTURED） | 无 | 有（自进化引擎） |
+
+**类比**：Runtime 是 Python 解释器，Atomic Agent 是 pip 包。你能用解释器写任何逻辑，但 pip 包封装了领域最佳实践。
+
+**什么时候"用 Runtime 就够了"**：
+
+- 一次性脚本任务（不重复使用）
+- 简单的 LLM prompt + API 调用（领域逻辑薄）
+- 探索性任务（不需要分发和版本管理）
+
+**什么时候值得封装为 Atomic Agent**：
+
+- 有结构化多阶段流程（如代码审查的三阶段管道）
+- 有领域规则库（如安全模式数据库、WCAG 标准库）
+- 需要独立分发和版本管理
+- 需要被 Composite Agent 编排
+- 需要暴露给外部框架调用
+
 ### 5.8 Runtime Context Tiered Loading
 
 > **实现模块**: `src/agent_nexus/platform/runtime/describer.py` — `TieredRuntimeDescriber`
