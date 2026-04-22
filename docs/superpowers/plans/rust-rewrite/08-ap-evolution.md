@@ -29,6 +29,12 @@
 **Python source:** `src/agent_nexus/platform/evolution/store.py` (1,392 lines — heaviest module)
 **Rust target:** `crates/ap-evolution/src/store/`
 
+> **F-02 fix:** Schema must be IDENTICAL to Python version.
+> The original plan invented 3 wrong tables (`skills`, `evolution_history`, `agent_health`).
+> Python actually has **6 tables**: `skill_records`, `skill_lineage_parents`,
+> `execution_analyses`, `skill_judgments`, `context_budget_log`, `agent_records`.
+> The exact SQL from `store.py:83-166` is the source of truth.
+
 Schema must be identical to Python version so the same SQLite file can be read/written.
 
 - [ ] **Step 1: Write store schema tests**
@@ -41,110 +47,179 @@ mod tests {
     #[test]
     fn init_schema_in_memory() {
         let store = EvolutionStore::new_in_memory().unwrap();
-        // Schema tables exist
         let tables = store.list_tables();
-        assert!(tables.contains(&"skills".to_string()));
-        assert!(tables.contains(&"evolution_history".to_string()));
-        assert!(tables.contains(&"agent_health".to_string()));
+        assert!(tables.contains(&"skill_records".to_string()));
+        assert!(tables.contains(&"skill_lineage_parents".to_string()));
+        assert!(tables.contains(&"execution_analyses".to_string()));
+        assert!(tables.contains(&"skill_judgments".to_string()));
+        assert!(tables.contains(&"context_budget_log".to_string()));
+        assert!(tables.contains(&"agent_records".to_string()));
     }
 
     #[test]
     fn backward_compat_read_python_db() {
         // Load a fixture SQLite file written by Python
-        // Verify all tables are readable
+        // Verify all 6 tables are readable
     }
 
     #[test]
-    fn skill_crud() {
+    fn skill_record_crud() {
         let store = EvolutionStore::new_in_memory().unwrap();
         let skill = SkillRecord {
+            id: "s-uuid-1".into(),
             name: "fix-imports".into(),
-            agent_name: "code-reviewer".into(),
-            skill_type: SkillType::Fix,
-            description: "Fix import ordering".into(),
-            code: "reorder_imports(file)".into(),
-            ..Default::default()
+            version: "1.0.0".into(),
+            lineage: SkillLineage::default(),
+            directory: "skills/fix-imports".into(),
+            is_active: true,
+            total_selections: 0,
+            total_applied: 0,
+            total_completions: 0,
+            total_fallbacks: 0,
         };
         store.insert_skill(&skill).unwrap();
-        let loaded = store.get_skill("fix-imports").unwrap().unwrap();
+        let loaded = store.get_skill_by_name("fix-imports").unwrap().unwrap();
         assert_eq!(loaded.name, "fix-imports");
-        assert_eq!(loaded.skill_type, SkillType::Fix);
+        assert_eq!(loaded.id, "s-uuid-1");
 
-        store.delete_skill("fix-imports").unwrap();
-        assert!(store.get_skill("fix-imports").unwrap().is_none());
+        store.delete_skill("s-uuid-1").unwrap();
+        assert!(store.get_skill_by_name("fix-imports").unwrap().is_none());
     }
 
     #[test]
-    fn evolution_history_tracking() {
+    fn execution_analysis_roundtrip() {
         let store = EvolutionStore::new_in_memory().unwrap();
-        store.record_evolution(&EvolutionRecord {
-            skill_name: "fix-imports".into(),
-            trigger: "post_task_analysis".into(),
-            result: "success".into(),
-            ..Default::default()
-        }).unwrap();
-        let history = store.get_evolution_history("fix-imports").unwrap();
-        assert_eq!(history.len(), 1);
+        store.insert_execution_analysis(
+            "a-uuid-1", "t-uuid-1", "code-reviewer",
+            "Analysis of task...", Some("[\"fix-imports\"]"),
+        ).unwrap();
+        let analyses = store.get_analyses_for_task("t-uuid-1").unwrap();
+        assert_eq!(analyses.len(), 1);
     }
 
     #[test]
-    fn agent_health_tracking() {
+    fn context_budget_log_roundtrip() {
         let store = EvolutionStore::new_in_memory().unwrap();
-        store.record_health(&HealthRecord {
-            agent_name: "code-reviewer".into(),
-            task_success: true,
-            duration_ms: 5000,
-            ..Default::default()
-        }).unwrap();
-        let health = store.get_agent_health("code-reviewer").unwrap();
-        assert!(!health.is_empty());
+        store.insert_context_budget_log(
+            "cbl-1", "code-reviewer", "compaction",
+            Some(5000), Some(2000), Some("{\"reason\":\"trigger_threshold\"}"),
+        ).unwrap();
+    }
+
+    #[test]
+    fn agent_record_roundtrip() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+        store.upsert_agent_record(
+            "ar-1", "code-reviewer", "atomic",
+            "[]", None,
+        ).unwrap();
+        let agent = store.get_agent_record("code-reviewer").unwrap().unwrap();
+        assert_eq!(agent.name, "code-reviewer");
+        assert_eq!(agent.agent_type, "atomic");
     }
 }
 ```
 
-- [ ] **Step 2: Implement schema.rs**
+- [ ] **Step 2: Implement schema.rs — EXACT copy from Python store.py:83-166**
 
 ```rust
 // crates/ap-evolution/src/store/schema.rs
 
-/// SQLite DDL — must match Python evolution/store.py exactly.
+/// SQLite DDL — verbatim copy from Python evolution/store.py:83-166.
+///
+/// DO NOT modify this schema. It must be identical so that Rust and Python
+/// can read/write the same SQLite file.
+///
+/// 6 tables:
+///   skill_records          — Skill identity + lineage + quality counters (14 cols)
+///   skill_lineage_parents  — DAG edges (many-to-many)
+///   execution_analyses     — Post-task analysis (one per task per agent)
+///   skill_judgments        — Per-skill assessment within an analysis
+///   context_budget_log     — Token usage / compaction observability
+///   agent_records          — Composite Agent evolution tracking (Layer 2)
 pub const SCHEMA_SQL: &str = r#"
-CREATE TABLE IF NOT EXISTS skills (
-    name TEXT PRIMARY KEY,
-    agent_name TEXT NOT NULL,
-    skill_type TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    code TEXT NOT NULL,
-    trigger_condition TEXT DEFAULT '',
-    success_count INTEGER NOT NULL DEFAULT 0,
-    failure_count INTEGER NOT NULL DEFAULT 0,
-    last_used_at TEXT,
+CREATE TABLE IF NOT EXISTS skill_records (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL DEFAULT '1.0.0',
+    lineage_origin TEXT NOT NULL DEFAULT 'imported',
+    lineage_generation INTEGER NOT NULL DEFAULT 0,
+    lineage_content_diff TEXT,
+    lineage_content_snapshot TEXT,
+    directory TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    total_selections INTEGER NOT NULL DEFAULT 0,
+    total_applied INTEGER NOT NULL DEFAULT 0,
+    total_completions INTEGER NOT NULL DEFAULT 0,
+    total_fallbacks INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_sr_active ON skill_records(is_active);
+CREATE INDEX IF NOT EXISTS idx_sr_name ON skill_records(name);
+CREATE INDEX IF NOT EXISTS idx_sr_updated ON skill_records(updated_at);
 
-CREATE TABLE IF NOT EXISTS evolution_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    skill_name TEXT NOT NULL,
-    trigger TEXT NOT NULL,
-    result TEXT NOT NULL,
-    details TEXT DEFAULT '',
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (skill_name) REFERENCES skills(name)
+CREATE TABLE IF NOT EXISTS skill_lineage_parents (
+    skill_id TEXT NOT NULL,
+    parent_id TEXT NOT NULL,
+    PRIMARY KEY (skill_id, parent_id),
+    FOREIGN KEY (skill_id) REFERENCES skill_records(id),
+    FOREIGN KEY (parent_id) REFERENCES skill_records(id)
 );
+CREATE INDEX IF NOT EXISTS idx_lp_parent ON skill_lineage_parents(parent_id);
 
-CREATE TABLE IF NOT EXISTS agent_health (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS execution_analyses (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
     agent_name TEXT NOT NULL,
-    task_success INTEGER NOT NULL,
-    duration_ms INTEGER,
-    error_type TEXT DEFAULT '',
+    analysis TEXT NOT NULL,
+    evolution_suggestions TEXT,
     created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_ea_task ON execution_analyses(task_id);
 
-CREATE INDEX IF NOT EXISTS idx_skills_agent ON skills(agent_name);
-CREATE INDEX IF NOT EXISTS idx_history_skill ON evolution_history(skill_name);
-CREATE INDEX IF NOT EXISTS idx_health_agent ON agent_health(agent_name);
+CREATE TABLE IF NOT EXISTS skill_judgments (
+    id TEXT PRIMARY KEY,
+    analysis_id TEXT NOT NULL,
+    skill_id TEXT NOT NULL,
+    selected INTEGER NOT NULL DEFAULT 0,
+    applied INTEGER NOT NULL DEFAULT 0,
+    completed INTEGER NOT NULL DEFAULT 0,
+    fell_back INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (analysis_id) REFERENCES execution_analyses(id),
+    FOREIGN KEY (skill_id) REFERENCES skill_records(id)
+);
+CREATE INDEX IF NOT EXISTS idx_sj_skill ON skill_judgments(skill_id);
+CREATE INDEX IF NOT EXISTS idx_sj_analysis ON skill_judgments(analysis_id);
+
+CREATE TABLE IF NOT EXISTS context_budget_log (
+    id TEXT PRIMARY KEY,
+    agent_name TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    tokens_before INTEGER,
+    tokens_after INTEGER,
+    details TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cbl_agent ON context_budget_log(agent_name);
+CREATE INDEX IF NOT EXISTS idx_cbl_agent_created
+    ON context_budget_log(agent_name, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_records (
+    agent_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'atomic',
+    skill_ids TEXT DEFAULT '[]',
+    orchestration_toml TEXT,
+    effective_rate REAL DEFAULT 0.0,
+    avg_steps REAL,
+    avg_duration_ms REAL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ar_active ON agent_records(is_active);
+CREATE INDEX IF NOT EXISTS idx_ar_name ON agent_records(name);
 "#;
 ```
 

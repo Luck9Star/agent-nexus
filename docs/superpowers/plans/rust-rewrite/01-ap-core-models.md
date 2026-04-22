@@ -23,9 +23,16 @@
 
 ## Task 1.1: IPC Models
 
+**Python source:** `models/ipc.py`
 **Files:**
 - Create: `crates/ap-core/src/models/ipc.rs`
 - Test: inline `#[cfg(test)]` module
+
+> **Wire-format compatibility note (F-01 fix):**
+> Python uses **flat structs** with a `type` discriminator field, NOT tagged enums.
+> Both `PlatformToAgent` and `AgentToPlatform` are single classes with ALL optional fields.
+> Using `#[serde(tag = "type")] enum` would produce a different JSON shape and break
+> serialization with Python agents. We must use flat structs.
 
 - [ ] **Step 1: Write the IPC model test**
 
@@ -33,72 +40,136 @@
 // crates/ap-core/src/models/ipc.rs (top of file, test at bottom)
 
 //! IPC message models: Platform <-> Agent communication via stdin/stdout JSON-lines.
+//!
+//! Wire format: FLAT STRUCTS with `type` discriminator.
+//! Python uses single classes with all optional fields, not tagged unions.
+//! See models/ipc.py for the source of truth.
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type")]
-pub enum PlatformToAgent {
-    #[serde(rename = "chat")]
-    Chat {
-        content: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        conversation_id: Option<String>,
-    },
-    #[serde(rename = "task")]
-    Task {
-        content: String,
-        task_id: String,
-    },
-    #[serde(rename = "data_reference")]
-    DataReference {
-        content: String,
-        ref_id: String,
-        summary: String,
-    },
+// ── Direction ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageDirection {
+    PlatformToAgent,
+    AgentToPlatform,
 }
 
+// ── Type discriminators ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlatformToAgentType {
+    Chat,
+    Task,
+    DataReference,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentToPlatformType {
+    Result,
+    Progress,
+    Error,
+}
+
+// ── Flat message structs (matches Python exactly) ──────────────────
+
+/// Message from Platform Router to Agent subprocess (stdin).
+///
+/// Python source: models/ipc.py:37-51
+/// Wire examples:
+///   Chat:  {"type":"chat","content":"...","conversation_id":"..."}
+///   Task:  {"type":"task","content":"...","task_id":"..."}
+///   Data:  {"type":"data_reference","ref_id":"var://...","summary":"..."}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type")]
-pub enum AgentToPlatform {
-    #[serde(rename = "result")]
-    Result {
-        content: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        task_id: Option<String>,
-        #[serde(default)]
-        success: bool,
-    },
-    #[serde(rename = "progress")]
-    Progress {
-        content: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        task_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        progress_pct: Option<f64>,
-    },
-    #[serde(rename = "error")]
-    Error {
-        error: String,
-        #[serde(rename = "type")]
-        error_type: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        task_id: Option<String>,
-    },
+pub struct PlatformToAgent {
+    #[serde(rename = "type")]
+    pub msg_type: PlatformToAgentType,
+    #[serde(default)]
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ref_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+/// Message from Agent subprocess to Platform Router (stdout).
+///
+/// Python source: models/ipc.py:54-95
+/// Wire examples:
+///   Result:   {"type":"result","task_id":"...","output":"...","status":"completed"}
+///   Progress: {"type":"progress","task_id":"...","message":"...","progress_pct":50.0}
+///   Error:    {"type":"error","task_id":"...","error":"..."}
+///
+/// NOTE: `is_success` is a computed property in Python, not a wire field.
+/// NOTE: All fields are optional; `type` is the only required discriminator.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentToPlatform {
+    #[serde(rename = "type")]
+    pub msg_type: AgentToPlatformType,
+    #[serde(default)]
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress_pct: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<serde_json::Value>,
+}
+
+impl AgentToPlatform {
+    /// Check if this response indicates successful completion.
+    /// Mirrors Python's `is_success` computed property.
+    pub fn is_success(&self) -> bool {
+        if self.msg_type == AgentToPlatformType::Error {
+            return false;
+        }
+        self.status.as_ref().map_or(true, |s| s.to_lowercase() == "completed")
+    }
+}
+
+// ── Envelope ───────────────────────────────────────────────────────
+
+/// Envelope for any IPC message, with direction tagging.
+///
+/// Python source: models/ipc.py:98-125
+/// Used for deserialization of raw JSON-lines from stdin/stdout pipes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IPCMessage {
+    pub direction: MessageDirection,
+    pub payload: serde_json::Value,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // ── PlatformToAgent roundtrips ─────────────────────────────────
+
     #[test]
     fn roundtrip_chat_message() {
-        let msg = PlatformToAgent::Chat {
+        let msg = PlatformToAgent {
+            msg_type: PlatformToAgentType::Chat,
             content: "hello agent".to_string(),
+            task_id: None,
             conversation_id: Some("conv-123".to_string()),
+            ref_id: None,
+            summary: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
-        // Must serialize as {"type":"chat","content":"hello agent","conversation_id":"conv-123"}
+        // Must produce: {"type":"chat","content":"hello agent","conversation_id":"conv-123"}
         assert!(json.contains(r#""type":"chat""#));
         let de: PlatformToAgent = serde_json::from_str(&json).unwrap();
         assert_eq!(msg, de);
@@ -106,9 +177,13 @@ mod tests {
 
     #[test]
     fn roundtrip_task_message() {
-        let msg = PlatformToAgent::Task {
+        let msg = PlatformToAgent {
+            msg_type: PlatformToAgentType::Task,
             content: "do something".to_string(),
-            task_id: "t-1".to_string(),
+            task_id: Some("t-1".to_string()),
+            conversation_id: None,
+            ref_id: None,
+            summary: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"task""#));
@@ -117,46 +192,157 @@ mod tests {
     }
 
     #[test]
+    fn roundtrip_data_reference_message() {
+        let msg = PlatformToAgent {
+            msg_type: PlatformToAgentType::DataReference,
+            content: String::new(),
+            task_id: None,
+            conversation_id: None,
+            ref_id: Some("var://x".to_string()),
+            summary: Some("variable x".to_string()),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"data_reference""#));
+        let de: PlatformToAgent = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, de);
+    }
+
+    // ── AgentToPlatform roundtrips ─────────────────────────────────
+
+    #[test]
     fn roundtrip_result_message() {
-        let msg = AgentToPlatform::Result {
+        let msg = AgentToPlatform {
+            msg_type: AgentToPlatformType::Result,
             content: "done".to_string(),
             task_id: Some("t-1".to_string()),
-            success: true,
+            message: None,
+            progress_pct: None,
+            error: None,
+            status: Some("completed".to_string()),
+            output: Some(serde_json::json!("result text")),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"result""#));
+        assert!(!json.contains("success")); // no fabricated field
+        let de: AgentToPlatform = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, de);
+    }
+
+    #[test]
+    fn roundtrip_progress_message() {
+        let msg = AgentToPlatform {
+            msg_type: AgentToPlatformType::Progress,
+            content: String::new(),
+            task_id: Some("t-1".to_string()),
+            message: Some("halfway".to_string()),
+            progress_pct: Some(50.0),
+            error: None,
+            status: None,
+            output: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"progress""#));
         let de: AgentToPlatform = serde_json::from_str(&json).unwrap();
         assert_eq!(msg, de);
     }
 
     #[test]
     fn roundtrip_error_message() {
-        let msg = AgentToPlatform::Error {
-            error: "something broke".to_string(),
-            error_type: "RuntimeError".to_string(),
-            task_id: None,
+        let msg = AgentToPlatform {
+            msg_type: AgentToPlatformType::Error,
+            content: String::new(),
+            task_id: Some("t-1".to_string()),
+            message: None,
+            progress_pct: None,
+            error: Some("something broke".to_string()),
+            status: None,
+            output: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"error""#));
-        // Python sends {"type":"error","error":"...","error_type":"..."}
-        // Our Rust uses #[serde(rename = "type")] for error_type
-        // Actually we need to handle the Python format which uses "error" and "error_type"
+        assert!(!json.contains("error_type")); // no fabricated field
         let de: AgentToPlatform = serde_json::from_str(&json).unwrap();
         assert_eq!(msg, de);
     }
 
+    // ── Python wire-format compatibility ───────────────────────────
+
     #[test]
-    fn deserialize_python_format_chat() {
+    fn deserialize_python_chat() {
         // Python sends: {"type":"chat","content":"hello","conversation_id":"c1"}
         let json = r#"{"type":"chat","content":"hello","conversation_id":"c1"}"#;
         let msg: PlatformToAgent = serde_json::from_str(json).unwrap();
-        match msg {
-            PlatformToAgent::Chat { content, conversation_id } => {
-                assert_eq!(content, "hello");
-                assert_eq!(conversation_id, Some("c1".to_string()));
-            }
-            _ => panic!("Expected Chat variant"),
-        }
+        assert_eq!(msg.msg_type, PlatformToAgentType::Chat);
+        assert_eq!(msg.content, "hello");
+        assert_eq!(msg.conversation_id.as_deref(), Some("c1"));
+    }
+
+    #[test]
+    fn deserialize_python_task() {
+        // Python sends: {"type":"task","content":"...","task_id":"t1"}
+        let json = r#"{"type":"task","content":"review code","task_id":"t-1"}"#;
+        let msg: PlatformToAgent = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.msg_type, PlatformToAgentType::Task);
+        assert_eq!(msg.task_id.as_deref(), Some("t-1"));
+    }
+
+    #[test]
+    fn deserialize_python_result() {
+        // Python sends: {"type":"result","task_id":"t1","output":"ok","status":"completed"}
+        let json = r#"{"type":"result","content":"","task_id":"t-1","output":"ok","status":"completed"}"#;
+        let msg: AgentToPlatform = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.msg_type, AgentToPlatformType::Result);
+        assert_eq!(msg.status.as_deref(), Some("completed"));
+        assert!(msg.is_success());
+    }
+
+    #[test]
+    fn deserialize_python_error() {
+        // Python sends: {"type":"error","task_id":"t1","error":"ImportError: ..."}
+        let json = r#"{"type":"error","content":"","task_id":"t-1","error":"ImportError: module not found"}"#;
+        let msg: AgentToPlatform = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.msg_type, AgentToPlatformType::Error);
+        assert!(!msg.is_success());
+    }
+
+    #[test]
+    fn deserialize_python_progress() {
+        // Python sends: {"type":"progress","task_id":"t1","message":"50% done","progress_pct":50.0}
+        let json = r#"{"type":"progress","content":"","task_id":"t-1","message":"50% done","progress_pct":50.0}"#;
+        let msg: AgentToPlatform = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.msg_type, AgentToPlatformType::Progress);
+        assert_eq!(msg.progress_pct, Some(50.0));
+        assert_eq!(msg.message.as_deref(), Some("50% done"));
+    }
+
+    #[test]
+    fn is_success_returns_false_for_error() {
+        let msg = AgentToPlatform {
+            msg_type: AgentToPlatformType::Error,
+            content: String::new(),
+            task_id: None,
+            message: None,
+            progress_pct: None,
+            error: Some("fail".to_string()),
+            status: None,
+            output: None,
+        };
+        assert!(!msg.is_success());
+    }
+
+    #[test]
+    fn is_success_returns_true_when_status_completed() {
+        let msg = AgentToPlatform {
+            msg_type: AgentToPlatformType::Result,
+            content: String::new(),
+            task_id: None,
+            message: None,
+            progress_pct: None,
+            error: None,
+            status: Some("completed".to_string()),
+            output: None,
+        };
+        assert!(msg.is_success());
     }
 }
 ```
@@ -164,13 +350,13 @@ mod tests {
 - [ ] **Step 2: Run test to verify it compiles**
 
 Run: `cargo test -p ap-core -- models::ipc`
-Expected: PASS (all 5 tests)
+Expected: PASS (all 14 tests)
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add crates/ap-core/src/models/
-git commit -m "feat(ap-core): add IPC message models with serde roundtrip tests"
+git commit -m "feat(ap-core): add IPC flat-struct models matching Python wire format"
 ```
 
 ---
@@ -851,23 +1037,75 @@ fn default_true() -> bool { true }
 
 impl SkillRecord {
     /// Validate counter invariants.
+    /// Python source: models/evolution.py `_validate_counters` — 5 checks.
     pub fn validate_counters(&self) -> Result<(), String> {
+        // Check 1: zero selections means zero applied and zero fallbacks
         if self.total_selections == 0 {
             if self.total_applied != 0 || self.total_fallbacks != 0 {
                 return Err("zero selections requires zero applied and zero fallbacks".into());
             }
         }
+        // Check 2: applied <= selections
         if self.total_applied > self.total_selections {
             return Err("total_applied cannot exceed total_selections".into());
         }
+        // Check 3: completions <= applied
         if self.total_completions > self.total_applied {
             return Err("total_completions cannot exceed total_applied".into());
         }
+        // Check 4: fallbacks <= applied
         if self.total_fallbacks > self.total_applied {
             return Err("total_fallbacks cannot exceed total_applied".into());
         }
+        // Check 5 (F-13 fix): completions + fallbacks <= applied
+        if self.total_completions + self.total_fallbacks > self.total_applied {
+            return Err("total_completions + total_fallbacks cannot exceed total_applied".into());
+        }
         Ok(())
     }
+}
+
+/// Standalone evolution metrics with same counter validators as SkillRecord.
+///
+/// Python source: models/evolution.py:97-123 `EvolutionMetrics`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct EvolutionMetrics {
+    #[serde(default)]
+    pub total_selections: u64,
+    #[serde(default)]
+    pub total_applied: u64,
+    #[serde(default)]
+    pub total_completions: u64,
+    #[serde(default)]
+    pub total_fallbacks: u64,
+}
+
+impl EvolutionMetrics {
+    pub fn validate(&self) -> Result<(), String> {
+        SkillRecord::validate_counters_from_parts(
+            self.total_selections, self.total_applied,
+            self.total_completions, self.total_fallbacks,
+        )
+    }
+}
+
+/// Context passed to evolver with task/agent metadata.
+///
+/// Python source: models/evolution.py:126-141 `EvolutionContext`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct EvolutionContext {
+    #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub task_id: String,
+    #[serde(default)]
+    pub skill_ids_used: Vec<String>,
+    #[serde(default)]
+    pub task_description: String,
+    #[serde(default)]
+    pub task_result: Option<String>,
+    #[serde(default)]
+    pub error_info: Option<String>,
 }
 
 #[cfg(test)]
@@ -928,6 +1166,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Variable {
     pub name: String,
+    /// Current value — can be any JSON-serializable type. Python: `value: Any`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
     #[serde(default)]
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1053,6 +1294,29 @@ pub struct HookExecution {
     #[serde(default = "utc_now")]
     pub executed_at: DateTime<Utc>,
 }
+
+impl HookExecution {
+    /// Validate: cannot be both passed and blocked.
+    /// Python source: models/hooks.py `_validate_passed_blocked`
+    pub fn validate(&self) -> Result<(), String> {
+        if self.passed && self.blocked {
+            return Err("HookExecution cannot be both passed and blocked".into());
+        }
+        Ok(())
+    }
+}
+
+/// Aggregated result of all hook executions for a single event.
+///
+/// Python source: models/hooks.py `AggregatedHookResult`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct AggregatedHookResult {
+    #[serde(default)]
+    pub results: Vec<HookExecution>,
+    pub should_block: bool,
+    #[serde(default)]
+    pub outputs: Vec<String>,
+}
 ```
 
 ```rust
@@ -1081,8 +1345,10 @@ pub struct Composition {
     pub tasks: std::collections::HashMap<String, CompositionTask>,
 }
 
+/// F-09 fix: Renamed from `WorkflowPhase` to `WorkflowPhaseEntry` to avoid
+/// collision with the router's `WorkflowPhase` enum in Phase 04.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct WorkflowPhase {
+pub struct WorkflowPhaseEntry {
     pub phase: String,
     #[serde(default)]
     pub tasks: Vec<String>,
@@ -1110,35 +1376,176 @@ pub struct WorkflowContext {
 // crates/ap-core/src/models/context.rs
 
 //! Context window models for token budget management.
+//!
+//! Python source: models/context.py
+//!
+//! IMPORTANT (F-05 fix): ContextBudget has 10 configurable fields with
+//! cross-field validators, NOT 4 simple fields. The plan originally
+//! oversimplified this to {max_tokens, used_tokens, compaction_threshold,
+//! compaction_target} which is wrong. The real model has tiered loading
+//! levels (L0-L3), session safety thresholds, and compaction cooldown.
 
 use serde::{Deserialize, Serialize};
 
+/// Tiered context loading levels.
+///
+/// L0: Identity core — injected every turn (<= 800 tokens).
+/// L1: Execution context — injected on first turn only (<= 3,000 tokens).
+/// L2: Extended knowledge — loaded on demand.
+/// L3: Runtime data — dynamic, never pre-loaded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContextLevel {
+    L0Identity,
+    L1Execution,
+    L2Extended,
+    L3Runtime,
+}
+
+/// Alert levels from token budget checking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BudgetAlertLevel {
+    HardCeiling,
+    ForcedTruncate,
+    Compaction,
+}
+
+/// Token budget limits for context tiered loading.
+///
+/// Python source: models/context.py:43-104
+/// All threshold values are fractions in 0.0-1.0 range.
+/// Cross-field constraints:
+///   - compaction_trigger > compaction_target
+///   - forced_truncate_threshold < session_hard_ceiling
+///   - l0_max + l1_max <= bootstrap_max
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextBudget {
-    pub max_tokens: u32,
-    pub used_tokens: u32,
-    pub compaction_threshold: f64,
+    pub l0_max: u32,
+    pub l1_max: u32,
+    pub bootstrap_max: u32,
+    pub single_file_max: u32,
+    pub compaction_trigger: f64,
     pub compaction_target: f64,
+    pub session_hard_ceiling: f64,
+    pub forced_truncate_threshold: f64,
+    pub min_turns_between_compactions: u32,
+    pub consecutive_compaction_alert: u32,
+}
+
+impl Default for ContextBudget {
+    fn default() -> Self {
+        Self {
+            l0_max: 800,
+            l1_max: 3000,
+            bootstrap_max: 5000,
+            single_file_max: 8000,
+            compaction_trigger: 0.8,
+            compaction_target: 0.4,
+            session_hard_ceiling: 0.95,
+            forced_truncate_threshold: 0.9,
+            min_turns_between_compactions: 5,
+            consecutive_compaction_alert: 3,
+        }
+    }
 }
 
 impl ContextBudget {
-    pub fn usage_ratio(&self) -> f64 {
-        if self.max_tokens == 0 {
-            return 0.0;
+    /// Validate all cross-field constraints. Mirrors Python's `_validate_thresholds`.
+    pub fn validate(&self) -> Result<(), String> {
+        // Thresholds must be fractions 0.0-1.0
+        for (name, value) in [
+            ("compaction_trigger", self.compaction_trigger),
+            ("compaction_target", self.compaction_target),
+            ("session_hard_ceiling", self.session_hard_ceiling),
+            ("forced_truncate_threshold", self.forced_truncate_threshold),
+        ] {
+            if !(0.0..=1.0).contains(&value) {
+                return Err(format!("{name}={value} out of range 0.0-1.0"));
+            }
         }
-        self.used_tokens as f64 / self.max_tokens as f64
-    }
-
-    pub fn needs_compaction(&self) -> bool {
-        self.usage_ratio() >= self.compaction_threshold
+        if self.compaction_trigger <= self.compaction_target {
+            return Err(format!(
+                "compaction_trigger ({}) must be > compaction_target ({})",
+                self.compaction_trigger, self.compaction_target
+            ));
+        }
+        if self.forced_truncate_threshold >= self.session_hard_ceiling {
+            return Err(format!(
+                "forced_truncate_threshold ({}) must be < session_hard_ceiling ({})",
+                self.forced_truncate_threshold, self.session_hard_ceiling
+            ));
+        }
+        if self.l0_max + self.l1_max > self.bootstrap_max {
+            return Err(format!(
+                "l0_max ({}) + l1_max ({}) = {} exceeds bootstrap_max ({})",
+                self.l0_max, self.l1_max, self.l0_max + self.l1_max, self.bootstrap_max
+            ));
+        }
+        Ok(())
     }
 }
 
+/// Session-scoped token usage tracking. Attached to AgentContext.
+///
+/// Python source: models/context.py:110-150
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ContextWindow {
-    pub budget: ContextBudget,
-    pub min_turns_between_compactions: u32,
-    pub consecutive_compaction_count: u32,
+pub struct TokenUsage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub compaction_count: u32,
+    pub last_compaction_turn: u32,
+}
+
+impl Default for TokenUsage {
+    fn default() -> Self {
+        Self {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            compaction_count: 0,
+            last_compaction_turn: 0,
+        }
+    }
+}
+
+impl TokenUsage {
+    pub fn total_tokens(&self) -> u64 {
+        self.prompt_tokens + self.completion_tokens
+    }
+
+    /// Return alert level or None if within budget.
+    /// Mirrors Python's `check_budget` method.
+    pub fn check_budget(
+        &self,
+        context_window: u64,
+        budget: &ContextBudget,
+    ) -> Option<BudgetAlertLevel> {
+        let ratio = if context_window == 0 { return None; } else {
+            self.total_tokens() as f64 / context_window as f64
+        };
+        if ratio >= budget.session_hard_ceiling {
+            Some(BudgetAlertLevel::HardCeiling)
+        } else if ratio >= budget.forced_truncate_threshold {
+            Some(BudgetAlertLevel::ForcedTruncate)
+        } else if ratio >= budget.compaction_trigger {
+            Some(BudgetAlertLevel::Compaction)
+        } else {
+            None
+        }
+    }
+}
+
+/// Context budget log entry for compaction observability.
+///
+/// Python source: used by EvolutionStore's context_budget_log table.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContextBudgetLogEntry {
+    pub id: String,
+    pub agent_name: String,
+    pub event_type: String,
+    pub tokens_before: Option<i64>,
+    pub tokens_after: Option<i64>,
+    pub details: Option<String>,
+    pub created_at: String,
 }
 
 #[cfg(test)]
@@ -1146,31 +1553,322 @@ mod tests {
     use super::*;
 
     #[test]
-    fn context_budget_usage() {
-        let budget = ContextBudget {
-            max_tokens: 1000,
-            used_tokens: 800,
-            compaction_threshold: 0.8,
-            compaction_target: 0.4,
-        };
-        assert!((budget.usage_ratio() - 0.8).abs() < 0.001);
-        assert!(budget.needs_compaction());
+    fn default_budget_validates() {
+        let budget = ContextBudget::default();
+        assert!(budget.validate().is_ok());
     }
 
     #[test]
-    fn context_budget_no_compaction_needed() {
-        let budget = ContextBudget {
-            max_tokens: 1000,
-            used_tokens: 500,
-            compaction_threshold: 0.8,
-            compaction_target: 0.4,
+    fn trigger_must_exceed_target() {
+        let mut budget = ContextBudget::default();
+        budget.compaction_trigger = 0.3;
+        budget.compaction_target = 0.5;
+        assert!(budget.validate().is_err());
+    }
+
+    #[test]
+    fn bootstrap_must_fit_l0_plus_l1() {
+        let mut budget = ContextBudget::default();
+        budget.bootstrap_max = 1000;
+        assert!(budget.validate().is_err());
+    }
+
+    #[test]
+    fn forced_truncate_must_be_below_ceiling() {
+        let mut budget = ContextBudget::default();
+        budget.forced_truncate_threshold = 0.96;
+        assert!(budget.validate().is_err());
+    }
+
+    #[test]
+    fn token_usage_check_budget() {
+        let usage = TokenUsage {
+            prompt_tokens: 850,
+            completion_tokens: 0,
+            compaction_count: 0,
+            last_compaction_turn: 0,
         };
-        assert!(!budget.needs_compaction());
+        let budget = ContextBudget::default();
+        // 850/1000 = 0.85 >= compaction_trigger(0.8)
+        assert_eq!(usage.check_budget(1000, &budget), Some(BudgetAlertLevel::Compaction));
+    }
+
+    #[test]
+    fn token_usage_below_threshold() {
+        let usage = TokenUsage {
+            prompt_tokens: 500,
+            completion_tokens: 0,
+            compaction_count: 0,
+            last_compaction_turn: 0,
+        };
+        let budget = ContextBudget::default();
+        assert_eq!(usage.check_budget(1000, &budget), None);
     }
 }
 ```
 
-- [ ] **Step 6: Write models/mod.rs**
+- [ ] **Step 6: Write distribution models (F-04 fix — was missing entirely)**
+
+```rust
+// crates/ap-core/src/models/distribution.rs
+
+//! Git-based distribution models: PackageSource, SourceEntry, LockfileEntry, InstallationStatus.
+//!
+//! Python source: models/distribution.py (150 lines)
+//! IMPORTANT: These types were completely missing from the original plan.
+//! Phase 07 (ap-fetcher) was defining local types that don't match Python.
+//! Now Phase 07 should reference these types instead.
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+use super::agent::AgentType;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceType {
+    Official,
+    Private,
+    Direct,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallationStatus {
+    Installed,
+    Outdated,
+    NotInstalled,
+    Installing,
+    Failed,
+}
+
+/// A package source entry from sources.yaml.
+///
+/// Python source: models/distribution.py:33-57
+/// Has `_validate_git_url` validator: git-type sources must have non-empty URL.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SourceEntry {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default = "default_git")]
+    pub source_type: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default = "default_branch")]
+    pub branch: String,
+}
+
+fn default_git() -> String { "git".to_string() }
+fn default_branch() -> String { "main".to_string() }
+
+impl SourceEntry {
+    /// Validate: git-type sources must have non-empty URL.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.source_type == "git" && self.url.trim().is_empty() {
+            return Err(format!(
+                "Git-type source requires a non-empty 'url'. Source '{}' has type='git' but url is empty.",
+                self.name
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// A single Agent entry in lockfile.json.
+///
+/// Python source: models/distribution.py:60-94
+/// IMPORTANT (F-03 fix): `commit_sha` not `git_hash`.
+/// Missing fields were: `agent_type`, `venv_path`, `dependencies`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LockfileEntry {
+    /// Version string. Python validates: r"^[a-zA-Z0-9._-]+$"
+    pub version: String,
+    pub source: String,
+    /// Commit SHA — 40/64 hex chars, or sentinel 'latest'/'head'.
+    /// NOT `git_hash` (original plan had wrong name).
+    pub commit_sha: String,
+    pub agent_type: AgentType,
+    #[serde(default)]
+    pub installed_at: String,
+    #[serde(default)]
+    pub venv_path: String,
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+}
+
+impl LockfileEntry {
+    /// Validate commit_sha format: 40/64 hex or 'latest'/'head'.
+    pub fn validate_commit_sha(&self) -> Result<(), String> {
+        let valid = self.commit_sha.len() == 40
+            || self.commit_sha.len() == 64
+            || self.commit_sha == "latest"
+            || self.commit_sha == "head";
+        if valid && self.commit_sha.len() >= 40 {
+            // Check hex format for actual SHAs
+            if !self.commit_sha.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err(format!("commit_sha '{}' is not valid hex", self.commit_sha));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The complete lockfile.json structure.
+///
+/// Python source: models/distribution.py:97-105
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Lockfile {
+    #[serde(default = "default_lockfile_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub agents: HashMap<String, LockfileEntry>,
+}
+
+fn default_lockfile_version() -> u32 { 1 }
+
+impl Default for Lockfile {
+    fn default() -> Self {
+        Self { version: 1, agents: HashMap::new() }
+    }
+}
+
+/// Git package source with local cache path.
+///
+/// Python source: models/distribution.py:108-115
+/// Extends SourceEntry with runtime state (local cache directory).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PackageSource {
+    #[serde(flatten)]
+    pub entry: SourceEntry,
+    #[serde(default)]
+    pub local_cache: String,
+}
+
+/// A single Agent entry from a source's index.yaml.
+///
+/// Python source: models/distribution.py:118-150
+/// Has `_reject_path_traversal` validator: no ".." in path.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IndexEntry {
+    pub name: String,
+    pub version: String,
+    pub agent_type: AgentType,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+    #[serde(default)]
+    pub path: String,
+}
+
+impl IndexEntry {
+    /// Reject path traversal sequences in the path field.
+    pub fn validate_path(&self) -> Result<(), String> {
+        if !self.path.is_empty() && self.path.contains("..") {
+            return Err(format!("IndexEntry.path must not contain '..': got '{}'", self.path));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_entry_validates_git_url() {
+        let entry = SourceEntry {
+            name: "test".into(),
+            source_type: "git".into(),
+            url: "".into(),
+            branch: "main".into(),
+        };
+        assert!(entry.validate().is_err());
+    }
+
+    #[test]
+    fn source_entry_passes_with_url() {
+        let entry = SourceEntry {
+            name: "test".into(),
+            source_type: "git".into(),
+            url: "https://github.com/test/repo".into(),
+            branch: "main".into(),
+        };
+        assert!(entry.validate().is_ok());
+    }
+
+    #[test]
+    fn lockfile_entry_valid_commit_sha() {
+        let entry = LockfileEntry {
+            version: "1.0.0".into(),
+            source: "official".into(),
+            commit_sha: "abc123def456abc123def456abc123def456abc1".into(),
+            agent_type: AgentType::Atomic,
+            installed_at: "2026-04-22T00:00:00Z".into(),
+            venv_path: String::new(),
+            dependencies: vec![],
+        };
+        assert!(entry.validate_commit_sha().is_ok());
+    }
+
+    #[test]
+    fn lockfile_entry_latest_sentinel() {
+        let entry = LockfileEntry {
+            version: "1.0.0".into(),
+            source: "official".into(),
+            commit_sha: "latest".into(),
+            agent_type: AgentType::Atomic,
+            installed_at: String::new(),
+            venv_path: String::new(),
+            dependencies: vec![],
+        };
+        assert!(entry.validate_commit_sha().is_ok());
+    }
+
+    #[test]
+    fn index_entry_rejects_path_traversal() {
+        let entry = IndexEntry {
+            name: "test".into(),
+            version: "1.0.0".into(),
+            agent_type: AgentType::Atomic,
+            description: String::new(),
+            tags: vec![],
+            dependencies: vec![],
+            path: "../etc/passwd".into(),
+        };
+        assert!(entry.validate_path().is_err());
+    }
+
+    #[test]
+    fn deserialize_python_lockfile() {
+        let json = r#"{
+            "version": 1,
+            "agents": {
+                "code-reviewer": {
+                    "version": "1.2.0",
+                    "source": "official",
+                    "commit_sha": "abc123def456abc123def456abc123def456abc1",
+                    "agent_type": "atomic",
+                    "installed_at": "2026-04-20T10:00:00Z",
+                    "venv_path": "~/.agent-nexus/venvs/doc-filler",
+                    "dependencies": ["pydantic>=2.0"]
+                }
+            }
+        }"#;
+        let lockfile: Lockfile = serde_json::from_str(json).unwrap();
+        assert!(lockfile.agents.contains_key("code-reviewer"));
+        let entry = &lockfile.agents["code-reviewer"];
+        assert_eq!(entry.version, "1.2.0");
+        assert_eq!(entry.agent_type, AgentType::Atomic);
+        assert_eq!(entry.venv_path, "~/.agent-nexus/venvs/doc-filler");
+        assert_eq!(entry.dependencies.len(), 1);
+    }
+}
+```
+
+- [ ] **Step 7: Write models/mod.rs**
 
 ```rust
 // crates/ap-core/src/models/mod.rs
@@ -1182,6 +1880,7 @@ pub mod common;
 pub mod composition;
 pub mod config;
 pub mod context;
+pub mod distribution;
 pub mod evolution;
 pub mod hooks;
 pub mod ipc;
@@ -1192,11 +1891,14 @@ pub mod task;
 // Re-export key types for convenience
 pub use agent::{AgentManifest, AgentType, RunMode, AgentRole, ModelTier};
 pub use config::{PlatformConfig, ModelConfig, RuntimeConfig, ProviderConfig};
-pub use ipc::{PlatformToAgent, AgentToPlatform};
-pub use task::{TaskItem, TaskState, TaskGraphSnapshot};
+pub use context::{ContextBudget, ContextLevel, BudgetAlertLevel, TokenUsage};
+pub use distribution::{SourceType, InstallationStatus, SourceEntry, LockfileEntry, Lockfile, PackageSource, IndexEntry};
+pub use evolution::{SkillRecord, EvolutionType, SkillOrigin, SkillLineage, EvolutionMetrics, EvolutionContext};
+pub use hooks::{HookType, HookEvent, HookDefinition, HookExecution};
+pub use ipc::{PlatformToAgent, AgentToPlatform, IPCMessage, MessageDirection};
 pub use permission::{PermissionConfig, PermissionMode, PermissionDecision};
-pub use evolution::{SkillRecord, EvolutionType, SkillOrigin, SkillLineage};
-pub use composition::{Composition, CompositionTask, WorkflowPhase, WorkflowResult, WorkflowContext};
+pub use task::{TaskItem, TaskState, TaskGraphSnapshot};
+pub use composition::{Composition, CompositionTask, WorkflowPhaseEntry, WorkflowResult, WorkflowContext};
 ```
 
 - [ ] **Step 7: Update lib.rs and add missing serde_json dep if needed**

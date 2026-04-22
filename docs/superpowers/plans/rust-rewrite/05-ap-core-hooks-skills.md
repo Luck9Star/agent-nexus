@@ -20,8 +20,12 @@
 **Python source:** `src/agent_nexus/platform/hooks/executor.py` (492 lines)
 **Rust target:** `crates/ap-core/src/hooks/executor.rs`
 
+> **F-08 fix:** Dispatch on `HookType` (command/http/prompt/agent), NOT on a
+> fabricated `HookAction` enum. The `HookDefinition` model from Phase 01 has
+> `hook_type: HookType` with optional `command`, `url`, `prompt`, `model` fields.
+
 Hooks run at lifecycle events: `pre_run`, `post_run`, `on_error`, `on_timeout`.
-A hook is a shell command or inline script that executes at the appropriate moment.
+A hook dispatches based on its `hook_type` field.
 
 - [ ] **Step 1: Write hook executor tests**
 
@@ -30,68 +34,89 @@ A hook is a shell command or inline script that executes at the appropriate mome
 mod tests {
     use super::*;
 
+    fn make_command_hook(event: HookEvent, cmd: &str) -> HookDefinition {
+        HookDefinition {
+            hook_type: HookType::Command,
+            event,
+            config: serde_json::Value::Null,
+            enabled: true,
+            block_on_failure: false,
+            timeout_seconds: 10.0,
+            matcher: None,
+            command: Some(cmd.to_string()),
+            url: None,
+            prompt: None,
+            model: None,
+        }
+    }
+
     #[test]
     fn register_and_list_hooks() {
         let mut exec = HookExecutor::new();
-        exec.register(HookDefinition {
-            event: HookEvent::PreRun,
-            action: HookAction::Command("echo starting".into()),
-            name: "log-start".into(),
-        });
-        let hooks = exec.list_for_event(&HookEvent::PreRun);
+        exec.register(make_command_hook(HookEvent::PreExecution, "echo starting"));
+        let hooks = exec.list_for_event(&HookEvent::PreExecution);
         assert_eq!(hooks.len(), 1);
-        assert_eq!(hooks[0].name, "log-start");
+        assert_eq!(hooks[0].hook_type, HookType::Command);
     }
 
     #[tokio::test]
     async fn execute_command_hook() {
         let exec = HookExecutor::new();
-        let def = HookDefinition {
-            event: HookEvent::PreRun,
-            action: HookAction::Command("echo hello".into()),
-            name: "test".into(),
-        };
+        let def = make_command_hook(HookEvent::PreExecution, "echo hello");
         let result = exec.execute(&def).await.unwrap();
-        assert!(result.success);
-        assert!(result.output.contains("hello"));
+        assert!(result.passed);
+        assert!(!result.blocked);
+        assert!(result.output.as_deref().unwrap_or("").contains("hello"));
     }
 
     #[tokio::test]
-    async fn execute_failing_hook_returns_error() {
+    async fn execute_failing_hook_returns_blocked() {
         let exec = HookExecutor::new();
-        let def = HookDefinition {
-            event: HookEvent::PreRun,
-            action: HookAction::Command("false".into()), // exits 1
-            name: "fail".into(),
-        };
+        let def = make_command_hook(HookEvent::PreExecution, "false");
         let result = exec.execute(&def).await.unwrap();
-        assert!(!result.success);
+        assert!(!result.passed);
     }
 
     #[tokio::test]
     async fn run_all_hooks_for_event() {
         let mut exec = HookExecutor::new();
-        exec.register(HookDefinition {
-            event: HookEvent::PostRun,
-            action: HookAction::Command("echo done".into()),
-            name: "h1".into(),
-        });
-        exec.register(HookDefinition {
-            event: HookEvent::PostRun,
-            action: HookAction::Command("echo complete".into()),
-            name: "h2".into(),
-        });
-        let results = exec.run_all(&HookEvent::PostRun).await;
-        assert_eq!(results.len(), 2);
-        assert!(results.iter().all(|r| r.success));
+        exec.register(make_command_hook(HookEvent::PostExecution, "echo done"));
+        exec.register(make_command_hook(HookEvent::PostExecution, "echo complete"));
+        let aggregated = exec.run_all(&HookEvent::PostExecution).await;
+        assert_eq!(aggregated.results.len(), 2);
+        assert!(aggregated.results.iter().all(|r| r.passed));
+        assert!(!aggregated.should_block);
+    }
+
+    #[tokio::test]
+    async fn http_hook_skipped_when_no_url() {
+        let exec = HookExecutor::new();
+        let def = HookDefinition {
+            hook_type: HookType::Http,
+            event: HookEvent::PostExecution,
+            config: serde_json::Value::Null,
+            enabled: true,
+            block_on_failure: false,
+            timeout_seconds: 10.0,
+            matcher: None,
+            command: None,
+            url: None,
+            prompt: None,
+            model: None,
+        };
+        let result = exec.execute(&def).await.unwrap();
+        // Should gracefully handle missing URL
+        assert!(!result.passed);
     }
 }
 ```
 
-- [ ] **Step 2: Implement HookExecutor**
+- [ ] **Step 2: Implement HookExecutor — dispatch on HookType**
 
 ```rust
-use crate::models::hooks::{HookEvent, HookAction, HookDefinition, HookExecution};
+use crate::models::hooks::{
+    HookType, HookEvent, HookDefinition, HookExecution, AggregatedHookResult,
+};
 use std::collections::HashMap;
 
 pub struct HookExecutor {
@@ -104,7 +129,8 @@ impl HookExecutor {
     }
 
     pub fn register(&mut self, hook: HookDefinition) {
-        self.hooks.entry(hook.event.clone())
+        if !hook.enabled { return; }
+        self.hooks.entry(hook.event)
             .or_default()
             .push(hook);
     }
@@ -113,30 +139,66 @@ impl HookExecutor {
         self.hooks.get(event).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    pub async fn execute(&self, hook: &HookDefinition) -> Result<HookExecution, std::io::Error> {
-        let output = match &hook.action {
-            HookAction::Command(cmd) => {
-                let parts: Vec<&str> = cmd.split_whitespace().collect();
-                let result = tokio::process::Command::new(parts[0])
-                    .args(&parts[1..])
-                    .output()
-                    .await?;
-                HookExecution {
-                    name: hook.name.clone(),
-                    success: result.status.success(),
-                    output: String::from_utf8_lossy(&result.stdout).into(),
-                    duration_ms: 0, // TODO: measure
-                }
+    /// Execute a single hook, dispatching on `hook_type`.
+    /// F-08 fix: dispatch on HookType, not a fabricated HookAction enum.
+    pub async fn execute(&self, hook: &HookDefinition) -> Result<HookExecution, HookExecuteError> {
+        let start = std::time::Instant::now();
+        let (passed, output, error) = match hook.hook_type {
+            HookType::Command => self.execute_command(hook).await?,
+            HookType::Http => self.execute_http(hook).await?,
+            HookType::Prompt => {
+                // Prompt hooks require model interaction — placeholder
+                (true, None, None)
             }
-            HookAction::Script(_script) => {
-                // Execute inline script via shell
-                todo!()
+            HookType::Agent => {
+                // Agent hooks delegate to an agent subprocess — placeholder
+                (true, None, None)
             }
         };
-        Ok(output)
+        let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+        Ok(HookExecution {
+            hook: hook.clone(),
+            passed,
+            blocked: !passed && hook.block_on_failure,
+            output,
+            error,
+            error_type: None,
+            duration_ms,
+            executed_at: chrono::Utc::now(),
+        })
     }
 
-    pub async fn run_all(&self, event: &HookEvent) -> Vec<HookExecution> {
+    async fn execute_command(
+        &self, hook: &HookDefinition,
+    ) -> Result<(bool, Option<String>, Option<String>), HookExecuteError> {
+        let cmd = hook.command.as_deref().ok_or(HookExecuteError::MissingField("command"))?;
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.is_empty() {
+            return Ok((false, None, Some("empty command".into())));
+        }
+        let result = tokio::process::Command::new(parts[0])
+            .args(&parts[1..])
+            .output()
+            .await
+ .map_err(|e| HookExecuteError::ExecutionFailed(e.to_string()))?;
+        let output = String::from_utf8_lossy(&result.stdout).to_string();
+        let error = if result.status.success() { None } else {
+            Some(String::from_utf8_lossy(&result.stderr).to_string())
+        };
+        Ok((result.status.success(), Some(output), error))
+    }
+
+    async fn execute_http(
+        &self, hook: &HookDefinition,
+    ) -> Result<(bool, Option<String>, Option<String>), HookExecuteError> {
+        let url = hook.url.as_deref().ok_or(HookExecuteError::MissingField("url"))?;
+        // HTTP POST with hook config as body — placeholder
+        let _ = url;
+        Ok((true, None, None))
+    }
+
+    /// Run all hooks for an event, return aggregated result.
+    pub async fn run_all(&self, event: &HookEvent) -> AggregatedHookResult {
         let mut results = Vec::new();
         if let Some(hooks) = self.hooks.get(event) {
             for hook in hooks {
@@ -145,8 +207,20 @@ impl HookExecutor {
                 }
             }
         }
-        results
+        let should_block = results.iter().any(|r| r.blocked);
+        let outputs = results.iter()
+            .filter_map(|r| r.output.clone())
+            .collect();
+        AggregatedHookResult { results, should_block, outputs }
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum HookExecuteError {
+    #[error("Missing required field: {0}")]
+    MissingField(&'static str),
+    #[error("Execution failed: {0}")]
+    ExecutionFailed(String),
 }
 ```
 

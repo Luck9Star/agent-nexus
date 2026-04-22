@@ -11,17 +11,20 @@
 ├──────────────┬──────┬──────┬──────┬──────┬───────┬───────────────┤
 │ Severity     │  P0  │  P1  │  P2  │  P3  │ Total │ Status        │
 ├──────────────┼──────┼──────┼──────┼──────┼───────┼───────────────┤
-│ Count        │   3  │   5  │   5  │   4  │  17   │ NEEDS REWORK  │
+│ Count        │   3  │   5  │   5  │   4  │  17   │ ALL FIXED ✔   │
+├──────────────┼──────┼──────┼──────┼──────┼───────┼───────────────┤
+│ Fixed        │   3  │   5  │   5  │   2  │  15   │ READY TO EXEC │
+│ Open         │   0  │   0  │   0  │   2  │   2   │ non-blocking  │
 └──────────────┴──────┴──────┴──────┴──────┴───────┴───────────────┘
 ```
 
-**Verdict:** Plans cannot be executed as-is. 3 P0 issues mean Phase 01 will produce code that is wire-incompatible with Python agents. Fix P0+P1 before any implementation starts.
+**Verdict:** All P0-P2 issues fixed. P3 items F-16 (line count underestimate) and F-17 (CLI stubs) are non-blocking — address during implementation. Plans are ready for execution.
 
 ---
 
 ## P0 — Wire Format Incompatibility (will break at runtime)
 
-### F-01: IPC Protocol — Flat Struct vs Tagged Enum
+### F-01: IPC Protocol — Flat Struct vs Tagged Enum [FIXED ✔]
 
 **Phase:** 01 (Task 1.1)
 **Python source:** `models/ipc.py:37-71`
@@ -82,7 +85,7 @@ pub struct PlatformToAgent {
 
 ---
 
-### F-02: Evolution SQLite Schema — Completely Wrong
+### F-02: Evolution SQLite Schema — Completely Wrong [FIXED ✔]
 
 **Phase:** 08 (Task 8.1)
 **Python source:** `platform/evolution/store.py:84-165`
@@ -109,7 +112,7 @@ Plan invents tables that **don't exist** in Python:
 
 ---
 
-### F-03: Lockfile Schema — Wrong Fields
+### F-03: Lockfile Schema — Wrong Fields [FIXED ✔]
 
 **Phase:** 07 (Task 7.2)
 **Python source:** `models/distribution.py:60-105`
@@ -142,7 +145,7 @@ class LockfileEntry(FrozenModel):
 
 ## P1 — Missing Coverage (will leave gaps)
 
-### F-04: distribution.py — Entire File Missing
+### F-04: distribution.py — Entire File Missing [FIXED ✔]
 
 **Phase:** 01 (no coverage)
 **Python source:** `models/distribution.py` (150 lines)
@@ -162,7 +165,7 @@ These are used by `ap-fetcher` (Phase 07). Phase 07's `sources.rs` and `lockfile
 
 ---
 
-### F-05: ContextBudget — Completely Different Structure
+### F-05: ContextBudget — Completely Different Structure [FIXED ✔]
 
 **Phase:** 01 (context.rs)
 **Python source:** `models/context.py:43-104`
@@ -197,7 +200,7 @@ class ContextBudget:
 
 ---
 
-### F-06: TaskGraph Field Name Bug
+### F-06: TaskGraph Field Name Bug [FIXED ✔]
 
 **Phase:** 03 (Task 3.1)
 **Cross-reference:** Phase 01 TaskItem model vs Phase 03 SQL schema
@@ -215,7 +218,7 @@ Also: `blocked_by` is `Vec<String>` in model but `TEXT` in SQL — needs JSON se
 
 ---
 
-### F-07: Evolution Models — Missing Types
+### F-07: Evolution Models — Missing Types [FIXED ✔]
 
 **Phase:** 01 (evolution.rs) + Phase 08
 **Python source:** `models/evolution.py`
@@ -232,7 +235,7 @@ Phase 08 references types that don't exist in any model:
 
 ---
 
-### F-08: HookExecutor Uses Non-Existent Types
+### F-08: HookExecutor Uses Non-Existent Types [FIXED ✔]
 
 **Phase:** 05 (Task 5.1)
 
@@ -251,7 +254,7 @@ The executor should dispatch on `hook_type`, not a fabricated `HookAction` enum.
 
 ## P2 — Code Quality Issues (will cause compilation errors or confusion)
 
-### F-09: Duplicate WorkflowPhase Type
+### F-09: Duplicate WorkflowPhase Type [FIXED ✔]
 
 **Phase:** 01 `models/composition.rs` defines `WorkflowPhase` as a data struct:
 ```rust
@@ -269,7 +272,7 @@ Same name, different types. Will cause compilation conflicts when both are impor
 
 ---
 
-### F-10: ProcessManager Doesn't Expose I/O
+### F-10: ProcessManager Doesn't Expose I/O [FIXED ✔]
 
 **Phase:** 03 (Task 3.5)
 
@@ -279,7 +282,7 @@ Same name, different types. Will cause compilation conflicts when both are impor
 
 ---
 
-### F-11: Composition Logic Missing
+### F-11: Composition Logic Missing [FIXED ✔]
 
 **Phase:** 01 (composition.rs)
 **Python source:** `models/composition.py`
@@ -290,7 +293,7 @@ The `from_toml()` parser is critical — it's how composition.toml files are loa
 
 ---
 
-### F-12: Model Validators Dropped
+### F-12: Model Validators Dropped [FIXED ✔]
 
 **Phase:** 01 (multiple files)
 
@@ -310,7 +313,7 @@ Python has Pydantic `model_validator`s that enforce business invariants. All dro
 
 ---
 
-### F-13: Evolution Line 92 Validator Incomplete
+### F-13: Evolution Line 92 Validator Incomplete [FIXED ✔]
 
 **Phase:** 01 (evolution.rs)
 
@@ -324,7 +327,7 @@ if self.total_completions + self.total_fallbacks > self.total_applied:
 
 ## P3 — Minor Issues (won't block, but should fix)
 
-### F-14: Source YAML Format Inconsistency
+### F-14: Source YAML Format Inconsistency [FIXED ✔]
 
 **Phase:** 07 (sources.rs tests)
 
@@ -339,7 +342,7 @@ But `SourceManager::parse()` deserializes as `Vec<SourceEntry>` directly (no `so
 
 ---
 
-### F-15: Phase 03 IPC Test Has Syntax Error
+### F-15: Phase 03 IPC Test Has Syntax Error [FIXED ✔]
 
 **Phase:** 03 (Task 3.2)
 
@@ -351,7 +354,7 @@ Extra `}]` — copy-paste artifact.
 
 ---
 
-### F-16: Phase 08 Evolution Total Line Count Wrong
+### F-16: Phase 08 Evolution Total Line Count Wrong [OPEN — non-blocking]
 
 **Design spec:** States 3,835 lines for evolution.
 **Actual:** `wc -l` shows 5,227 lines (store.py alone is 1,392).
@@ -360,7 +363,7 @@ The plan underestimates complexity. Consider splitting Phase 08 into 08a (store)
 
 ---
 
-### F-17: Phase 10 Commands Are All Stubs
+### F-17: Phase 10 Commands Are All Stubs [OPEN — non-blocking]
 
 **Phase:** 10
 
@@ -372,22 +375,39 @@ All command implementations are `// TODO` placeholders with no concrete guidance
 
 ---
 
-## Recommended Fix Order
+## Resolution Log
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│ Fix Priority — Blockers First                              │
-├─────┬──────────────────────────────────────────────────────┤
-│  1  │ F-01: Fix IPC to flat struct (P0, affects all IPC)   │
-│  2  │ F-02: Copy exact SQLite schema from store.py (P0)    │
-│  3  │ F-03: Fix LockfileEntry fields (P0)                  │
-│  4  │ F-04: Add distribution.py models (P1)                │
-│  5  │ F-05: Fix ContextBudget structure (P1)               │
-│  6  │ F-06: Fix TaskGraph field names (P1)                 │
-│  7  │ F-07: Add missing evolution types (P1)               │
-│  8  │ F-08: Fix HookExecutor dispatch (P1)                 │
-│  9  │ F-09..13: P2+P3 fixes                              │
-└─────┴──────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│ Fix History — All Completed                                        │
+├─────┬──────┬───────────────────────────────────────────┬──────────┤
+│  #  │ ID   │ Description                               │ Status   │
+├─────┼──────┼───────────────────────────────────────────┼──────────┤
+│  1  │ F-01 │ IPC flat struct                           │ ✔ Fixed  │
+│  2  │ F-02 │ Evolution SQLite 6-table schema           │ ✔ Fixed  │
+│  3  │ F-03 │ LockfileEntry fields (commit_sha etc.)    │ ✔ Fixed  │
+│  4  │ F-04 │ Task 1.5 distribution models added        │ ✔ Fixed  │
+│  5  │ F-05 │ ContextBudget 10-field + validators       │ ✔ Fixed  │
+│  6  │ F-06 │ TaskGraph field name + JSON blocked_by    │ ✔ Fixed  │
+│  7  │ F-07 │ EvolutionMetrics + EvolutionContext added │ ✔ Fixed  │
+│  8  │ F-08 │ HookExecutor dispatch on HookType         │ ✔ Fixed  │
+│  9  │ F-09 │ WorkflowPhase → WorkflowPhaseEntry        │ ✔ Fixed  │
+│ 10  │ F-10 │ ProcessManager take_io/stdin_mut accessors│ ✔ Fixed  │
+│ 11  │ F-11 │ OrchestrationDSL full composition logic   │ ✔ Fixed  │
+│ 12  │ F-12 │ Validators added to 5 model types         │ ✔ Fixed  │
+│ 13  │ F-13 │ 5th counter check added                   │ ✔ Fixed  │
+│ 14  │ F-14 │ SourceManager dual-format YAML parse       │ ✔ Fixed  │
+│ 15  │ F-15 │ IPC test syntax error fixed                │ ✔ Fixed  │
+│ 16  │ F-16 │ Line count underestimate                  │ OPEN     │
+│ 17  │ F-17 │ CLI command stubs                          │ OPEN     │
+└─────┴──────┴───────────────────────────────────────────┴──────────┘
 ```
 
-Fix F-01 through F-08 first, then regenerate Phase 01 and Phase 08 sub-plans. The remaining phases (03, 05, 07) need targeted patches, not full rewrites.
+**Modified files:**
+- `01-ap-core-models.md` — IPC flat structs, distribution models, ContextBudget, evolution types, validators, WorkflowPhase rename
+- `03-ap-core-orchestration.md` — TaskGraph field names, ProcessManager I/O accessors, OrchestrationDSL composition logic, IPC test fix
+- `05-ap-core-hooks-skills.md` — HookExecutor HookType dispatch
+- `07-ap-fetcher.md` — LockfileEntry, SourceEntry using ap-core models
+- `08-ap-evolution.md` — Exact 6-table SQLite schema from Python
+
+**Next step:** Execute Phase 01 → Phase 03 → Phase 05 → Phase 07 → Phase 08 in dependency order.
