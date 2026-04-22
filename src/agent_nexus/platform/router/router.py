@@ -238,7 +238,7 @@ class PlatformRouter:
                 error_type=type(exc).__name__,
             )
 
-        # Pre-compute role→agent mapping once (deterministic across phases)
+        # Pre-compute role->agent mapping once (deterministic across phases)
         role_agents: dict[str, list[str]] = {}
         for name, agent_def in definition.agents.items():
             role_agents.setdefault(agent_def.role, []).append(name)
@@ -318,6 +318,8 @@ class PlatformRouter:
             ``error_type`` keys.  Agent-not-found and process-dead conditions
             are returned as error dicts rather than raised exceptions.
         """
+        # Pre-lock checks: return user-friendly error dicts for
+        # not-found / not-alive without entering the IPC lock.
         handle = self._pm.get_agent(atomic_name)
         if handle is None:
             return _make_error_result(f"Agent '{atomic_name}' not found", "KeyError")
@@ -325,45 +327,13 @@ class PlatformRouter:
         if not handle.is_alive:
             return _make_error_result(f"Agent '{atomic_name}' process is not alive", "ProcessNotAliveError")
 
-        # Serialize send+receive per agent to prevent concurrent IPC
-        # calls from interleaving responses on the same handle.
-        lock = get_ipc_lock(atomic_name)
-        async with lock:
-            # Recheck liveness after acquiring lock -- agent may have died
-            # during lock wait.  Without this check we waste the full IPC
-            # timeout on a dead process.
-            if not handle.is_alive:
-                return _make_error_result(
-                    f"Agent '{atomic_name}' process died while waiting for lock",
-                    "ProcessNotAliveError",
-                )
-
-            # Send chat message via IPC
-            try:
-                await handle.ipc.send_chat(
-                    message, conversation_id=conversation_id
-                )
-            except (IPCError, OSError, RuntimeError, asyncio.TimeoutError) as exc:
-                logger.warning("IPC send error for agent '%s': %s", atomic_name, exc)
-                return _make_error_result(f"IPC send error: {exc}", type(exc).__name__)
-
-            # Wait for final result (progress messages are silently consumed)
-            try:
-                response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
-            except (IPCError, OSError, RuntimeError, asyncio.TimeoutError) as exc:
-                logger.warning("IPC receive error for agent '%s': %s", atomic_name, exc)
-                return _make_error_result(f"IPC error: {exc}", type(exc).__name__)
-
-            # Parse response
-            if response.type == AgentToPlatformType.ERROR:
-                return _make_error_result(response.error or "Agent returned an error", "AgentError")
-
-            return {
-                "output": response.content or "",
-                # Default to success when status is unset — minimal agent
-                # implementations may omit the status field.
-                "success": response.is_success,
-            }
+        try:
+            content = await self._ipc_chat(atomic_name, message, conversation_id)
+            return {"output": content, "success": True}
+        except (IPCConnectionError, IPCTimeoutError, IPCError) as exc:
+            return _make_error_result(f"IPC error: {exc}", type(exc).__name__)
+        except AgentExecutionError as exc:
+            return _make_error_result(exc.error, exc.error_type)
 
     async def get_tools(self) -> list[dict]:
         """Get aggregated tool schemas from the gateway registry.
@@ -476,7 +446,7 @@ class PlatformRouter:
             (``route_composite``) catches and records the failure.
 
         Args:
-            role_agents: Pre-computed role→agent-names mapping.  When provided
+            role_agents: Pre-computed role->agent-names mapping.  When provided
                 (by ``route_composite``), the list comprehension is skipped.
                 When ``None`` (legacy / tests), the map is computed on the fly.
         """
@@ -573,7 +543,7 @@ class PlatformRouter:
     ) -> str:
         """Execute a single agent interaction via IPC.
 
-        Sends the message, waits for a final result, returns the content.
+        Delegates to :meth:`_ipc_chat` for the actual send/receive logic.
 
         Returns:
             ``str`` on success (the response content).
@@ -586,6 +556,31 @@ class PlatformRouter:
                 directly so callers can distinguish infrastructure-level IPC
                 failures from agent-level errors.
         """
+        return await self._ipc_chat(agent_name, message, conversation_id)
+
+    # ------------------------------------------------------------------
+    # IPC helpers
+    # ------------------------------------------------------------------
+
+    async def _ipc_chat(
+        self,
+        agent_name: str,
+        message: str,
+        conversation_id: str,
+        timeout: float = DEFAULT_IPC_EXECUTE_TIMEOUT,
+    ) -> str:
+        """Send a chat message to an agent via IPC and return the response content.
+
+        Shared implementation for :meth:`route_to_atomic` and
+        :meth:`_execute_single_agent`.  Handles IPC lock acquisition,
+        send, receive, and response parsing.
+
+        Raises:
+            AgentExecutionError: On agent-level failures (not found, not alive,
+                error response, non-IPC send/receive errors).
+            IPCConnectionError, IPCTimeoutError, IPCError: On infrastructure
+                failures, propagated directly so callers can distinguish them.
+        """
         handle = self._pm.get_agent(agent_name)
         if handle is None or not handle.is_alive:
             raise AgentExecutionError(
@@ -595,8 +590,6 @@ class PlatformRouter:
 
         # Serialize send+receive per agent to prevent concurrent IPC
         # calls from interleaving responses on the same handle.
-        # Uses the same lock as route_to_atomic so both code paths
-        # are mutually exclusive for a given agent.
         lock = get_ipc_lock(agent_name)
         async with lock:
             try:
@@ -610,7 +603,7 @@ class PlatformRouter:
                 )
 
             try:
-                response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
+                response = await handle.ipc.receive_until_result(timeout=timeout)
             except (IPCConnectionError, IPCTimeoutError, IPCError):
                 raise
             except (OSError, RuntimeError, asyncio.TimeoutError) as exc:
@@ -623,6 +616,12 @@ class PlatformRouter:
                 raise AgentExecutionError(
                     f"Agent '{agent_name}' error: {response.error or 'unknown'}",
                     "AgentError",
+                )
+
+            if not response.is_success:
+                raise AgentExecutionError(
+                    f"Agent '{agent_name}' returned status: {response.status or 'unknown'}",
+                    "AgentStatusError",
                 )
 
             return str(response.content) if response.content is not None else ""

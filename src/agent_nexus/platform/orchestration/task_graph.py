@@ -48,6 +48,9 @@ logger = logging.getLogger(__name__)
 _TASK_COLUMNS = "id, description, agent, state, vars, created_at, updated_at"
 """Column list for tasks SELECT queries — single source of truth."""
 
+_SQL_CHUNK_SIZE = 500
+"""Max variables per SQLite IN clause — matches evolution/store.py."""
+
 _TASK_COLUMNS_T = "t.id, t.description, t.agent, t.state, t.vars, t.created_at, t.updated_at"
 """Aliased column list for tasks SELECT queries using table alias 't'."""
 
@@ -235,13 +238,16 @@ class TaskGraph:
                     seen.add(tid)
                 raise ValueError(f"Duplicate task IDs in batch: {dupes}")
 
-            placeholders = ",".join("?" * len(task_ids))
-            existing = conn.execute(
-                f"SELECT id FROM tasks WHERE id IN ({placeholders})",
-                tuple(task_ids),
-            ).fetchall()
-            if existing:
-                existing_ids = {r[0] for r in existing}
+            existing_ids: set[str] = set()
+            for i in range(0, len(task_ids), _SQL_CHUNK_SIZE):
+                chunk = task_ids[i : i + _SQL_CHUNK_SIZE]
+                placeholders = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"SELECT id FROM tasks WHERE id IN ({placeholders})",
+                    tuple(chunk),
+                ).fetchall()
+                existing_ids.update(r[0] for r in rows)
+            if existing_ids:
                 raise ValueError(
                     f"Tasks already exist: {existing_ids}"
                 )
@@ -257,11 +263,17 @@ class TaskGraph:
                         external_deps.add(dep_id)
                     all_deps.append((task.id, dep_id))
             if external_deps:
-                ph = ",".join("?" * len(external_deps))
-                found = {r[0] for r in conn.execute(
-                    f"SELECT id FROM tasks WHERE id IN ({ph})",
-                    tuple(external_deps),
-                ).fetchall()}
+                ext_list = list(external_deps)
+                found: set[str] = set()
+                for i in range(0, len(ext_list), _SQL_CHUNK_SIZE):
+                    chunk = ext_list[i : i + _SQL_CHUNK_SIZE]
+                    ph = ",".join("?" * len(chunk))
+                    found.update(
+                        r[0] for r in conn.execute(
+                            f"SELECT id FROM tasks WHERE id IN ({ph})",
+                            tuple(chunk),
+                        ).fetchall()
+                    )
                 missing = external_deps - found
                 if missing:
                     raise ValueError(
@@ -505,11 +517,15 @@ class TaskGraph:
             # Preserve creation order within each group
             group_ids = sorted(available, key=lambda t: position[t])
             # Batch-load group tasks in one pass instead of per-task queries
-            placeholders = ",".join("?" for _ in group_ids)
-            group_rows = conn.execute(
-                f"SELECT {_TASK_COLUMNS} FROM tasks WHERE id IN ({placeholders})",
-                group_ids,
-            ).fetchall()
+            # (chunked to stay under SQLITE_MAX_VARIABLE_NUMBER)
+            group_rows: list[tuple[Any, ...]] = []
+            for gi in range(0, len(group_ids), _SQL_CHUNK_SIZE):
+                g_chunk = group_ids[gi : gi + _SQL_CHUNK_SIZE]
+                placeholders = ",".join("?" for _ in g_chunk)
+                group_rows.extend(conn.execute(
+                    f"SELECT {_TASK_COLUMNS} FROM tasks WHERE id IN ({placeholders})",
+                    g_chunk,
+                ).fetchall())
             group_tasks = self._rows_to_tasks(conn, group_rows)
             groups.append(group_tasks)
             assigned.update(group_ids)
@@ -623,12 +639,16 @@ class TaskGraph:
             return {}
         deps: dict[str, list[str]] = {}
         if task_ids:
-            placeholders = ",".join("?" * len(task_ids))
-            rows = conn.execute(
-                f"SELECT task_id, blocked_by_id FROM task_dependencies "
-                f"WHERE task_id IN ({placeholders})",
-                tuple(task_ids),
-            ).fetchall()
+            tid_list = list(task_ids)
+            rows: list[tuple[Any, ...]] = []
+            for i in range(0, len(tid_list), _SQL_CHUNK_SIZE):
+                chunk = tid_list[i : i + _SQL_CHUNK_SIZE]
+                placeholders = ",".join("?" * len(chunk))
+                rows.extend(conn.execute(
+                    f"SELECT task_id, blocked_by_id FROM task_dependencies "
+                    f"WHERE task_id IN ({placeholders})",
+                    tuple(chunk),
+                ).fetchall())
         else:
             rows = conn.execute(
                 "SELECT task_id, blocked_by_id FROM task_dependencies"

@@ -7,6 +7,8 @@ from typing import Any
 
 import toml
 
+from agent_nexus.platform.utils import detect_cycles_dfs as _detect_cycles_dfs
+
 
 class CompositionError(Exception):
     """Error in composition.toml parsing or validation."""
@@ -108,27 +110,11 @@ class Composition:
 
 def _detect_cycles(tasks: dict[str, CompositionTask]) -> None:
     """Detect dependency cycles. Raises CompositionError if found."""
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def _dfs(node: str, path: list[str]) -> None:
-        if node in visiting:
-            cycle_start = path.index(node)
-            cycle = path[cycle_start:] + [node]
-            raise CompositionError(f"Dependency cycle: {' -> '.join(cycle)}")
-        if node in visited:
-            return
-        visiting.add(node)
-        path.append(node)
-        task = tasks.get(node)
-        if task:
-            for dep in task.blocked_by:
-                if dep in tasks:
-                    _dfs(dep, path)
-        path.pop()
-        visiting.discard(node)
-        visited.add(node)
-
-    for tid in tasks:
-        if tid not in visited:
-            _dfs(tid, [])
+    cycles = _detect_cycles_dfs(
+        nodes=tasks.keys(),
+        get_deps=lambda name: [dep for dep in tasks[name].blocked_by if dep in tasks],
+    )
+    if cycles:
+        # Format the first cycle for the error message
+        cycle = cycles[0]
+        raise CompositionError(f"Dependency cycle: {' -> '.join(cycle)}")

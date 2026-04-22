@@ -383,6 +383,27 @@ class DeferredAgentRegistry:
         }
 
     # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
+
+    def remove_agent_tools(self, agent_name: str) -> None:
+        """Remove all tool registrations for *agent_name*.
+
+        Called when an agent is deregistered or its subprocess dies.
+        Cleans up ``_tool_by_name``, ``_tool_adapters``, and both agent
+        tier dicts so that subsequent lookups reflect the removal.
+
+        Args:
+            agent_name: Name of the agent whose tools to remove.
+        """
+        adapters = self._tool_adapters.get(agent_name, [])
+        for adapter in adapters:
+            self._tool_by_name.pop(adapter.full_name, None)
+        self._tool_adapters.pop(agent_name, None)
+        self._core_agents.pop(agent_name, None)
+        self._deferred_agents.pop(agent_name, None)
+
+    # ------------------------------------------------------------------
     # Query helpers
     # ------------------------------------------------------------------
 

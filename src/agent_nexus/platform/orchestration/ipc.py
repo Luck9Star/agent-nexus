@@ -402,6 +402,8 @@ class IPCProtocol:
 # the router need shared access without a circular dependency.
 
 
+_MAX_LOCK_REGISTRY_SIZE = 1000
+
 _ipc_lock_registry: dict[str, asyncio.Lock] = {}
 _ipc_lock_loop_id: int | None = None
 
@@ -430,6 +432,9 @@ def get_ipc_lock(agent_name: str) -> asyncio.Lock:
 
     lock = _ipc_lock_registry.get(agent_name)
     if lock is None:
+        # Bounded cache: evict oldest entry (FIFO) when at capacity.
+        if len(_ipc_lock_registry) >= _MAX_LOCK_REGISTRY_SIZE:
+            _ipc_lock_registry.pop(next(iter(_ipc_lock_registry)))
         lock = asyncio.Lock()
         _ipc_lock_registry[agent_name] = lock
     return lock

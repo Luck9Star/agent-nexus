@@ -1199,6 +1199,48 @@ class EvolutionStore:
             conn.execute("DELETE FROM agent_records")
             conn.execute("DELETE FROM skill_records")
 
+    def prune_budget_log(
+        self,
+        max_age_days: int = 30,
+        max_rows: int = 10_000,
+    ) -> int:
+        """Prune old or excess rows from ``context_budget_log``.
+
+        Two-pass strategy:
+        1. Delete rows older than *max_age_days*.
+        2. If rows still exceed *max_rows*, delete the oldest entries
+           (by ``created_at``) to bring the count down.
+
+        Returns the total number of deleted rows.
+        """
+        deleted = 0
+        with self._conn(immediate=True) as conn:
+            # Pass 1: age-based pruning
+            cur = conn.execute(
+                "DELETE FROM context_budget_log "
+                "WHERE created_at < datetime('now', ?)",
+                (f"-{max_age_days} days",),
+            )
+            deleted += cur.rowcount
+
+            # Pass 2: cap total row count
+            count = conn.execute(
+                "SELECT COUNT(*) FROM context_budget_log"
+            ).fetchone()[0]
+            if count > max_rows:
+                excess = count - max_rows
+                cur = conn.execute(
+                    "DELETE FROM context_budget_log "
+                    "WHERE id IN ("
+                    "  SELECT id FROM context_budget_log "
+                    "  ORDER BY created_at ASC LIMIT ?"
+                    ")",
+                    (excess,),
+                )
+                deleted += cur.rowcount
+
+        return deleted
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
