@@ -1,6 +1,10 @@
 # Python Runtime 执行层
 
-> Agent Nexus POC v5 — §5 Python Runtime 执行层：Runtime vs Tool Call 范式、CaveAgent 实测数据、架构核心、SecurityChecker、Runtime-First Hybrid 策略、隔离级别、与 Atomic Agent 集成
+> Agent Nexus Design Doc — §5 Python Runtime 执行层：Runtime vs Tool Call 范式、CaveAgent 实测数据、架构核心、SecurityChecker、Runtime-First Hybrid 策略、隔离级别、与 Atomic Agent 集成
+
+> **Status**: ✅ Implemented
+> **Code**: `src/agent_nexus/platform/runtime/` (PythonRuntime 245 lines, IPythonExecutor 438 lines, SecurityChecker 267 lines, SecurityRules 281 lines, TieredDescriber 139 lines, PermissionChecker 403 lines, TokenTracker 175 lines)
+> **Tests**: `tests/unit/test_runtime.py`, `tests/unit/test_runtime_models.py`, `tests/unit/test_executor.py`, `tests/unit/test_security_checker.py`, `tests/unit/test_security_rules.py`, `tests/unit/test_describer.py`, `tests/unit/test_permission_checker.py`, `tests/unit/test_permission_models.py`, `tests/unit/test_token_tracker.py`
 
 ## §5 Python Runtime 执行层
 
@@ -47,27 +51,32 @@ Tau-2 benchmark（6 个 SOTA LLM）：
 
 ### 5.3 CaveAgent 架构核心
 
+> **实现模块**: `src/agent_nexus/platform/runtime/runtime.py` — `PythonRuntime`, `src/agent_nexus/platform/runtime/executor.py` — `IPythonExecutor`
+
 ```python
 class PythonRuntime:
     """持久 Python 命名空间，管理 Variables / Functions / Types"""
-    _executor: PythonExecutor       # IPython InteractiveShell
+    _executor: IPythonExecutor       # IPython InteractiveShell wrapper
     _variables: Dict[str, Variable]  # 持久化 Python 对象
     _functions: Dict[str, Function]  # 可调用的 Python 函数
-    _types: Dict[str, Type]          # 可用的 Python 类型（含 schema）
+    _types: Dict[str, RuntimeType]   # 可用的 Python 类型（含 schema）
+    _security_checker: SecurityChecker  # AST 级安全检查
 
     def inject_variable(self, variable: Variable)
     def inject_function(self, function: Function)
-    def inject_type(self, type_obj: Type)
+    def inject_type(self, type_obj: RuntimeType)
     async def execute(self, code: str) -> ExecutionResult
     def retrieve(self, name: str) -> Any
 
-    # LLM Prompt 生成
+    # LLM Prompt 生成（由 TieredRuntimeDescriber 调用）
     def describe_variables(self) -> str
     def describe_functions(self) -> str
     def describe_types(self) -> str
 ```
 
 ### 5.4 SecurityChecker（AST 级安全检查）
+
+> **实现模块**: `src/agent_nexus/platform/runtime/security_checker.py` — `SecurityChecker`, `src/agent_nexus/platform/runtime/security_rules.py` — `ImportRule`, `FunctionRule`, `AttributeRule`, `RegexRule`
 
 > **参考模块**: cave-agent `src/cave_agent/security/checker.py` — `SecurityChecker` 类, `src/cave_agent/security/rules.py` — `ImportRule`, `FunctionRule`, `AttributeRule`, `RegexRule`
 
@@ -99,7 +108,9 @@ Python Runtime 优先，MCP 用于外部通信。不可完全抛弃 Tool Call。
 | 多 Agent 共享状态 | ⚠️ 需设计 | ✅ MailboxManager | **消息** |
 | 对外暴露（非 Python 客户端） | ❌ | ✅ | **MCP** |
 
-### 5.6 隔离级别：IPythonRuntime（同进程）
+### 5.6 隔离级别：IPythonExecutor（同进程）
+
+> **实现模块**: `src/agent_nexus/platform/runtime/executor.py` — `IPythonExecutor` (InteractiveShell wrapper, lazy-init, 禁用 history/automagic/colors)
 
 > **参考模块**: cave-agent `src/cave_agent/runtime/executor.py` — `IPythonExecutor` (InteractiveShell wrapper), `src/cave_agent/runtime/ipykernel_runtime.py` — `IPyKernelRuntime` (备选)
 
@@ -153,6 +164,8 @@ class DocFillerAgent:
 
 ### 5.8 Runtime Context Tiered Loading
 
+> **实现模块**: `src/agent_nexus/platform/runtime/describer.py` — `TieredRuntimeDescriber`
+
 > **参考来源**: nanobot Token 优化方案 — Type Schema 是 Runtime context 中的 token 大头
 
 #### 5.8.1 Token 开销分析
@@ -179,25 +192,26 @@ class DocFillerAgent:
 class TieredRuntimeDescriber:
     """Runtime Context 四层描述"""
 
+    def __init__(self, runtime: PythonRuntime): ...
+
     def l0_context(self) -> str:
-        """L0 身份核心（每轮注入）"""
-        vars_desc = self.runtime.describe_variables()  # name + description only
-        type_names = self.runtime.describe_types(level="names")
-        return f"Variables: {vars_desc}\nTypes: {type_names}"
+        """L0 身份核心（每轮注入, ~100 tokens）"""
+        # Variable names + descriptions + Type names
+        ...
 
     def l1_context(self) -> str:
-        """L1 执行上下文（首轮注入）"""
-        funcs_desc = self.runtime.describe_functions()
-        types_summary = self.runtime.describe_types(level="summary")
-        return f"Functions: {funcs_desc}\nTypes:\n{types_summary}"
+        """L1 执行上下文（首轮注入, ~500 tokens）"""
+        # Function signatures + relevant Type schemas
+        ...
 
     def l2_context(self) -> str:
         """L2 按需获取完整 Type Schema"""
-        return self.runtime.describe_types(level="schema")
+        # Full Type JSON Schema + Memory/history
+        ...
 
     def l3_value(self, var_name: str) -> str:
         """L3 运行时获取 Variable 当前值"""
-        return self.runtime.retrieve(var_name)
+        ...
 ```
 
 #### 5.8.3 跨 Agent 数据传递优化

@@ -1,6 +1,10 @@
 # Self-Evolution Engine
 
-> Agent Nexus POC v5 — §6 Self-Evolution Engine：OpenSpace 核心机制、双层自进化设计、三触发器 + 防循环机制、质量指标、健康诊断阈值、进化引擎架构、SQLite Schema
+> Agent Nexus Design Doc — §6 Self-Evolution Engine：OpenSpace 核心机制、双层自进化设计、三触发器 + 防循环机制、质量指标、健康诊断阈值、进化引擎架构、SQLite Schema
+
+> **Status**: ✅ Implemented
+> **Code**: `src/agent_nexus/platform/evolution/` (Engine 250, Store 1392, Analyzer 306, Evolver 443, Compaction 220, Health 310, Promotion 408, ContextDescriber 340, Thresholds 118 — 3,837 lines total)
+> **Tests**: `tests/unit/test_evolution_engine.py`, `tests/unit/test_evolution_store.py`, `tests/unit/test_evolution_analyzer.py`, `tests/unit/test_evolution_evolver.py`, `tests/unit/test_evolution_compaction.py`, `tests/unit/test_evolution_health.py`, `tests/unit/test_evolution_promotion.py`, `tests/unit/test_evolution_thresholds.py`, `tests/unit/test_evolution_models.py`, `tests/unit/test_evolution_module.py`
 
 ## §6 Self-Evolution Engine
 
@@ -122,6 +126,8 @@ fallback_rate = total_fallbacks / total_selections
 | 中等效果 | `effective_rate < 0.55` 且 `applied_rate > 0.25` | DERIVED |
 
 ### 6.6 进化引擎架构
+
+> **实现模块**: `src/agent_nexus/platform/evolution/engine.py` — `EvolutionEngine` (统一门面), `src/agent_nexus/platform/evolution/evolver.py` — `SkillEvolver` (FIX/DERIVED/CAPTURED), `src/agent_nexus/platform/evolution/analyzer.py` — `ExecutionAnalyzer` (任务后分析), `src/agent_nexus/platform/evolution/health.py` — `HealthChecker` (阈值诊断), `src/agent_nexus/platform/evolution/compaction.py` — `CompactionGuard` (防死循环), `src/agent_nexus/platform/evolution/promotion.py` — `AgentPromoter` (Skill→Agent 提升), `src/agent_nexus/platform/evolution/store.py` — `EvolutionStore` (SQLite 持久化)
 
 ```python
 class EvolutionEngine:
@@ -249,6 +255,8 @@ CREATE INDEX idx_ar_name ON agent_records(name);
 
 ### 6.8 进化数据分层注入
 
+> **实现模块**: `src/agent_nexus/platform/evolution/context_describer.py` — `EvolutionContextDescriber`
+
 > **参考来源**: nanobot Token 优化方案 — Evolution Engine 数据是 Agent Context 的重要组成部分
 
 进化引擎产出的数据需要分层注入到 Agent Context 中，避免全量注入导致 Token 膨胀。
@@ -291,6 +299,8 @@ class EvolutionContextDescriber:
 ```
 
 ### 6.9 Compaction 防死循环设计
+
+> **实现模块**: `src/agent_nexus/platform/evolution/compaction.py` — `CompactionGuard`
 
 > **教训来源**: OpenClaw #68032 — Context 溢出时 Compaction 触发正反馈死循环
 

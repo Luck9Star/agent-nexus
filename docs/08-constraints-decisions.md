@@ -1,6 +1,10 @@
 # 技术约束与设计决策
 
-> Agent Nexus POC v5 — §10 技术约束与设计决策：设计约束、技术约束、质量约束、模型配置、许可证
+> Agent Nexus Design Doc — §10 技术约束与设计决策：设计约束、技术约束、质量约束、模型配置、许可证
+
+> **Status**: ✅ Implemented
+> **Code**: `src/agent_nexus/platform/runtime/security_checker.py`, `src/agent_nexus/platform/runtime/permission_checker.py`, `src/agent_nexus/platform/config/`
+> **Tests**: `tests/unit/test_security_checker.py`, `tests/unit/test_security_rules.py`, `tests/unit/test_permission_checker.py`, `tests/unit/test_config_models.py`, `tests/unit/test_config_model_config.py`, `tests/unit/test_config_defaults.py`
 
 ## §10 技术约束与设计决策
 
@@ -301,12 +305,12 @@ PermissionChecker 侧重**静态权限控制**（配置层面），SecurityCheck
 
 #### 10.8.1 重构范围
 
-| 组件 | Python POC | Rust 重构 | 不迁移原因 |
-|------|-----------|-----------|-----------|
-| Git Installer (subprocess→git) | ✅ POC | ✅ 重构（ap-fetcher） | 性能关键 |
-| MCP Gateway (FastMCP → rmcp) | ✅ POC | ✅ 重构 | 官方 SDK |
-| Agent Supervisor (asyncio → tokio) | ✅ POC | ✅ 重构 | 进程管理 |
-| CLI (Typer → clap) | ✅ POC | ✅ 重构 | 用户体验 |
+| 组件 | Python Implementation | Rust 重构 | 不迁移原因 |
+|------|----------------------|-----------|-----------|
+| Git Installer (subprocess→git) | ✅ Implemented | ✅ 重构（ap-fetcher） | 性能关键 |
+| MCP Gateway (FastMCP → rmcp) | ✅ Implemented | ✅ 重构 | 官方 SDK |
+| Agent Supervisor (asyncio → tokio) | ✅ Implemented | ✅ 重构 | 进程管理 |
+| CLI (Typer → clap) | ✅ Implemented | ✅ 重构 | 用户体验 |
 | Agent Runtime | Python | **不动** | MCP 边界 |
 | Agent Business Logic | Python | **不动** | MCP 边界 |
 | uv venv 管理 | subprocess(uv) | tokio::process(uv) | 机制不变 |

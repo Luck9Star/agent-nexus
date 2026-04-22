@@ -1,6 +1,10 @@
 # MCP 暴露与通信
 
-> Agent Nexus POC v5 — §8 MCP 暴露与通信：FastMCP 双模式、MCP Gateway、通信矩阵、Platform Router、SKILL.md 规范、数据流场景
+> Agent Nexus Design Doc — §8 MCP 暴露与通信：FastMCP 双模式、MCP Gateway、通信矩阵、Platform Router、SKILL.md 规范、数据流场景
+
+> **Status**: ✅ Implemented (core) | 🔧 Partial (Provider Adaptation, AnthropicNativeStrategy)
+> **Code**: `src/agent_nexus/platform/gateway/` (gateway.py, deferred_registry.py, tool_adapter.py), `src/agent_nexus/platform/router/` (router.py, workflow.py, subtask.py)
+> **Tests**: `tests/unit/test_gateway_tool_adapter.py`, `tests/unit/test_router_subtask.py`, `tests/unit/test_router_workflow.py`, `tests/unit/test_gateway_module.py`
 
 ## §8 MCP 暴露与通信
 
@@ -550,9 +554,9 @@ def build_context(request: ContextRequest) -> str:
     return "\n\n".join(parts)
 ```
 
-#### 8.8.5 Provider Adaptation（Not yet implemented in POC）
+#### 8.8.5 Provider Adaptation
 
-> **Note**: `ProviderAwareToolStrategy` and `AnthropicNativeStrategy` are design targets. The current POC uses the standard `DeferredAgentRegistry` with `search_and_activate` as the baseline tool search mechanism. Provider-specific optimizations (e.g., Anthropic native `defer_loading`) will be added in a future iteration.
+> **Implementation Status**: `DeferredAgentRegistry` with `search_and_activate` is the baseline mechanism and fully implemented in `src/agent_nexus/platform/gateway/deferred_registry.py`. Provider-specific optimizations (`ProviderAwareToolStrategy`, `AnthropicNativeStrategy`) remain as design targets for a future iteration.
 
 Gateway 是唯一感知用户模型 Provider 的位置（来自 `config.toml`）：
 

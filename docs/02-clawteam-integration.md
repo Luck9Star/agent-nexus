@@ -1,6 +1,10 @@
 # 自建编排层
 
-> Agent Nexus POC v5 — §4 自建编排层：自建组件设计（参考 ClawTeam 实现）、TaskGraph、IPC、ProcessManager、OrchestrationDSL、与 ClawTeam 的对应关系
+> Agent Nexus Design Doc — §4 自建编排层：自建组件设计（参考 ClawTeam 实现）、TaskGraph、IPC、ProcessManager、OrchestrationDSL、与 ClawTeam 的对应关系
+
+> **Status**: ✅ Implemented
+> **Code**: `src/agent_nexus/platform/orchestration/` (TaskGraph 806 lines, IPC 445 lines, ProcessManager 629 lines, DSL 578 lines)
+> **Tests**: `tests/unit/test_task_graph.py`, `tests/unit/test_task_model.py`, `tests/unit/test_task_models.py`, `tests/unit/test_ipc.py`, `tests/unit/test_ipc_models.py`, `tests/unit/test_process_manager.py`, `tests/unit/test_dsl.py`, `tests/unit/test_orchestration_pipeline.py`
 
 ## §4 自建编排层
 
@@ -238,13 +242,13 @@ preload_agents = ["requirements-analyzer"]
 
 ### 4.7 自建 vs 依赖决策总结
 
-| 自建组件 | 代码量估算 | 参考 ClawTeam 源码 | 复杂度 |
+| 自建组件 | 实际代码量 | 参考 ClawTeam 源码 | 复杂度 |
 |----------|-----------|-------------------|--------|
-| TaskGraph | ~524 行 | `store/file.py` (blocked_by + 环检测) | 中 |
-| IPC 协议 | ~286 行 | `team/mailbox.py` (消息格式参考) | 低 |
-| ProcessManager | ~355 行 | `spawn/subprocess_backend.py` + 健康检查 | 中 |
-| OrchestrationDSL | ~416 行 | `templates/__init__.py` + TOML 解析 | 低 |
-| **总计** | **~1,581 行** | | |
+| TaskGraph | 806 行 | `store/file.py` (blocked_by + 环检测) | 中 |
+| IPC 协议 | 445 行 | `team/mailbox.py` (消息格式参考) | 低 |
+| ProcessManager | 629 行 | `spawn/subprocess_backend.py` + 健康检查 | 中 |
+| OrchestrationDSL | 578 行 | `templates/__init__.py` + TOML 解析 | 低 |
+| **总计** | **2,458 行** | | |
 
 > MIT License 义务：如果直接搬运 ClawTeam 代码，需保留原始版权声明和许可声明。
 

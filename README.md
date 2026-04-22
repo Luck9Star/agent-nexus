@@ -898,7 +898,7 @@ pytest tests/e2e/ -v
 
 | 组件 | 技术 | 说明 |
 |------|------|------|
-| 平台核心 | Python 3.11+ | POC 阶段 |
+| 平台核心 | Python 3.11+ | 生产就绪（Phase 1-6 完成） |
 | 数据模型 | Pydantic v2 (frozen) | 全量不可变模型 |
 | Agent 框架 | PydanticAI | Agent 逻辑和工具定义 |
 | MCP Server | FastMCP | per-Agent MCP 暴露 |
@@ -912,7 +912,7 @@ pytest tests/e2e/ -v
 
 ## 设计文档
 
-所有设计文档位于 `docs/`，POC v5.2 中文文档：
+所有设计文档位于 `docs/`，中文设计文档（已根据实现验证）：
 
 | 主题 | 文件 |
 |------|------|

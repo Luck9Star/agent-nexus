@@ -1,6 +1,9 @@
 # 实施计划
 
-> Agent Nexus POC v5 — §11 实施计划：7 个 Phase、风险矩阵、项目结构
+> Agent Nexus Design Doc — §11 实施计划：7 个 Phase、风险矩阵、项目结构
+
+> **Status**: Phase 1-6 已完成 | Phase 7 (Rust 重构) 待实施
+> **Code**: `src/agent_nexus/`, `agents/`, `tests/`
 
 ## §11 实施计划
 
@@ -40,7 +43,7 @@
 - [x] **T2: Tiered Context Loading 基础框架** — TieredContextBuilder（L0/L1 分层注入）
 - [x] **T5: Provider-Agnostic Tool Search** — AgentSearchTool MCP tool + Anthropic 原生 `defer_loading` 适配
 - [x] Model Config Manager
-- [x] 所有 10 个 Atomic Agent 注册
+- [x] 所有 11 个 Atomic Agent 注册（含 1 个自进化晋升的 good-skill）
 - [ ] 端到端 MCP 测试
 
 ### Phase 4：Git-based Distribution + CLI（Week 6-7）
@@ -91,7 +94,7 @@
 
 > **参考**: §12.6 Rust 重构路径、§12.6.5 核心 Trait 定义、§10.8 Rust 重构约束
 
-目标：Python POC 验证后，上层用 Rust 重构
+目标：Python 实现验证后，上层用 Rust 重构
 
 - [ ] ap-core crate：核心类型（AgentId, Version, Manifest, Dependency）
 - [ ] ap-fetcher crate：Git-based 包获取（git2 + semver，替代 ap-registry + ap-client + ap-store）
@@ -182,7 +185,7 @@ agent-nexus/
 │       ├── runtime.py
 │       └── task.py
 ├── agents/                      # 官方 Agent
-│   ├── atomic/                  # 10 Atomic Agents
+│   ├── atomic/                  # 11 Atomic Agents（含 1 个自进化晋升）
 │   └── composite/               # 5 Composite Agents
 ├── tests/                       # 测试
 │   ├── unit/

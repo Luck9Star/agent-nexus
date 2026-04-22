@@ -898,7 +898,7 @@ Current test coverage: **3554 tests all passing** (platform 2698 + agents 856), 
 
 | Component | Technology | Notes |
 |-----------|-----------|-------|
-| Platform Core | Python 3.11+ | POC phase |
+| Platform Core | Python 3.11+ | Production-ready (Phases 1-6 complete) |
 | Data Models | Pydantic v2 (frozen) | All-immutable models |
 | Agent Framework | PydanticAI | Agent logic and tool definitions |
 | MCP Server | FastMCP | per-Agent MCP exposure |
@@ -930,7 +930,7 @@ agent-nexus/
 |   +-- composite/            # 5 Composite Agents
 +-- tests/                    # Platform tests (unit + integration + e2e)
 +-- templates/                # OrchestrationDSL TOML templates
-+-- docs/                     # Design documents (POC v5.2, Chinese)
++-- docs/                     # Design documents (Chinese, verified against codebase)
 +-- crates/                   # Rust rewrite (future)
 +-- pyproject.toml
 ```
@@ -939,7 +939,7 @@ agent-nexus/
 
 ## Design Documents
 
-All design documents are in `docs/`, POC v5.2 (Chinese):
+All design documents are in `docs/` (Chinese, verified against implementation):
 
 | Topic | File |
 |-------|------|

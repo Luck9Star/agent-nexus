@@ -1,8 +1,10 @@
 # Agent 体系
 
-> Agent Nexus POC v5 — §7 Agent 体系：两种 Agent 类型、Atomic Agent 组成、Composite Agent 组成、三种运行模式、概念映射表、Agent Package 结构、Agent 目录
->
-> **v5.1 更新**：移除 ClawTeam 依赖，Agent 编排改为自建 OrchestrationDSL。
+> Agent Nexus Design Doc — §7 Agent 体系：两种 Agent 类型、Atomic Agent 组成、Composite Agent 组成、三种运行模式、概念映射表、Agent Package 结构、Agent 目录
+
+> **Status**: ✅ Implemented
+> **Code**: `src/agent_nexus/models/agent.py`, `agents/atomic/`, `agents/composite/`
+> **Tests**: `tests/unit/test_agent_models.py`
 
 ## §7 Agent 体系
 
@@ -110,6 +112,8 @@ class AgentPackage:
 
 #### Atomic Agent Package 目录结构
 
+**设计目标**：
+
 ```
 agent-doc-filler/
 ├── agent-manifest.yaml       # 元数据 + 权限 + 模型配置
@@ -131,7 +135,21 @@ agent-doc-filler/
     └── test_agent.py
 ```
 
+**当前实现**（以 doc-filler 为例）：
+
+```
+agents/atomic/doc-filler/
+├── agent-manifest.yaml       # ✅ 已实现
+├── SKILL.md                  # ✅ 已实现
+├── agent.py                  # ✅ 已实现（PydanticAI 核心逻辑）
+└── pyproject.toml            # ✅ 已实现
+```
+
+> tools/、hooks/、mcp_servers/、mcp_adapter.py、local_adapter.py 等目录和文件为设计目标，将在后续迭代中按需添加。当前 Agent 通过 Platform 的 MCP Gateway 和 IPC 基础设施统一管理。
+
 #### Composite Agent Package 目录结构
+
+**设计目标**：
 
 ```
 agent-feature-delivery-pipeline/
@@ -146,6 +164,17 @@ agent-feature-delivery-pipeline/
 └── tests/
     └── test_composition.py
 ```
+
+**当前实现**：
+
+```
+agents/composite/feature-delivery-pipeline/
+├── agent-manifest.yaml       # ✅ 已实现
+├── SKILL.md                  # ✅ 已实现
+└── pyproject.toml            # ✅ 已实现
+```
+
+> composition.toml、hooks/ 等为设计目标。编排由 Platform Router 通过 OrchestrationDSL 统一管理。
 
 #### agent-manifest.yaml 规范
 
@@ -198,7 +227,7 @@ hooks:
 
 ### 7.7 Agent 目录
 
-**Atomic Agents（10）：**
+**Atomic Agents（11，含 1 个自进化晋升的 good-skill）：**
 
 | Name | Domain | Model Tier | Key Differentiator |
 |------|--------|------------|-------------------|
@@ -212,6 +241,7 @@ hooks:
 | Localization Specialist | 文档/内容 - 翻译与适配 | Standard | 术语表管理，语域识别 |
 | Market Intelligence Analyst | 研究/分析 - 市场研究 | Standard | Porter/SWOT/PESTEL 方法论 |
 | Test Suite Generator | 软件工程 - 测试 | Standard | 每范式测试策略 |
+| Good Skill * | 通用 | Standard | 自进化自动晋升示例（from sk-1, effective_rate=0.9）|
 
 **Composite Agents（5）：**
 
