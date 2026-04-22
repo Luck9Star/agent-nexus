@@ -16,15 +16,18 @@ Modes:
 
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 from typing import Optional
 
 import typer
 import yaml
 
-from agent_nexus.platform.utils import AGENT_NAME_RE
+from agent_nexus.platform.utils import (
+    AGENT_NAME_RE,
+    agent_name_to_package as _agent_name_to_package,
+    to_class_name as _to_class_name,
+    atomic_write as _atomic_write,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -36,35 +39,9 @@ _TOOLS_MODE_MAP = {
 }
 
 
-def _agent_name_to_package(name: str) -> str:
-    """``code-reviewer`` → ``agent_code_reviewer``."""
-    return "agent_" + name.replace("-", "_")
-
-
-def _to_class_name(name: str) -> str:
-    """``code-reviewer`` → ``CodeReviewer``."""
-    return "".join(part.capitalize() for part in name.split("-"))
-
-
 def _to_entry_fn(name: str) -> str:
     """``code-reviewer`` → ``code_reviewer``."""
     return name.replace("-", "_")
-
-
-def _atomic_write(path: Path, content: str) -> None:
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".scaffold-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(content)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, str(path))
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,8 @@ from agent_localization_specialist.models import LocalizationResult
 
 def _preserve_case(match: re.Match, replacement: str) -> str:
     """Preserve the casing of the original match."""
+    if not replacement:
+        return replacement
     original = match.group(0)
     if original.isupper():
         return replacement.upper()

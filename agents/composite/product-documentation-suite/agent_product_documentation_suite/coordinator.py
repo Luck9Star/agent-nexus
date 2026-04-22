@@ -14,9 +14,8 @@ import json
 import logging
 import os
 import uuid
-from pathlib import Path
 
-import toml
+from agent_nexus.models.composition import Composition, CompositionError
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +23,7 @@ from agent_product_documentation_suite.models import (
     DocArtifact,
     DocumentationResult,
 )
-from agent_nexus.platform.utils import detect_cycles_dfs, resolve_composition_path
+from agent_nexus.platform.utils import detect_cycles_dfs
 
 # ---------------------------------------------------------------------------
 # Simulated Atomic Agent helpers (POC -- no real subprocesses)
@@ -274,24 +273,34 @@ class DocumentationSuiteCoordinator:
 
     @staticmethod
     def parse_composition(toml_path: str) -> dict:
-        """Parse a composition.toml file and return its structure.
+        """Parse a composition.toml file using the shared Composition model.
 
         Args:
             toml_path: Path to the composition.toml file.
 
         Returns:
-            Parsed TOML as a dict.
+            Parsed TOML as a dict (backward-compatible format).
 
         Raises:
             FileNotFoundError: If the file does not exist.
         """
-        if not os.path.exists(toml_path):
-            raise FileNotFoundError(f"Composition file not found: {toml_path}")
-
-        with open(toml_path) as f:
-            data = toml.load(f)
-
-        return data
+        try:
+            comp = Composition.from_toml(toml_path)
+        except CompositionError as exc:
+            if "not found" in str(exc):
+                raise FileNotFoundError(str(exc)) from exc
+            raise
+        return {
+            "composition": {"name": comp.name, "description": comp.description},
+            "tasks": {
+                tid: {
+                    "name": task.name,
+                    "agent": task.agent,
+                    "blocked_by": task.blocked_by,
+                }
+                for tid, task in comp.tasks.items()
+            },
+        }
 
     @staticmethod
     def validate_composition(data: dict) -> list[str]:

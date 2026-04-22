@@ -1255,7 +1255,7 @@ class TestPromotionPreservesExisting:
         )
 
         # Force a write failure after directory creation
-        with patch.object(AgentPromoter, "_atomic_write", side_effect=OSError("disk full")):
+        with patch("agent_nexus.platform.evolution.promotion._atomic_write", side_effect=OSError("disk full")):
             result = promoter.promote(candidate)
 
         assert not result.success
@@ -1284,7 +1284,7 @@ class TestPromotionPreservesExisting:
         # The directory does not exist yet
         assert not (agents_dir / "new-skill").exists()
 
-        with patch.object(AgentPromoter, "_atomic_write", side_effect=OSError("disk full")):
+        with patch("agent_nexus.platform.evolution.promotion._atomic_write", side_effect=OSError("disk full")):
             result = promoter.promote(candidate)
 
         assert not result.success
@@ -1296,7 +1296,7 @@ class TestPromotionPathTraversalGuard:
     """promote() must reject skill names that could escape agents_root.
 
     Regression: promotion.py had no name validation (unlike installer.py
-    and supervisor.py which have _AGENT_NAME_RE / _SAFE_NAME_RE).
+    and supervisor.py which use AGENT_NAME_RE from platform.utils).
     """
 
     def test_rejects_dotdot_traversal(self, tmp_path: Path) -> None:
@@ -1345,7 +1345,7 @@ class TestPromotionPathTraversalGuard:
 
         candidate = PromotionCandidate(
             skill_id="s1",
-            skill_name="valid-skill.v2",
+            skill_name="valid-skill-v2",
             effective_rate=0.9,
             total_selections=100,
             directory="skills/valid",
@@ -3002,31 +3002,25 @@ class TestPromotionAtomicWriteCleanup:
         """When os.replace raises, the temp file is cleaned up."""
         from unittest.mock import patch
 
-        store = _store_with_records(tmp_path)
-        agents_dir = tmp_path / "agents"
-        agents_dir.mkdir()
-        promoter = AgentPromoter(store, agents_root=agents_dir)
+        from agent_nexus.platform.utils import atomic_write
 
         target = tmp_path / "test_output.txt"
         with patch("os.replace", side_effect=OSError("replace failed")):
             with pytest.raises(OSError, match="replace failed"):
-                promoter._atomic_write(target, "hello")
+                atomic_write(target, "hello")
 
         # Temp file should NOT remain on disk
-        tmps = list(target.parent.glob(".promo-*.tmp"))
+        tmps = list(target.parent.glob(".write-*.tmp"))
         assert tmps == []
 
     def test_atomic_write_cleanup_unlink_fails_silently(self, tmp_path: Path) -> None:
         """When os.replace AND os.unlink both raise, the original error propagates."""
         from unittest.mock import patch
 
-        store = _store_with_records(tmp_path)
-        agents_dir = tmp_path / "agents"
-        agents_dir.mkdir()
-        promoter = AgentPromoter(store, agents_root=agents_dir)
+        from agent_nexus.platform.utils import atomic_write
 
         target = tmp_path / "test_output2.txt"
         with patch("os.replace", side_effect=OSError("replace failed")):
             with patch("os.unlink", side_effect=OSError("already deleted")):
                 with pytest.raises(OSError, match="replace failed"):
-                    promoter._atomic_write(target, "hello")
+                    atomic_write(target, "hello")

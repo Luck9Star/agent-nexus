@@ -4,16 +4,58 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import sqlite3
+import tempfile
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Generator
 
-# Agent name pattern: starts with alphanumeric, then alphanumeric/dot/hyphen/underscore
-AGENT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+# Agent name pattern: starts with alphanumeric, then alphanumeric/hyphen/underscore
+AGENT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+
+
+def agent_name_to_package(agent_name: str) -> str:
+    """Convert agent name to Python package directory name.
+
+    Examples: ``code-reviewer`` -> ``agent_code_reviewer``,
+    ``test-suite-generator`` -> ``agent_test_suite_generator``.
+    """
+    return "agent_" + agent_name.replace("-", "_")
+
+
+def to_class_name(agent_name: str) -> str:
+    """Convert agent name to PascalCase class name (without Agent suffix).
+
+    Examples: ``code-reviewer`` -> ``CodeReviewer``,
+    ``test-suite-generator`` -> ``TestSuiteGenerator``.
+    """
+    return "".join(part.capitalize() for part in agent_name.split("-"))
+
+
+def atomic_write(path: Path, content: str, *, prefix: str = ".write-", suffix: str = ".tmp") -> None:
+    """Write *content* to *path* atomically via temp file + ``os.replace``.
+
+    Prevents corrupted files if the process crashes mid-write.
+    """
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(path.parent), prefix=prefix, suffix=suffix,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, str(path))
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def now_iso() -> str:

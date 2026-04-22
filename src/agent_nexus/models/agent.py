@@ -103,7 +103,7 @@ class AgentManifest(FrozenModel):
     type: AgentType
     description: str = Field(min_length=1)
     capabilities: list[str] = Field(default_factory=list)
-    model_config_field: AgentModelConfig | None = Field(default=None, alias="model_config")
+    model_preferences: AgentModelConfig | None = Field(default=None, alias="model_config")
     role: AgentRole | None = None
     dependencies: AgentDependencies = Field(default_factory=AgentDependencies)
     permissions: PermissionConfig | None = None

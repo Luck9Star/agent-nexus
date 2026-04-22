@@ -17,5 +17,5 @@ name = "localization-analysis"
 agent = "localization-specialist"
 blocked_by = []
 
-# task4 (conflict-detection) removed: conflict-detector atomic agent
+# TODO(task4): conflict-detector atomic agent
 # does not exist yet. Will be re-added when the agent is created.

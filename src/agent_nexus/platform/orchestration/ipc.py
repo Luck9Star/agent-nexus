@@ -415,6 +415,11 @@ def get_ipc_lock(agent_name: str) -> asyncio.Lock:
     locks (e.g. after ``asyncio.run()`` in tests), all locks are
     discarded and recreated to prevent ``attached to a different loop``
     errors.
+
+    Thread-safety: This function MUST only be called from the asyncio
+    event loop thread.  Under CPython's GIL, dict operations on the
+    event loop are atomic, but concurrent access from non-asyncio
+    threads (e.g. IPython worker threads) would be unsafe.
     """
     global _ipc_lock_registry, _ipc_lock_loop_id
 

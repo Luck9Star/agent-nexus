@@ -227,12 +227,16 @@ class SecurityChecker:
                     violations.extend(rule.check(node))
                 except Exception:
                     logger.warning(
-                        "Rule %r failed on node %s",
+                        "Security rule %r failed on node %s — treating as violation",
                         type(rule).__name__,
                         type(node).__name__,
                         exc_info=True,
                     )
-                    continue
+                    violations.append(SecurityViolation(
+                        rule_type=type(rule).__name__,
+                        node_type=type(node).__name__,
+                        message=f"Security rule {type(rule).__name__!r} raised an exception — execution blocked for safety",
+                    ))
 
         # Regex rules: once on full source
         for rule in self._regex_rules:
@@ -240,10 +244,15 @@ class SecurityChecker:
                 violations.extend(rule.check_source(code))
             except Exception:
                 logger.warning(
-                    "Rule %r failed on source",
+                    "Security rule %r failed on source — treating as violation",
                     type(rule).__name__,
                     exc_info=True,
                 )
+                violations.append(SecurityViolation(
+                    rule_type=type(rule).__name__,
+                    node_type="source",
+                    message=f"Security rule {type(rule).__name__!r} raised an exception — execution blocked for safety",
+                ))
 
         result = tuple(violations)
 

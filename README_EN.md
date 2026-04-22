@@ -6,7 +6,7 @@ English | **[中文](README.md)**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests: 2704](https://img.shields.io/badge/tests-2704_passing-brightgreen.svg)]()
+[![Tests: 3554](https://img.shields.io/badge/tests-3554_passing-brightgreen.svg)]()
 
 Agent Nexus is an **MCP-native** intelligent agent platform built on a four-layer architecture. Users run Agents locally with their own model configuration (OpenAI / Anthropic / Ollama / Chinese providers all supported).
 
@@ -297,6 +297,7 @@ agent-nexus doctor
 
 # Print version
 agent-nexus version
+agent-nexus -v              # equivalent
 
 # Print environment snapshot (config path, Python version, provider status)
 agent-nexus env
@@ -340,6 +341,31 @@ agent-nexus search "document"
 # Show detailed info about an agent
 agent-nexus info doc-filler
 ```
+
+### Create Agents
+
+```bash
+# Non-interactive (simple mode: single run tool)
+agent-nexus create agent my-agent -d "My agent description"
+
+# Pipeline mode (analyze / execute / report tools)
+agent-nexus create agent my-agent -d "description" --tools pipeline
+
+# Interactive wizard (step through tool pattern, model tier, etc.)
+agent-nexus create agent my-agent --wizard
+
+# Specify output directory
+agent-nexus create agent my-agent -d "description" --output ./my-agents
+```
+
+Tool patterns:
+
+| Pattern | `--tools` | Generated MCP Tools |
+|---------|-----------|-------------------|
+| Simple | `simple` (default) | `run` |
+| Pipeline | `pipeline` | `analyze`, `execute`, `report` |
+
+Generated files: `agent-manifest.yaml`, `agent.py`, `SKILL.md`, `pyproject.toml`, `<pkg>/__init__.py`, `<pkg>/agent.py`, `<pkg>/mcp_adapter.py`
 
 ### Package Sources
 
@@ -467,7 +493,7 @@ agent-nexus check ./my-agent
 
 ## Agent Catalog
 
-### 10 Atomic Agents
+### 11 Atomic Agents
 
 Each Atomic Agent is a single-purpose specialist with deep domain optimization:
 
@@ -483,6 +509,7 @@ Each Atomic Agent is a single-purpose specialist with deep domain optimization:
 | **contract-analyzer** | Document/Content - Legal Analysis | Premium | Cross-clause dependency understanding, multi-jurisdiction compliance |
 | **market-intelligence-analyst** | Research/Analysis - Market Research | Standard | Porter/SWOT/PESTEL methodology |
 | **test-suite-generator** | Software Engineering - Testing | Standard | AST parsing + per-paradigm test strategy |
+| **good-skill** | General (Auto-Promoted) | Standard | Auto-promoted from skill sk-1 by the Self-Evolution Engine (effective_rate=0.9) |
 
 ### 5 Composite Agents
 
@@ -536,6 +563,20 @@ my-composite/
   tests/
     test_composition.py
 ```
+
+### Quick Start with Scaffolding
+
+Use `agent-nexus create agent` to generate a complete agent package skeleton:
+
+```bash
+# Fastest way
+agent-nexus create agent my-agent -d "My agent description"
+
+# Interactive wizard
+agent-nexus create agent my-agent --wizard
+```
+
+The scaffolding command generates all required files including `agent-manifest.yaml`, `SKILL.md`, `pyproject.toml`, `mcp_adapter.py`, and more. See [CLI Commands - Create Agents](#create-agents).
 
 ### agent-manifest.yaml
 
@@ -849,7 +890,7 @@ pytest tests/integration/ -v
 pytest tests/e2e/ -v
 ```
 
-Current test coverage: **2704 tests all passing**, covering all platform modules and Agent packages.
+Current test coverage: **3554 tests all passing** (platform 2698 + agents 856), covering all platform modules and Agent packages.
 
 ---
 
@@ -861,7 +902,7 @@ Current test coverage: **2704 tests all passing**, covering all platform modules
 | Data Models | Pydantic v2 (frozen) | All-immutable models |
 | Agent Framework | PydanticAI | Agent logic and tool definitions |
 | MCP Server | FastMCP | per-Agent MCP exposure |
-| CLI | Typer | init/doctor/version/env, install/run/list/search, runtime start/stop/status, config, evolution |
+| CLI | Typer | init/doctor/version/env, install/run/list/search, create agent, runtime start/stop/status, config, evolution |
 | Persistence | SQLite WAL | TaskGraph concurrent safety |
 | Runtime | IPython InteractiveShell | Kernel execution |
 | Config | TOML + YAML | config.toml + sources.yaml |
@@ -885,7 +926,7 @@ agent-nexus/
 |       +-- evolution/        # Self-Evolution Engine (6 modules)
 |       +-- runtime/          # Python Runtime (IPython + SecurityChecker)
 +-- agents/                   # Agent packages
-|   +-- atomic/               # 10 Atomic Agents
+|   +-- atomic/               # 11 Atomic Agents
 |   +-- composite/            # 5 Composite Agents
 +-- tests/                    # Platform tests (unit + integration + e2e)
 +-- templates/                # OrchestrationDSL TOML templates

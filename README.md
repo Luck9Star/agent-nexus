@@ -6,7 +6,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests: 2704](https://img.shields.io/badge/tests-2704_passing-brightgreen.svg)]()
+[![Tests: 3554](https://img.shields.io/badge/tests-3554_passing-brightgreen.svg)]()
 
 Agent Nexus 是一个 **MCP-native** 的智能体平台，采用四层架构设计。用户在本地运行 Agent，自行配置模型（OpenAI / Anthropic / Ollama / 国产模型均支持）。
 
@@ -297,6 +297,7 @@ agent-nexus doctor
 
 # 查看版本
 agent-nexus version
+agent-nexus -v              # 等价写法
 
 # 查看环境快照（config 路径、Python 版本、provider 状态）
 agent-nexus env
@@ -340,6 +341,31 @@ agent-nexus search "document"
 # 查看 Agent 详细信息
 agent-nexus info doc-filler
 ```
+
+### 创建 Agent
+
+```bash
+# 非交互式创建（simple 模式：单个 run 工具）
+agent-nexus create agent my-agent -d "My agent description"
+
+# Pipeline 模式（analyze / execute / report 三个工具）
+agent-nexus create agent my-agent -d "description" --tools pipeline
+
+# 交互式向导（逐步选择工具模式、模型层级等）
+agent-nexus create agent my-agent --wizard
+
+# 指定输出目录
+agent-nexus create agent my-agent -d "description" --output ./my-agents
+```
+
+工具模式：
+
+| 模式 | `--tools` | 生成的 MCP 工具 |
+|------|-----------|----------------|
+| 简单 | `simple`（默认） | `run` |
+| 流水线 | `pipeline` | `analyze`、`execute`、`report` |
+
+生成的文件：`agent-manifest.yaml`、`agent.py`、`SKILL.md`、`pyproject.toml`、`<pkg>/__init__.py`、`<pkg>/agent.py`、`<pkg>/mcp_adapter.py`
 
 ### 包源管理
 
@@ -467,7 +493,7 @@ agent-nexus check ./my-agent
 
 ## Agent 目录
 
-### 10 个 Atomic Agent
+### 11 个 Atomic Agent
 
 每个 Atomic Agent 都是单一专业能力的深度优化专家：
 
@@ -483,6 +509,7 @@ agent-nexus check ./my-agent
 | **contract-analyzer** | 文档/内容 - 法律分析 | Premium | 条款间依赖理解，多法域合规 |
 | **market-intelligence-analyst** | 研究/分析 - 市场研究 | Standard | Porter/SWOT/PESTEL 方法论 |
 | **test-suite-generator** | 软件工程 - 测试 | Standard | AST 解析 + 每范式测试策略 |
+| **good-skill** | 通用（自进化晋升） | Standard | 由自进化引擎从 skill sk-1 自动晋升（effective_rate=0.9） |
 
 ### 5 个 Composite Agent
 
@@ -536,6 +563,20 @@ my-composite/
   tests/
     test_composition.py
 ```
+
+### 快速创建（脚手架）
+
+使用 `agent-nexus create agent` 一键生成完整的 Agent 包骨架：
+
+```bash
+# 最快方式
+agent-nexus create agent my-agent -d "My agent description"
+
+# 交互向导
+agent-nexus create agent my-agent --wizard
+```
+
+脚手架会自动生成上述所有必需文件，包括 `agent-manifest.yaml`、`SKILL.md`、`pyproject.toml`、`mcp_adapter.py` 等。详见 [CLI 命令 - 创建 Agent](#创建-agent)。
 
 ### agent-manifest.yaml
 
@@ -849,7 +890,7 @@ pytest tests/integration/ -v
 pytest tests/e2e/ -v
 ```
 
-当前测试覆盖：**2704 个测试全部通过**，覆盖所有平台模块和 Agent 包。
+当前测试覆盖：**3554 个测试全部通过**（平台 2698 + Agent 856），覆盖所有平台模块和 Agent 包。
 
 ---
 
@@ -861,7 +902,7 @@ pytest tests/e2e/ -v
 | 数据模型 | Pydantic v2 (frozen) | 全量不可变模型 |
 | Agent 框架 | PydanticAI | Agent 逻辑和工具定义 |
 | MCP Server | FastMCP | per-Agent MCP 暴露 |
-| CLI | Typer | init/doctor/version/env, install/run/list/search, runtime start/stop/status, config, evolution |
+| CLI | Typer | init/doctor/version/env, install/run/list/search, create agent, runtime start/stop/status, config, evolution |
 | 持久化 | SQLite WAL | TaskGraph 并发安全 |
 | Runtime | IPython InteractiveShell | 内核执行 |
 | 配置 | TOML + YAML | config.toml + sources.yaml |

@@ -14,34 +14,19 @@ Actions:
 
 from __future__ import annotations
 
-import os
 import shutil
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
 from agent_nexus.platform.evolution.store import EvolutionStore
-from agent_nexus.platform.utils import AGENT_NAME_RE
-
-
-def _agent_name_to_package(agent_name: str) -> str:
-    """Convert agent name to Python package directory name.
-
-    Examples: ``code-reviewer`` -> ``agent_code_reviewer``,
-    ``test-suite-generator`` -> ``agent_test_suite_generator``.
-    """
-    return "agent_" + agent_name.replace("-", "_")
-
-
-def _to_class_name(agent_name: str) -> str:
-    """Convert agent name to PascalCase class name (without Agent suffix).
-
-    Examples: ``code-reviewer`` -> ``CodeReviewer``,
-    ``test-suite-generator`` -> ``TestSuiteGenerator``.
-    """
-    return "".join(part.capitalize() for part in agent_name.split("-"))
+from agent_nexus.platform.utils import (
+    AGENT_NAME_RE,
+    agent_name_to_package,
+    to_class_name,
+    atomic_write as _atomic_write,
+)
 
 
 @dataclass
@@ -160,7 +145,7 @@ class AgentPromoter:
             )
 
         agent_dir = self._agents_root / agent_name
-        pkg_name = _agent_name_to_package(agent_name)
+        pkg_name = agent_name_to_package(agent_name)
         pkg_dir = agent_dir / pkg_name
 
         # Track whether the directory existed BEFORE we started so we
@@ -183,37 +168,37 @@ class AgentPromoter:
             # Generate manifest
             manifest_content = self._generate_manifest(candidate)
             manifest_path = agent_dir / "agent-manifest.yaml"
-            self._atomic_write(manifest_path, manifest_content)
+            _atomic_write(manifest_path, manifest_content)
             written_files.append(manifest_path)
 
             # Generate __init__.py (package root)
             init_content = self._generate_init_py(candidate, pkg_name)
             init_path = pkg_dir / "__init__.py"
-            self._atomic_write(init_path, init_content)
+            _atomic_write(init_path, init_content)
             written_files.append(init_path)
 
             # Generate agent.py inside package (entry point)
             entry_content = self._generate_entry_point(candidate)
             entry_path = pkg_dir / "agent.py"
-            self._atomic_write(entry_path, entry_content)
+            _atomic_write(entry_path, entry_content)
             written_files.append(entry_path)
 
             # Generate mcp_adapter.py inside package
             mcp_content = self._generate_mcp_adapter(candidate, pkg_name)
             mcp_path = pkg_dir / "mcp_adapter.py"
-            self._atomic_write(mcp_path, mcp_content)
+            _atomic_write(mcp_path, mcp_content)
             written_files.append(mcp_path)
 
             # Generate pyproject.toml
             pyproject_content = self._generate_pyproject(candidate, pkg_name)
             pyproject_path = agent_dir / "pyproject.toml"
-            self._atomic_write(pyproject_path, pyproject_content)
+            _atomic_write(pyproject_path, pyproject_content)
             written_files.append(pyproject_path)
 
             # Generate skill file
             skill_content = self._generate_skill_md(candidate)
             skill_path = agent_dir / "SKILL.md"
-            self._atomic_write(skill_path, skill_content)
+            _atomic_write(skill_path, skill_content)
             written_files.append(skill_path)
         except OSError as e:
             # Clean up partial files.
@@ -244,7 +229,7 @@ class AgentPromoter:
         self, candidate: PromotionCandidate, pkg_name: str
     ) -> str:
         """Generate __init__.py for the promoted agent package."""
-        class_name = _to_class_name(candidate.skill_name)
+        class_name = to_class_name(candidate.skill_name)
         return (
             f'"""agent-{candidate.skill_name} — Auto-promoted agent.\n'
             f'\n'
@@ -325,28 +310,6 @@ class AgentPromoter:
             f'select = ["E", "F", "I", "N", "UP", "B", "SIM"]\n'
         )
 
-    @staticmethod
-    def _atomic_write(path: Path, content: str) -> None:
-        """Write *content* to *path* atomically via temp file + os.replace.
-
-        Prevents corrupted files if the process crashes mid-write.
-        """
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(path.parent), prefix=".promo-", suffix=".tmp",
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(content)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(tmp_path, str(path))
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-
     def _generate_manifest(
         self, candidate: PromotionCandidate
     ) -> str:
@@ -385,7 +348,7 @@ class AgentPromoter:
         self, candidate: PromotionCandidate
     ) -> str:
         """Generate a minimal agent.py skeleton for the promoted agent."""
-        class_name = _to_class_name(candidate.skill_name)
+        class_name = to_class_name(candidate.skill_name)
         return (
             f'"""Auto-promoted agent: {candidate.skill_name}.\n'
             f'\n'

@@ -218,8 +218,7 @@ class TestAtomicWriteFailure:
     def test_temp_file_cleaned_on_failure(self, tmp_path: Path) -> None:
         from unittest.mock import patch
 
-        store = _make_store()
-        promoter = AgentPromoter(store)
+        from agent_nexus.platform.utils import atomic_write
 
         target = tmp_path / "sub" / "dir" / "test.yaml"
         # Make parent dir exist
@@ -227,13 +226,13 @@ class TestAtomicWriteFailure:
 
         with patch("os.replace", side_effect=PermissionError("denied")):
             with pytest.raises(PermissionError):
-                promoter._atomic_write(target, "test content")
+                atomic_write(target, "test content")
 
         # The target file should NOT exist (write failed)
         assert not target.exists()
 
-        # No stale .promo-*.tmp files left behind
-        tmp_files = list(target.parent.glob(".promo-*.tmp"))
+        # No stale .write-*.tmp files left behind
+        tmp_files = list(target.parent.glob(".write-*.tmp"))
         assert tmp_files == []
 
 
@@ -264,7 +263,7 @@ class TestPromotionPartialRollback:
         candidate = _candidate()
 
         # Make the second write (agent.py) fail
-        original_write = promoter._atomic_write
+        from agent_nexus.platform.evolution.promotion import _atomic_write as real_write
         call_count = 0
 
         def _failing_write(path, content):
@@ -272,9 +271,9 @@ class TestPromotionPartialRollback:
             call_count += 1
             if call_count == 2:
                 raise OSError("disk full")
-            return original_write(path, content)
+            return real_write(path, content)
 
-        with patch.object(promoter, "_atomic_write", side_effect=_failing_write):
+        with patch("agent_nexus.platform.evolution.promotion._atomic_write", side_effect=_failing_write):
             result = promoter.promote(candidate)
 
         assert result.success is False
@@ -296,7 +295,7 @@ class TestPromotionPartialRollback:
         agent_dir = agents_root / "good-skill"
         assert not agent_dir.exists()
 
-        with patch.object(promoter, "_atomic_write", side_effect=OSError("fail")):
+        with patch("agent_nexus.platform.evolution.promotion._atomic_write", side_effect=OSError("fail")):
             result = promoter.promote(candidate)
 
         assert result.success is False

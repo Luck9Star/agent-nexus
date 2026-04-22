@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -135,10 +136,23 @@ class ConfigMigrator:
         merged = cls._deep_merge(defaults, raw)
         merged["schema_version"] = cls.TARGET_VERSION
 
-        config_path.write_text(
-            toml.dumps(merged),
-            encoding="utf-8",
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(config_path.parent),
+            prefix=".config-migrate-",
+            suffix=".tmp",
         )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(toml.dumps(merged))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, str(config_path))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         logger.info(
             "Config migrated: %s -> %s",
             current_version or "(none)",

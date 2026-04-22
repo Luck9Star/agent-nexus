@@ -68,9 +68,9 @@ def _generate_recommendations(findings: list[SecurityFinding]) -> list[str]:
     )
 
     recommendations: list[str] = []
-    for f in sorted_findings:
-        rec = f.remediation or f"No specific remediation provided for {f.category} at {f.location}"
-        prefix = f"[{f.severity.upper()}] {f.location}: "
+    for finding in sorted_findings:
+        rec = finding.remediation or f"No specific remediation provided for {finding.category} at {finding.location}"
+        prefix = f"[{finding.severity.upper()}] {finding.location}: "
         recommendations.append(prefix + rec)
 
     return recommendations

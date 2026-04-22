@@ -17,5 +17,5 @@ name = "test-generation"
 agent = "test-suite-generator"
 blocked_by = []
 
-# task4 (quality-gate-decision) removed: quality-gate-decider atomic agent
+# TODO(task4): quality-gate-decider atomic agent
 # does not exist yet. Will be re-added when the agent is created.

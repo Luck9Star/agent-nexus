@@ -656,12 +656,12 @@ class TestMcpServerConfigTransportValidation:
 
 
 # ---------------------------------------------------------------------------
-# AgentManifest.model_config_field alias round-trip (iter88)
+# AgentManifest.model_preferences alias round-trip (iter88)
 # ---------------------------------------------------------------------------
 
 
 class TestAgentManifestModelConfigRoundTrip:
-    """model_config_field alias must survive serialization round-trip."""
+    """model_preferences alias must survive serialization round-trip."""
 
     def test_model_dump_round_trip_preserves_model_config(self):
         m = AgentManifest(
@@ -673,8 +673,8 @@ class TestAgentManifestModelConfigRoundTrip:
         )
         data = m.model_dump()
         m2 = AgentManifest(**data)
-        assert m2.model_config_field is not None
-        assert m2.model_config_field.recommended == "gpt-4o"
+        assert m2.model_preferences is not None
+        assert m2.model_preferences.recommended == "gpt-4o"
 
     def test_model_dump_json_round_trip_preserves_model_config(self):
         m = AgentManifest(
@@ -686,9 +686,9 @@ class TestAgentManifestModelConfigRoundTrip:
         )
         json_str = m.model_dump_json()
         m2 = AgentManifest.model_validate_json(json_str)
-        assert m2.model_config_field is not None
-        assert m2.model_config_field.recommended == "gpt-4o"
-        assert m2.model_config_field.fallback == "gpt-3.5-turbo"
+        assert m2.model_preferences is not None
+        assert m2.model_preferences.recommended == "gpt-4o"
+        assert m2.model_preferences.fallback == "gpt-3.5-turbo"
 
     def test_field_name_construction_works(self):
         m = AgentManifest(
@@ -696,10 +696,10 @@ class TestAgentManifestModelConfigRoundTrip:
             version="1.0.0",
             type=AgentType.ATOMIC,
             description="d",
-            model_config_field=AgentModelConfig(recommended="gpt-4o"),
+            model_preferences=AgentModelConfig(recommended="gpt-4o"),
         )
-        assert m.model_config_field is not None
-        assert m.model_config_field.recommended == "gpt-4o"
+        assert m.model_preferences is not None
+        assert m.model_preferences.recommended == "gpt-4o"
 
     def test_none_model_config_round_trips(self):
         m = AgentManifest(
@@ -710,7 +710,7 @@ class TestAgentManifestModelConfigRoundTrip:
         )
         data = m.model_dump()
         m2 = AgentManifest(**data)
-        assert m2.model_config_field is None
+        assert m2.model_preferences is None
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ Centralizes patterns used across all model modules to enforce DRY.
 
 from __future__ import annotations
 
-import re
+
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, ConfigDict
@@ -30,9 +30,30 @@ class FrozenModel(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
-# Agent name validation regex — shared across installer, supervisor, promotion.
-# Valid names: start with alphanumeric, then alphanumeric/dot/hyphen/underscore.
-_AGENT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
-
 # Sentinel for missing values in runtime — shared across executor, runtime, describer.
-_MISSING = object()
+# Uses a singleton class so that identity comparison survives pickle round-trips.
+class _MissingSentinel:
+    """Singleton sentinel for missing values — preserves identity across pickle."""
+
+    _instance: "_MissingSentinel | None" = None
+
+    def __new__(cls) -> "_MissingSentinel":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "<MISSING>"
+
+    def __reduce__(self) -> tuple:
+        # Return (_restore_missing,) so unpickling calls the module-level
+        # helper and always gets back the same singleton.
+        return (_restore_missing, ())
+
+
+def _restore_missing() -> "_MissingSentinel":
+    """Pickle restore helper — returns the _MISSING singleton."""
+    return _MISSING
+
+
+_MISSING = _MissingSentinel()
