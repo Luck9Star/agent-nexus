@@ -49,7 +49,6 @@ from agent_nexus.platform.local.cli._lifecycle import (
     list_agents,
     search,
     info,
-    sources,
 )
 
 # All lifecycle commands registered as top-level commands
@@ -60,7 +59,6 @@ app.command("run", context_settings={"allow_extra_args": True, "ignore_unknown_o
 app.command("list")(list_agents)
 app.command()(search)
 app.command()(info)
-app.command()(sources)
 
 # --- New command modules ---
 from agent_nexus.platform.local.cli.init_cmd import init_app
@@ -68,12 +66,16 @@ from agent_nexus.platform.local.cli.config_cmd import config_app
 from agent_nexus.platform.local.cli.runtime_cmd import runtime_app
 from agent_nexus.platform.local.cli.evolution_cmd import evolution_app
 from agent_nexus.platform.local.cli.create_cmd import create_app
+from agent_nexus.platform.local.cli.check_cmd import check_agent
+from agent_nexus.platform.local.cli.sources_cmd import sources_app
 
 app.add_typer(init_app)
 app.add_typer(config_app, name="config")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(evolution_app, name="evolution")
 app.add_typer(create_app, name="create")
+app.add_typer(sources_app, name="sources")
+app.command("check")(check_agent)
 
 if __name__ == "__main__":
     app()

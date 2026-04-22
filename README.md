@@ -334,9 +334,15 @@ agent-nexus update --all
 # 列出已安装的 Agent
 agent-nexus list
 
+# JSON 格式输出
+agent-nexus list --json
+
 # 搜索所有源中的 Agent
 agent-nexus search "security"
 agent-nexus search "document"
+
+# 搜索结果 JSON 输出
+agent-nexus search "security" --json
 
 # 查看 Agent 详细信息
 agent-nexus info doc-filler
@@ -405,6 +411,9 @@ agent-nexus ps
 # 查看 Agent 日志（默认最近 50 行）
 agent-nexus logs doc-filler
 agent-nexus logs doc-filler --lines 200
+
+# 实时跟踪日志输出
+agent-nexus logs doc-filler --follow
 ```
 
 ### 配置管理

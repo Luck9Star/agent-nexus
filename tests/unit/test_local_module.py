@@ -1198,7 +1198,7 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._lifecycle._init_managers",
+            "agent_nexus.platform.local.cli.sources_cmd._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["sources", "list"])
@@ -1212,11 +1212,11 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._lifecycle._init_managers",
+            "agent_nexus.platform.local.cli.sources_cmd._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
             result = runner.invoke(app, ["sources", "add", "--name", "my-src"])
-            assert result.exit_code == 1
+            assert result.exit_code != 0
             assert "required" in result.output.lower() or "url" in result.output.lower()
 
     def test_sources_add_success(self) -> None:
@@ -1226,8 +1226,10 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._lifecycle._init_managers",
+            "agent_nexus.platform.local.cli.sources_cmd._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
+        ), patch(
+            "agent_nexus.platform.local.installer._validate_git_url",
         ):
             result = runner.invoke(app, ["sources", "add", "--name", "my-src", "--url", "https://x.com/r.git"])
             assert "added" in result.output.lower()
@@ -1241,10 +1243,10 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._lifecycle._init_managers",
+            "agent_nexus.platform.local.cli.sources_cmd._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
-            result = runner.invoke(app, ["sources", "remove", "--name", "my-src"])
+            result = runner.invoke(app, ["sources", "remove", "my-src"])
             assert "removed" in result.output.lower()
 
     def test_sources_remove_missing(self) -> None:
@@ -1255,38 +1257,23 @@ class TestCLI:
         mock_loader = MagicMock()
 
         with patch(
-            "agent_nexus.platform.local.cli._lifecycle._init_managers",
+            "agent_nexus.platform.local.cli.sources_cmd._init_managers",
             return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
         ):
-            result = runner.invoke(app, ["sources", "remove", "--name", "nope"])
+            result = runner.invoke(app, ["sources", "remove", "nope"])
             assert "not found" in result.output.lower()
 
     def test_sources_remove_missing_name(self) -> None:
-        """sources remove without --name shows error."""
-        mock_lockfile = MagicMock(spec=LockfileManager)
-        mock_sources = MagicMock(spec=SourceManager)
-        mock_loader = MagicMock()
-
-        with patch(
-            "agent_nexus.platform.local.cli._lifecycle._init_managers",
-            return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
-        ):
-            result = runner.invoke(app, ["sources", "remove"])
-            assert result.exit_code == 1
+        """sources remove without name shows error."""
+        result = runner.invoke(app, ["sources", "remove"])
+        assert result.exit_code != 0
+        assert "required" in result.output.lower() or "missing" in result.output.lower()
 
     def test_sources_unknown_action(self) -> None:
         """sources with unknown action shows error."""
-        mock_lockfile = MagicMock(spec=LockfileManager)
-        mock_sources = MagicMock(spec=SourceManager)
-        mock_loader = MagicMock()
-
-        with patch(
-            "agent_nexus.platform.local.cli._lifecycle._init_managers",
-            return_value=(mock_loader, mock_lockfile, mock_sources, Path("/tmp/cfg")),
-        ):
-            result = runner.invoke(app, ["sources", "explode"])
-            assert "Unknown action" in result.output
-            assert result.exit_code == 1
+        result = runner.invoke(app, ["sources", "explode"])
+        assert result.exit_code != 0
+        assert "no such command" in result.output.lower() or "error" in result.output.lower()
 
     def test_app_no_args_shows_help(self) -> None:
         """Running app with no args shows help (no_args_is_help=True)."""

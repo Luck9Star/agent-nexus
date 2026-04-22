@@ -66,31 +66,24 @@ def update(
 # =====================================================================
 
 
-def list_agents() -> None:
+def list_agents(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
     """List installed agents."""
-    asyncio.run(_list_agents())
+    asyncio.run(_list_agents(json_output))
 
 
-def search(query: str = typer.Argument(help="Search query")) -> None:
+def search(
+    query: str = typer.Argument(help="Search query"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
     """Search for available agents."""
-    asyncio.run(_search(query))
+    asyncio.run(_search(query, json_output))
 
 
 def info(name: str = typer.Argument(help="Agent name")) -> None:
     """Show detailed information about an agent."""
     asyncio.run(_info(name))
-
-
-def sources(
-    action: str = typer.Argument(help="Action: list, add, remove"),
-    name: Optional[str] = typer.Option(None, "--name", help="Source name"),
-    url: Optional[str] = typer.Option(None, "--url", help="Source git URL"),
-    source_type: Optional[str] = typer.Option(
-        None, "--type", help="Source type: official, private"
-    ),
-) -> None:
-    """Manage package sources."""
-    asyncio.run(_sources(action, name, url, source_type))
 
 
 def run_agent(
@@ -223,12 +216,26 @@ async def _update(name: str | None, all_agents: bool) -> None:
         raise typer.Exit(code=1)
 
 
-async def _list_agents() -> None:
+async def _list_agents(json_output: bool = False) -> None:
     """Async list implementation."""
+    import json
+
     _loader, lockfile, _sources, _config_dir = _init_managers()
     lockfile_data = lockfile.load()
 
     agents = lockfile_data.agents
+    if json_output:
+        result = [
+            {
+                "name": agent_name,
+                "version": entry.version,
+                "type": entry.agent_type.value,
+                "source": entry.source,
+            }
+            for agent_name, entry in agents.items()
+        ]
+        typer.echo(json.dumps(result, indent=2))
+        return
     if not agents:
         typer.echo("No agents installed.")
         return
@@ -244,8 +251,10 @@ async def _list_agents() -> None:
     typer.echo(f"\n{len(agents)} agent(s) installed.")
 
 
-async def _search(query: str) -> None:
+async def _search(query: str, json_output: bool = False) -> None:
     """Async search implementation."""
+    import json
+
     from agent_nexus.platform.local.sources import SourceManager
 
     config_dir = _get_config_dir()
@@ -262,6 +271,10 @@ async def _search(query: str) -> None:
                 "source": source.name,
             }
         )
+
+    if json_output:
+        typer.echo(json.dumps(results, indent=2))
+        return
 
     if not results:
         typer.echo(f"No agents found matching '{query}'.")
@@ -330,65 +343,6 @@ async def _info(name: str) -> None:
                 typer.echo(f"    {line}")
         except Exception:
             logger.debug("Failed to read SKILL.md preview", exc_info=True)
-
-
-async def _sources(
-    action: str,
-    name: str | None,
-    url: str | None,
-    source_type: str | None,
-) -> None:
-    """Async sources management implementation."""
-    from agent_nexus.models.distribution import SourceEntry
-
-    _loader, _lockfile, sources, _config_dir = _init_managers()
-
-    if action == "list":
-        source_list = sources.list_sources()
-        if not source_list:
-            typer.echo("No sources configured.")
-            return
-        typer.echo(f"{'Name':<20} {'Type':<10} {'URL'}")
-        typer.echo("-" * 60)
-        for s in source_list:
-            typer.echo(f"{s.name:<20} {s.type:<10} {s.url}")
-
-    elif action == "add":
-        if not name or not url:
-            typer.echo("--name and --url are required for adding a source.")
-            raise typer.Exit(code=1)
-        # Validate URL scheme before creating the source entry
-        from agent_nexus.platform.local.installer import _validate_git_url
-        try:
-            _validate_git_url(url)
-        except ValueError as exc:
-            typer.echo(f"Error: {exc}", err=True)
-            raise typer.Exit(code=1)
-
-        entry = SourceEntry(
-            name=name,
-            type=source_type or "git",
-            url=url,
-        )
-        sources.add_source(entry)
-        typer.echo(f"Source '{name}' added.")
-
-    elif action == "remove":
-        if not name:
-            typer.echo("--name is required for removing a source.")
-            raise typer.Exit(code=1)
-        removed = sources.remove_source(name)
-        if removed:
-            typer.echo(f"Source '{name}' removed.")
-        else:
-            typer.echo(f"Source '{name}' not found.")
-            raise typer.Exit(code=1)
-
-    else:
-        typer.echo(
-            f"Unknown action '{action}'. Use: list, add, remove.", err=True
-        )
-        raise typer.Exit(code=1)
 
 
 async def _run(name: str, mode: str, transport: str, extra_args: list[str] | None = None) -> None:

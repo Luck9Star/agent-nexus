@@ -334,9 +334,15 @@ agent-nexus update --all
 # List installed agents
 agent-nexus list
 
+# JSON output
+agent-nexus list --json
+
 # Search for agents across all sources
 agent-nexus search "security"
 agent-nexus search "document"
+
+# Search with JSON output
+agent-nexus search "security" --json
 
 # Show detailed info about an agent
 agent-nexus info doc-filler
@@ -405,6 +411,9 @@ agent-nexus ps
 # Show agent logs (default: last 50 lines)
 agent-nexus logs doc-filler
 agent-nexus logs doc-filler --lines 200
+
+# Follow log output in real-time
+agent-nexus logs doc-filler --follow
 ```
 
 ### Configuration Management

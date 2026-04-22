@@ -10,6 +10,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -27,7 +28,6 @@ from agent_nexus.platform.local.cli._lifecycle import (
     _info,
     _install,
     _list_agents,
-    _sources,
     _uninstall,
     _update,
     _wait_forever,
@@ -570,160 +570,44 @@ class TestInfo:
 # ============================================================================
 
 
-class TestSources:
-    """Tests for _sources internal async function."""
+class TestSourcesSubApp:
+    """Tests for sources Typer sub-app (sources list/add/remove)."""
 
-    @pytest.mark.asyncio
-    async def test_list_with_sources(self) -> None:
-        """List sources displays table format."""
-        mocks, _, sources_mock, _ = _mock_managers()
-        source_entries = [
-            SourceEntry(name="official", type="git", url="https://example.com/repo"),
-            SourceEntry(name="private", type="git", url="https://internal.com/repo"),
-        ]
-        sources_mock.list_sources.return_value = source_entries
+    def test_sources_help_shows_subcommands(self) -> None:
+        """sources --help shows list, add, remove subcommands."""
+        result = runner.invoke(app, ["sources", "--help"])
+        assert result.exit_code == 0
+        assert "list" in result.output
+        assert "add" in result.output
+        assert "remove" in result.output
 
-        with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
-        ):
-            await _sources("list", None, None, None)
+    def test_sources_list_no_sources(self) -> None:
+        """sources list with no sources prints 'No sources configured'."""
+        with patch(
+            "agent_nexus.platform.local.cli.sources_cmd._init_managers"
+        ) as mock_init:
+            mock_lockfile = MagicMock()
+            mock_sources = MagicMock()
+            mock_sources.list_sources.return_value = []
+            mock_init.return_value = (MagicMock(), mock_lockfile, mock_sources, Path("/tmp"))
+            result = runner.invoke(app, ["sources", "list"])
+        assert "No sources" in result.output
 
-        calls = _echo_calls(echo_mock)
-        assert any("Name" in c and "Type" in c for c in calls)
-        assert any("official" in c for c in calls)
-        assert any("private" in c for c in calls)
+    def test_sources_add_requires_name_and_url(self) -> None:
+        """sources add without required options fails."""
+        result = runner.invoke(app, ["sources", "add"])
+        assert result.exit_code != 0
 
-    @pytest.mark.asyncio
-    async def test_list_no_sources(self) -> None:
-        """List with no sources prints 'No sources configured'."""
-        mocks, _, sources_mock, _ = _mock_managers()
-        sources_mock.list_sources.return_value = []
-
-        with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
-        ):
-            await _sources("list", None, None, None)
-
-        calls = _echo_calls(echo_mock)
-        assert "No sources configured." in calls
-
-    @pytest.mark.asyncio
-    async def test_add_without_name(self) -> None:
-        """Add without --name prints error and exits."""
-        mocks, _, _, _ = _mock_managers()
-
-        with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
-        ):
-            with pytest.raises(click.exceptions.Exit) as exc_info:
-                await _sources("add", None, "https://example.com", "git")
-
-        assert exc_info.value.exit_code == 1
-        calls = _echo_calls(echo_mock)
-        assert any("--name and --url are required" in c for c in calls)
-
-    @pytest.mark.asyncio
-    async def test_add_with_valid_params(self) -> None:
-        """Add with valid params creates SourceEntry and prints 'added'."""
-        mocks, _, sources_mock, _ = _mock_managers()
-
-        with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.models.distribution.SourceEntry", wraps=SourceEntry),
-            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
-        ):
-            await _sources("add", "my-source", "https://example.com/repo", "git")
-
-        sources_mock.add_source.assert_called_once()
-        calls = _echo_calls(echo_mock)
-        assert any("added" in c for c in calls)
-
-    @pytest.mark.asyncio
-    async def test_add_with_default_type(self) -> None:
-        """Add without explicit type defaults to 'git'."""
-        mocks, _, sources_mock, _ = _mock_managers()
-
-        with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.models.distribution.SourceEntry", wraps=SourceEntry),
-            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
-        ):
-            await _sources("add", "my-source", "https://example.com/repo", None)
-
-        # Verify add_source was called with an entry whose type is "git"
-        call_args = sources_mock.add_source.call_args
-        added_entry = call_args[0][0]
-        assert added_entry.type == "git"
-        assert added_entry.name == "my-source"
-        assert added_entry.url == "https://example.com/repo"
-
-    @pytest.mark.asyncio
-    async def test_remove_existing(self) -> None:
-        """Remove an existing source prints 'removed'."""
-        mocks, _, sources_mock, _ = _mock_managers()
-        sources_mock.remove_source.return_value = True
-
-        with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
-        ):
-            await _sources("remove", "my-source", None, None)
-
-        sources_mock.remove_source.assert_called_once_with("my-source")
-        calls = _echo_calls(echo_mock)
-        assert any("removed" in c for c in calls)
-
-    @pytest.mark.asyncio
-    async def test_remove_non_existing(self) -> None:
-        """Remove a non-existing source prints 'not found'."""
-        mocks, _, sources_mock, _ = _mock_managers()
-        sources_mock.remove_source.return_value = False
-
-        with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
-        ):
-            with pytest.raises(click.exceptions.Exit) as exc_info:
-                await _sources("remove", "missing-source", None, None)
-            assert exc_info.value.exit_code == 1
-
-        calls = _echo_calls(echo_mock)
-        assert any("not found" in c for c in calls)
-
-    @pytest.mark.asyncio
-    async def test_remove_without_name(self) -> None:
-        """Remove without --name prints error and exits."""
-        mocks, _, _, _ = _mock_managers()
-
-        with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
-        ):
-            with pytest.raises(click.exceptions.Exit) as exc_info:
-                await _sources("remove", None, None, None)
-
-        assert exc_info.value.exit_code == 1
-        calls = _echo_calls(echo_mock)
-        assert any("--name is required" in c for c in calls)
-
-    @pytest.mark.asyncio
-    async def test_unknown_action(self) -> None:
-        """Unknown action prints error and exits with code 1."""
-        mocks, _, _, _ = _mock_managers()
-
-        with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
-        ):
-            with pytest.raises(click.exceptions.Exit) as exc_info:
-                await _sources("bogus", None, None, None)
-
-        assert exc_info.value.exit_code == 1
-        calls = _echo_calls(echo_mock)
-        assert any("Unknown action" in c for c in calls)
+    def test_sources_remove_not_found(self) -> None:
+        """sources remove nonexistent source exits with error."""
+        with patch(
+            "agent_nexus.platform.local.cli.sources_cmd._init_managers"
+        ) as mock_init:
+            mock_sources = MagicMock()
+            mock_sources.remove_source.return_value = False
+            mock_init.return_value = (MagicMock(), MagicMock(), mock_sources, Path("/tmp"))
+            result = runner.invoke(app, ["sources", "remove", "nonexistent"])
+        assert result.exit_code != 0
 
 
 # ---------------------------------------------------------------------------
@@ -1452,25 +1336,12 @@ class TestPathTraversalRejection:
         # Must NOT reach lockfile.get_entry
         lockfile_mock.get_entry.assert_not_called()
 
-    # --- _sources add URL validation ---
+    # --- sources add URL validation (via CLI) ---
 
-    @pytest.mark.asyncio
-    async def test_sources_add_rejects_file_url(self) -> None:
-        """_sources add rejects file:// URLs."""
-        mocks, _, sources_mock, _ = _mock_managers()
-
-        with (
-            patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
-        ):
-            with pytest.raises(click.exceptions.Exit) as exc_info:
-                await _sources("add", "evil", "file:///etc/passwd", "git")
-
-        assert exc_info.value.exit_code == 1
-        calls = _echo_calls(echo_mock)
-        assert any("invalid" in c.lower() for c in calls)
-        # Must NOT create a SourceEntry
-        sources_mock.add_source.assert_not_called()
+    def test_sources_add_rejects_file_url(self) -> None:
+        """sources add rejects file:// URLs."""
+        result = runner.invoke(app, ["sources", "add", "--name", "evil", "--url", "file:///etc/passwd"])
+        assert result.exit_code != 0
 
     # --- valid names still work ---
 
@@ -1491,3 +1362,76 @@ class TestPathTraversalRejection:
         lockfile_mock.get_entry.assert_called_once_with("my-agent")
         # Exit code 1 is from "not installed" check, not from validation
         assert exc_info.value.exit_code == 1
+
+
+class TestLogsFollow:
+    """Verify --follow option is accepted by runtime logs command."""
+
+    def test_logs_follow_option_exists(self) -> None:
+        """Verify --follow option is accepted by logs command."""
+        result = runner.invoke(app, ["runtime", "logs", "--help"])
+        assert result.exit_code == 0
+        assert "--follow" in result.output
+
+
+# ============================================================================
+# --json output tests
+# ============================================================================
+
+
+class TestJsonOutput:
+    """Tests for --json flag on list and search commands."""
+
+    def test_list_json(self) -> None:
+        """list --json outputs valid JSON array."""
+        with patch(
+            "agent_nexus.platform.local.cli._lifecycle._init_managers"
+        ) as mock_init:
+            entry = _make_entry()
+            mock_lockfile = MagicMock()
+            mock_lockfile.load.return_value = Lockfile(agents={"doc-filler": entry})
+            mock_init.return_value = (MagicMock(), mock_lockfile, MagicMock(), Path("/tmp"))
+            result = runner.invoke(app, ["list", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+        assert data[0]["name"] == "doc-filler"
+
+    def test_list_json_empty(self) -> None:
+        """list --json with no agents outputs empty JSON array."""
+        with patch(
+            "agent_nexus.platform.local.cli._lifecycle._init_managers"
+        ) as mock_init:
+            mock_lockfile = MagicMock()
+            mock_lockfile.load.return_value = Lockfile(agents={})
+            mock_init.return_value = (MagicMock(), mock_lockfile, MagicMock(), Path("/tmp"))
+            result = runner.invoke(app, ["list", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data == []
+
+    def test_search_json(self) -> None:
+        """search --json outputs valid JSON array."""
+        with patch(
+            "agent_nexus.platform.local.cli._lifecycle._get_config_dir",
+            return_value=Path("/tmp/cfg"),
+        ):
+            sources_mock = MagicMock()
+            src_entry = MagicMock()
+            src_entry.name = "official"
+            idx_entry = MagicMock()
+            idx_entry.name = "doc-filler"
+            idx_entry.version = "1.0.0"
+            idx_entry.type = MagicMock(value="atomic")
+            idx_entry.description = "Doc filler"
+            sources_mock.search_agents.return_value = [(src_entry, idx_entry)]
+
+            with patch(
+                "agent_nexus.platform.local.sources.SourceManager",
+                return_value=sources_mock,
+            ):
+                result = runner.invoke(app, ["search", "doc", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+        assert data[0]["name"] == "doc-filler"

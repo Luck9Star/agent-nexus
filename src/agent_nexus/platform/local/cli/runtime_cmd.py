@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 
 import typer
 
@@ -68,9 +69,13 @@ def status() -> None:
 def logs(
     name: str = typer.Argument(help="Agent name"),
     lines: int = typer.Option(50, "--lines", "-n", help="Number of lines to show"),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Follow log output"),
 ) -> None:
     """Show recent log output for an agent."""
-    _show_logs(name, lines)
+    if follow:
+        _follow_logs(name, lines)
+    else:
+        _show_logs(name, lines)
 
 
 @runtime_app.command()
@@ -237,23 +242,70 @@ async def _status() -> None:
         typer.echo(f"{agent_name:<25} {'yes':<12} {is_running:<10} {pid:<10}")
 
 
-def _show_logs(name: str, num_lines: int) -> None:
+def _resolve_log_path(name: str) -> Path:
+    """Validate agent name and return log file path.
+
+    Raises ``typer.Exit`` if the name is invalid or the log file does not exist.
+    """
     if not AGENT_NAME_RE.match(name):
         typer.echo(f"Invalid agent name: {name!r}", err=True)
         raise typer.Exit(code=1)
 
-    _loader, lockfile, _sources, config_dir = _init_managers()
+    _loader, _lockfile, _sources, config_dir = _init_managers()
     log_path = config_dir / "logs" / f"{name}.log"
 
     if not log_path.exists():
         typer.echo(f"No log file for '{name}'. Agent may not have been started.")
-        return
+        raise typer.Exit(code=0)
 
+    return log_path
+
+
+def _show_logs(name: str, num_lines: int) -> None:
+    log_path = _resolve_log_path(name)
     try:
         from collections import deque
 
         with open(log_path, encoding="utf-8") as f:
             tail = deque(f, maxlen=num_lines)
         typer.echo("".join(tail))
+    except typer.Exit:
+        raise
     except Exception as exc:
         typer.echo(f"Error reading log: {exc}", err=True)
+
+
+def _follow_logs(name: str, num_lines: int = 50) -> None:
+    """Follow log output in real-time (tail -f style)."""
+    log_path = _resolve_log_path(name)
+
+    import time
+    from collections import deque
+
+    # Print existing content (memory-efficient: only keep last N lines)
+    with open(log_path, encoding="utf-8", errors="replace") as f:
+        tail = deque(f, maxlen=num_lines)
+    for line in tail:
+        typer.echo(line)
+
+    # Follow for new lines
+    last_pos = log_path.stat().st_size
+
+    try:
+        while True:
+            time.sleep(0.5)
+            try:
+                current_size = log_path.stat().st_size
+            except FileNotFoundError:
+                break
+            if current_size < last_pos:
+                last_pos = 0
+            if current_size > last_pos:
+                with open(log_path, encoding="utf-8", errors="replace") as f:
+                    f.seek(last_pos)
+                    new_content = f.read()
+                    last_pos = f.tell()
+                for line in new_content.splitlines():
+                    typer.echo(line)
+    except KeyboardInterrupt:
+        pass
