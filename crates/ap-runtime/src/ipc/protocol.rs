@@ -274,7 +274,9 @@ mod tests {
         tokio::spawn(async move {
             let mut reader = BufReader::new(sr);
             let mut buf = vec![0u8; 1024];
-            let _ = reader.read(&mut buf).await;
+            if let Err(e) = reader.read(&mut buf).await {
+                tracing::warn!("IPC read error in test helper: {e}");
+            }
         });
 
         // send a message first

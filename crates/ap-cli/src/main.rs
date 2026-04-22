@@ -169,12 +169,15 @@ enum RuntimeAction {
 
 fn main() -> Result<()> {
     // Initialize tracing (minimal default)
+    // If init fails (e.g. already initialized), that's acceptable in tests or
+    // when embedded — log a debug message but don't crash.
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
         )
-        .try_init();
+        .try_init()
+        .inspect_err(|e| eprintln!("tracing init failed (non-fatal): {e}"));
 
     let cli = Cli::parse();
     let output = OutputFormatter::new(cli.json, cli.follow);

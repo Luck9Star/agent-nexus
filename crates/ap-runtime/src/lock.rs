@@ -1,82 +1,14 @@
 //! Per-agent lock registry with FIFO eviction.
 //!
-//! Uses DashMap for concurrent access and a VecDeque to track insertion
-//! order for FIFO eviction when the lock count exceeds MAX_LOCKS.
-
-use dashmap::mapref::entry::Entry;
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
-
-/// Maximum number of concurrent agent locks before eviction kicks in.
-const MAX_LOCKS: usize = 1000;
-
-// ---------------------------------------------------------------------------
-// LockRegistry
-// ---------------------------------------------------------------------------
+//! Re-exports [`ap_core::orchestration::IpcLockRegistry`] as [`LockRegistry`]
+//! to eliminate code duplication. The canonical implementation lives in
+//! `ap-core/src/orchestration/ipc_lock.rs`.
 
 /// Registry of per-agent locks with bounded capacity and FIFO eviction.
-pub struct LockRegistry {
-    locks: dashmap::DashMap<String, Arc<Mutex<()>>>,
-    order: Mutex<VecDeque<String>>,
-}
-
-impl LockRegistry {
-    /// Create a new empty registry.
-    pub fn new() -> Self {
-        Self {
-            locks: dashmap::DashMap::new(),
-            order: Mutex::new(VecDeque::new()),
-        }
-    }
-
-    /// Get or create a lock for the given agent ID.
-    ///
-    /// If the agent already has a lock, returns a clone of the existing Arc.
-    /// If the agent is new and the registry is at capacity, evicts the oldest entry.
-    ///
-    /// Uses DashMap::entry() to avoid TOCTOU race between get() and insert().
-    pub fn get_or_create(&self, agent_id: &str) -> Arc<Mutex<()>> {
-        match self.locks.entry(agent_id.to_string()) {
-            Entry::Occupied(e) => Arc::clone(e.get()),
-            Entry::Vacant(e) => {
-                let lock = Arc::new(Mutex::new(()));
-                let cloned = Arc::clone(&lock);
-                e.insert(lock);
-
-                // Track insertion order
-                let mut order = self.order.lock().unwrap();
-                order.push_back(agent_id.to_string());
-
-                // Evict oldest if over limit
-                if order.len() > MAX_LOCKS {
-                    if let Some(old_id) = order.pop_front() {
-                        self.locks.remove(&old_id);
-                    }
-                }
-
-                cloned
-            }
-        }
-    }
-
-    /// Returns the current number of active locks.
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.locks.len()
-    }
-
-    /// Returns true if there are no active locks.
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.locks.is_empty()
-    }
-}
-
-impl Default for LockRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+///
+/// Thin re-export of `ap_core::orchestration::IpcLockRegistry` under the
+/// name `LockRegistry` to preserve the existing public API of this crate.
+pub type LockRegistry = ap_core::orchestration::IpcLockRegistry;
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -85,6 +17,7 @@ impl Default for LockRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use std::thread;
 
     #[test]
@@ -107,21 +40,6 @@ mod tests {
             !Arc::ptr_eq(&lock1, &lock2),
             "Different agents should get different locks"
         );
-    }
-
-    #[test]
-    fn eviction_removes_oldest() {
-        let registry = LockRegistry::new();
-        // Fill up to MAX_LOCKS + 1
-        for i in 0..=MAX_LOCKS {
-            registry.get_or_create(&format!("agent-{i}"));
-        }
-        // agent-0 should have been evicted
-        assert!(registry.locks.get("agent-0").is_none());
-        // agent-1 should still exist
-        assert!(registry.locks.get("agent-1").is_some());
-        // Latest agent should still exist
-        assert!(registry.locks.get(&format!("agent-{MAX_LOCKS}")).is_some());
     }
 
     #[test]

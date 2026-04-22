@@ -283,7 +283,7 @@ pub fn get_agent_record(
 }
 
 /// List all table names in the database (for testing schema).
-pub fn list_tables(conn: &Connection) -> Vec<String> {
+pub(crate) fn list_tables(conn: &Connection) -> Vec<String> {
     let mut stmt = conn
         .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         .unwrap();
@@ -296,7 +296,7 @@ pub fn list_tables(conn: &Connection) -> Vec<String> {
 }
 
 /// Count rows in a table.
-pub fn count_rows(conn: &Connection, table: &str) -> Result<i64, StoreError> {
+pub(crate) fn count_rows(conn: &Connection, table: &str) -> Result<i64, StoreError> {
     // Only allow known table names to prevent SQL injection
     let allowed = [
         "skill_records",

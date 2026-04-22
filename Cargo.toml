@@ -40,9 +40,6 @@ git2 = "0.19"
 # HTTP
 axum = "0.8"
 
-# MCP
-rmcp = "0.1"
-
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
 dashmap = "6"

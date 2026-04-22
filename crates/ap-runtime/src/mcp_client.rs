@@ -95,6 +95,13 @@ pub trait McpClient: Send + Sync {
         name: &str,
         arguments: JsonValue,
     ) -> Pin<Box<dyn Future<Output = Result<JsonValue, McpError>> + Send + '_>>;
+
+    /// Shut down the client and release any held resources (subprocesses, connections, etc.).
+    ///
+    /// Default implementation is a no-op so that existing implementors are not broken.
+    fn shutdown(&mut self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async {})
+    }
 }
 
 // ---------------------------------------------------------------------------

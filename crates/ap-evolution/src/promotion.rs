@@ -109,13 +109,16 @@ pub fn promote_skill(
 
     // 4. Register in store
     let agent_id = uuid::Uuid::new_v4().to_string();
-    store.upsert_agent_record(
+    if let Err(e) = store.upsert_agent_record(
         &agent_id,
         skill_name,
         "atomic",
         "[]",
         None,
-    )?;
+    ) {
+        rollback(&written);
+        return Err(e.into());
+    }
 
     Ok(PromotionResult {
         agent_dir,

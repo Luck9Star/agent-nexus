@@ -194,7 +194,6 @@ name = "ap-runtime"
 version = "0.1.0"
 dependencies = [
  "ap-core",
- "dashmap",
  "rstest",
  "serde",
  "serde_json",

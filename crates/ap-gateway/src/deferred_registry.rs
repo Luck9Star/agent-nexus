@@ -127,11 +127,16 @@ impl DeferredAgentRegistry {
             .await
             .map_err(|e| RegistryError::ActivationFailed(e.to_string()))?;
 
-        // Phase 3: Update state (re-acquire lock)
+        // Phase 3: Update state (re-acquire lock, TOCTOU-safe)
         let mut agents = self.agents.lock().await;
         let slot = agents
             .get_mut(name)
             .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
+        if slot.client.is_some() {
+            // Another caller activated first — our client is redundant.
+            // The client we created will be dropped here, triggering cleanup.
+            return Ok(slot.tools.clone());
+        }
         slot.client = Some(Arc::new(tokio::sync::Mutex::new(client)));
         slot.tools = tools.clone();
         slot.last_used = std::time::Instant::now();
@@ -186,7 +191,10 @@ impl DeferredAgentRegistry {
         let mut count = 0;
         for slot in agents.values_mut() {
             if slot.client.is_some() && slot.last_used.elapsed() > timeout {
-                slot.client = None;
+                if let Some(client_arc) = slot.client.take() {
+                    let mut client = client_arc.lock().await;
+                    client.shutdown().await;
+                }
                 slot.tools.clear();
                 count += 1;
             }
@@ -200,7 +208,10 @@ impl DeferredAgentRegistry {
         let slot = agents
             .get_mut(name)
             .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
-        slot.client = None;
+        if let Some(client_arc) = slot.client.take() {
+            let mut client = client_arc.lock().await;
+            client.shutdown().await;
+        }
         slot.tools.clear();
         Ok(())
     }

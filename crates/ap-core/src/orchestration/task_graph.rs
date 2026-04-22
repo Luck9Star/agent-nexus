@@ -6,6 +6,8 @@ use rusqlite::{params, Connection};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
+use tracing::debug;
+
 use crate::models::common::utc_now;
 use crate::models::task::{TaskItem, TaskState};
 
@@ -25,6 +27,11 @@ pub enum TaskGraphError {
     DuplicateTask(String),
     #[error("Cycle detected in task dependencies")]
     CycleDetected,
+    #[error("Invalid state transition: {from} -> {to}")]
+    InvalidTransition {
+        from: String,
+        to: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -137,11 +144,20 @@ impl TaskGraph {
             let updated_str: String = row.get(8)?;
 
             let state = Self::str_to_state(&state_str);
-            let blocked_by: Vec<String> = serde_json::from_str(&blocked_json).unwrap_or_default();
-            let vars: serde_json::Value = serde_json::from_str(&vars_str).unwrap_or(serde_json::Value::Null);
+            let blocked_by: Vec<String> = serde_json::from_str(&blocked_json).unwrap_or_else(|e| {
+                debug!("Failed to parse blocked_by JSON for task {}: {}", id, e);
+                Vec::new()
+            });
+            let vars: serde_json::Value = serde_json::from_str(&vars_str).unwrap_or_else(|e| {
+                debug!("Failed to parse vars JSON for task {}: {}", id, e);
+                serde_json::Value::Null
+            });
             let result: Option<serde_json::Value> = result_str
                 .as_deref()
-                .and_then(|s| serde_json::from_str(s).ok());
+                .and_then(|s| serde_json::from_str(s).map_err(|e| {
+                    debug!("Failed to parse result JSON for task {}: {}", id, e);
+                    e
+                }).ok());
             let created_at = chrono::DateTime::parse_from_rfc3339(&created_str)
                 .map(|dt| dt.to_utc())
                 .unwrap_or_else(|_| utc_now());
@@ -169,8 +185,11 @@ impl TaskGraph {
         }
     }
 
-    /// Update a task's state.
-    pub fn set_state(&self, task_id: &str, state: TaskState) -> Result<(), TaskGraphError> {
+    /// Update a task's state without validation.
+    ///
+    /// Intended for internal use only (e.g., loading from DB).
+    /// External callers should prefer `transition_state` which enforces the state machine.
+    pub(crate) fn set_state(&self, task_id: &str, state: TaskState) -> Result<(), TaskGraphError> {
         let rows = self.conn.execute(
             "UPDATE tasks SET state = ?1, updated_at = ?2 WHERE task_id = ?3",
             params![Self::state_to_str(state), chrono::Utc::now().to_rfc3339(), task_id],
@@ -179,6 +198,35 @@ impl TaskGraph {
             return Err(TaskGraphError::NotFound(task_id.to_string()));
         }
         Ok(())
+    }
+
+    /// Validate and apply a state transition.
+    ///
+    /// Valid transitions:
+    /// - Pending -> InProgress
+    /// - InProgress -> Completed
+    /// - InProgress -> Failed
+    ///
+    /// All other transitions return `TaskGraphError::InvalidTransition`.
+    pub fn transition_state(&self, task_id: &str, new_state: TaskState) -> Result<(), TaskGraphError> {
+        let task = self.get_task(task_id)?
+            .ok_or_else(|| TaskGraphError::NotFound(task_id.to_string()))?;
+
+        let valid = matches!(
+            (task.state, new_state),
+            (TaskState::Pending, TaskState::InProgress)
+            | (TaskState::InProgress, TaskState::Completed)
+            | (TaskState::InProgress, TaskState::Failed)
+        );
+
+        if !valid {
+            return Err(TaskGraphError::InvalidTransition {
+                from: Self::state_to_str(task.state).to_string(),
+                to: Self::state_to_str(new_state).to_string(),
+            });
+        }
+
+        self.set_state(task_id, new_state)
     }
 
     /// Detect cycles via DFS with three-color marking.
@@ -335,11 +383,20 @@ impl TaskGraph {
 
             let state = Self::str_to_state(&state_str);
             let blocked_by: Vec<String> =
-                serde_json::from_str(&blocked_json).unwrap_or_default();
+                serde_json::from_str(&blocked_json).unwrap_or_else(|e| {
+                    debug!("Failed to parse blocked_by JSON for task {}: {}", id, e);
+                    Vec::new()
+                });
             let vars: serde_json::Value =
-                serde_json::from_str(&vars_str).unwrap_or(serde_json::Value::Null);
+                serde_json::from_str(&vars_str).unwrap_or_else(|e| {
+                    debug!("Failed to parse vars JSON for task {}: {}", id, e);
+                    serde_json::Value::Null
+                });
             let result: Option<serde_json::Value> =
-                result_str.as_deref().and_then(|s| serde_json::from_str(s).ok());
+                result_str.as_deref().and_then(|s| serde_json::from_str(s).map_err(|e| {
+                    debug!("Failed to parse result JSON for task {}: {}", id, e);
+                    e
+                }).ok());
             let created_at = chrono::DateTime::parse_from_rfc3339(&created_str)
                 .map(|dt| dt.to_utc())
                 .unwrap_or_else(|_| utc_now());
@@ -550,6 +607,101 @@ mod tests {
         tg.set_state("t1", TaskState::InProgress).unwrap();
         let got = tg.get_task("t1").unwrap().unwrap();
         assert_eq!(got.state, TaskState::InProgress);
+    }
+
+    // ── transition_state: valid transitions ──────────────────────────
+
+    #[test]
+    fn transition_pending_to_in_progress() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+        tg.transition_state("t1", TaskState::InProgress).unwrap();
+        let got = tg.get_task("t1").unwrap().unwrap();
+        assert_eq!(got.state, TaskState::InProgress);
+    }
+
+    #[test]
+    fn transition_in_progress_to_completed() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+        tg.transition_state("t1", TaskState::InProgress).unwrap();
+        tg.transition_state("t1", TaskState::Completed).unwrap();
+        let got = tg.get_task("t1").unwrap().unwrap();
+        assert_eq!(got.state, TaskState::Completed);
+    }
+
+    #[test]
+    fn transition_in_progress_to_failed() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+        tg.transition_state("t1", TaskState::InProgress).unwrap();
+        tg.transition_state("t1", TaskState::Failed).unwrap();
+        let got = tg.get_task("t1").unwrap().unwrap();
+        assert_eq!(got.state, TaskState::Failed);
+    }
+
+    // ── transition_state: invalid transitions ────────────────────────
+
+    #[test]
+    fn transition_completed_to_in_progress_rejected() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+        tg.transition_state("t1", TaskState::InProgress).unwrap();
+        tg.transition_state("t1", TaskState::Completed).unwrap();
+        let err = tg.transition_state("t1", TaskState::InProgress).unwrap_err();
+        match err {
+            TaskGraphError::InvalidTransition { from, to } => {
+                assert_eq!(from, "completed");
+                assert_eq!(to, "in_progress");
+            }
+            other => panic!("expected InvalidTransition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transition_failed_to_completed_rejected() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+        tg.transition_state("t1", TaskState::InProgress).unwrap();
+        tg.transition_state("t1", TaskState::Failed).unwrap();
+        let err = tg.transition_state("t1", TaskState::Completed).unwrap_err();
+        match err {
+            TaskGraphError::InvalidTransition { from, to } => {
+                assert_eq!(from, "failed");
+                assert_eq!(to, "completed");
+            }
+            other => panic!("expected InvalidTransition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transition_completed_to_pending_rejected() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+        tg.transition_state("t1", TaskState::InProgress).unwrap();
+        tg.transition_state("t1", TaskState::Completed).unwrap();
+        let err = tg.transition_state("t1", TaskState::Pending).unwrap_err();
+        match err {
+            TaskGraphError::InvalidTransition { from, to } => {
+                assert_eq!(from, "completed");
+                assert_eq!(to, "pending");
+            }
+            other => panic!("expected InvalidTransition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transition_pending_to_completed_rejected() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
+        let err = tg.transition_state("t1", TaskState::Completed).unwrap_err();
+        match err {
+            TaskGraphError::InvalidTransition { from, to } => {
+                assert_eq!(from, "pending");
+                assert_eq!(to, "completed");
+            }
+            other => panic!("expected InvalidTransition, got {:?}", other),
+        }
     }
 
     #[test]

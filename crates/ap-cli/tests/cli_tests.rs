@@ -238,7 +238,8 @@ fn run_placeholder() {
         .unwrap()
         .args(["run", "test-agent", "do", "something"])
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains("PlatformRouter"));
 }
 
 #[test]

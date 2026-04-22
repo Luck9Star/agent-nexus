@@ -108,7 +108,9 @@ impl McpGateway {
         let listener = tokio::net::TcpListener::bind(&self.config.listen_addr).await?;
         let addr = listener.local_addr()?;
         tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
+            if let Err(e) = axum::serve(listener, app).await {
+                tracing::error!("Gateway HTTP server fatal error: {e}");
+            }
         });
         Ok(addr)
     }

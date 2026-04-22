@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::process::{Child, Command};
+use tracing::warn;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -60,10 +61,22 @@ impl ProcessManager {
     }
 
     /// Spawn a new process, capturing stdin/stdout for IPC.
+    ///
+    /// If a process with the same `id` already exists, the old process is
+    /// killed first to prevent resource leaks.
     pub async fn spawn(&mut self, id: &str, cmd: &str, args: &[&str]) -> Result<(), ProcessError> {
         if self.processes.len() >= self.max_concurrent {
             return Err(ProcessError::MaxConcurrent(self.max_concurrent));
         }
+
+        // Kill existing process with the same ID to prevent resource leaks
+        if self.processes.contains_key(id) {
+            warn!(id, "spawn: replacing existing process");
+            if let Some(mut old) = self.processes.remove(id) {
+                let _ = old.child.kill().await;
+            }
+        }
+
         let mut child = Command::new(cmd)
             .args(args)
             .stdin(Stdio::piped())
@@ -224,5 +237,20 @@ mod tests {
         let result = pm.spawn("p3", "sleep", &["10"]).await;
         assert!(result.is_err());
         pm.kill_all().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn spawn_replaces_existing_process() {
+        let mut pm = ProcessManager::new();
+        // Spawn first process
+        pm.spawn("dup", "sleep", &["10"]).await.unwrap();
+        assert!(pm.is_running("dup"));
+
+        // Spawn again with same ID — old process should be killed
+        pm.spawn("dup", "cat", &[]).await.unwrap();
+        assert!(pm.is_running("dup"));
+
+        // Clean up — should succeed (the replacement process)
+        pm.kill("dup").await.unwrap();
     }
 }

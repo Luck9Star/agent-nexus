@@ -45,6 +45,16 @@ impl IpcLockRegistry {
             }
         }
     }
+
+    /// Returns the current number of active locks.
+    pub fn len(&self) -> usize {
+        self.locks.len()
+    }
+
+    /// Returns true if there are no active locks.
+    pub fn is_empty(&self) -> bool {
+        self.locks.is_empty()
+    }
 }
 
 impl Default for IpcLockRegistry {

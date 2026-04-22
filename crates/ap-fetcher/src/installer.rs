@@ -41,6 +41,9 @@ impl GitInstaller {
         branch: Option<&str>,
         version: Option<&str>,
     ) -> Result<PathBuf, InstallerError> {
+        // Validate install_dir: reject path traversal attempts
+        Self::validate_install_dir(&self.install_dir)?;
+
         // Validate URL scheme: reject dangerous schemes like file://
         let allowed_schemes = ["https://", "http://", "git://", "ssh://"];
         let is_local_path = url.starts_with('/') || url.starts_with('.') || url.starts_with('~');
@@ -68,22 +71,31 @@ impl GitInstaller {
 
         let repo = self.clone_repo(url, branch, &tmp_path)?;
 
-        // Checkout specific version if requested
-        if let Some(ver) = version {
-            Self::checkout_version(&repo, ver)?;
+        // Post-clone operations: checkout + rename. On any failure, clean up tmp_path.
+        let result = (|| -> Result<PathBuf, InstallerError> {
+            // Checkout specific version if requested
+            if let Some(ver) = version {
+                Self::checkout_version(&repo, ver)?;
+            }
+
+            // Close the repo (releases file handles) before moving
+            drop(repo);
+
+            // Atomic move: remove old install, rename temp to final
+            if final_path.exists() {
+                std::fs::remove_dir_all(&final_path)?;
+            }
+            std::fs::rename(&tmp_path, &final_path)?;
+            info!("Installed agent to {:?}", final_path);
+
+            Ok(final_path)
+        })();
+
+        if result.is_err() {
+            let _ = std::fs::remove_dir_all(&tmp_path);
         }
 
-        // Close the repo (releases file handles) before moving
-        drop(repo);
-
-        // Atomic move: remove old install, rename temp to final
-        if final_path.exists() {
-            std::fs::remove_dir_all(&final_path)?;
-        }
-        std::fs::rename(&tmp_path, &final_path)?;
-        info!("Installed agent to {:?}", final_path);
-
-        Ok(final_path)
+        result
     }
 
     /// Find a semver tag matching the given version and check it out.
@@ -145,6 +157,19 @@ impl GitInstaller {
         } else {
             sanitized
         }
+    }
+
+    /// Validate that install_dir does not contain path traversal components.
+    fn validate_install_dir(path: &std::path::Path) -> Result<(), InstallerError> {
+        for component in path.components() {
+            if let std::path::Component::ParentDir = component {
+                return Err(InstallerError::Validation(format!(
+                    "install_dir must not contain '..' (path traversal): {}",
+                    path.display()
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Clone a repository with the given options.
@@ -302,6 +327,34 @@ mod tests {
         assert_eq!(
             GitInstaller::url_to_dirname("/local/path/agent-repo"),
             "agent-repo"
+        );
+    }
+
+    #[test]
+    fn install_dir_rejects_path_traversal() {
+        let bad_dir = PathBuf::from("/tmp/../etc");
+        let installer = GitInstaller::new(bad_dir);
+
+        let result = installer.install("https://github.com/foo/bar", None, None);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("path traversal"),
+            "Expected path traversal error, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn install_dir_rejects_embedded_parent_dir() {
+        let bad_dir = PathBuf::from("/home/user/../secret/agent");
+        let installer = GitInstaller::new(bad_dir);
+
+        let result = installer.install("https://github.com/foo/bar", None, None);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("path traversal"),
+            "Expected path traversal error, got: {err_msg}"
         );
     }
 
