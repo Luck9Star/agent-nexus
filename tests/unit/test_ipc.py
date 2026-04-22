@@ -283,7 +283,10 @@ class TestIPCProtocolHeartbeat:
     ) -> None:
         """send_heartbeat() returns False when response is not progress."""
         resp = {"type": "result", "content": "something"}
-        mock_stdout.readline.return_value = (json.dumps(resp) + "\n").encode("utf-8")
+        mock_stdout.readline.side_effect = [
+            (json.dumps(resp) + "\n").encode("utf-8"),
+            b"",  # EOF on second read -> IPCConnectionError -> loop exits
+        ]
 
         result = await protocol.send_heartbeat()
         assert result is False

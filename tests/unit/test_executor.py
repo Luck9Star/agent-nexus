@@ -102,7 +102,7 @@ class TestIPythonExecutorTimeout:
         """
         import asyncio as _aio
         shared_executor.inject("_aio", _aio)
-        result = await shared_executor.execute("await _aio.sleep(10)", timeout=0.5)
+        result = await shared_executor.execute("await _aio.sleep(3)", timeout=0.3)
         assert result.success is False
         # The cancellation appears as CancelledError in output or error
         combined = (result.error or "") + (result.output or "")
@@ -167,7 +167,7 @@ class TestExecutorUsesToThread:
         # time.sleep is synchronous and blocks -- to_thread lets the event
         # loop cancel the wrapper on timeout
         result = await shared_executor.execute(
-            "import time; time.sleep(10)", timeout=0.3
+            "import time; time.sleep(2)", timeout=0.2
         )
         assert result.success is False
         assert "timed out" in (result.error or "").lower()
@@ -416,7 +416,7 @@ class TestTimedOutFlag:
         try:
             # Execute code that will timeout
             result = await executor.execute(
-                "import time; time.sleep(10)", timeout=0.3
+                "import time; time.sleep(2)", timeout=0.2
             )
             assert result.success is False
             assert executor._timed_out is True
@@ -721,43 +721,24 @@ class TestCancelledErrorHandling:
     """CancelledError during _execute_inner sets _timed_out and re-raises."""
 
     @pytest.mark.asyncio
-    async def test_cancelled_error_sets_timed_out_flag(self) -> None:
-        """CancelledError during execution sets _timed_out = True."""
+    async def test_after_cancelled_subsequent_execute_blocked(self) -> None:
+        """After CancelledError, subsequent execute() returns contaminated error.
+
+        This single test covers three CancelledError behaviors:
+        - CancelledError is re-raised (not swallowed) — verified by pytest.raises
+        - _timed_out flag is set — verified by subsequent contaminated error
+        - Subsequent execution is blocked — verified by contaminated assertion
+        """
         from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
-            # Patch _run_cell_sync to raise CancelledError via transform_cell
-            await executor._require_shell()
-            original_transform = executor._shell.transform_cell
-
-            def raise_cancel(code):
-                raise asyncio.CancelledError("simulated cancellation")
-
-            executor._shell.transform_cell = raise_cancel
-            executor._shell.transform_cell = original_transform  # restore
-
-            # Instead, directly test the _execute_inner path by mocking
-            # the to_thread call to raise CancelledError
-            original_to_thread = asyncio.to_thread
-
-            async def mock_execute_inner(code, timeout):
-                # Simulate what _execute_inner does: it calls to_thread
-                # which raises CancelledError
-                shell = await executor._require_shell()
-                shell  # noqa: just to ensure shell is created
-                # The CancelledError should propagate and set _timed_out
-                raise asyncio.CancelledError("test cancel")
-
-            # Use a more direct approach: cancel the task during execution
-            import time
-
             async def cancel_after_delay(task):
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.05)
                 task.cancel()
 
             task = asyncio.create_task(
-                executor.execute("import time; time.sleep(5)", timeout=10)
+                executor.execute("import time; time.sleep(2)", timeout=10)
             )
             asyncio.create_task(cancel_after_delay(task))
 
@@ -765,52 +746,6 @@ class TestCancelledErrorHandling:
                 await task
 
             assert executor._timed_out is True
-        finally:
-            executor.close()
-
-    @pytest.mark.asyncio
-    async def test_cancelled_error_propagates(self) -> None:
-        """CancelledError is re-raised (not swallowed)."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
-
-        executor = IPythonExecutor()
-        try:
-            import time
-
-            async def cancel_after_delay(task):
-                await asyncio.sleep(0.1)
-                task.cancel()
-
-            task = asyncio.create_task(
-                executor.execute("import time; time.sleep(5)", timeout=10)
-            )
-            asyncio.create_task(cancel_after_delay(task))
-
-            with pytest.raises(asyncio.CancelledError):
-                await task
-        finally:
-            executor.close()
-
-    @pytest.mark.asyncio
-    async def test_after_cancelled_subsequent_execute_blocked(self) -> None:
-        """After CancelledError, subsequent execute() returns contaminated error."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
-
-        executor = IPythonExecutor()
-        try:
-            import time
-
-            async def cancel_after_delay(task):
-                await asyncio.sleep(0.1)
-                task.cancel()
-
-            task = asyncio.create_task(
-                executor.execute("import time; time.sleep(5)", timeout=10)
-            )
-            asyncio.create_task(cancel_after_delay(task))
-
-            with pytest.raises(asyncio.CancelledError):
-                await task
 
             # Subsequent execute should fail with contaminated message
             result = await executor.execute("x = 1", timeout=5)
@@ -960,13 +895,13 @@ class TestExecDoneTiming:
         try:
             # Use a short sleep so the thread finishes quickly after timeout
             result = await executor.execute(
-                "import time; time.sleep(2)", timeout=0.3
+                "import time; time.sleep(1)", timeout=0.3
             )
             assert result.success is False
             # _exec_done may still be cleared (thread running)
-            # Wait long enough for the 2s sleep to complete
+            # Wait long enough for the 1s sleep to complete
             import time
-            time.sleep(2.5)
+            time.sleep(1.5)
             assert executor._exec_done.is_set()
         finally:
             executor.close()

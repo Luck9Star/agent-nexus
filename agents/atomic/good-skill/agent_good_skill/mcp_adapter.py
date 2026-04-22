@@ -8,7 +8,13 @@ from __future__ import annotations
 
 def create_mcp_server() -> object:
     """Create and return a FastMCP server for good-skill."""
-    from fastmcp import FastMCP
+    try:
+        from fastmcp import FastMCP
+    except ImportError as exc:
+        raise ImportError(
+            "fastmcp is required for MCP server mode. "
+            "Install with: pip install fastmcp"
+        ) from exc
 
     mcp = FastMCP("good-skill")
 
