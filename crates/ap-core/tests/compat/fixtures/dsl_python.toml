@@ -1,0 +1,16 @@
+[[tasks]]
+name = "research"
+agent = "code-reviewer"
+phase = 1
+
+[[tasks]]
+name = "implement"
+agent = "code-writer"
+phase = 2
+depends_on = ["research"]
+
+[[tasks]]
+name = "test"
+agent = "test-runner"
+phase = 3
+depends_on = ["implement"]
