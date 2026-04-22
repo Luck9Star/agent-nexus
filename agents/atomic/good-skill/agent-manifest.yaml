@@ -4,6 +4,9 @@ description: Auto-promoted from skill sk-1
 version: 0.1.0
 capabilities:
 - general-purpose
+mcp:
+  tools:
+  - run
 permissions:
   mode: default
   allowed_tools:
@@ -14,6 +17,7 @@ permissions:
   - bash
 model_config:
   recommended: standard
+  fallback: economy
 promotion:
   from_skill: sk-1
   effective_rate: 0.9

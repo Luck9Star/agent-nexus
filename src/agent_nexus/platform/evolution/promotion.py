@@ -279,10 +279,10 @@ class AgentPromoter:
             f'    mcp = FastMCP("{candidate.skill_name}")\n'
             f'\n'
             f'    @mcp.tool()\n'
-            f'    def run(task: str, context: dict | None = None) -> str:\n'
+            f'    async def run(task: str, context: dict | None = None) -> str:\n'
             f'        """Execute the {candidate.skill_name} agent task."""\n'
             f'        from {pkg_name}.agent import {candidate.skill_name.replace("-", "_")}_run\n'
-            f'        return {candidate.skill_name.replace("-", "_")}_run(task, context)\n'
+            f'        return await {candidate.skill_name.replace("-", "_")}_run(task, context)\n'
             f'\n'
             f'    return mcp\n'
         )
@@ -361,6 +361,9 @@ class AgentPromoter:
             "description": f"Auto-promoted from skill {candidate.skill_id}",
             "version": "0.1.0",
             "capabilities": ["general-purpose"],
+            "mcp": {
+                "tools": ["run"],
+            },
             "permissions": {
                 "mode": "default",
                 "allowed_tools": ["file_read", "grep", "glob"],
@@ -368,6 +371,7 @@ class AgentPromoter:
             },
             "model_config": {
                 "recommended": "standard",
+                "fallback": "economy",
             },
             "promotion": {
                 "from_skill": candidate.skill_id,
