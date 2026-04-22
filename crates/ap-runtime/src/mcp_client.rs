@@ -6,6 +6,8 @@
 
 use serde_json::Value as JsonValue;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 
 // ---------------------------------------------------------------------------
 // ToolInfo
@@ -73,19 +75,26 @@ impl From<std::io::Error> for McpError {
 }
 
 // ---------------------------------------------------------------------------
-// McpClient trait
+// McpClient trait (async via Pin<Box<dyn Future>>)
 // ---------------------------------------------------------------------------
 
 /// Trait for MCP client implementations.
 ///
 /// Implementations handle the transport layer (stdio, SSE, etc.) while
 /// the trait provides a uniform interface for listing and calling tools.
+///
+/// Uses `Pin<Box<dyn Future>>` return types to remain dyn-compatible
+/// (object-safe) for use as `Box<dyn McpClient>`.
 pub trait McpClient: Send + Sync {
     /// List all tools available on the MCP server.
-    fn list_tools(&self) -> Result<Vec<ToolInfo>, McpError>;
+    fn list_tools(&self) -> Pin<Box<dyn Future<Output = Result<Vec<ToolInfo>, McpError>> + Send + '_>>;
 
     /// Call a tool by name with the given arguments.
-    fn call_tool(&self, name: &str, arguments: JsonValue) -> Result<JsonValue, McpError>;
+    fn call_tool(
+        &self,
+        name: &str,
+        arguments: JsonValue,
+    ) -> Pin<Box<dyn Future<Output = Result<JsonValue, McpError>> + Send + '_>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,12 +105,17 @@ pub trait McpClient: Send + Sync {
 pub struct NoopMcpClient;
 
 impl McpClient for NoopMcpClient {
-    fn list_tools(&self) -> Result<Vec<ToolInfo>, McpError> {
-        Ok(Vec::new())
+    fn list_tools(&self) -> Pin<Box<dyn Future<Output = Result<Vec<ToolInfo>, McpError>> + Send + '_>> {
+        Box::pin(async { Ok(Vec::new()) })
     }
 
-    fn call_tool(&self, name: &str, _arguments: JsonValue) -> Result<JsonValue, McpError> {
-        Err(McpError::ToolNotFound(name.to_string()))
+    fn call_tool(
+        &self,
+        name: &str,
+        _arguments: JsonValue,
+    ) -> Pin<Box<dyn Future<Output = Result<JsonValue, McpError>> + Send + '_>> {
+        let name = name.to_string();
+        Box::pin(async { Err(McpError::ToolNotFound(name)) })
     }
 }
 
@@ -113,17 +127,17 @@ impl McpClient for NoopMcpClient {
 mod tests {
     use super::*;
 
-    #[test]
-    fn noop_client_lists_no_tools() {
+    #[tokio::test]
+    async fn noop_client_lists_no_tools() {
         let client = NoopMcpClient;
-        let tools = client.list_tools().unwrap();
+        let tools = client.list_tools().await.unwrap();
         assert!(tools.is_empty());
     }
 
-    #[test]
-    fn noop_client_returns_tool_not_found() {
+    #[tokio::test]
+    async fn noop_client_returns_tool_not_found() {
         let client = NoopMcpClient;
-        let result = client.call_tool("any_tool", serde_json::json!({}));
+        let result = client.call_tool("any_tool", serde_json::json!({})).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             McpError::ToolNotFound(name) => assert_eq!(name, "any_tool"),
@@ -172,10 +186,10 @@ mod tests {
         assert!(mcp_err.source().is_some());
     }
 
-    #[test]
-    fn dyn_mcp_client_works() {
+    #[tokio::test]
+    async fn dyn_mcp_client_works() {
         let client: Box<dyn McpClient> = Box::new(NoopMcpClient);
-        let tools = client.list_tools().unwrap();
+        let tools = client.list_tools().await.unwrap();
         assert!(tools.is_empty());
     }
 }
