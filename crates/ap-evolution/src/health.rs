@@ -41,6 +41,15 @@ impl HealthTracker {
     pub fn total(&self) -> u64 {
         self.successes + self.failures
     }
+
+    /// Reset the tracker, clearing all recorded counts.
+    ///
+    /// Useful for periodic health re-evaluation to prevent old failures from
+    /// permanently dragging down the score in long-running processes.
+    pub fn reset(&mut self) {
+        self.successes = 0;
+        self.failures = 0;
+    }
 }
 
 impl Default for HealthTracker {
@@ -102,5 +111,18 @@ mod tests {
         tracker.record_failure();
         tracker.record_success();
         assert_eq!(tracker.total(), 3);
+    }
+
+    #[test]
+    fn reset_clears_counts() {
+        let mut tracker = HealthTracker::new();
+        tracker.record_success();
+        tracker.record_failure();
+        tracker.record_failure();
+        assert_eq!(tracker.total(), 3);
+
+        tracker.reset();
+        assert_eq!(tracker.total(), 0);
+        assert_eq!(tracker.get_health_score(), 1.0);
     }
 }

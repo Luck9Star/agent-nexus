@@ -15,10 +15,9 @@ pub fn describe_context(task_result: &TaskResult, skill_name: &str) -> String {
 
     format!(
         "Evolution context for skill '{skill_name}':\n\
-         Task ID: {task_id}\n\
-         Agent: {agent}\n\
-         Status: {status}\
-         {error_section}",
+Task ID: {task_id}\n\
+Agent: {agent}\n\
+Status: {status}{error_section}",
         task_id = task_result.task_id,
         agent = task_result.agent_name,
         status = status,

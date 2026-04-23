@@ -49,9 +49,14 @@ impl SourceManager {
         }
 
         // Try wrapped format first: { sources: [...] }
-        if let Ok(wrapped) = serde_yaml::from_str::<SourcesYaml>(trimmed) {
-            debug!("Parsed sources as wrapped format");
-            return Ok(wrapped.sources);
+        match serde_yaml::from_str::<SourcesYaml>(trimmed) {
+            Ok(wrapped) => {
+                debug!("Parsed sources as wrapped format");
+                return Ok(wrapped.sources);
+            }
+            Err(e) => {
+                debug!("Wrapped format parse failed ({}), trying bare array", e);
+            }
         }
 
         // Try bare array format: [...]

@@ -260,7 +260,7 @@ mod tests {
     fn save_produces_pretty_json() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lockfile.json");
-        let mut mgr = LockfileManager::new(path.clone());
+        let mgr = LockfileManager::new(path.clone());
 
         let (name, entry) = make_entry("pretty", "fff0000000000000000000000000000000000fff");
         mgr.add(&name, entry).unwrap();

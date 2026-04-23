@@ -233,9 +233,8 @@ impl McpGateway {
         validate_name("agent_name", &agent)?;
         validate_name("tool_name", &tool)?;
 
-        // Ensure agent is active (attempt activation with NoopMcpClient if not).
-        // In production, a real client factory would be injected. For now we
-        // just try to call if already active.
+        // Ensure agent is active. The registry's call_tool will attempt
+        // lazy activation if the agent is registered but not yet running.
         let result = gw.registry.call_tool(&agent, &tool, arguments).await?;
         Ok(Json(result))
     }

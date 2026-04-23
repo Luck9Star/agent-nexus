@@ -180,6 +180,7 @@ impl OrchestrationDsl {
         let mut white: HashSet<&str> = tasks.iter().map(|t| t.name.as_str()).collect();
         let mut gray: HashSet<&str> = HashSet::new();
         let mut black: HashSet<&str> = HashSet::new();
+        let mut path: Vec<String> = Vec::new();
 
         fn dfs<'a>(
             name: &'a str,
@@ -188,18 +189,25 @@ impl OrchestrationDsl {
             white: &mut HashSet<&'a str>,
             gray: &mut HashSet<&'a str>,
             black: &mut HashSet<&'a str>,
+            path: &mut Vec<String>,
         ) -> Option<Vec<String>> {
             white.remove(name);
             gray.insert(name);
+            path.push(name.to_string());
 
             let idx = *name_index.get(name)?;
             for dep in &tasks[idx].depends_on {
                 if gray.contains(dep.as_str()) {
-                    // Found cycle
-                    return Some(vec![name.to_string(), dep.clone()]);
+                    // Found cycle — extract the cycle segment from the current DFS path
+                    let cycle_start = path.iter().position(|p| p == dep).unwrap_or(0);
+                    let mut cycle: Vec<String> = path[cycle_start..].to_vec();
+                    cycle.push(dep.clone());
+                    return Some(cycle);
                 }
                 if !black.contains(dep.as_str()) {
-                    if let Some(cycle) = dfs(dep.as_str(), tasks, name_index, white, gray, black) {
+                    if let Some(cycle) =
+                        dfs(dep.as_str(), tasks, name_index, white, gray, black, path)
+                    {
                         return Some(cycle);
                     }
                 }
@@ -207,13 +215,15 @@ impl OrchestrationDsl {
 
             gray.remove(name);
             black.insert(name);
+            path.pop();
             None
         }
 
         let names: Vec<&str> = tasks.iter().map(|t| t.name.as_str()).collect();
         for name in names {
             if !black.contains(name) {
-                if let Some(cycle) = dfs(name, tasks, name_index, &mut white, &mut gray, &mut black)
+                if let Some(cycle) =
+                    dfs(name, tasks, name_index, &mut white, &mut gray, &mut black, &mut path)
                 {
                     return Some(cycle);
                 }

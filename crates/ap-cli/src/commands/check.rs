@@ -131,9 +131,12 @@ fn check_sources(root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Check that a command exists on PATH via `which`.
+/// Check that a command exists on PATH.
+///
+/// Uses `which` on Unix and `where` on Windows for cross-platform support.
 fn check_command_exists(cmd: &str) -> bool {
-    Command::new("which")
+    let finder = if cfg!(windows) { "where" } else { "which" };
+    Command::new(finder)
         .arg(cmd)
         .output()
         .map(|o| o.status.success())
