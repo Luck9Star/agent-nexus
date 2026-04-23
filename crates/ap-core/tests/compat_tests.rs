@@ -143,7 +143,7 @@ fn task_graph_schema_has_tasks_table() {
 
     let graph = ap_core::orchestration::task_graph::TaskGraph::new_in_memory().unwrap();
     // Empty graph should be valid
-    assert!(graph.is_empty());
+    assert!(graph.is_empty().unwrap());
 
     // Add a task to verify the schema works
     let task = TaskItem {
@@ -158,7 +158,7 @@ fn task_graph_schema_has_tasks_table() {
         updated_at: chrono::Utc::now(),
     };
     graph.add_task(&task).unwrap();
-    assert!(!graph.is_empty());
+    assert!(!graph.is_empty().unwrap());
 
     let fetched = graph.get_task("t-1").unwrap().unwrap();
     assert_eq!(fetched.id, "t-1");

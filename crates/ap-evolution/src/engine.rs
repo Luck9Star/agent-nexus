@@ -156,25 +156,39 @@ impl EvolutionEngine {
             task_id: task_id.to_string(),
         };
 
-        // Update health tracker
-        let mut health = self.health_guard();
-        if success {
-            health.record_success();
-        } else {
-            health.record_failure();
+        // Update health tracker — drop guard before I/O
+        {
+            let mut health = self.health_guard();
+            if success {
+                health.record_success();
+            } else {
+                health.record_failure();
+            }
         }
 
         // Run analysis to get suggestions
         let suggestions = self.analyzer.analyze(&result);
 
-        // Process each suggestion
+        // Process each suggestion (I/O) — no health lock held
         let mut outcomes = Vec::with_capacity(suggestions.len());
         for suggestion in &suggestions {
-            let outcome = self.evolver.evolve_fix(
+            match self.evolver.evolve_fix(
                 &suggestion.skill_name,
                 &suggestion.reason,
-            )?;
-            outcomes.push(outcome);
+            ) {
+                Ok(outcome) => outcomes.push(outcome),
+                Err(EvolverError::SkillNotFound(name)) => {
+                    tracing::debug!("Skill not found for evolution: {name}, skipping");
+                    // Don't abort — other suggestions may still be processable
+                    continue;
+                }
+                Err(e) => {
+                    // Record failure under a fresh guard, then propagate
+                    let mut health = self.health_guard();
+                    health.record_failure();
+                    return Err(e.into());
+                }
+            }
         }
 
         Ok(outcomes)
@@ -186,9 +200,11 @@ impl EvolutionEngine {
         skill_name: &str,
         error: &str,
     ) -> Result<Vec<EvolutionOutcome>, EvolveDispatchError> {
-        // Update health tracker
-        let mut health = self.health_guard();
-        health.record_failure();
+        // Update health tracker — drop guard before I/O
+        {
+            let mut health = self.health_guard();
+            health.record_failure();
+        }
 
         let outcome = self.evolver.evolve_fix(skill_name, error)?;
         Ok(vec![outcome])
@@ -263,15 +279,17 @@ impl EvolutionEngine {
     /// Returns a list of evolution suggestions (may be empty).
     /// Updates the health tracker based on success/failure.
     pub fn post_task_evolve(&self, result: &TaskResult) -> Vec<EvolutionSuggestion> {
-        // Update health tracker
-        let mut health = self.health_guard();
-        if result.success {
-            health.record_success();
-        } else {
-            health.record_failure();
+        // Update health tracker — drop guard before calling analyzer
+        {
+            let mut health = self.health_guard();
+            if result.success {
+                health.record_success();
+            } else {
+                health.record_failure();
+            }
         }
 
-        // Run analysis
+        // Run analysis (no health lock held)
         self.analyzer.analyze(result)
     }
 

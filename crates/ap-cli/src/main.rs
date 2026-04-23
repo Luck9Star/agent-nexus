@@ -46,6 +46,10 @@ enum Commands {
         /// Version to install (tag or semver)
         #[arg(short, long)]
         version: Option<String>,
+
+        /// Agent type (atomic or composite)
+        #[arg(short, long, default_value = "atomic")]
+        r#type: String,
     },
 
     /// Run an agent with a task
@@ -202,8 +206,8 @@ fn main() -> Result<()> {
             SourcesAction::Remove { name } => commands::sources::run_remove(&name, &output)?,
         },
 
-        Commands::Install { agent, version } => {
-            commands::install::run(&agent, version.as_deref(), &output)?;
+        Commands::Install { agent, version, r#type } => {
+            commands::install::run(&agent, version.as_deref(), &r#type, &output)?;
         }
 
         Commands::Run {

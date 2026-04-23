@@ -75,6 +75,10 @@ fn dfs(
 // TaskGraph
 // ---------------------------------------------------------------------------
 
+/// TaskGraph stores task dependency relationships in SQLite.
+///
+/// **Note**: This type is `!Send + !Sync` because `rusqlite::Connection` is not thread-safe.
+/// To use in async contexts, wrap in `std::sync::Mutex` and access via `tokio::task::spawn_blocking`.
 pub struct TaskGraph {
     conn: Connection,
 }
@@ -121,12 +125,16 @@ impl TaskGraph {
         Ok(())
     }
 
-    /// Insert a task into the graph.
+    /// Adds a task to the graph with its dependencies.
     ///
     /// Validates that:
     /// - No duplicate `task_id` exists
     /// - All `blocked_by` references point to existing tasks
     /// - The new task does not introduce a cycle
+    ///
+    /// **Performance note**: This method runs full cycle detection (O(V+E)) on every insert,
+    /// making batch insertion O(n^2). For bulk operations, consider using a transaction
+    /// and checking cycles once after all inserts.
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
@@ -355,11 +363,14 @@ impl TaskGraph {
     }
 
     /// Check if the graph is empty.
-    pub fn is_empty(&self) -> bool {
-        self.conn
-            .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
-            .unwrap_or(1)
-            == 0
+    ///
+    /// # Errors
+    /// Returns an error if the underlying database query fails.
+    pub fn is_empty(&self) -> Result<bool, TaskGraphError> {
+        let count: i64 = self.conn
+            .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
+            .map_err(TaskGraphError::Sqlite)?;
+        Ok(count == 0)
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
@@ -473,7 +484,7 @@ mod tests {
     #[test]
     fn create_in_memory() {
         let tg = TaskGraph::new_in_memory().unwrap();
-        assert!(tg.is_empty());
+        assert!(tg.is_empty().unwrap());
     }
 
     #[test]
@@ -723,7 +734,7 @@ mod tests {
         let tg = TaskGraph::new_in_memory().unwrap();
 
         // Start with exactly 0 tasks
-        assert!(tg.is_empty());
+        assert!(tg.is_empty().unwrap());
 
         // Add t1 and t2, then use raw SQL to make t1 block on t2 (creating a cycle)
         tg.add_task(&simple_task("t1", "a", &[])).unwrap();

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::agent::AgentType;
+use super::common::utc_now;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -41,19 +42,33 @@ pub struct SourceEntry {
 
 fn default_git() -> String { "git".to_string() }
 fn default_branch() -> String { "main".to_string() }
-fn utc_now() -> DateTime<Utc> { Utc::now() }
 
 impl SourceEntry {
-    /// Validate: git-type sources must have non-empty URL.
+    /// Validate: git-type sources must have non-empty URL with a valid scheme.
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn validate(&self) -> Result<(), String> {
-        if self.source_type == "git" && self.url.trim().is_empty() {
-            return Err(format!(
-                "Git-type source requires a non-empty 'url'. Source '{}' has type='git' but url is empty.",
-                self.name
-            ));
+        if self.source_type == "git" {
+            let url = self.url.trim();
+            if url.is_empty() {
+                return Err(format!(
+                    "Git-type source requires a non-empty 'url'. Source '{}' has type='git' but url is empty.",
+                    self.name
+                ));
+            }
+            let valid = url.starts_with("https://")
+                || url.starts_with("http://")
+                || url.starts_with("ssh://")
+                || url.starts_with("git@")
+                || url.starts_with('/')
+                || (url.chars().next().map_or(false, |c| c.is_alphanumeric()) && !url.starts_with('-'));
+            if !valid {
+                return Err(format!(
+                    "Invalid URL scheme for git source '{}': '{url}'",
+                    self.name
+                ));
+            }
         }
         Ok(())
     }
@@ -84,14 +99,17 @@ impl LockfileEntry {
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn validate_commit_sha(&self) -> Result<(), String> {
-        let valid = self.commit_sha.len() == 40
-            || self.commit_sha.len() == 64
-            || self.commit_sha == "latest"
-            || self.commit_sha == "head";
-        if valid
-            && self.commit_sha.len() >= 40
-            && !self.commit_sha.chars().all(|c| c.is_ascii_hexdigit())
-        {
+        if self.commit_sha == "latest" || self.commit_sha == "head" {
+            return Ok(());
+        }
+        let len = self.commit_sha.len();
+        if len != 40 && len != 64 {
+            return Err(format!(
+                "commit_sha '{}' has invalid length {} (expected 40 or 64 hex chars, or 'latest'/'head')",
+                self.commit_sha, len
+            ));
+        }
+        if !self.commit_sha.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(format!("commit_sha '{}' is not valid hex", self.commit_sha));
         }
         Ok(())

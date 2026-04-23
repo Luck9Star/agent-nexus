@@ -148,21 +148,25 @@ impl DeferredAgentRegistry {
             })
             .await;
 
-        // Initialize the tools list exactly once.
-        let tools_arc = slot
-            .tools
-            .get_or_init(|| async {
-                let client = client_arc.lock().await;
-                let tools = client
-                    .list_tools()
-                    .await
-                    .map_err(|e| RegistryError::ActivationFailed(e.to_string()))
-                    .unwrap_or_default();
-                Arc::new(tools)
-            })
-            .await;
+        // Initialize the tools list — retry-able on failure.
+        // Fast path: already cached from a previous successful activation.
+        if let Some(cached) = slot.tools.get() {
+            return Ok(cached.to_vec());
+        }
 
-        Ok(tools_arc.to_vec())
+        // Slow path: call list_tools, only write to OnceCell on success.
+        let client = client_arc.lock().await;
+        let tools = client
+            .list_tools()
+            .await
+            .map_err(|e| RegistryError::ActivationFailed(format!("list_tools failed: {e}")))?;
+
+        let tools_arc = Arc::new(tools);
+        // `set` returns Err only if another caller beat us — use the cached value.
+        if slot.tools.set(tools_arc).is_err() {
+            // Another caller won the race; their value is in the cell.
+        }
+        Ok(slot.tools.get().unwrap().to_vec())
     }
 
     /// Get the cached tool list for an active agent.

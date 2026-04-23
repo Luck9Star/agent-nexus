@@ -39,6 +39,10 @@ const VALID_TABLES: &[&str] = &[
 /// connection from the pool, performs the operation, and returns the
 /// connection.  Read-heavy workloads benefit from multiple concurrent
 /// readers under WAL mode.
+///
+/// **Transaction semantics**: Each public method acquires its own connection from the pool.
+/// Multi-step operations are NOT atomic across method calls. For atomic multi-step
+/// operations, use the `queries::` module directly with a single connection.
 pub struct EvolutionStore {
     pool: Pool<SqliteConnectionManager>,
 }

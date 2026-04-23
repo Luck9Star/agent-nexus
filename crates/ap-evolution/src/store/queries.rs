@@ -241,6 +241,11 @@ pub(crate) fn deactivate_skill(conn: &Connection, id: &str) -> Result<bool, Stor
 /// If `deactivate_parents` is true (FIX evolution), all parent skills are
 /// deactivated atomically. The caller is responsible for ensuring the new
 /// skill record has a unique ID.
+///
+/// **Ordering contract**: Parent deactivation MUST happen BEFORE the new skill insert.
+/// The `idx_sr_unique_active_name` partial unique index enforces that only one active
+/// skill with a given name can exist. If this ordering is inverted, the insert will
+/// violate the unique constraint and fail.
 pub(crate) fn evolve_skill(
     conn: &Connection,
     new_skill: &SkillRecord,

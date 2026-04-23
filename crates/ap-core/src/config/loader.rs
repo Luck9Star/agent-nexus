@@ -55,9 +55,15 @@ impl ConfigLoader {
 
     /// Load from `path`, returning full defaults on any error (missing file,
     /// parse error, etc.).
-    #[must_use] 
+    #[must_use]
     pub fn load_or_default(path: &Path) -> PlatformConfig {
-        Self::load_from_path(path).unwrap_or_default()
+        match Self::load_from_path(path) {
+            Ok(config) => config,
+            Err(e) => {
+                tracing::warn!("Failed to load config from {}: {e}, using defaults", path.display());
+                PlatformConfig::default()
+            }
+        }
     }
 }
 

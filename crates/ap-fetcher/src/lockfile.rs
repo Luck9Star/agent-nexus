@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use ap_core::models::distribution::{Lockfile, LockfileEntry};
 
@@ -82,9 +82,16 @@ impl LockfileManager {
 
     /// Add or update an agent entry in the lockfile.
     ///
+    /// // SAFETY: This read-modify-write is NOT protected by file-level locking.
+    /// // Concurrent `ap-cli` processes writing the same lockfile can silently lose
+    /// // entries (TOCTOU race). Only one `ap-cli` process should run at a time.
+    /// // TODO: Add advisory file locking (e.g. `fs4` crate) when dependency
+    /// // policy allows.
+    ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn add(&self, name: &str, entry: LockfileEntry) -> Result<(), LockfileError> {
+        warn!("Lockfile TOCTOU: modifying lockfile without file-level locking — ensure single process");
         let mut lockfile = self.load()?;
         lockfile.agents.insert(name.to_string(), entry);
         self.save(&lockfile)
@@ -92,9 +99,16 @@ impl LockfileManager {
 
     /// Remove an agent entry from the lockfile.
     ///
+    /// // SAFETY: This read-modify-write is NOT protected by file-level locking.
+    /// // Concurrent `ap-cli` processes writing the same lockfile can silently lose
+    /// // entries (TOCTOU race). Only one `ap-cli` process should run at a time.
+    /// // TODO: Add advisory file locking (e.g. `fs4` crate) when dependency
+    /// // policy allows.
+    ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn remove(&self, name: &str) -> Result<(), LockfileError> {
+        warn!("Lockfile TOCTOU: modifying lockfile without file-level locking — ensure single process");
         let mut lockfile = self.load()?;
         lockfile.agents.remove(name);
         self.save(&lockfile)

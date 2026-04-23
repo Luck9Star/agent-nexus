@@ -153,6 +153,12 @@ impl UvBridge {
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub async fn pip_install(&self, venv_python: &Path, requirements: &[&str]) -> Result<(), UvError> {
+        // Validate requirements BEFORE resolving the uv binary so that input
+        // validation errors are caught regardless of whether uv is installed.
+        for req in requirements {
+            validate_requirement(req)?;
+        }
+
         let uv = self.resolved_path().await?;
         let mut cmd = Command::new(&uv);
         cmd.arg("pip")
@@ -161,7 +167,6 @@ impl UvBridge {
             .arg(venv_python);
 
         for req in requirements {
-            validate_requirement(req)?;
             cmd.arg(req);
         }
 
@@ -226,8 +231,11 @@ impl UvBridge {
                 }
             }
         }
-        // Fall back to configured path; the actual command will produce a clear error
-        Ok(self.uv_path.clone())
+        // No uv binary found among candidates — return an error so callers
+        // can report the problem instead of silently proceeding.
+        Err(UvError::CommandFailed(
+            format!("uv binary not found on system (tried: {:?})", candidates),
+        ))
     }
 }
 

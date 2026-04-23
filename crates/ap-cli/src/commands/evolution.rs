@@ -38,6 +38,10 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
 ///
 /// Wires into `ap_evolution::promotion::promote_skill` to create agent scaffolding.
 pub fn run_promote(skill: &str, output: &OutputFormatter) -> Result<()> {
+    // Validate skill name to prevent path traversal
+    commands::validate_fs_name(skill)
+        .with_context(|| format!("Invalid skill name: {skill}"))?;
+
     let root = commands::find_project_root(
         &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
     );

@@ -71,11 +71,15 @@ impl ModelConfigManager {
                 std::env::var("DEFAULT_MODEL").ok(),
                 Some("openai:gpt-4o".to_string()),
             ].into_iter().flatten() {
-                if let Some((fb_provider, _fb_model)) = fb.split_once(':') {
+                if let Some((fb_provider, fb_model)) = fb.split_once(':') {
                     if let Some(p) = self.config.models.providers.get(fb_provider) {
+                        tracing::warn!(
+                            "Provider '{}' not found, falling back to '{}' provider with model '{}'",
+                            provider_name, fb_provider, fb_model
+                        );
                         return Ok(ResolvedModel {
                             provider_name: fb_provider.to_string(),
-                            model_name: model_name.clone(),
+                            model_name: fb_model.to_string(),
                             base_url: p.base_url.clone(),
                             api_key_env: p.api_key_env.clone(),
                             api_type: p.api,
@@ -162,8 +166,8 @@ mod tests {
         std::env::remove_var("DEFAULT_MODEL");
         let mgr = ModelConfigManager::new(test_config());
         let resolved = mgr.resolve("unknown:model").unwrap();
-        // Falls back to hardcoded openai provider
-        assert_eq!(resolved.model_name, "model");
+        // Falls back to hardcoded openai provider with its own model name
+        assert_eq!(resolved.model_name, "gpt-4o");
         assert_eq!(resolved.provider_name, "openai");
         assert_eq!(resolved.base_url, "https://api.openai.com/v1");
     }
@@ -212,6 +216,7 @@ mod tests {
             let mgr = ModelConfigManager::new(test_config());
             let resolved = mgr.resolve("nonexistent:model").unwrap();
             assert_eq!(resolved.provider_name, "deepseek");
+            assert_eq!(resolved.model_name, "deepseek-chat");
             assert_eq!(resolved.base_url, "https://api.deepseek.com/v1");
         });
     }
@@ -223,6 +228,7 @@ mod tests {
             let mgr = ModelConfigManager::new(test_config());
             let resolved = mgr.resolve("nonexistent:model").unwrap();
             assert_eq!(resolved.provider_name, "ollama");
+            assert_eq!(resolved.model_name, "qwen2.5-coder:7b");
             assert_eq!(resolved.base_url, "http://localhost:11434/v1");
         });
     }
@@ -234,6 +240,7 @@ mod tests {
             let mgr = ModelConfigManager::new(test_config());
             let resolved = mgr.resolve("nonexistent:model").unwrap();
             assert_eq!(resolved.provider_name, "openai");
+            assert_eq!(resolved.model_name, "gpt-4o");
             assert_eq!(resolved.base_url, "https://api.openai.com/v1");
         });
     }

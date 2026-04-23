@@ -234,8 +234,8 @@ impl McpGateway {
         validate_name("agent_name", &agent)?;
         validate_name("tool_name", &tool)?;
 
-        // Ensure agent is active. The registry's call_tool will attempt
-        // lazy activation if the agent is registered but not yet running.
+        // Agent must be explicitly activated before tool calls.
+        // Returns 503 if the agent is registered but not yet running.
         let result = gw.registry.call_tool(&agent, &tool, arguments).await?;
         Ok(Json(result))
     }

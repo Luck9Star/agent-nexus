@@ -11,7 +11,7 @@ use crate::output::OutputFormatter;
 ///
 /// Looks up the agent in configured sources, clones via `GitInstaller`,
 /// and records in `LockfileManager`.
-pub fn run(agent: &str, version: Option<&str>, output: &OutputFormatter) -> Result<()> {
+pub fn run(agent: &str, version: Option<&str>, agent_type_str: &str, output: &OutputFormatter) -> Result<()> {
     commands::validate_fs_name(agent)
         .with_context(|| format!("Invalid agent name: {agent}"))?;
 
@@ -29,6 +29,15 @@ pub fn run(agent: &str, version: Option<&str>, output: &OutputFormatter) -> Resu
                 "Agent '{agent}' not found in sources. Run `agent-nexus sources list` to see available agents."
             )
         })?;
+
+    // Validate agent type before any I/O to avoid leaving a dirty install on disk
+    let agent_type = match agent_type_str.to_lowercase().as_str() {
+        "atomic" => ap_core::models::agent::AgentType::Atomic,
+        "composite" => ap_core::models::agent::AgentType::Composite,
+        other => anyhow::bail!(
+            "Unknown agent type '{other}'. Expected 'atomic' or 'composite'."
+        ),
+    };
 
     output.info(&format!("Installing '{}' from {} ...", agent, source.url));
 
@@ -66,7 +75,7 @@ pub fn run(agent: &str, version: Option<&str>, output: &OutputFormatter) -> Resu
         version: version.unwrap_or("latest").to_string(),
         source: agent.to_string(),
         commit_sha,
-        agent_type: ap_core::models::agent::AgentType::Atomic,
+        agent_type,
         installed_at: chrono::Utc::now(),
         venv_path: format!(".venvs/{agent}"),
         dependencies: vec![],

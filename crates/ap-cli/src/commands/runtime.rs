@@ -126,8 +126,11 @@ async fn async_exec(
     // Generate a task ID
     let task_id = format!("cli-{}-{}", std::process::id(), chrono::Utc::now().timestamp_millis());
 
-    // Send the task
-    let task_content = args.join(" ");
+    let task_content = if args.len() == 1 {
+        args[0].clone()
+    } else {
+        args.join(" ")
+    };
     proto
         .send_task(&task_content, &task_id)
         .await

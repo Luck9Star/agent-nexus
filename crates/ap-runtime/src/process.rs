@@ -115,7 +115,16 @@ impl AgentProcess {
 
     /// Consume self, returning (id, stdin, stdout, child).
     /// stdin/stdout are sink/empty if already taken via `take_io()`.
-    #[must_use] 
+    ///
+    /// # Safety Contract
+    ///
+    /// The returned `Child` is NOT killed on drop. The caller is responsible for
+    /// calling `child.kill()` or awaiting the child's exit to prevent zombie processes.
+    /// Failure to do so will leak OS process resources.
+    ///
+    /// After calling `split()`, the `AgentProcess` is consumed and its `Drop` impl
+    /// will NOT run — the child will NOT be killed automatically.
+    #[must_use]
     pub fn split(
         mut self,
     ) -> (

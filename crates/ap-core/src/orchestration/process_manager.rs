@@ -62,6 +62,11 @@ pub struct ManagedProcess {
 
 pub type IoPair = (Box<dyn AsyncWrite + Unpin + Send>, Box<dyn AsyncRead + Unpin + Send>);
 
+/// ProcessManager manages subprocess lifecycles.
+///
+/// **Design note**: All methods require `&mut self` (single-owner pattern).
+/// For multi-task access, wrap in `Arc<Mutex<ProcessManager>>` or use a
+/// `ProcessManagerHandle` with `tokio::task::spawn_blocking`.
 pub struct ProcessManager {
     processes: HashMap<String, ManagedProcess>,
     max_concurrent: usize,

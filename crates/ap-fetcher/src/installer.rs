@@ -146,8 +146,8 @@ impl GitInstaller {
         let raw = url
             .rsplit('/')
             .next()
-            .unwrap_or("agent")
-            .trim_end_matches(".git");
+            .unwrap_or("agent");
+        let raw = raw.strip_suffix(".git").unwrap_or(raw);
         let sanitized: String = raw
             .chars()
             .map(|c| {

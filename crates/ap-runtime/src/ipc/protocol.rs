@@ -85,6 +85,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentProtocol<R, W> {
                     success: true,
                 })
             }
+            // Wildcard arm for forward-compatibility with future AgentToPlatformType variants.
+            #[allow(unreachable_patterns)]
+            _ => Err(IpcError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unexpected message type in receive_result: {:?}", msg.msg_type),
+            ))),
         }
     }
 
