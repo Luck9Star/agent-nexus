@@ -1,15 +1,15 @@
 //! EvolutionStore: SQLite-backed persistence facade for the Self-Evolution Engine.
 //!
-//! Thread-safe via `std::sync::Mutex<rusqlite::Connection>`.
+//! Thread-safe via `r2d2` connection pool.
 //! Uses WAL mode for file-backed databases.
 
 pub mod error;
 pub mod queries;
 pub mod schema;
 
-use rusqlite::Connection;
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 use std::path::Path;
-use std::sync::Mutex;
 
 pub use error::{Result, StoreError};
 
@@ -18,45 +18,67 @@ pub use queries::{
     AgentRecord, ExecutionAnalysis, SkillJudgment, SkillRecord,
 };
 
+/// Known table names used in tests to verify whitelist correctness.
+#[cfg(test)]
+const VALID_TABLES: &[&str] = &[
+    "skill_records",
+    "skill_lineage_parents",
+    "execution_analyses",
+    "skill_judgments",
+    "context_budget_log",
+    "agent_records",
+];
+
 // ---------------------------------------------------------------------------
 // EvolutionStore facade
 // ---------------------------------------------------------------------------
 
 /// SQLite-backed store for skill records and evolution data.
 ///
-/// Thread-safe via `std::sync::Mutex<Connection>`.  All methods acquire
-/// the lock, perform the operation synchronously, and release the lock.
-/// This is correct because rusqlite operations are CPU-bound and never
-/// need to be held across `.await` points.
+/// Thread-safe via an `r2d2` connection pool.  Each method acquires a
+/// connection from the pool, performs the operation, and returns the
+/// connection.  Read-heavy workloads benefit from multiple concurrent
+/// readers under WAL mode.
 pub struct EvolutionStore {
-    conn: Mutex<Connection>,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl EvolutionStore {
     /// Create a file-backed EvolutionStore with WAL mode.
     pub fn new(path: &Path) -> Result<Self> {
-        let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
-        conn.execute_batch(schema::SCHEMA_SQL)?;
-        Ok(Self {
-            conn: Mutex::new(conn),
-        })
+        let manager = SqliteConnectionManager::file(path)
+            .with_init(|conn| {
+                conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+                conn.execute_batch(schema::SCHEMA_SQL)?;
+                Ok(())
+            });
+        let pool = Pool::builder().build(manager)?;
+        Ok(Self { pool })
     }
 
     /// Create an in-memory EvolutionStore (for testing).
     pub fn new_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()?;
-        conn.execute_batch(schema::SCHEMA_SQL)?;
-        Ok(Self {
-            conn: Mutex::new(conn),
-        })
+        let manager = SqliteConnectionManager::memory()
+            .with_init(|conn| {
+                conn.execute_batch(schema::SCHEMA_SQL)?;
+                Ok(())
+            });
+        let pool = Pool::builder()
+            .max_size(1) // in-memory DB is per-connection, so limit to 1
+            .build(manager)?;
+        Ok(Self { pool })
     }
 
-    /// Acquire the connection lock.
-    fn conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
-        self.conn.lock().map_err(|e| {
-            StoreError::Io(std::io::Error::other(format!("lock poisoned: {e}")))
-        })
+    /// Acquire a connection from the pool.
+    fn conn(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>> {
+        self.pool.get().map_err(StoreError::from)
+    }
+
+    /// Acquire a raw connection for direct SQL execution (e.g. in tests).
+    /// Prefer using typed methods over this.
+    #[cfg(test)]
+    fn raw_conn(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>> {
+        self.conn()
     }
 
     // -----------------------------------------------------------------------
@@ -307,6 +329,9 @@ impl EvolutionStore {
     }
 
     /// Count rows in a table (for testing).
+    ///
+    /// Delegates to `queries::count_rows` which validates the table name
+    /// against a whitelist to prevent SQL injection.
     pub fn count_rows(&self, table: &str) -> Result<i64> {
         let conn = self.conn()?;
         queries::count_rows(&conn, table)
@@ -431,11 +456,13 @@ mod tests {
 
     #[test]
     fn concurrent_access_does_not_deadlock() {
-        let store = EvolutionStore::new_in_memory().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("concurrent_test.db");
+        let store = EvolutionStore::new(&db_path).unwrap();
         let store = std::sync::Arc::new(store);
 
         let mut handles = vec![];
-        for i in 0..4 {
+        for i in 0..8 {
             let s = store.clone();
             handles.push(std::thread::spawn(move || {
                 let skill = SkillRecord {
@@ -462,10 +489,28 @@ mod tests {
             h.join().unwrap();
         }
         let active = store.get_active_skills().unwrap();
-        assert_eq!(active.len(), 4);
+        assert_eq!(active.len(), 8);
     }
 
-    // --- New facade tests for missing methods ---
+    #[test]
+    fn count_rows_rejects_invalid_table() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+        let result = store.count_rows("users; DROP TABLE skill_records; --");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Unknown table"), "Expected whitelist error, got: {err}");
+    }
+
+    #[test]
+    fn count_rows_accepts_valid_tables() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+        for table in VALID_TABLES {
+            let result = store.count_rows(table);
+            assert!(result.is_ok(), "count_rows should accept '{table}'");
+        }
+    }
+
+    // --- Facade tests for missing methods ---
 
     fn make_facade_skill(id: &str, name: &str) -> SkillRecord {
         SkillRecord {
@@ -593,7 +638,9 @@ mod tests {
 
     #[test]
     fn facade_get_ancestry() {
-        let store = EvolutionStore::new_in_memory().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("ancestry_test.db");
+        let store = EvolutionStore::new(&db_path).unwrap();
 
         let gp = make_facade_skill("anc-gp", "anc-gp");
         store.insert_skill(&gp).unwrap();
@@ -601,9 +648,9 @@ mod tests {
         let mut p = make_facade_skill("anc-p", "anc-p");
         p.lineage_generation = 1;
         store.insert_skill(&p).unwrap();
-        // Need to insert lineage parent manually via internal queries
+        // Insert lineage parent via raw SQL
         {
-            let conn = store.conn().unwrap();
+            let conn = store.raw_conn().unwrap();
             conn.execute(
                 "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES ('anc-p', 'anc-gp')",
                 [],
@@ -614,7 +661,7 @@ mod tests {
         c.lineage_generation = 2;
         store.insert_skill(&c).unwrap();
         {
-            let conn = store.conn().unwrap();
+            let conn = store.raw_conn().unwrap();
             conn.execute(
                 "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES ('anc-c', 'anc-p')",
                 [],
@@ -629,7 +676,9 @@ mod tests {
 
     #[test]
     fn facade_get_children() {
-        let store = EvolutionStore::new_in_memory().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("children_test.db");
+        let store = EvolutionStore::new(&db_path).unwrap();
 
         let parent = make_facade_skill("ch-parent", "ch-parent");
         store.insert_skill(&parent).unwrap();
@@ -637,7 +686,7 @@ mod tests {
         let child = make_facade_skill("ch-child", "ch-child");
         store.insert_skill(&child).unwrap();
         {
-            let conn = store.conn().unwrap();
+            let conn = store.raw_conn().unwrap();
             conn.execute(
                 "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES ('ch-child', 'ch-parent')",
                 [],

@@ -1,54 +1,65 @@
-//! HealthTracker — tracks success/failure ratio for evolution quality.
+//! HealthTracker — tracks success/failure ratio using EWMA for decay.
 
-/// Tracks successes and failures to compute a health score.
+/// Smoothing factor for EWMA. Higher values weight recent events more.
+/// 0.1 means ~10% weight on the newest event, slow decay of old state.
+const ALPHA: f64 = 0.1;
+
+/// Tracks health score using an exponentially weighted moving average.
+///
+/// Unlike a simple success/total ratio, EWMA naturally decays the influence
+/// of old events: after many new successes, an ancient failure has negligible
+/// impact on the score. This prevents the "frozen score" problem where
+/// `successes / (successes + failures)` becomes nearly constant after
+/// thousands of operations.
 #[derive(Debug, Clone)]
 pub struct HealthTracker {
-    successes: u64,
-    failures: u64,
+    score: f64,
+    total: u64,
 }
 
 impl HealthTracker {
-    /// Create a new tracker with zero counts.
+    /// Create a new tracker starting at perfect health (1.0).
     pub fn new() -> Self {
         Self {
-            successes: 0,
-            failures: 0,
+            score: 1.0,
+            total: 0,
         }
     }
 
     /// Record a successful outcome.
+    ///
+    /// The EWMA update pulls the score toward 1.0:
+    /// `score = score * (1 - ALPHA) + 1.0 * ALPHA`
     pub fn record_success(&mut self) {
-        self.successes += 1;
+        self.score = self.score * (1.0 - ALPHA) + 1.0 * ALPHA;
+        self.total += 1;
     }
 
     /// Record a failed outcome.
+    ///
+    /// The EWMA update pulls the score toward 0.0:
+    /// `score = score * (1 - ALPHA) + 0.0 * ALPHA`
     pub fn record_failure(&mut self) {
-        self.failures += 1;
+        self.score = self.score * (1.0 - ALPHA) + 0.0 * ALPHA;
+        self.total += 1;
     }
 
-    /// Compute the health score: `successes / (successes + failures)`.
+    /// Compute the current health score (0.0 to 1.0).
     ///
     /// Returns `1.0` if no data has been recorded yet (no evidence of failure).
     pub fn get_health_score(&self) -> f64 {
-        let total = self.successes + self.failures;
-        if total == 0 {
-            return 1.0;
-        }
-        self.successes as f64 / total as f64
+        self.score
     }
 
     /// Total number of recorded events.
     pub fn total(&self) -> u64 {
-        self.successes + self.failures
+        self.total
     }
 
-    /// Reset the tracker, clearing all recorded counts.
-    ///
-    /// Useful for periodic health re-evaluation to prevent old failures from
-    /// permanently dragging down the score in long-running processes.
+    /// Reset the tracker to initial state (score 1.0, zero events).
     pub fn reset(&mut self) {
-        self.successes = 0;
-        self.failures = 0;
+        self.score = 1.0;
+        self.total = 0;
     }
 }
 
@@ -69,12 +80,14 @@ mod tests {
     }
 
     #[test]
-    fn all_successes_score_1() {
+    fn all_successes_stay_at_1() {
         let mut tracker = HealthTracker::new();
         for _ in 0..10 {
             tracker.record_success();
         }
-        assert_eq!(tracker.get_health_score(), 1.0);
+        // With ALPHA=0.1, 10 successes converge close to 1.0 but not exactly
+        let score = tracker.get_health_score();
+        assert!(score > 0.99, "Expected score > 0.99, got {score}");
     }
 
     #[test]
@@ -83,18 +96,19 @@ mod tests {
         tracker.record_success();
         tracker.record_success();
         tracker.record_failure();
-        // 2/3 = 0.666...
+        // After 2 successes then 1 failure, score should be between 0.5 and 1.0
         let score = tracker.get_health_score();
-        assert!((score - 0.6666).abs() < 0.01);
+        assert!(score > 0.5 && score < 1.0, "Expected 0.5 < score < 1.0, got {score}");
     }
 
     #[test]
-    fn all_failures_score_0() {
+    fn all_failures_converge_to_0() {
         let mut tracker = HealthTracker::new();
-        for _ in 0..5 {
+        for _ in 0..100 {
             tracker.record_failure();
         }
-        assert_eq!(tracker.get_health_score(), 0.0);
+        let score = tracker.get_health_score();
+        assert!(score < 0.01, "Expected score < 0.01, got {score}");
     }
 
     #[test]
@@ -114,7 +128,7 @@ mod tests {
     }
 
     #[test]
-    fn reset_clears_counts() {
+    fn reset_clears_state() {
         let mut tracker = HealthTracker::new();
         tracker.record_success();
         tracker.record_failure();
@@ -124,5 +138,43 @@ mod tests {
         tracker.reset();
         assert_eq!(tracker.total(), 0);
         assert_eq!(tracker.get_health_score(), 1.0);
+    }
+
+    #[test]
+    fn recent_events_weight_more_than_old() {
+        // This is the key EWMA property: after many new successes,
+        // old failures should have negligible impact.
+        let mut tracker = HealthTracker::new();
+
+        // Record 5 failures
+        for _ in 0..5 {
+            tracker.record_failure();
+        }
+        let score_after_failures = tracker.get_health_score();
+
+        // Record 50 successes
+        for _ in 0..50 {
+            tracker.record_success();
+        }
+        let score_after_recovery = tracker.get_health_score();
+
+        // The recovery should bring the score close to 1.0
+        assert!(
+            score_after_recovery > 0.9,
+            "Expected score > 0.9 after 50 successes, got {score_after_recovery} (was {score_after_failures} after 5 failures)"
+        );
+    }
+
+    #[test]
+    fn failure_drops_score_quickly_from_perfect() {
+        let mut tracker = HealthTracker::new();
+        // Start at 1.0, one failure
+        tracker.record_failure();
+        // Score should drop by ALPHA: 1.0 * 0.9 + 0.0 * 0.1 = 0.9
+        let score = tracker.get_health_score();
+        assert!(
+            (score - 0.9).abs() < 0.001,
+            "Expected ~0.9 after one failure from perfect, got {score}"
+        );
     }
 }

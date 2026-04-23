@@ -11,6 +11,28 @@ use crate::output::OutputFormatter;
 /// Default timeout for waiting on an agent response.
 const RESPONSE_TIMEOUT_SECS: u64 = 120;
 
+/// Resolve the Python interpreter from `AGENT_NEXUS_PYTHON` or fall back to `python3`.
+///
+/// Validates that the value is a bare command name or an absolute path
+/// (rejects relative paths containing `..` or directory traversal).
+fn resolve_python() -> String {
+    match std::env::var("AGENT_NEXUS_PYTHON") {
+        Ok(val) if !val.is_empty() => {
+            // Reject values with path traversal
+            if val.contains("..") || val.contains('\0') {
+                eprintln!(
+                    "Warning: AGENT_NEXUS_PYTHON contains suspicious path '{}', falling back to python3",
+                    val
+                );
+                "python3".to_string()
+            } else {
+                val
+            }
+        }
+        _ => "python3".to_string(),
+    }
+}
+
 /// Run `runtime exec <agent>` command.
 ///
 /// Looks up the agent in the lockfile, spawns it as a subprocess via
@@ -57,15 +79,13 @@ pub fn run_exec(agent: &str, args: &[String], output: &OutputFormatter) -> Resul
     //    Look for a `main.py` entrypoint; fall back to `python -m <agent>`.
     let entrypoint = install_dir.join("main.py");
     let (cmd, cmd_args) = if entrypoint.exists() {
-        let python = std::env::var("AGENT_NEXUS_PYTHON")
-            .unwrap_or_else(|_| "python3".to_string());
+        let python = resolve_python();
         let mut a = vec![entrypoint.to_string_lossy().to_string()];
         a.extend(args.iter().cloned());
         (python, a)
     } else {
         // Fall back: try running the agent module directly
-        let python = std::env::var("AGENT_NEXUS_PYTHON")
-            .unwrap_or_else(|_| "python3".to_string());
+        let python = resolve_python();
         let mut a = vec!["-m".to_string(), agent.replace('-', "_")];
         a.extend(args.iter().cloned());
         (python, a)

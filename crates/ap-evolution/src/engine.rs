@@ -413,8 +413,12 @@ mod tests {
         engine.post_task_evolve(&result);
 
         let score = engine.get_health_score();
-        // 2/3 = 0.666...
-        assert!((score - 0.6666).abs() < 0.01);
+        // With EWMA (ALPHA=0.1), the score should be between 0.5 and 1.0
+        // but NOT equal to the simple 2/3 ratio.
+        assert!(
+            score > 0.5 && score < 1.0,
+            "Expected 0.5 < score < 1.0 after 2 successes + 1 failure, got {score}"
+        );
     }
 
     #[test]

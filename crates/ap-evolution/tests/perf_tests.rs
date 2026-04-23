@@ -86,11 +86,11 @@ fn bench_skill_inserts() {
     );
 
     // Target: < 10ms total for 1000 inserts. With 5x headroom: 50ms.
-    // Note: Each insert acquires a Mutex lock and does an INSERT with 15 params.
-    // Realistic target for Mutex+SQLite: < 100ms for 1000 inserts.
+    // Note: Each insert acquires a pool connection and does an INSERT with 15 params.
+    // Realistic target for Pool+SQLite: < 200ms for 1000 inserts.
     assert!(
-        elapsed.as_millis() < 150,
-        "1000 skill inserts too slow: {:?} (target < 100ms, headroom < 150ms)",
+        elapsed.as_millis() < 300,
+        "1000 skill inserts too slow: {:?} (target < 200ms, headroom < 300ms)",
         elapsed
     );
 

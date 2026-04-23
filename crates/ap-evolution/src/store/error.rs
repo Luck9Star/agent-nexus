@@ -6,6 +6,9 @@ pub enum StoreError {
     #[error("SQLite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 
+    #[error("Connection pool error: {0}")]
+    Pool(#[from] r2d2::Error),
+
     #[error("duplicate agent name: an agent with name '{name}' already exists (agent_id={existing_id})")]
     DuplicateAgentName { name: String, existing_id: String },
 

@@ -40,13 +40,22 @@ pub struct PromotionResult {
 }
 
 /// Validate that a skill name is safe to use as a directory name.
+///
+/// Uses a whitelist approach: only alphanumeric, hyphen, and underscore
+/// characters are allowed. Maximum length is 64 characters.
 fn validate_skill_name(name: &str) -> Result<(), PromotionError> {
     if name.is_empty() {
         return Err(PromotionError::Serialization("Skill name cannot be empty".into()));
     }
-    if name.contains("..") || name.contains('/') || name.contains('\\') {
+    if name.len() > 64 {
         return Err(PromotionError::Serialization(format!(
-            "Invalid skill name (path traversal): {name}"
+            "Skill name too long ({} chars, max 64): {name}",
+            name.len()
+        )));
+    }
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(PromotionError::Serialization(format!(
+            "Invalid skill name (only alphanumeric, hyphen, underscore allowed): {name}"
         )));
     }
     Ok(())
@@ -290,7 +299,10 @@ mod tests {
         let result = promote_skill(&store, "../../etc/passwd", dir.path());
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("path traversal"));
+        assert!(
+            err.contains("only alphanumeric"),
+            "Expected whitelist error, got: {err}"
+        );
     }
 
     #[test]
@@ -300,6 +312,44 @@ mod tests {
 
         let result = promote_skill(&store, "", dir.path());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn promote_skill_rejects_name_with_spaces() {
+        let store = test_store();
+        let dir = tempfile::tempdir().unwrap();
+
+        let result = promote_skill(&store, "my skill", dir.path());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn promote_skill_rejects_name_with_dots() {
+        let store = test_store();
+        let dir = tempfile::tempdir().unwrap();
+
+        let result = promote_skill(&store, "skill.name", dir.path());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn promote_skill_rejects_overly_long_name() {
+        let store = test_store();
+        let dir = tempfile::tempdir().unwrap();
+
+        let long_name = "a".repeat(65);
+        let result = promote_skill(&store, &long_name, dir.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("too long"));
+    }
+
+    #[test]
+    fn promote_skill_accepts_valid_names() {
+        let store = test_store();
+        let dir = tempfile::tempdir().unwrap();
+
+        let result = promote_skill(&store, "my-skill_v2", dir.path());
+        assert!(result.is_ok());
     }
 
     #[test]

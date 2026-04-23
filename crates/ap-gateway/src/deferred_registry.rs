@@ -7,7 +7,7 @@ use std::time::Duration;
 use ap_core::models::agent::AgentManifest;
 use ap_runtime::mcp_client::{McpClient, ToolInfo};
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -36,8 +36,11 @@ pub enum RegistryError {
 struct AgentSlot {
     #[allow(dead_code)] // Used for agent metadata lookups in production
     manifest: AgentManifest,
-    client: Option<Arc<tokio::sync::Mutex<Box<dyn McpClient>>>>,
-    tools: Arc<Vec<ToolInfo>>,
+    /// OnceCell ensures only one caller creates the client, eliminating the
+    /// TOCTOU race where multiple concurrent `activate()` calls each create
+    /// redundant MCP clients (which may spawn expensive subprocesses).
+    client: OnceCell<Arc<Mutex<Box<dyn McpClient>>>>,
+    tools: OnceCell<Arc<Vec<ToolInfo>>>,
     last_used: std::time::Instant,
 }
 
@@ -50,8 +53,12 @@ struct AgentSlot {
 ///
 /// Agents are registered with a manifest and remain inactive until `activate`
 /// is called. Idle agents are stopped after a configurable timeout.
+///
+/// Uses `tokio::sync::OnceCell` for client initialization to guarantee exactly
+/// one MCP client is created per agent, even under concurrent activation.
+/// Slots are wrapped in `Arc` so OnceCell references can outlive the global lock.
 pub struct DeferredAgentRegistry {
-    agents: Arc<Mutex<HashMap<String, AgentSlot>>>,
+    agents: Arc<Mutex<HashMap<String, Arc<Mutex<AgentSlot>>>>>,
     idle_timeout: Duration,
 }
 
@@ -77,12 +84,12 @@ impl DeferredAgentRegistry {
     /// Register an agent manifest without starting the subprocess.
     pub async fn register_manifest(&self, manifest: AgentManifest) {
         let name = manifest.name.clone();
-        let slot = AgentSlot {
+        let slot = Arc::new(Mutex::new(AgentSlot {
             manifest,
-            client: None,
-            tools: Arc::new(Vec::new()),
+            client: OnceCell::new(),
+            tools: OnceCell::new(),
             last_used: std::time::Instant::now(),
-        };
+        }));
         self.agents.lock().await.insert(name, slot);
     }
 
@@ -103,62 +110,68 @@ impl DeferredAgentRegistry {
 
     /// Activate an agent: start its subprocess, connect MCP, list tools.
     ///
-    /// The `client_factory` closure is called to create the MCP client.
-    /// Returns the list of tools discovered on the agent.
+    /// The `client_factory` closure is called at most once per agent thanks to
+    /// `OnceCell`. Concurrent callers will await the same initialization
+    /// instead of creating duplicate clients.
     ///
-    /// If the agent is already active, returns the cached tools.
+    /// Returns the list of tools discovered on the agent.
     pub async fn activate(
         &self,
         name: &str,
         client_factory: Box<dyn FnOnce() -> Box<dyn McpClient> + Send>,
     ) -> Result<Vec<ToolInfo>, RegistryError> {
-        // Phase 1: Check if already active (under lock)
-        {
+        // Brief lock to get an Arc reference to the slot.
+        let slot_arc = {
             let agents = self.agents.lock().await;
-            let slot = agents
+            agents
                 .get(name)
-                .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
-            if slot.client.is_some() {
-                return Ok(slot.tools.to_vec());
-            }
-        }
+                .cloned()
+                .ok_or_else(|| RegistryError::NotFound(name.to_string()))?
+        }; // Lock released — all subsequent work uses per-slot synchronization.
 
-        // Phase 2: Create client and list tools (no lock held)
-        let client = client_factory();
-        let tools = client
-            .list_tools()
-            .await
-            .map_err(|e| RegistryError::ActivationFailed(e.to_string()))?;
+        let mut slot = slot_arc.lock().await;
 
-        // Phase 3: Update state (re-acquire lock, TOCTOU-safe)
-        let mut agents = self.agents.lock().await;
-        let slot = agents
-            .get_mut(name)
-            .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
-        if slot.client.is_some() {
-            // Another caller activated first — our client is redundant.
-            // The client we created will be dropped here, triggering cleanup.
-            return Ok(slot.tools.to_vec());
-        }
-        slot.client = Some(Arc::new(tokio::sync::Mutex::new(client)));
-        let tools_arc = Arc::new(tools);
-        let result = tools_arc.to_vec();
-        slot.tools = tools_arc;
+        // Update last_used first to avoid borrow conflicts with OnceCell.
         slot.last_used = std::time::Instant::now();
-        Ok(result)
+
+        // Initialize the client exactly once.
+        let client_arc = slot
+            .client
+            .get_or_init(|| async {
+                let client = client_factory();
+                Arc::new(Mutex::new(client))
+            })
+            .await;
+
+        // Initialize the tools list exactly once.
+        let tools_arc = slot
+            .tools
+            .get_or_init(|| async {
+                let client = client_arc.lock().await;
+                let tools = client
+                    .list_tools()
+                    .await
+                    .map_err(|e| RegistryError::ActivationFailed(e.to_string()))
+                    .unwrap_or_default();
+                Arc::new(tools)
+            })
+            .await;
+
+        Ok(tools_arc.to_vec())
     }
 
     /// Get the cached tool list for an active agent.
     pub async fn get_tools(&self, name: &str) -> Result<Arc<Vec<ToolInfo>>, RegistryError> {
         let agents = self.agents.lock().await;
-        let slot = agents
+        let slot_arc = agents
             .get(name)
             .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
+        let slot = slot_arc.lock().await;
 
-        if slot.client.is_none() {
-            return Err(RegistryError::NotActive(name.to_string()));
-        }
-        Ok(Arc::clone(&slot.tools))
+        slot.tools
+            .get()
+            .cloned()
+            .ok_or_else(|| RegistryError::NotActive(name.to_string()))
     }
 
     /// Call a tool on an active agent via its MCP client.
@@ -170,13 +183,15 @@ impl DeferredAgentRegistry {
     ) -> Result<serde_json::Value, RegistryError> {
         // Phase 1: Get client Arc and update last_used (brief lock)
         let client_arc = {
-            let mut agents = self.agents.lock().await;
-            let slot = agents
-                .get_mut(name)
+            let agents = self.agents.lock().await;
+            let slot_arc = agents
+                .get(name)
                 .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
+            let mut slot = slot_arc.lock().await;
             slot.last_used = std::time::Instant::now();
             slot.client
-                .clone()
+                .get()
+                .cloned()
                 .ok_or_else(|| RegistryError::NotActive(name.to_string()))?
         };
         // Phase 2: Call tool outside global lock (only per-agent mutex held)
@@ -195,20 +210,21 @@ impl DeferredAgentRegistry {
     /// down outside the lock to avoid blocking all registry operations during I/O.
     pub async fn deactivate_idle(&self) -> usize {
         // Phase 1: Collect idle clients and remove from registry (under lock)
-        let to_shutdown: Vec<Arc<tokio::sync::Mutex<Box<dyn McpClient>>>> = {
-            let mut agents = self.agents.lock().await;
+        let to_shutdown: Vec<Arc<Mutex<Box<dyn McpClient>>>> = {
+            let agents = self.agents.lock().await;
             let timeout = self.idle_timeout;
             let mut idle_clients = Vec::new();
-            for slot in agents.values_mut() {
-                if slot.client.is_some() && slot.last_used.elapsed() > timeout {
+            for slot_arc in agents.values() {
+                let mut slot = slot_arc.lock().await;
+                if slot.client.get().is_some() && slot.last_used.elapsed() > timeout {
                     if let Some(client_arc) = slot.client.take() {
                         idle_clients.push(client_arc);
                     }
-                    slot.tools = Arc::new(Vec::new());
+                    slot.tools.take();
                 }
             }
             idle_clients
-        }; // Lock dropped here
+        };
 
         let count = to_shutdown.len();
 
@@ -228,11 +244,12 @@ impl DeferredAgentRegistry {
     pub async fn deactivate(&self, name: &str) -> Result<(), RegistryError> {
         // Phase 1: Remove agent and take client Arc (under lock)
         let client_arc = {
-            let mut agents = self.agents.lock().await;
-            let slot = agents
-                .get_mut(name)
+            let agents = self.agents.lock().await;
+            let slot_arc = agents
+                .get(name)
                 .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
-            slot.tools = Arc::new(Vec::new());
+            let mut slot = slot_arc.lock().await;
+            slot.tools.take();
             slot.client.take()
         }; // Lock dropped here
 
@@ -262,6 +279,7 @@ mod tests {
     use ap_runtime::mcp_client::ToolInfo;
     use std::future::Future;
     use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// A mock MCP client that returns predefined tools and echoes calls.
     struct MockMcpClient {
@@ -538,5 +556,39 @@ mod tests {
     async fn default_trait_works() {
         let registry = DeferredAgentRegistry::default();
         assert!(registry.list_agents().await.is_empty());
+    }
+
+    /// Verify that a second activation does not call the factory again.
+    #[tokio::test]
+    async fn concurrent_activate_calls_factory_once() {
+        let registry = DeferredAgentRegistry::new();
+        registry.register_manifest(test_manifest("concurrent")).await;
+
+        // First activation with a counter factory.
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_clone = counter.clone();
+        registry
+            .activate(
+                "concurrent",
+                Box::new(move || {
+                    counter_clone.fetch_add(1, Ordering::SeqCst);
+                    Box::new(MockMcpClient::new(sample_tools()))
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+
+        // Second call must NOT invoke the factory.
+        registry
+            .activate(
+                "concurrent",
+                Box::new(|| panic!("Factory should not be called a second time")),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 }

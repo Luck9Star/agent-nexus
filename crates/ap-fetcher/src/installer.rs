@@ -175,6 +175,10 @@ impl GitInstaller {
     }
 
     /// Clone a repository with the given options.
+    ///
+    /// Uses shallow clone (`--depth 1`) for non-local URLs to minimize
+    /// download size and clone time. Falls back to full clone for local paths
+    /// since shallow clones on local repos provide no benefit and may fail.
     fn clone_repo(
         &self,
         url: &str,
@@ -196,6 +200,12 @@ impl GitInstaller {
 
         let mut fetch_opts = git2::FetchOptions::new();
         fetch_opts.remote_callbacks(remote_callbacks);
+
+        // Use shallow clone for remote URLs to reduce download time.
+        let is_local = url.starts_with('/') || url.starts_with('.') || url.starts_with('~');
+        if !is_local {
+            fetch_opts.depth(1);
+        }
 
         let mut builder = git2::build::RepoBuilder::new();
         builder.fetch_options(fetch_opts);
