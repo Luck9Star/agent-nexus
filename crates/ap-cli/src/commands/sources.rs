@@ -13,6 +13,10 @@ fn sources_yaml_path() -> std::path::PathBuf {
 }
 
 /// Run `sources list` command.
+///
+/// Marked as returning `Result` for command-handler uniformity; this command
+/// cannot fail in practice.
+#[allow(clippy::unnecessary_wraps)]
 pub fn run_list(output: &OutputFormatter) -> Result<()> {
     let mgr = SourceManager::new(sources_yaml_path());
     let sources = mgr.list();
@@ -46,7 +50,7 @@ pub fn run_add(name: &str, url: &str, branch: Option<&str>, output: &OutputForma
     let mgr = SourceManager::new(sources_yaml_path());
     mgr.add(entry)?;
 
-    output.success(&format!("Added source '{}' -> {}", name, url));
+    output.success(&format!("Added source '{name}' -> {url}"));
     Ok(())
 }
 
@@ -55,7 +59,7 @@ pub fn run_remove(name: &str, output: &OutputFormatter) -> Result<()> {
     let mgr = SourceManager::new(sources_yaml_path());
     mgr.remove(name)?;
 
-    output.success(&format!("Removed source '{}'", name));
+    output.success(&format!("Removed source '{name}'"));
     Ok(())
 }
 

@@ -58,11 +58,14 @@ impl OutputFormatter {
     }
 
     /// Print structured data. In JSON mode, pretty-print; otherwise display a summary.
+    ///
+    /// `&self` is retained for future mode-dependent formatting (e.g., table output).
+    #[allow(clippy::unused_self)]
     pub fn data<T: Serialize>(&self, data: &T) {
         // Always pretty-print JSON for structured data
         let json = serde_json::to_string_pretty(data)
-            .unwrap_or_else(|e| format!("{{\"error\":\"serialization failed: {}\"}}", e));
-        println!("{}", json);
+            .unwrap_or_else(|e| format!("{{\"error\":\"serialization failed: {e}\"}}"));
+        println!("{json}");
     }
 
     /// Returns whether JSON mode is active.

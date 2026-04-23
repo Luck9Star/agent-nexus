@@ -9,7 +9,7 @@ use crate::output::OutputFormatter;
 
 /// Run `evolution status` command.
 ///
-/// Delegates to EvolutionEngine for skill count and health score.
+/// Delegates to `EvolutionEngine` for skill count and health score.
 pub fn run_status(output: &OutputFormatter) -> Result<()> {
     let root = commands::find_project_root(
         &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -29,8 +29,8 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
     let health_score = engine.get_health_score();
 
     output.info("Evolution Engine status:");
-    output.info(&format!("  Health score: {:.2}", health_score));
-    output.info(&format!("  Skills tracked: {}", skill_count));
+    output.info(&format!("  Health score: {health_score:.2}"));
+    output.info(&format!("  Skills tracked: {skill_count}"));
     Ok(())
 }
 
@@ -55,10 +55,10 @@ pub fn run_promote(skill: &str, output: &OutputFormatter) -> Result<()> {
     // Promoted agents go under .agents/promoted/
     let output_dir = root.join(".agents").join("promoted");
 
-    output.info(&format!("Promoting skill '{}' to agent...", skill));
+    output.info(&format!("Promoting skill '{skill}' to agent..."));
 
     let result = ap_evolution::promotion::promote_skill(&store, skill, &output_dir)
-        .map_err(|e| anyhow::anyhow!("Promotion failed: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Promotion failed: {e}"))?;
 
     output.success(&format!(
         "Skill '{}' promoted to agent at: {}",

@@ -26,6 +26,7 @@ pub struct GitInstaller {
 
 impl GitInstaller {
     /// Create a new installer that installs agents under `install_dir`.
+    #[must_use] 
     pub fn new(install_dir: PathBuf) -> Self {
         Self { install_dir }
     }
@@ -35,6 +36,9 @@ impl GitInstaller {
     /// Clones into a temporary directory (under `install_dir`), optionally checks
     /// out a specific semver version tag, then moves the result to the final
     /// location atomically.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn install(
         &self,
         url: &str,
@@ -62,7 +66,7 @@ impl GitInstaller {
         let final_path = self.install_dir.join(&dir_name);
 
         // Create a temp directory under install_dir for atomic clone
-        let tmp_path = self.install_dir.join(format!(".tmp-{}", dir_name));
+        let tmp_path = self.install_dir.join(format!(".tmp-{dir_name}"));
         if tmp_path.exists() {
             std::fs::remove_dir_all(&tmp_path)?;
         }
@@ -103,7 +107,7 @@ impl GitInstaller {
     /// Find a semver tag matching the given version and check it out.
     pub(crate) fn checkout_version(repo: &git2::Repository, version: &str) -> Result<(), InstallerError> {
         let target = semver::Version::parse(version).map_err(|e| {
-            InstallerError::VersionNotFound(format!("invalid semver '{}': {}", version, e))
+            InstallerError::VersionNotFound(format!("invalid semver '{version}': {e}"))
         })?;
 
         let tags = repo.tag_names(None)?;
@@ -128,7 +132,7 @@ impl GitInstaller {
             ))
         })?;
 
-        let refname = format!("refs/tags/{}", tag);
+        let refname = format!("refs/tags/{tag}");
         let obj = repo.revparse_single(&refname)?;
         repo.checkout_tree(&obj, None)?;
         repo.set_head(&refname)?;
@@ -161,7 +165,7 @@ impl GitInstaller {
         }
     }
 
-    /// Validate that install_dir does not contain path traversal components.
+    /// Validate that `install_dir` does not contain path traversal components.
     fn validate_install_dir(path: &std::path::Path) -> Result<(), InstallerError> {
         for component in path.components() {
             if let std::path::Component::ParentDir = component {
@@ -179,6 +183,9 @@ impl GitInstaller {
     /// Uses shallow clone (`--depth 1`) for non-local URLs to minimize
     /// download size and clone time. Falls back to full clone for local paths
     /// since shallow clones on local repos provide no benefit and may fail.
+    ///
+    /// `&self` is retained for future use (e.g., configurable clone strategies).
+    #[allow(clippy::unused_self)]
     fn clone_repo(
         &self,
         url: &str,

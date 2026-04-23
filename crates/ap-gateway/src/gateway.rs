@@ -73,13 +73,10 @@ impl axum::response::IntoResponse for GatewayError {
             GatewayError::Registry(RegistryError::NotActive(_)) => {
                 (axum::http::StatusCode::SERVICE_UNAVAILABLE, self.to_string())
             }
-            GatewayError::Registry(RegistryError::ActivationFailed(_)) => {
-                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
-            }
-            GatewayError::Registry(RegistryError::ToolExecutionFailed(_)) => {
-                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
-            }
-            GatewayError::ToolCall(_) => {
+            GatewayError::Registry(
+                RegistryError::ActivationFailed(_) | RegistryError::ToolExecutionFailed(_),
+            )
+            | GatewayError::ToolCall(_) => {
                 (axum::http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
             GatewayError::ValidationError(_) => {
@@ -132,6 +129,7 @@ pub struct McpGateway {
 
 impl McpGateway {
     /// Create a new gateway with the given configuration.
+    #[must_use] 
     pub fn new(config: GatewayConfig) -> Self {
         let registry = Arc::new(DeferredAgentRegistry::with_idle_timeout(
             std::time::Duration::from_secs(config.idle_timeout_secs),
@@ -153,6 +151,9 @@ impl McpGateway {
     ///
     /// The server runs on a background tokio task and can be stopped via
     /// [`Self::shutdown`].
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn start(self: &Arc<Self>) -> Result<SocketAddr, GatewayError> {
         let app = Router::new()
             .route("/tools", get(Self::list_tools_handler))

@@ -1,4 +1,4 @@
-//! OrchestrationDSL: TOML DAG parser with cycle detection and topological execution order.
+//! `OrchestrationDSL`: TOML DAG parser with cycle detection and topological execution order.
 //!
 //! Python source: `src/agent_nexus/platform/orchestration/dsl.py` (~350 lines)
 
@@ -62,12 +62,15 @@ struct DslToml {
 impl OrchestrationDsl {
     /// Parse a TOML string into a validated DAG.
     /// Rejects cycles, missing dependencies, and duplicate task names.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn parse(toml: &str) -> Result<Self, DslError> {
         let wrapper: DslToml = toml::from_str(toml)?;
         Self::from_tasks(wrapper.tasks)
     }
 
-    /// Build from a task list (shared logic for parse and from_toml).
+    /// Build from a task list (shared logic for parse and `from_toml`).
     fn from_tasks(tasks: Vec<DslTask>) -> Result<Self, DslError> {
         if tasks.is_empty() {
             return Err(DslError::EmptyDag);
@@ -104,12 +107,16 @@ impl OrchestrationDsl {
     }
 
     /// Load from a TOML file on disk.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn from_toml(path: &std::path::Path) -> Result<Self, DslError> {
         let content = std::fs::read_to_string(path)?;
         Self::parse(&content)
     }
 
     /// Return tasks with no dependencies (entry points).
+    #[must_use] 
     pub fn get_root_tasks(&self) -> Vec<&DslTask> {
         self.tasks
             .iter()
@@ -118,6 +125,7 @@ impl OrchestrationDsl {
     }
 
     /// Return tasks that depend on the given task.
+    #[must_use] 
     pub fn get_dependents(&self, task_name: &str) -> Vec<&DslTask> {
         self.tasks
             .iter()
@@ -127,6 +135,10 @@ impl OrchestrationDsl {
 
     /// Topological execution order (BFS/Kahn's algorithm).
     /// Respects phase ordering for ties.
+    ///
+    /// # Panics
+    /// May panic if internal invariants are violated.
+    #[must_use]
     pub fn get_execution_order(&self) -> Vec<&DslTask> {
         let task_count = self.tasks.len();
         let mut in_degree: HashMap<&str, usize> = HashMap::with_capacity(task_count);
@@ -177,11 +189,7 @@ impl OrchestrationDsl {
         tasks: &[DslTask],
         name_index: &HashMap<String, usize>,
     ) -> Option<Vec<String>> {
-        let mut white: HashSet<&str> = tasks.iter().map(|t| t.name.as_str()).collect();
-        let mut gray: HashSet<&str> = HashSet::new();
-        let mut black: HashSet<&str> = HashSet::new();
-        let mut path: Vec<String> = Vec::new();
-
+        // Inner DFS function must be defined before any let-statements.
         fn dfs<'a>(
             name: &'a str,
             tasks: &'a [DslTask],
@@ -218,6 +226,11 @@ impl OrchestrationDsl {
             path.pop();
             None
         }
+
+        let mut white: HashSet<&str> = tasks.iter().map(|t| t.name.as_str()).collect();
+        let mut gray: HashSet<&str> = HashSet::new();
+        let mut black: HashSet<&str> = HashSet::new();
+        let mut path: Vec<String> = Vec::new();
 
         let names: Vec<&str> = tasks.iter().map(|t| t.name.as_str()).collect();
         for name in names {

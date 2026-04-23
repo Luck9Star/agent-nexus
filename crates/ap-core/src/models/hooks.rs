@@ -1,4 +1,4 @@
-//! Hook system models: HookType, HookEvent, HookDefinition, HookExecution.
+//! Hook system models: `HookType`, `HookEvent`, `HookDefinition`, `HookExecution`.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -74,6 +74,9 @@ pub struct HookExecution {
 impl HookExecution {
     /// Validate: cannot be both passed and blocked.
     /// Python source: models/hooks.py `_validate_passed_blocked`
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn validate(&self) -> Result<(), String> {
         if self.passed && self.blocked {
             return Err("HookExecution cannot be both passed and blocked".into());
@@ -98,6 +101,9 @@ pub struct AggregatedHookResult {
 
 impl HookDefinition {
     /// Validate the hook definition.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn validate(&self) -> Result<(), String> {
         if !self.enabled {
             return Ok(());

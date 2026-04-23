@@ -1,4 +1,4 @@
-//! ConfigLoader: load `config.toml` and return a `PlatformConfig`.
+//! `ConfigLoader`: load `config.toml` and return a `PlatformConfig`.
 //!
 //! Mirrors the Python `ConfigLoader.load_config()` behaviour:
 //! missing fields fall back to built-in defaults via serde defaults.
@@ -30,6 +30,9 @@ impl ConfigLoader {
     ///
     /// Missing fields fall back to their serde defaults (identical to
     /// `PlatformConfig::default()`).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn load_from_path(path: &Path) -> Result<PlatformConfig, ConfigError> {
         let content = std::fs::read_to_string(path)?;
         Self::load_from_str(&content)
@@ -40,6 +43,9 @@ impl ConfigLoader {
     /// After parsing, built-in provider defaults are merged (for any providers
     /// not already in the config) and environment variable overrides for the
     /// default model are applied (`AGENT_MODEL` > `DEFAULT_MODEL`).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn load_from_str(content: &str) -> Result<PlatformConfig, ConfigError> {
         let mut config: PlatformConfig = toml::from_str(content)?;
         apply_builtin_providers(&mut config);
@@ -49,6 +55,7 @@ impl ConfigLoader {
 
     /// Load from `path`, returning full defaults on any error (missing file,
     /// parse error, etc.).
+    #[must_use] 
     pub fn load_or_default(path: &Path) -> PlatformConfig {
         Self::load_from_path(path).unwrap_or_default()
     }

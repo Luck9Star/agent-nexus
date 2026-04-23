@@ -1,7 +1,7 @@
-//! AgentProcess: wraps a tokio subprocess with piped stdin/stdout for IPC.
+//! `AgentProcess`: wraps a tokio subprocess with piped stdin/stdout for IPC.
 //!
 //! This is a higher-level, single-process wrapper compared to ap-core's
-//! ProcessManager (which manages a map of processes). AgentProcess owns
+//! `ProcessManager` (which manages a map of processes). `AgentProcess` owns
 //! exactly one child process and provides lifecycle + I/O extraction.
 
 use std::mem::ManuallyDrop;
@@ -38,6 +38,14 @@ pub struct AgentProcess {
 
 impl AgentProcess {
     /// Spawn a new subprocess with piped stdin/stdout and inherited stderr.
+    ///
+    /// Marked `async` for API consistency; the underlying `Command::spawn` is
+    /// synchronous but callers may use this in async contexts where a future
+    /// `async` implementation is anticipated.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    #[allow(clippy::unused_async)]
     pub async fn spawn(id: &str, cmd: &str, args: &[&str]) -> Result<Self, ProcessError> {
         let mut child = Command::new(cmd)
             .args(args)
@@ -68,6 +76,7 @@ impl AgentProcess {
     }
 
     /// Returns the agent ID.
+    #[must_use] 
     pub fn id(&self) -> &str {
         &self.id
     }
@@ -78,6 +87,9 @@ impl AgentProcess {
     }
 
     /// Kill the process.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn kill(&mut self) -> Result<(), ProcessError> {
         self.child.kill().await.map_err(ProcessError::Kill)
     }
@@ -103,6 +115,7 @@ impl AgentProcess {
 
     /// Consume self, returning (id, stdin, stdout, child).
     /// stdin/stdout are sink/empty if already taken via `take_io()`.
+    #[must_use] 
     pub fn split(
         mut self,
     ) -> (

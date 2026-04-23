@@ -8,6 +8,10 @@ use crate::commands;
 use crate::output::OutputFormatter;
 
 /// Run `env` command -- display config dir, python version, git, uv, providers status.
+///
+/// Marked as returning `Result` for command-handler uniformity; this command
+/// cannot fail in practice.
+#[allow(clippy::unnecessary_wraps)]
 pub fn run(output: &OutputFormatter) -> Result<()> {
     let root = commands::find_project_root(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
 
@@ -29,9 +33,9 @@ pub fn run(output: &OutputFormatter) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&obj).expect("JSON serialization is infallible"));
     } else {
         println!("Config dir: {}", root.display());
-        println!("Python: {}", python_version);
-        println!("Git: {}", git_version);
-        println!("uv: {}", uv_version);
+        println!("Python: {python_version}");
+        println!("Git: {git_version}");
+        println!("uv: {uv_version}");
         if provider_names.is_empty() {
             println!("Providers: (none configured)");
         } else {
@@ -46,27 +50,23 @@ pub fn run(output: &OutputFormatter) -> Result<()> {
 fn get_command_output(cmd: &str, args: &[&str]) -> String {
     Command::new(cmd)
         .args(args)
-        .output()
-        .map(|o| {
+        .output().map_or_else(|_| "not found".to_string(), |o| {
             if o.status.success() {
                 String::from_utf8_lossy(&o.stdout).trim().to_string()
             } else {
                 String::from_utf8_lossy(&o.stderr).trim().to_string()
             }
         })
-        .unwrap_or_else(|_| "not found".to_string())
 }
 
 /// Load provider names from config.toml, falling back to defaults.
 fn load_provider_names(root: &std::path::Path) -> Vec<String> {
     let config_path = root.join("config.toml");
-    let content = match std::fs::read_to_string(&config_path) {
-        Ok(c) => c,
-        Err(_) => return vec![],
+    let Ok(content) = std::fs::read_to_string(&config_path) else {
+        return vec![];
     };
-    let config: toml::Value = match toml::from_str(&content) {
-        Ok(c) => c,
-        Err(_) => return vec![],
+    let Ok(config): Result<toml::Value, _> = toml::from_str(&content) else {
+        return vec![];
     };
     config
         .get("models")

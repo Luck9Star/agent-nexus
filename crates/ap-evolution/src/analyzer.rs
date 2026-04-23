@@ -1,4 +1,4 @@
-//! ExecutionAnalyzer — post-task analysis to identify evolution opportunities.
+//! `ExecutionAnalyzer` — post-task analysis to identify evolution opportunities.
 //!
 //! This is a stateless analysis pass: given a `TaskResult`, produce a list of
 //! `EvolutionSuggestion`s. The analyzer does not touch the store itself.
@@ -46,6 +46,7 @@ pub struct Analyzer;
 
 impl Analyzer {
     /// Create a new analyzer instance.
+    #[must_use] 
     pub fn new() -> Self {
         Self
     }
@@ -55,6 +56,7 @@ impl Analyzer {
     /// Current logic:
     /// - Failed task with an error message produces a `Fix` suggestion.
     /// - Successful tasks produce no suggestions (for now).
+    #[must_use] 
     pub fn analyze(&self, task_result: &TaskResult) -> Vec<EvolutionSuggestion> {
         let mut suggestions = Vec::new();
 

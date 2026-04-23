@@ -8,6 +8,7 @@
 /// A rough 4-bytes-per-token estimate is used. If the context fits within the
 /// budget it is returned unchanged; otherwise it is truncated and `...` is
 /// appended.
+#[must_use] 
 pub fn compact(context: &str, max_tokens: usize) -> String {
     let max_bytes = max_tokens.saturating_mul(4);
     if context.len() <= max_bytes {

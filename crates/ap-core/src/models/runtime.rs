@@ -1,4 +1,4 @@
-//! Python Runtime models: Variable, Function, RuntimeType, ExecutionResult, SecurityViolation.
+//! Python Runtime models: Variable, Function, `RuntimeType`, `ExecutionResult`, `SecurityViolation`.
 
 use serde::{Deserialize, Serialize};
 

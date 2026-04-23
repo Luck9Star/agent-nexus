@@ -1,4 +1,4 @@
-//! Configuration models: ProviderConfig, ModelConfig, RuntimeConfig, PlatformConfig.
+//! Configuration models: `ProviderConfig`, `ModelConfig`, `RuntimeConfig`, `PlatformConfig`.
 
 use serde::{Deserialize, Serialize};
 

@@ -26,7 +26,7 @@ fn get_from_path(path: &Path, key: &str, output: &OutputFormatter) -> Result<()>
     let config: toml::Value = toml::from_str(&content).with_context(|| "Invalid config.toml")?;
 
     let value = lookup_toml_key(&config, key).with_context(|| {
-        format!("Key '{}' not found in config.toml", key)
+        format!("Key '{key}' not found in config.toml")
     })?;
 
     if output.is_json() {
@@ -60,7 +60,7 @@ fn set_in_path(path: &Path, key: &str, value: &str, output: &OutputFormatter) ->
     let content = std::fs::read_to_string(path)?;
     let mut config: toml::Value = toml::from_str(&content).with_context(|| "Invalid config.toml")?;
 
-    set_toml_key(&mut config, key, value).with_context(|| format!("Cannot set key '{}'", key))?;
+    set_toml_key(&mut config, key, value).with_context(|| format!("Cannot set key '{key}'"))?;
 
     let new_content = toml::to_string_pretty(&config)?;
 
@@ -69,7 +69,7 @@ fn set_in_path(path: &Path, key: &str, value: &str, output: &OutputFormatter) ->
     std::fs::write(&tmp_path, &new_content)?;
     std::fs::rename(&tmp_path, path)?;
 
-    output.success(&format!("Set {} = {}", key, value));
+    output.success(&format!("Set {key} = {value}"));
     Ok(())
 }
 
@@ -106,26 +106,26 @@ pub fn run_show(output: &OutputFormatter) -> Result<()> {
             let config: toml::Value = toml::from_str(&content).with_context(|| "Invalid config.toml")?;
 
             if let Some(default) = config.get("models").and_then(|m| m.get("default")).and_then(|v| v.as_str()) {
-                println!("Default model: {}", default);
+                println!("Default model: {default}");
             } else {
                 println!("Default model: openai:gpt-4o (built-in default)");
             }
 
             // Python path
             if let Some(python) = config.get("runtime").and_then(|r| r.get("python_path")).and_then(|v| v.as_str()) {
-                println!("Python path: {}", python);
+                println!("Python path: {python}");
             }
 
             // uv path
             if let Some(uv) = config.get("runtime").and_then(|r| r.get("uv_path")).and_then(|v| v.as_str()) {
-                println!("uv path: {}", uv);
+                println!("uv path: {uv}");
             }
 
             // Providers
             if let Some(providers) = config.get("models").and_then(|m| m.get("providers")).and_then(|v| v.as_table()) {
                 println!("Providers:");
                 for (name, _cfg) in providers {
-                    println!("  - {}", name);
+                    println!("  - {name}");
                 }
             }
         } else {

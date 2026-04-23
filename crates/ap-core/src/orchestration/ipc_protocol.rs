@@ -1,6 +1,6 @@
-//! IpcProtocol: high-level semantic methods over IpcStream.
+//! `IpcProtocol`: high-level semantic methods over `IpcStream`.
 //!
-//! Python source: `src/agent_nexus/platform/orchestration/ipc.py` — send_chat, send_task, heartbeat
+//! Python source: `src/agent_nexus/platform/orchestration/ipc.py` — `send_chat`, `send_task`, heartbeat
 
 use crate::models::ipc::{AgentToPlatform, AgentToPlatformType, PlatformToAgent, PlatformToAgentType};
 use crate::orchestration::ipc::{IpcError, IpcStream};
@@ -33,6 +33,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
     }
 
     /// Send a chat message to an agent.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn send_chat(
         &mut self,
         content: &str,
@@ -42,7 +45,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
             .send(&PlatformToAgent {
                 msg_type: PlatformToAgentType::Chat,
                 content: content.into(),
-                conversation_id: conversation_id.map(|s| s.into()),
+                conversation_id: conversation_id.map(std::convert::Into::into),
                 task_id: None,
                 ref_id: None,
                 summary: None,
@@ -51,6 +54,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
     }
 
     /// Send a task message to an agent.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn send_task(&mut self, content: &str, task_id: &str) -> Result<(), IpcError> {
         self.stream
             .send(&PlatformToAgent {
@@ -64,8 +70,11 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
             .await
     }
 
-    /// Receive the next agent response, converting it to an AgentResult.
-    /// If a timeout (in seconds) is provided, aborts with IpcError::Timeout on expiry.
+    /// Receive the next agent response, converting it to an `AgentResult`.
+    /// If a timeout (in seconds) is provided, aborts with `IpcError::Timeout` on expiry.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn receive_result(&mut self, timeout: Option<f64>) -> Result<AgentResult, IpcError> {
         let receive_fut = self.stream.receive::<AgentToPlatform>();
         let msg = match timeout {

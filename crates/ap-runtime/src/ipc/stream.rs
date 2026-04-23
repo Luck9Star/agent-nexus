@@ -1,7 +1,7 @@
-//! AgentIpcStream: wraps ap-core's IpcStream with agent-specific features.
+//! `AgentIpcStream`: wraps ap-core's `IpcStream` with agent-specific features.
 //!
 //! Adds heartbeat ping-pong and typed send/receive using ap-core's
-//! PlatformToAgent / AgentToPlatform models.
+//! `PlatformToAgent` / `AgentToPlatform` models.
 
 use ap_core::models::ipc::{
     AgentToPlatform, AgentToPlatformType, PlatformToAgent, PlatformToAgentType,
@@ -19,35 +19,44 @@ const HEARTBEAT_TIMEOUT_SECS: f64 = 10.0;
 // AgentIpcStream
 // ---------------------------------------------------------------------------
 
-/// Wraps IpcStream with agent-specific send/receive and heartbeat support.
+/// Wraps `IpcStream` with agent-specific send/receive and heartbeat support.
 pub struct AgentIpcStream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     inner: IpcStream<R, W>,
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentIpcStream<R, W> {
-    /// Create a new AgentIpcStream from raw reader/writer halves.
+    /// Create a new `AgentIpcStream` from raw reader/writer halves.
     pub fn new(reader: R, writer: W) -> Self {
         Self {
             inner: IpcStream::new(reader, writer),
         }
     }
 
-    /// Create from an existing IpcStream.
+    /// Create from an existing `IpcStream`.
     pub fn from_stream(stream: IpcStream<R, W>) -> Self {
         Self { inner: stream }
     }
 
     /// Send any serializable message.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn send<T: Serialize>(&mut self, msg: &T) -> Result<(), IpcError> {
         self.inner.send(msg).await
     }
 
     /// Receive any deserializable message.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn receive<T: DeserializeOwned>(&mut self) -> Result<T, IpcError> {
         self.inner.receive::<T>().await
     }
 
-    /// Send a PlatformToAgent chat message.
+    /// Send a `PlatformToAgent` chat message.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn send_chat(
         &mut self,
         content: &str,
@@ -56,7 +65,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentIpcStream<R, W> {
         self.send(&PlatformToAgent {
             msg_type: PlatformToAgentType::Chat,
             content: content.to_string(),
-            conversation_id: conversation_id.map(|s| s.to_string()),
+            conversation_id: conversation_id.map(std::string::ToString::to_string),
             task_id: None,
             ref_id: None,
             summary: None,
@@ -64,7 +73,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentIpcStream<R, W> {
         .await
     }
 
-    /// Send a PlatformToAgent task message.
+    /// Send a `PlatformToAgent` task message.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn send_task(&mut self, content: &str, task_id: &str) -> Result<(), IpcError> {
         self.send(&PlatformToAgent {
             msg_type: PlatformToAgentType::Task,
@@ -77,7 +89,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentIpcStream<R, W> {
         .await
     }
 
-    /// Receive an AgentToPlatform response with optional timeout.
+    /// Receive an `AgentToPlatform` response with optional timeout.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn receive_response(
         &mut self,
         timeout: Option<Duration>,
@@ -97,10 +112,13 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentIpcStream<R, W> {
         }
     }
 
-    /// Heartbeat: send a ping message and expect a pong within HEARTBEAT_TIMEOUT_SECS.
+    /// Heartbeat: send a ping message and expect a pong within `HEARTBEAT_TIMEOUT_SECS`.
     ///
     /// Uses a chat message with content "__ping__" as heartbeat. The agent
     /// is expected to respond with a result message containing "__pong__".
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn heartbeat(&mut self) -> Result<(), IpcError> {
         self.send_chat("__ping__", None).await?;
         let timeout_dur = Duration::from_secs_f64(HEARTBEAT_TIMEOUT_SECS);

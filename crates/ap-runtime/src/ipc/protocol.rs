@@ -1,6 +1,6 @@
 //! High-level IPC protocol operations for agent communication.
 //!
-//! Provides convenience methods: send_chat, send_task, receive_result, heartbeat.
+//! Provides convenience methods: `send_chat`, `send_task`, `receive_result`, heartbeat.
 
 use ap_core::models::ipc::{
     AgentToPlatformType, PlatformToAgent, PlatformToAgentType,
@@ -14,7 +14,7 @@ use super::stream::AgentIpcStream;
 /// Default heartbeat timeout: 10 seconds.
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Re-export AgentResult from ap-core (canonical definition).
+/// Re-export `AgentResult` from ap-core (canonical definition).
 pub use ap_core::orchestration::ipc_protocol::AgentResult;
 
 // ---------------------------------------------------------------------------
@@ -27,19 +27,22 @@ pub struct AgentProtocol<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentProtocol<R, W> {
-    /// Create a new AgentProtocol from raw reader/writer halves.
+    /// Create a new `AgentProtocol` from raw reader/writer halves.
     pub fn new(reader: R, writer: W) -> Self {
         Self {
             stream: AgentIpcStream::new(reader, writer),
         }
     }
 
-    /// Create from an existing AgentIpcStream.
+    /// Create from an existing `AgentIpcStream`.
     pub fn from_stream(stream: AgentIpcStream<R, W>) -> Self {
         Self { stream }
     }
 
     /// Send a chat message to the agent.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn send_chat(
         &mut self,
         content: &str,
@@ -51,12 +54,18 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentProtocol<R, W> {
     }
 
     /// Send a task message to the agent.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn send_task(&mut self, content: &str, task_id: &str) -> Result<(), IpcError> {
         self.stream.send_task(content, task_id).await
     }
 
-    /// Receive the next agent response and convert it to an AgentResult.
-    /// If a timeout is provided, aborts with IpcError::Timeout on expiry.
+    /// Receive the next agent response and convert it to an `AgentResult`.
+    /// If a timeout is provided, aborts with `IpcError::Timeout` on expiry.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn receive_result(&mut self, timeout: Option<Duration>) -> Result<AgentResult, IpcError> {
         let msg = self.stream.receive_response(timeout).await?;
         let success = msg.is_success();
@@ -80,6 +89,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentProtocol<R, W> {
     }
 
     /// Heartbeat: send ping, expect pong within 10 seconds.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn heartbeat(&mut self) -> Result<(), IpcError> {
         // Send ping message
         self.stream

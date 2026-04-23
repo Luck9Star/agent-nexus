@@ -443,3 +443,90 @@ fn help_shows_all_subcommands() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Create agent edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn create_agent_very_long_name() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Create a name with 256+ characters
+    let long_name = "a".repeat(300);
+
+    // The name passes validate_fs_name (no path traversal chars), so create
+    // should succeed. Filesystems support long filenames, and our validation
+    // does not impose a length limit.
+    let result = Command::cargo_bin("agent-nexus")
+        .unwrap()
+        .args(["create", "agent", &long_name])
+        .current_dir(dir.path())
+        .assert();
+
+    if result.get_output().status.success() {
+        // If it succeeded, verify the scaffold exists
+        let agent_dir = dir.path().join("agents").join("atomic").join(&long_name);
+        assert!(
+            agent_dir.join("SKILL.md").exists(),
+            "SKILL.md should exist for long-named agent"
+        );
+    }
+    // If it failed, that's also acceptable -- filesystems may reject very long names.
+    // The key requirement is that it does not panic.
+    let stderr = String::from_utf8_lossy(&result.get_output().stderr);
+    let stdout = String::from_utf8_lossy(&result.get_output().stdout);
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        !combined.contains("panic"),
+        "create agent with long name should not panic, got: {combined:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Sources remove edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sources_remove_last_source() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+
+    // Add a single source
+    Command::cargo_bin("agent-nexus")
+        .unwrap()
+        .args([
+            "sources",
+            "add",
+            "only-source",
+            "https://github.com/example/repo",
+        ])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    // Remove it -- this leaves the sources list empty
+    Command::cargo_bin("agent-nexus")
+        .unwrap()
+        .args(["sources", "remove", "only-source"])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    // List should show empty
+    let output = Command::cargo_bin("agent-nexus")
+        .unwrap()
+        .args(["--json", "sources", "list"])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout).expect("Expected valid JSON");
+    let sources = parsed.as_array().expect("Expected JSON array");
+    assert!(
+        sources.is_empty(),
+        "After removing the last source, list should be empty, got: {sources:?}"
+    );
+}

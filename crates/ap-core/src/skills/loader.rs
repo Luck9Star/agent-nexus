@@ -1,4 +1,4 @@
-//! SkillLoader — parses SKILL.md files with YAML frontmatter (--- delimiters).
+//! `SkillLoader` — parses SKILL.md files with YAML frontmatter (--- delimiters).
 
 use crate::skills::models::Skill;
 
@@ -22,6 +22,9 @@ use crate::skills::models::Skill;
 ///
 /// If no frontmatter is found, all YAML fields default to empty and the
 /// entire content becomes the body.
+///
+/// # Errors
+/// Returns an error if the underlying operation fails.
 pub fn parse_skill(content: &str) -> Result<Skill, String> {
     let content = content.trim_start();
 
@@ -54,17 +57,14 @@ pub fn parse_skill(content: &str) -> Result<Skill, String> {
         .position(|l| l.trim() == "---")
         .map(|p| p + 1); // offset by 1 since we sliced from [1..]
 
-    let (yaml_str, body) = match closing_idx {
-        Some(ci) => {
-            let yaml_part = lines[1..ci].join("\n");
-            let body_part = lines[ci + 1..].join("\n");
-            (yaml_part.trim().to_string(), body_part.trim().to_string())
-        }
-        None => {
-            // No closing delimiter — everything after opening --- is YAML
-            let yaml_part = lines[1..].join("\n");
-            (yaml_part.trim().to_string(), String::new())
-        }
+    let (yaml_str, body) = if let Some(ci) = closing_idx {
+        let yaml_part = lines[1..ci].join("\n");
+        let body_part = lines[ci + 1..].join("\n");
+        (yaml_part.trim().to_string(), body_part.trim().to_string())
+    } else {
+        // No closing delimiter — everything after opening --- is YAML
+        let yaml_part = lines[1..].join("\n");
+        (yaml_part.trim().to_string(), String::new())
     };
 
     if yaml_str.is_empty() {

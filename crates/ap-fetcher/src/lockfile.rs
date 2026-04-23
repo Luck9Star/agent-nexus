@@ -24,17 +24,24 @@ pub struct LockfileManager {
 
 impl LockfileManager {
     /// Create a new lockfile manager pointing to the given `lockfile.json` path.
+    #[must_use] 
     pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
 
     /// Static: parse a JSON string into a `Lockfile`.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn parse(json: &str) -> Result<Lockfile, LockfileError> {
         let lockfile: Lockfile = serde_json::from_str(json)?;
         Ok(lockfile)
     }
 
     /// Load lockfile from disk. Returns default (empty) lockfile if file is missing.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn load(&self) -> Result<Lockfile, LockfileError> {
         if !self.path.exists() {
             debug!("Lockfile not found, returning default: {:?}", self.path);
@@ -49,6 +56,9 @@ impl LockfileManager {
     }
 
     /// Atomically write the lockfile as pretty-printed JSON (write to `.tmp`, then rename).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn save(&self, lockfile: &Lockfile) -> Result<(), LockfileError> {
         let json = serde_json::to_string_pretty(lockfile)?;
 
@@ -71,6 +81,9 @@ impl LockfileManager {
     }
 
     /// Add or update an agent entry in the lockfile.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn add(&self, name: &str, entry: LockfileEntry) -> Result<(), LockfileError> {
         let mut lockfile = self.load()?;
         lockfile.agents.insert(name.to_string(), entry);
@@ -78,6 +91,9 @@ impl LockfileManager {
     }
 
     /// Remove an agent entry from the lockfile.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn remove(&self, name: &str) -> Result<(), LockfileError> {
         let mut lockfile = self.load()?;
         lockfile.agents.remove(name);
@@ -85,12 +101,18 @@ impl LockfileManager {
     }
 
     /// Check if an agent exists in the lockfile.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn has(&self, name: &str) -> Result<bool, LockfileError> {
         let lockfile = self.load()?;
         Ok(lockfile.agents.contains_key(name))
     }
 
     /// Get a specific agent entry from the lockfile, if present.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn get(&self, name: &str) -> Result<Option<LockfileEntry>, LockfileError> {
         let lockfile = self.load()?;
         Ok(lockfile.agents.get(name).cloned())

@@ -21,8 +21,7 @@ fn resolve_python() -> String {
             // Reject values with path traversal
             if val.contains("..") || val.contains('\0') {
                 eprintln!(
-                    "Warning: AGENT_NEXUS_PYTHON contains suspicious path '{}', falling back to python3",
-                    val
+                    "Warning: AGENT_NEXUS_PYTHON contains suspicious path '{val}', falling back to python3"
                 );
                 "python3".to_string()
             } else {
@@ -39,7 +38,7 @@ fn resolve_python() -> String {
 /// `AgentProcess`, communicates via IPC (JSON-lines), and displays the result.
 pub fn run_exec(agent: &str, args: &[String], output: &OutputFormatter) -> Result<()> {
     commands::validate_fs_name(agent)
-        .with_context(|| format!("Invalid agent name: {}", agent))?;
+        .with_context(|| format!("Invalid agent name: {agent}"))?;
 
     let root = commands::find_project_root(
         &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -60,8 +59,7 @@ pub fn run_exec(agent: &str, args: &[String], output: &OutputFormatter) -> Resul
         .context("Failed to read lockfile")?
         .with_context(|| {
             format!(
-                "Agent '{}' not found in lockfile. Install it first with `agent-nexus install {}`.",
-                agent, agent
+                "Agent '{agent}' not found in lockfile. Install it first with `agent-nexus install {agent}`."
             )
         })?;
 
@@ -91,7 +89,7 @@ pub fn run_exec(agent: &str, args: &[String], output: &OutputFormatter) -> Resul
         (python, a)
     };
 
-    output.info(&format!("Spawning agent '{}' via {} ...", agent, cmd));
+    output.info(&format!("Spawning agent '{agent}' via {cmd} ..."));
     if !args.is_empty() {
         output.info(&format!("  Args: {}", args.join(" ")));
     }
@@ -103,7 +101,7 @@ pub fn run_exec(agent: &str, args: &[String], output: &OutputFormatter) -> Resul
     Ok(())
 }
 
-/// Async inner: spawn AgentProcess, send task via IPC, display result.
+/// Async inner: spawn `AgentProcess`, send task via IPC, display result.
 async fn async_exec(
     agent_id: &str,
     cmd: &str,
@@ -111,7 +109,7 @@ async fn async_exec(
     _source: &str,
     output: &OutputFormatter,
 ) -> Result<()> {
-    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
 
     let mut proc = ap_runtime::AgentProcess::spawn(agent_id, cmd, &arg_refs)
         .await
@@ -135,7 +133,7 @@ async fn async_exec(
         .await
         .context("Failed to send task to agent via IPC")?;
 
-    output.info(&format!("Task sent (id={}), waiting for response...", task_id));
+    output.info(&format!("Task sent (id={task_id}), waiting for response..."));
 
     // Wait for response with timeout
     let timeout = Duration::from_secs(RESPONSE_TIMEOUT_SECS);
@@ -149,7 +147,7 @@ async fn async_exec(
             }
         }
         Err(e) => {
-            output.error(&format!("Agent communication error: {}", e));
+            output.error(&format!("Agent communication error: {e}"));
         }
     }
 

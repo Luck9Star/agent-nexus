@@ -29,11 +29,13 @@ impl Default for Thresholds {
 
 impl Thresholds {
     /// Create a new Thresholds with default values.
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Check if the given metrics meet the promotion criteria.
+    #[must_use] 
     pub fn is_promotion_eligible(
         &self,
         selections: u32,
@@ -46,6 +48,7 @@ impl Thresholds {
     }
 
     /// Check if the given metrics meet the minimum viability criteria.
+    #[must_use] 
     pub fn is_viable(&self, selections: u32, success_rate: f64, applications: u32) -> bool {
         selections >= self.min_selections
             && success_rate >= self.min_success_rate

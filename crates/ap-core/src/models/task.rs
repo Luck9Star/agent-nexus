@@ -1,4 +1,4 @@
-//! Task graph models: TaskItem, TaskState.
+//! Task graph models: `TaskItem`, `TaskState`.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,9 @@ pub struct TaskItem {
 
 impl TaskItem {
     /// Validate that a task does not block itself.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn validate_no_self_reference(&self) -> Result<(), String> {
         if self.blocked_by.contains(&self.id) {
             return Err(format!("Task '{}' cannot block itself", self.id));

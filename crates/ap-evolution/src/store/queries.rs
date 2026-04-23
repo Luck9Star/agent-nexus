@@ -56,7 +56,12 @@ pub struct AgentRecord {
 }
 
 /// A row from the `skill_judgments` table.
+///
+/// Contains multiple boolean flags tracking judgment lifecycle. The bool
+/// fields are inherent to the domain model (judgment outcomes) and cannot
+/// be meaningfully simplified.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct SkillJudgment {
     pub id: String,
     pub analysis_id: String,
@@ -88,7 +93,7 @@ pub(crate) fn insert_skill(conn: &Connection, skill: &SkillRecord) -> Result<(),
             skill.lineage_content_diff,
             skill.lineage_content_snapshot,
             skill.directory,
-            skill.is_active as i32,
+            i32::from(skill.is_active),
             skill.total_selections,
             skill.total_applied,
             skill.total_completions,
@@ -284,10 +289,10 @@ pub(crate) fn save_judgment(conn: &Connection, judgment: &SkillJudgment) -> Resu
             judgment.id,
             judgment.analysis_id,
             judgment.skill_id,
-            judgment.selected as i32,
-            judgment.applied as i32,
-            judgment.completed as i32,
-            judgment.fell_back as i32,
+            i32::from(judgment.selected),
+            i32::from(judgment.applied),
+            i32::from(judgment.completed),
+            i32::from(judgment.fell_back),
         ],
     )?;
     Ok(())
@@ -375,7 +380,7 @@ pub(crate) fn get_ancestry(
         placeholders.join(",")
     );
     let mut stmt = conn.prepare(&sql)?;
-    let params: Vec<&str> = visited.iter().map(|s| s.as_str()).collect();
+    let params: Vec<&str> = visited.iter().map(std::string::String::as_str).collect();
     let rows = stmt.query_map(rusqlite::params_from_iter(params.iter().copied()), skill_record_from_row)?;
     for skill in rows {
         ancestors.push(skill?);

@@ -1,4 +1,4 @@
-//! Model string resolution: "provider:model_name" -> ResolvedModel.
+//! Model string resolution: "`provider:model_name`" -> `ResolvedModel`.
 //!
 //! Python source: `src/agent_nexus/platform/config/model_config.py` (~320 lines)
 
@@ -26,6 +26,7 @@ pub struct ModelConfigManager {
 }
 
 impl ModelConfigManager {
+    #[must_use] 
     pub fn new(config: PlatformConfig) -> Self {
         Self { config }
     }
@@ -37,59 +38,57 @@ impl ModelConfigManager {
     /// only the first colon is used to split provider from model name.
     ///
     /// Resolution priority (6 levels, matching Python behaviour):
-    /// 1. Explicit model string passed to resolve()
+    /// 1. Explicit model string passed to `resolve()`
     /// 2. _(Agent's own config — handled at call site, not here)_
     /// 3. Platform default from config
     /// 4. Environment variable `AGENT_MODEL`
     /// 5. Environment variable `DEFAULT_MODEL`
     /// 6. Hardcoded fallback `"openai:gpt-4o"`
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn resolve(&self, model_string: &str) -> Result<ResolvedModel, ModelConfigError> {
         // Level 1: Explicit model string
-        let (provider_name, model_name) = match model_string.split_once(':') {
-            Some((p, m)) => (p.to_string(), m.to_string()),
-            None => {
-                // Level 3: Platform default
-                let default_provider =
-                    self.config.models.default.split(':').next().unwrap_or("openai");
-                (default_provider.to_string(), model_string.to_string())
-            }
+        let (provider_name, model_name) = if let Some((p, m)) = model_string.split_once(':') { (p.to_string(), m.to_string()) } else {
+            // Level 3: Platform default
+            let default_provider =
+                self.config.models.default.split(':').next().unwrap_or("openai");
+            (default_provider.to_string(), model_string.to_string())
         };
 
         // Try to find provider config
         let provider = self.config.models.providers.get(&provider_name);
-        match provider {
-            Some(p) => Ok(ResolvedModel {
-                provider_name,
-                model_name,
-                base_url: p.base_url.clone(),
-                api_key_env: p.api_key_env.clone(),
-                api_type: p.api,
-            }),
-            None => {
-                // Levels 4-6: Try AGENT_MODEL, DEFAULT_MODEL, hardcoded fallback
-                for ref fb in [
-                    std::env::var("AGENT_MODEL").ok(),
-                    std::env::var("DEFAULT_MODEL").ok(),
-                    Some("openai:gpt-4o".to_string()),
-                ].into_iter().flatten() {
-                    if let Some((fb_provider, _fb_model)) = fb.split_once(':') {
-                        if let Some(p) = self.config.models.providers.get(fb_provider) {
-                            return Ok(ResolvedModel {
-                                provider_name: fb_provider.to_string(),
-                                model_name: model_name.clone(),
-                                base_url: p.base_url.clone(),
-                                api_key_env: p.api_key_env.clone(),
-                                api_type: p.api,
-                            });
-                        }
+        if let Some(p) = provider { Ok(ResolvedModel {
+            provider_name,
+            model_name,
+            base_url: p.base_url.clone(),
+            api_key_env: p.api_key_env.clone(),
+            api_type: p.api,
+        }) } else {
+            // Levels 4-6: Try AGENT_MODEL, DEFAULT_MODEL, hardcoded fallback
+            for ref fb in [
+                std::env::var("AGENT_MODEL").ok(),
+                std::env::var("DEFAULT_MODEL").ok(),
+                Some("openai:gpt-4o".to_string()),
+            ].into_iter().flatten() {
+                if let Some((fb_provider, _fb_model)) = fb.split_once(':') {
+                    if let Some(p) = self.config.models.providers.get(fb_provider) {
+                        return Ok(ResolvedModel {
+                            provider_name: fb_provider.to_string(),
+                            model_name: model_name.clone(),
+                            base_url: p.base_url.clone(),
+                            api_key_env: p.api_key_env.clone(),
+                            api_type: p.api,
+                        });
                     }
                 }
-                Err(ModelConfigError::ProviderNotFound(provider_name))
             }
+            Err(ModelConfigError::ProviderNotFound(provider_name))
         }
     }
 
     /// Look up an API key from an environment variable name.
+    #[must_use] 
     pub fn resolve_api_key(&self, env_var: &str) -> Option<String> {
         if env_var.is_empty() {
             return None;
@@ -98,6 +97,7 @@ impl ModelConfigManager {
     }
 
     /// Return the configured default model string.
+    #[must_use] 
     pub fn default_model(&self) -> &str {
         &self.config.models.default
     }

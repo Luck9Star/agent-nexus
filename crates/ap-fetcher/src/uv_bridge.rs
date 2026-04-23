@@ -26,12 +26,12 @@ pub enum UvError {
 fn validate_requirement(req: &str) -> Result<(), UvError> {
     if req.starts_with('-') {
         return Err(UvError::CommandFailed(
-            format!("Invalid requirement (starts with '-'): {}", req)
+            format!("Invalid requirement (starts with '-'): {req}")
         ));
     }
     if req.contains(|c: char| c.is_control() || c == ' ' || c == '\t') {
         return Err(UvError::CommandFailed(
-            format!("Invalid requirement (contains whitespace/control chars): {:?}", req)
+            format!("Invalid requirement (contains whitespace/control chars): {req:?}")
         ));
     }
     // Reject URL-based requirements (package @ git+https://..., direct URLs)
@@ -39,7 +39,7 @@ fn validate_requirement(req: &str) -> Result<(), UvError> {
     let url_schemes = ["http://", "https://", "git+", "ftp://", "file://"];
     if url_schemes.iter().any(|s| lower.contains(s)) {
         return Err(UvError::CommandFailed(
-            format!("Invalid requirement (URL scheme not allowed): {}", req)
+            format!("Invalid requirement (URL scheme not allowed): {req}")
         ));
     }
     // Reject embedded pip options after semicolon
@@ -48,7 +48,7 @@ fn validate_requirement(req: &str) -> Result<(), UvError> {
         // Allow environment markers (e.g. ; python_version >= "3.8") but reject flags
         if after.split(',').any(|part| part.trim().starts_with('-')) {
             return Err(UvError::CommandFailed(
-                format!("Invalid requirement (embedded option after ';'): {}", req)
+                format!("Invalid requirement (embedded option after ';'): {req}")
             ));
         }
     }
@@ -63,7 +63,8 @@ pub struct UvBridge {
 }
 
 impl UvBridge {
-    /// Create a new UvBridge using the default `uv` binary name.
+    /// Create a new `UvBridge` using the default `uv` binary name.
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             uv_path: "uv".to_string(),
@@ -72,6 +73,7 @@ impl UvBridge {
     }
 
     /// Builder: specify a custom path to the `uv` binary.
+    #[must_use]
     pub fn with_path(self, path: impl Into<String>) -> Self {
         Self {
             uv_path: path.into(),
@@ -116,6 +118,9 @@ impl UvBridge {
     }
 
     /// Create a virtual environment at the given path using `uv venv`.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn create_venv(&self, path: &Path) -> Result<(), UvError> {
         let uv = self.resolved_path().await?;
         let output = Command::new(&uv)
@@ -125,7 +130,7 @@ impl UvBridge {
             .stderr(Stdio::piped())
             .output()
             .await
-            .map_err(|e| UvError::CommandFailed(format!("failed to run uv venv: {}", e)))?;
+            .map_err(|e| UvError::CommandFailed(format!("failed to run uv venv: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -144,6 +149,9 @@ impl UvBridge {
     ///
     /// `venv_python` is the path to the Python binary in the venv.
     /// `requirements` is a list of package specifiers (e.g. `["requests>=2.0", "flask"]`).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn pip_install(&self, venv_python: &Path, requirements: &[&str]) -> Result<(), UvError> {
         let uv = self.resolved_path().await?;
         let mut cmd = Command::new(&uv);
@@ -160,7 +168,7 @@ impl UvBridge {
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         let output = cmd.output().await.map_err(|e| {
-            UvError::CommandFailed(format!("failed to run uv pip install: {}", e))
+            UvError::CommandFailed(format!("failed to run uv pip install: {e}"))
         })?;
 
         if !output.status.success() {
@@ -186,7 +194,7 @@ impl UvBridge {
         if self.uv_path == "uv" {
             // Add common variant names
             for ver in &["3", "3.12", "3.11", "3.10"] {
-                names.push(format!("uv{}", ver));
+                names.push(format!("uv{ver}"));
             }
         }
         names

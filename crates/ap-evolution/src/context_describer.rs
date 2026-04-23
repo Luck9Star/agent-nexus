@@ -6,6 +6,7 @@ use crate::analyzer::TaskResult;
 /// Generate a context description string for the given task result and skill.
 ///
 /// This is used as a prompt prefix when asking an LLM to evolve a skill.
+#[must_use] 
 pub fn describe_context(task_result: &TaskResult, skill_name: &str) -> String {
     let status = if task_result.success { "SUCCESS" } else { "FAILURE" };
     let error_section = match &task_result.error {

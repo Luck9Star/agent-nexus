@@ -1,4 +1,4 @@
-//! ProcessManager: async process spawning via tokio::process::Command.
+//! `ProcessManager`: async process spawning via `tokio::process::Command`.
 //!
 //! Python source: `src/agent_nexus/platform/orchestration/process_manager.py` (~550 lines)
 
@@ -68,6 +68,7 @@ pub struct ProcessManager {
 }
 
 impl ProcessManager {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             processes: HashMap::new(),
@@ -75,6 +76,7 @@ impl ProcessManager {
         }
     }
 
+    #[must_use] 
     pub fn with_max_concurrent(mut self, max: usize) -> Self {
         self.max_concurrent = max;
         self
@@ -87,6 +89,9 @@ impl ProcessManager {
     ///
     /// `env` is an optional set of environment variables layered on top of
     /// the inheriting environment for per-agent isolation.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn spawn(
         &mut self,
         id: &str,
@@ -110,7 +115,7 @@ impl ProcessManager {
 
         let spawn_config = SpawnConfig {
             cmd: cmd.to_string(),
-            args: args.iter().map(|s| s.to_string()).collect(),
+            args: args.iter().map(std::string::ToString::to_string).collect(),
             env: env.clone().unwrap_or_default(),
         };
 
@@ -163,6 +168,9 @@ impl ProcessManager {
     ///
     /// Sends SIGKILL immediately. Prefer [`graceful_shutdown`] for normal
     /// shutdown to give the agent a chance to clean up.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     #[deprecated(
         since = "0.2.0",
         note = "Use `graceful_shutdown` instead for safe 3-stage shutdown"
@@ -180,12 +188,15 @@ impl ProcessManager {
 
     /// Gracefully stop a process using a 3-stage sequence.
     ///
-    /// 1. Send SIGTERM (Unix) / TerminateProcess (Windows).
+    /// 1. Send SIGTERM (Unix) / `TerminateProcess` (Windows).
     /// 2. Wait up to `timeout` for the process to exit.
     /// 3. If still alive, send SIGKILL.
     ///
     /// Returns `Ok(true)` if the process exited after SIGTERM (graceful),
     /// `Ok(false)` if SIGKILL was required (forced).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn graceful_shutdown(
         &mut self,
         id: &str,
@@ -238,6 +249,9 @@ impl ProcessManager {
     ///
     /// Best-effort: continues shutting down remaining processes even if one
     /// fails. Returns the last error encountered, if any.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn graceful_shutdown_all(
         &mut self,
         timeout: Duration,
@@ -264,6 +278,9 @@ impl ProcessManager {
     ///
     /// The original `cmd`, `args`, and `env` that were passed to [`spawn`]
     /// are reused. Returns `Ok(())` once the new process is running.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn restart_agent(&mut self, id: &str, timeout: Duration) -> Result<(), ProcessError> {
         // Extract spawn config before removing the process entry.
         let config = {
@@ -279,7 +296,7 @@ impl ProcessManager {
         let _ = self.graceful_shutdown(id, timeout).await;
 
         // Re-spawn with stored configuration.
-        let args_vec: Vec<&str> = config.args.iter().map(|s| s.as_str()).collect();
+        let args_vec: Vec<&str> = config.args.iter().map(std::string::String::as_str).collect();
         let env_opt = if config.env.is_empty() {
             None
         } else {
@@ -293,12 +310,18 @@ impl ProcessManager {
     // -----------------------------------------------------------------------
 
     /// Send a termination signal (SIGTERM on Unix, no-op on Windows).
+    ///
+    /// `&self` is unused but retained for consistency with the struct's method
+    /// signatures — future platform-specific extensions may need access to state.
+    #[allow(clippy::unused_self)]
     fn send_term(&self, child: &mut Child, id: &str) -> Result<(), ProcessError> {
         #[cfg(unix)]
         {
             if let Some(pid) = child.id() {
                 // Send SIGTERM via libc::kill.
                 // Safe because: pid > 0 (child process), signal = 15 (SIGTERM).
+                // pid is u32 on Unix; casting to i32 is safe for valid PIDs.
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
                 let ret = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
                 if ret == -1 {
                     let err = std::io::Error::last_os_error();
@@ -331,6 +354,9 @@ impl ProcessManager {
     ///
     /// Best-effort: continues killing remaining processes even if one fails.
     /// Returns the last error encountered, if any.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn kill_all(&mut self) -> Result<(), ProcessError> {
         let ids: Vec<String> = self.processes.keys().cloned().collect();
         let mut last_err = None;
@@ -356,6 +382,9 @@ impl ProcessManager {
     ///
     /// After calling this, the process entry keeps its child handle
     /// (so `is_running` / `kill` still work), but I/O is now owned by the caller.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn take_io(&mut self, id: &str) -> Result<IoPair, ProcessError> {
         let proc = self
             .processes
@@ -367,6 +396,9 @@ impl ProcessManager {
     }
 
     /// Borrow stdin for a single write operation without taking ownership.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn stdin_mut(
         &mut self,
         id: &str,
@@ -379,6 +411,9 @@ impl ProcessManager {
     }
 
     /// Borrow stdout for a single read operation without taking ownership.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn stdout_mut(
         &mut self,
         id: &str,
@@ -401,7 +436,7 @@ impl Drop for ProcessManager {
     fn drop(&mut self) {
         // Best-effort kill all child processes to prevent zombies.
         // start_kill() is non-async and sends SIGKILL immediately.
-        for (_, proc) in self.processes.iter_mut() {
+        for proc in self.processes.values_mut() {
             let _ = proc.child.start_kill();
         }
     }

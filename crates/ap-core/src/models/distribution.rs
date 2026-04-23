@@ -1,4 +1,4 @@
-//! Git-based distribution models: PackageSource, SourceEntry, LockfileEntry, InstallationStatus.
+//! Git-based distribution models: `PackageSource`, `SourceEntry`, `LockfileEntry`, `InstallationStatus`.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -45,6 +45,9 @@ fn utc_now() -> DateTime<Utc> { Utc::now() }
 
 impl SourceEntry {
     /// Validate: git-type sources must have non-empty URL.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn validate(&self) -> Result<(), String> {
         if self.source_type == "git" && self.url.trim().is_empty() {
             return Err(format!(
@@ -76,7 +79,10 @@ pub struct LockfileEntry {
 }
 
 impl LockfileEntry {
-    /// Validate commit_sha format: 40/64 hex or 'latest'/'head'.
+    /// Validate `commit_sha` format: 40/64 hex or 'latest'/'head'.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn validate_commit_sha(&self) -> Result<(), String> {
         let valid = self.commit_sha.len() == 40
             || self.commit_sha.len() == 64
@@ -143,6 +149,9 @@ pub struct IndexEntry {
 
 impl IndexEntry {
     /// Reject path traversal sequences in the path field.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn validate_path(&self) -> Result<(), String> {
         if !self.path.is_empty() && self.path.contains("..") {
             return Err(format!("IndexEntry.path must not contain '..': got '{}'", self.path));

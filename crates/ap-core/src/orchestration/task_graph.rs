@@ -1,4 +1,4 @@
-//! TaskGraph: SQLite-backed DAG of tasks with topological sort and cycle detection.
+//! `TaskGraph`: SQLite-backed DAG of tasks with topological sort and cycle detection.
 //!
 //! Python source: `src/agent_nexus/platform/orchestration/task_graph.py` (~600 lines)
 
@@ -37,6 +37,41 @@ pub enum TaskGraphError {
 }
 
 // ---------------------------------------------------------------------------
+// Cycle detection helper
+// ---------------------------------------------------------------------------
+
+/// Depth-first search with three-color marking for cycle detection.
+///
+/// Returns `true` if a cycle is found starting from `name`.
+fn dfs(
+    name: &str,
+    tasks: &[TaskItem],
+    name_index: &HashMap<String, usize>,
+    white: &mut HashSet<String>,
+    gray: &mut HashSet<String>,
+    black: &mut HashSet<String>,
+) -> bool {
+    white.remove(name);
+    gray.insert(name.to_string());
+    let Some(&idx) = name_index.get(name) else {
+        return false;
+    };
+    for dep in &tasks[idx].blocked_by {
+        if gray.contains(dep) {
+            return true;
+        }
+        if !black.contains(dep)
+            && dfs(dep, tasks, name_index, white, gray, black)
+        {
+            return true;
+        }
+    }
+    gray.remove(name);
+    black.insert(name.to_string());
+    false
+}
+
+// ---------------------------------------------------------------------------
 // TaskGraph
 // ---------------------------------------------------------------------------
 
@@ -45,7 +80,10 @@ pub struct TaskGraph {
 }
 
 impl TaskGraph {
-    /// Create an in-memory TaskGraph (for testing).
+    /// Create an in-memory `TaskGraph` (for testing).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn new_in_memory() -> Result<Self, TaskGraphError> {
         let conn = Connection::open_in_memory()?;
         let tg = Self { conn };
@@ -53,7 +91,10 @@ impl TaskGraph {
         Ok(tg)
     }
 
-    /// Create a file-backed TaskGraph with WAL mode.
+    /// Create a file-backed `TaskGraph` with WAL mode.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn new(path: &Path) -> Result<Self, TaskGraphError> {
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
@@ -83,9 +124,12 @@ impl TaskGraph {
     /// Insert a task into the graph.
     ///
     /// Validates that:
-    /// - No duplicate task_id exists
-    /// - All blocked_by references point to existing tasks
+    /// - No duplicate `task_id` exists
+    /// - All `blocked_by` references point to existing tasks
     /// - The new task does not introduce a cycle
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn add_task(&self, task: &TaskItem) -> Result<(), TaskGraphError> {
         // Check for duplicate
         if self.get_task(&task.id)?.is_some() {
@@ -95,8 +139,7 @@ impl TaskGraph {
         for dep_id in &task.blocked_by {
             if self.get_task(dep_id)?.is_none() {
                 return Err(TaskGraphError::NotFound(format!(
-                    "blocked_by dependency '{}' not found",
-                    dep_id
+                    "blocked_by dependency '{dep_id}' not found"
                 )));
             }
         }
@@ -116,13 +159,13 @@ impl TaskGraph {
                 Self::state_to_str(task.state),
                 blocked_json,
                 task.vars.to_string(),
-                task.result.as_ref().map(|v| v.to_string()),
+                task.result.as_ref().map(std::string::ToString::to_string),
                 task.created_at.to_rfc3339(),
                 task.updated_at.to_rfc3339(),
             ],
         )?;
         // Check for newly introduced cycles; rollback if found
-        if self.detect_cycle_with_conn(&tx)? {
+        if Self::detect_cycle_with_conn(&tx)? {
             tx.rollback()?;
             return Err(TaskGraphError::CycleDetected);
         }
@@ -131,13 +174,16 @@ impl TaskGraph {
     }
 
     /// Retrieve a task by ID.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn get_task(&self, task_id: &str) -> Result<Option<TaskItem>, TaskGraphError> {
         let mut stmt = self.conn.prepare(
             "SELECT task_id, agent_name, description, state, blocked_by, vars, result, created_at, updated_at
              FROM tasks WHERE task_id = ?1",
         )?;
 
-        let result = stmt.query_row(params![task_id], |row| Self::task_from_row(row));
+        let result = stmt.query_row(params![task_id], Self::task_from_row);
 
         match result {
             Ok(task) => Ok(Some(task)),
@@ -164,20 +210,22 @@ impl TaskGraph {
     /// Validate and apply a state transition.
     ///
     /// Valid transitions:
-    /// - Pending -> InProgress
-    /// - InProgress -> Completed
-    /// - InProgress -> Failed
+    /// - Pending -> `InProgress`
+    /// - `InProgress` -> Completed
+    /// - `InProgress` -> Failed
     ///
     /// All other transitions return `TaskGraphError::InvalidTransition`.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn transition_state(&self, task_id: &str, new_state: TaskState) -> Result<(), TaskGraphError> {
         let task = self.get_task(task_id)?
             .ok_or_else(|| TaskGraphError::NotFound(task_id.to_string()))?;
 
         let valid = matches!(
             (task.state, new_state),
-            (TaskState::Pending, TaskState::InProgress)
-            | (TaskState::InProgress, TaskState::Completed)
-            | (TaskState::InProgress, TaskState::Failed)
+            (TaskState::Pending, TaskState::InProgress) |
+(TaskState::InProgress, TaskState::Completed | TaskState::Failed)
         );
 
         if !valid {
@@ -191,13 +239,15 @@ impl TaskGraph {
     }
 
     /// Detect cycles via DFS with three-color marking (delegates to connection-agnostic helper).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn detect_cycle(&self) -> Result<bool, TaskGraphError> {
-        self.detect_cycle_with_conn(&self.conn)
+        Self::detect_cycle_with_conn(&self.conn)
     }
 
     /// Connection-agnostic cycle detection used by both `detect_cycle` and `add_task` transaction.
     fn detect_cycle_with_conn(
-        &self,
         conn: &Connection,
     ) -> Result<bool, TaskGraphError> {
         let tasks = Self::load_all_tasks_from_conn(conn)?;
@@ -211,38 +261,6 @@ impl TaskGraph {
         let mut gray: HashSet<String> = HashSet::new();
         let mut black: HashSet<String> = HashSet::new();
 
-        fn dfs(
-            name: &str,
-            tasks: &[TaskItem],
-            name_index: &HashMap<String, usize>,
-            white: &mut HashSet<String>,
-            gray: &mut HashSet<String>,
-            black: &mut HashSet<String>,
-        ) -> bool {
-            white.remove(name);
-            gray.insert(name.to_string());
-
-            let idx = match name_index.get(name) {
-                Some(&i) => i,
-                None => return false,
-            };
-
-            for dep in &tasks[idx].blocked_by {
-                if gray.contains(dep) {
-                    return true; // cycle found
-                }
-                if !black.contains(dep)
-                    && dfs(dep, tasks, name_index, white, gray, black)
-                {
-                    return true;
-                }
-            }
-
-            gray.remove(name);
-            black.insert(name.to_string());
-            false
-        }
-
         let names: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
         for name in names {
             if !black.contains(&name)
@@ -255,6 +273,12 @@ impl TaskGraph {
     }
 
     /// Return tasks in topological execution order (Kahn's algorithm).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    ///
+    /// # Panics
+    /// May panic if internal invariants are violated.
     pub fn topological_sort(&self) -> Result<Vec<String>, TaskGraphError> {
         if self.detect_cycle()? {
             return Err(TaskGraphError::CycleDetected);
@@ -298,6 +322,9 @@ impl TaskGraph {
     }
 
     /// Get tasks with state=Pending and all dependencies completed.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn get_ready_tasks(&self) -> Result<Vec<TaskItem>, TaskGraphError> {
         let tasks = self.load_all_tasks()?;
         let state_map: HashMap<String, TaskState> = tasks
@@ -313,15 +340,12 @@ impl TaskGraph {
                 }
                 // All dependencies must be completed; warn on dangling references
                 t.blocked_by.iter().all(|dep| {
-                    match state_map.get(dep) {
-                        Some(&s) => s == TaskState::Completed,
-                        None => {
-                            warn!(
-                                "Task '{}' has dangling blocked_by reference to '{}'",
-                                t.id, dep
-                            );
-                            false
-                        }
+                    if let Some(&s) = state_map.get(dep) { s == TaskState::Completed } else {
+                        warn!(
+                            "Task '{}' has dangling blocked_by reference to '{}'",
+                            t.id, dep
+                        );
+                        false
                     }
                 })
             })
@@ -350,7 +374,7 @@ impl TaskGraph {
              FROM tasks",
         )?;
 
-        let rows = stmt.query_map([], |row| Self::task_from_row(row))?;
+        let rows = stmt.query_map([], Self::task_from_row)?;
 
         let mut tasks = Vec::new();
         for task in rows {
@@ -387,12 +411,8 @@ impl TaskGraph {
                 debug!("Failed to parse result JSON for task {}: {}", id, e);
                 e
             }).ok());
-        let created_at = chrono::DateTime::parse_from_rfc3339(&created_str)
-            .map(|dt| dt.to_utc())
-            .unwrap_or_else(|_| utc_now());
-        let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_str)
-            .map(|dt| dt.to_utc())
-            .unwrap_or_else(|_| utc_now());
+        let created_at = chrono::DateTime::parse_from_rfc3339(&created_str).map_or_else(|_| utc_now(), |dt| dt.to_utc());
+        let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_str).map_or_else(|_| utc_now(), |dt| dt.to_utc());
 
         Ok(TaskItem {
             id,
@@ -737,8 +757,6 @@ mod tests {
     fn get_ready_tasks_warns_on_dangling_dependency() {
         // Install a tracing subscriber that captures log output so we can
         // verify the warning is emitted.
-        use tracing_subscriber::layer::SubscriberExt;
-        use tracing_subscriber::util::SubscriberInitExt;
         use tracing_subscriber::EnvFilter;
 
         // Use a no-op guard — we just need the subscriber active during the test.

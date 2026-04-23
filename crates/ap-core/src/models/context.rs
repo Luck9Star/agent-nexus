@@ -2,7 +2,7 @@
 //!
 //! Python source: models/context.py
 //!
-//! IMPORTANT (F-05 fix): ContextBudget has 10 configurable fields with
+//! IMPORTANT (F-05 fix): `ContextBudget` has 10 configurable fields with
 //! cross-field validators, NOT 4 simple fields.
 
 use chrono::{DateTime, Utc};
@@ -12,7 +12,7 @@ use crate::models::common::utc_now;
 
 /// Tiered context loading levels.
 ///
-/// Python source: IntEnum — serializes as integers 0-3.
+/// Python source: `IntEnum` — serializes as integers 0-3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ContextLevel {
@@ -87,6 +87,9 @@ impl Default for ContextBudget {
 
 impl ContextBudget {
     /// Validate all cross-field constraints. Mirrors Python's `_validate_thresholds`.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn validate(&self) -> Result<(), String> {
         for (name, value) in [
             ("compaction_trigger", self.compaction_trigger),
@@ -136,18 +139,22 @@ pub struct TokenUsage {
 }
 
 impl TokenUsage {
+    #[must_use] 
     pub fn total_tokens(&self) -> u64 {
         self.prompt_tokens + self.completion_tokens
     }
 
     /// Return alert level or None if within budget.
+    #[must_use]
     pub fn check_budget(
         &self,
         context_window: u64,
         budget: &ContextBudget,
     ) -> Option<BudgetAlertLevel> {
         let ratio = if context_window == 0 { return None; } else {
-            self.total_tokens() as f64 / context_window as f64
+            // Cast is safe: token counts are well below 2^52 in practice.
+            #[allow(clippy::cast_precision_loss)]
+            { self.total_tokens() as f64 / context_window as f64 }
         };
         if ratio > budget.session_hard_ceiling {
             Some(BudgetAlertLevel::HardCeiling)

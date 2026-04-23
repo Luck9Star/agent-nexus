@@ -36,7 +36,7 @@ pub enum RegistryError {
 struct AgentSlot {
     #[allow(dead_code)] // Used for agent metadata lookups in production
     manifest: AgentManifest,
-    /// OnceCell ensures only one caller creates the client, eliminating the
+    /// `OnceCell` ensures only one caller creates the client, eliminating the
     /// TOCTOU race where multiple concurrent `activate()` calls each create
     /// redundant MCP clients (which may spawn expensive subprocesses).
     client: OnceCell<Arc<Mutex<Box<dyn McpClient>>>>,
@@ -56,16 +56,17 @@ struct AgentSlot {
 ///
 /// Uses `tokio::sync::OnceCell` for client initialization to guarantee exactly
 /// one MCP client is created per agent, even under concurrent activation.
-/// Slots are wrapped in `Arc` so OnceCell references can outlive the global lock.
+/// Slots are wrapped in `Arc` so `OnceCell` references can outlive the global lock.
 pub struct DeferredAgentRegistry {
     agents: Arc<Mutex<HashMap<String, Arc<Mutex<AgentSlot>>>>>,
     idle_timeout: Duration,
 }
 
 impl DeferredAgentRegistry {
-    const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60); // 5 minutes
+    const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_mins(5); // 5 minutes
 
     /// Create a new registry with the default 5-minute idle timeout.
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             agents: Arc::new(Mutex::new(HashMap::new())),
@@ -74,6 +75,7 @@ impl DeferredAgentRegistry {
     }
 
     /// Create a new registry with a custom idle timeout.
+    #[must_use] 
     pub fn with_idle_timeout(timeout: Duration) -> Self {
         Self {
             agents: Arc::new(Mutex::new(HashMap::new())),
@@ -115,6 +117,9 @@ impl DeferredAgentRegistry {
     /// instead of creating duplicate clients.
     ///
     /// Returns the list of tools discovered on the agent.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn activate(
         &self,
         name: &str,
@@ -161,6 +166,9 @@ impl DeferredAgentRegistry {
     }
 
     /// Get the cached tool list for an active agent.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn get_tools(&self, name: &str) -> Result<Arc<Vec<ToolInfo>>, RegistryError> {
         let agents = self.agents.lock().await;
         let slot_arc = agents
@@ -175,6 +183,9 @@ impl DeferredAgentRegistry {
     }
 
     /// Call a tool on an active agent via its MCP client.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn call_tool(
         &self,
         name: &str,
@@ -241,6 +252,9 @@ impl DeferredAgentRegistry {
     ///
     /// Two-phase approach: remove the agent under the lock, then shut it down
     /// outside the lock to avoid blocking all registry operations during I/O.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn deactivate(&self, name: &str) -> Result<(), RegistryError> {
         // Phase 1: Remove agent and take client Arc (under lock)
         let client_arc = {

@@ -13,6 +13,7 @@ pub struct IpcLockRegistry {
 }
 
 impl IpcLockRegistry {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             locks: dashmap::DashMap::new(),
@@ -22,7 +23,7 @@ impl IpcLockRegistry {
 
     /// Get or create a lock for the given agent.
     /// Evicts the oldest lock if over the limit.
-    /// Uses DashMap::entry() to avoid TOCTOU race between get() and insert().
+    /// Uses `DashMap::entry()` to avoid TOCTOU race between `get()` and `insert()`.
     pub fn get_or_create(&self, agent_id: &str) -> Arc<Mutex<()>> {
         use dashmap::mapref::entry::Entry;
 
@@ -34,7 +35,7 @@ impl IpcLockRegistry {
                 e.insert(lock);
 
                 // Evict oldest if over limit
-                let mut order = self.order.lock().unwrap_or_else(|e| e.into_inner());
+                let mut order = self.order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 order.push_back(agent_id.to_string());
                 if order.len() > MAX_LOCKS {
                     if let Some(old_id) = order.pop_front() {

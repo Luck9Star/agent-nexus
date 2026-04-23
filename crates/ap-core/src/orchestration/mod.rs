@@ -1,4 +1,4 @@
-//! Orchestration layer: TaskGraph, ProcessManager, IPC, DSL.
+//! Orchestration layer: `TaskGraph`, `ProcessManager`, IPC, DSL.
 //!
 //! This module implements the self-built orchestration core:
 //! - `TaskGraph` — SQLite-backed DAG of tasks with cycle detection

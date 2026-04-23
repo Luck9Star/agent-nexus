@@ -1,4 +1,4 @@
-//! Composition models: CompositionTask, Composition.
+//! Composition models: `CompositionTask`, Composition.
 
 use serde::{Deserialize, Serialize};
 

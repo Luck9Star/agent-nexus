@@ -35,14 +35,14 @@ pub fn validate_fs_name(name: &str) -> anyhow::Result<()> {
         anyhow::bail!("Name cannot be empty");
     }
     if name.contains('\0') {
-        anyhow::bail!("Invalid name (contains null byte): {}", name);
+        anyhow::bail!("Invalid name (contains null byte): {name}");
     }
     if name.contains("..") || name.contains('/') || name.contains('\\') {
-        anyhow::bail!("Invalid name (path traversal characters): {}", name);
+        anyhow::bail!("Invalid name (path traversal characters): {name}");
     }
     // Reject leading hyphens that could be interpreted as flags
     if name.starts_with('-') {
-        anyhow::bail!("Invalid name (starts with hyphen): {}", name);
+        anyhow::bail!("Invalid name (starts with hyphen): {name}");
     }
     Ok(())
 }

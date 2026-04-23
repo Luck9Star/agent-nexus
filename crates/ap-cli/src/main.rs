@@ -197,13 +197,13 @@ fn main() -> Result<()> {
         Commands::Sources { action } => match action {
             SourcesAction::List => commands::sources::run_list(&output)?,
             SourcesAction::Add { name, url, branch } => {
-                commands::sources::run_add(&name, &url, Some(&branch), &output)?
+                commands::sources::run_add(&name, &url, Some(&branch), &output)?;
             }
             SourcesAction::Remove { name } => commands::sources::run_remove(&name, &output)?,
         },
 
         Commands::Install { agent, version } => {
-            commands::install::run(&agent, version.as_deref(), &output)?
+            commands::install::run(&agent, version.as_deref(), &output)?;
         }
 
         Commands::Run {
@@ -227,13 +227,13 @@ fn main() -> Result<()> {
         Commands::Evolution { action } => match action {
             EvolutionAction::Status => commands::evolution::run_status(&output)?,
             EvolutionAction::Promote { skill } => {
-                commands::evolution::run_promote(&skill, &output)?
+                commands::evolution::run_promote(&skill, &output)?;
             }
         },
 
         Commands::Runtime { action } => match action {
             RuntimeAction::Exec { agent, args } => {
-                commands::runtime::run_exec(&agent, &args, &output)?
+                commands::runtime::run_exec(&agent, &args, &output)?;
             }
         },
 

@@ -1,4 +1,4 @@
-//! EvolutionEngine — top-level facade that ties together the store, analyzer,
+//! `EvolutionEngine` — top-level facade that ties together the store, analyzer,
 //! evolver, and health tracker.
 
 use std::sync::Arc;
@@ -71,6 +71,7 @@ pub struct EvolutionEngine {
 
 impl EvolutionEngine {
     /// Create a new engine backed by the given store.
+    #[must_use] 
     pub fn new(store: EvolutionStore) -> Self {
         let store = Arc::new(store);
         let evolver = Arc::new(SkillEvolver::new(Arc::clone(&store)));
@@ -84,6 +85,7 @@ impl EvolutionEngine {
     }
 
     /// Create a new engine with custom thresholds.
+    #[must_use] 
     pub fn with_thresholds(store: EvolutionStore, thresholds: Thresholds) -> Self {
         let store = Arc::new(store);
         let evolver = Arc::new(SkillEvolver::new(Arc::clone(&store)));
@@ -98,7 +100,7 @@ impl EvolutionEngine {
 
     /// Acquire the health mutex, recovering from a poisoned lock.
     fn health_guard(&self) -> std::sync::MutexGuard<'_, HealthTracker> {
-        self.health.lock().unwrap_or_else(|e| e.into_inner())
+        self.health.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Unified evolve entry point — dispatches by trigger type.
@@ -108,15 +110,18 @@ impl EvolutionEngine {
     ///
     /// - **Analysis**: Run post-task analysis, extract suggestions, evolve skills.
     /// - **Failure**: Look up the named skill, call `evolve_fix()`.
-    /// - **ToolDegradation**: Look up the named skill, call `evolve_fix()`.
-    /// - **MetricCheck**: Scan all active skills, evolve underperforming ones.
+    /// - **`ToolDegradation`**: Look up the named skill, call `evolve_fix()`.
+    /// - **`MetricCheck`**: Scan all active skills, evolve underperforming ones.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn evolve(
         &self,
         trigger: EvolveTrigger,
     ) -> Result<EvolveDispatchResult, EvolveDispatchError> {
         let outcomes = match &trigger {
             EvolveTrigger::Analysis { task_id, agent_name, success, error } => {
-                self.dispatch_analysis(task_id, agent_name, *success, error)
+                self.dispatch_analysis(task_id, agent_name, *success, error.as_ref())
             }
             EvolveTrigger::Failure { skill_name, error } => {
                 self.dispatch_failure(skill_name, error)
@@ -142,21 +147,21 @@ impl EvolutionEngine {
         task_id: &str,
         agent_name: &str,
         success: bool,
-        error: &Option<String>,
+        error: Option<&String>,
     ) -> Result<Vec<EvolutionOutcome>, EvolveDispatchError> {
         let result = TaskResult {
             success,
-            error: error.clone(),
+            error: error.cloned(),
             agent_name: agent_name.to_string(),
             task_id: task_id.to_string(),
         };
 
         // Update health tracker
         let mut health = self.health_guard();
-        if !success {
-            health.record_failure();
-        } else {
+        if success {
             health.record_success();
+        } else {
+            health.record_failure();
         }
 
         // Run analysis to get suggestions
@@ -209,11 +214,13 @@ impl EvolutionEngine {
 
         for skill in &active_skills {
             // Skip skills without enough data points (anti-loop)
-            if skill.total_selections < self.thresholds.min_selections as i64 {
+            if skill.total_selections < i64::from(self.thresholds.min_selections) {
                 continue;
             }
 
             // Compute success rate: completions / selections
+            // Casts from i64 are safe: skill counters are well below 2^52 in practice.
+            #[allow(clippy::cast_precision_loss)]
             let success_rate = if skill.total_selections > 0 {
                 skill.total_completions as f64 / skill.total_selections as f64
             } else {
@@ -221,6 +228,8 @@ impl EvolutionEngine {
             };
 
             // Check if skill is underperforming
+            // Casts from i64 to u32 are safe: skill counters are small in practice.
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let is_viable = self.thresholds.is_viable(
                 skill.total_selections as u32,
                 success_rate,
@@ -272,7 +281,12 @@ impl EvolutionEngine {
     }
 
     /// Count the number of active skills in the store.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn get_skill_count(&self) -> crate::store::error::Result<usize> {
+        // Cast from i64 to usize is safe: skill count is always non-negative and small.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         Ok(self.store.count_active_skills()? as usize)
     }
 

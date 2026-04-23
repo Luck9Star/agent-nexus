@@ -12,17 +12,20 @@
 pub struct McpToolAdapter;
 
 impl McpToolAdapter {
+    #[must_use] 
     pub fn new() -> Self {
         Self
     }
 
     /// Create namespaced tool name: "code-reviewer" + "review" -> "code-reviewer___review"
+    #[must_use] 
     pub fn namespace_tool(&self, agent: &str, tool: &str) -> String {
-        format!("{}{}{}", agent, SEPARATOR, tool)
+        format!("{agent}{SEPARATOR}{tool}")
     }
 
     /// Parse namespaced name: "code-reviewer___review" -> ("code-reviewer", "review")
     /// Returns None if format doesn't match.
+    #[must_use] 
     pub fn parse_namespaced(&self, name: &str) -> Option<(String, String)> {
         let (agent, tool) = name.split_once(SEPARATOR)?;
         Some((agent.to_string(), tool.to_string()))

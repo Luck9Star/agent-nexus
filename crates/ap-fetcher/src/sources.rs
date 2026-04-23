@@ -35,6 +35,7 @@ pub struct SourceManager {
 
 impl SourceManager {
     /// Create a new source manager pointing to the given `sources.yaml` path.
+    #[must_use] 
     pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
@@ -42,6 +43,9 @@ impl SourceManager {
     /// Static: parse a YAML string into a list of `SourceEntry`.
     ///
     /// Accepts both `{sources: [...]}` (wrapped) and bare `[...]` formats.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn parse(yaml: &str) -> Result<Vec<SourceEntry>, SourceError> {
         let trimmed = yaml.trim();
         if trimmed.is_empty() {
@@ -66,6 +70,9 @@ impl SourceManager {
     }
 
     /// Load sources from file. Returns empty vec if the file doesn't exist.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn load(&self) -> Result<Vec<SourceEntry>, SourceError> {
         if !self.path.exists() {
             debug!("Sources file not found, returning empty: {:?}", self.path);
@@ -83,6 +90,9 @@ impl SourceManager {
     }
 
     /// Atomically write sources to the YAML file (write to `.tmp`, then rename).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn save(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
         let wrapped = SourcesYaml {
             sources: sources.to_vec(),
@@ -98,6 +108,7 @@ impl SourceManager {
     }
 
     /// Convenience: load sources, or return empty vec on any error.
+    #[must_use] 
     pub fn list(&self) -> Vec<SourceEntry> {
         self.load().unwrap_or_default()
     }
@@ -106,6 +117,9 @@ impl SourceManager {
     ///
     /// Validates the entry, loads existing sources, removes any existing entry
     /// with the same name (matching Python's upsert behavior), appends, and saves.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn add(&self, entry: SourceEntry) -> Result<(), SourceError> {
         entry
             .validate()
@@ -122,6 +136,9 @@ impl SourceManager {
     /// Remove a source by name.
     ///
     /// Returns an error if the source is not found.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn remove(&self, name: &str) -> Result<(), SourceError> {
         let mut sources = self.load()?;
         let original_len = sources.len();

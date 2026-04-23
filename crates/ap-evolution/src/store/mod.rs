@@ -1,4 +1,4 @@
-//! EvolutionStore: SQLite-backed persistence facade for the Self-Evolution Engine.
+//! `EvolutionStore`: SQLite-backed persistence facade for the Self-Evolution Engine.
 //!
 //! Thread-safe via `r2d2` connection pool.
 //! Uses WAL mode for file-backed databases.
@@ -44,7 +44,10 @@ pub struct EvolutionStore {
 }
 
 impl EvolutionStore {
-    /// Create a file-backed EvolutionStore with WAL mode.
+    /// Create a file-backed `EvolutionStore` with WAL mode.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn new(path: &Path) -> Result<Self> {
         let manager = SqliteConnectionManager::file(path)
             .with_init(|conn| {
@@ -56,7 +59,10 @@ impl EvolutionStore {
         Ok(Self { pool })
     }
 
-    /// Create an in-memory EvolutionStore (for testing).
+    /// Create an in-memory `EvolutionStore` (for testing).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn new_in_memory() -> Result<Self> {
         let manager = SqliteConnectionManager::memory()
             .with_init(|conn| {
@@ -86,24 +92,36 @@ impl EvolutionStore {
     // -----------------------------------------------------------------------
 
     /// Insert a skill record.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn insert_skill(&self, skill: &SkillRecord) -> Result<()> {
         let conn = self.conn()?;
         queries::insert_skill(&conn, skill)
     }
 
     /// Get an active skill by name.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn get_skill_by_name(&self, name: &str) -> Result<Option<SkillRecord>> {
         let conn = self.conn()?;
         queries::get_skill_by_name(&conn, name)
     }
 
     /// Get a skill by ID (regardless of active status).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn get_skill_by_id(&self, id: &str) -> Result<Option<SkillRecord>> {
         let conn = self.conn()?;
         queries::get_skill_by_id(&conn, id)
     }
 
     /// Get all active skills.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn get_active_skills(&self) -> Result<Vec<SkillRecord>> {
         let conn = self.conn()?;
         queries::get_active_skills(&conn)
@@ -112,6 +130,9 @@ impl EvolutionStore {
     /// Delete a skill record by id.
     ///
     /// Returns `Ok(true)` if a row was deleted, `Ok(false)` if no matching row was found.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn delete_skill(&self, id: &str) -> Result<bool> {
         let conn = self.conn()?;
         queries::delete_skill(&conn, id)
@@ -124,6 +145,9 @@ impl EvolutionStore {
     /// Increment `total_selections` for a skill.
     ///
     /// Returns `Ok(true)` if updated, `Ok(false)` if skill not found.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn increment_selections(&self, id: &str) -> Result<bool> {
         let conn = self.conn()?;
         queries::increment_selections(&conn, id)
@@ -132,6 +156,9 @@ impl EvolutionStore {
     /// Increment `total_applied` for a skill.
     ///
     /// Returns `Ok(true)` if updated, `Ok(false)` if skill not found.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn increment_applied(&self, id: &str) -> Result<bool> {
         let conn = self.conn()?;
         queries::increment_applied(&conn, id)
@@ -140,6 +167,9 @@ impl EvolutionStore {
     /// Increment `total_completions` for a skill.
     ///
     /// Returns `Ok(true)` if updated, `Ok(false)` if skill not found.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn increment_completions(&self, id: &str) -> Result<bool> {
         let conn = self.conn()?;
         queries::increment_completions(&conn, id)
@@ -148,6 +178,9 @@ impl EvolutionStore {
     /// Increment `total_fallbacks` for a skill.
     ///
     /// Returns `Ok(true)` if updated, `Ok(false)` if skill not found.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn increment_fallbacks(&self, id: &str) -> Result<bool> {
         let conn = self.conn()?;
         queries::increment_fallbacks(&conn, id)
@@ -160,6 +193,9 @@ impl EvolutionStore {
     /// Deactivate a skill by setting `is_active = 0`.
     ///
     /// Returns `Ok(true)` if updated, `Ok(false)` if skill not found.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn deactivate_skill(&self, id: &str) -> Result<bool> {
         let conn = self.conn()?;
         queries::deactivate_skill(&conn, id)
@@ -168,6 +204,9 @@ impl EvolutionStore {
     /// Evolve a skill: insert a new version with lineage parents.
     ///
     /// If `deactivate_parents` is true (FIX evolution), parents are deactivated.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn evolve_skill(
         &self,
         new_skill: &SkillRecord,
@@ -183,12 +222,18 @@ impl EvolutionStore {
     // -----------------------------------------------------------------------
 
     /// Insert a skill judgment.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn save_judgment(&self, judgment: &SkillJudgment) -> Result<()> {
         let conn = self.conn()?;
         queries::save_judgment(&conn, judgment)
     }
 
     /// Get judgments for a skill, most recent first.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn get_judgments_for_skill(
         &self,
         skill_id: &str,
@@ -203,6 +248,9 @@ impl EvolutionStore {
     // -----------------------------------------------------------------------
 
     /// Walk up the lineage tree via BFS, returning ancestors oldest-first.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn get_ancestry(
         &self,
         skill_id: &str,
@@ -213,6 +261,9 @@ impl EvolutionStore {
     }
 
     /// Get child skill IDs derived from the given parent.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn get_children(&self, parent_id: &str) -> Result<Vec<String>> {
         let conn = self.conn()?;
         queries::get_children(&conn, parent_id)
@@ -223,6 +274,9 @@ impl EvolutionStore {
     // -----------------------------------------------------------------------
 
     /// Record a post-task analysis.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn record_analysis(
         &self,
         task_id: &str,
@@ -244,6 +298,9 @@ impl EvolutionStore {
     }
 
     /// Get analyses for a specific task.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn get_analyses_for_task(&self, task_id: &str) -> Result<Vec<ExecutionAnalysis>> {
         let conn = self.conn()?;
         queries::get_analyses_for_task(&conn, task_id)
@@ -253,7 +310,10 @@ impl EvolutionStore {
     // Context budget log
     // -----------------------------------------------------------------------
 
-    /// Log a budget event (compaction, budget_check, etc.).
+    /// Log a budget event (compaction, `budget_check`, etc.).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn log_budget_event(
         &self,
         agent_name: &str,
@@ -280,6 +340,9 @@ impl EvolutionStore {
     // -----------------------------------------------------------------------
 
     /// Upsert an agent record.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn upsert_agent_record(
         &self,
         agent_id: &str,
@@ -293,6 +356,9 @@ impl EvolutionStore {
     }
 
     /// Get an agent record by name.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn get_agent_record(&self, name: &str) -> Result<Option<AgentRecord>> {
         let conn = self.conn()?;
         queries::get_agent_record(&conn, name)
@@ -303,11 +369,17 @@ impl EvolutionStore {
     // -----------------------------------------------------------------------
 
     /// List all active skills (alias for `get_active_skills`).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn list_skills(&self) -> Result<Vec<SkillRecord>> {
         self.get_active_skills()
     }
 
     /// Count active skills in the store.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn count_active_skills(&self) -> Result<i64> {
         let conn = self.conn()?;
         let count: i64 = conn.query_row(
@@ -323,6 +395,9 @@ impl EvolutionStore {
     // -----------------------------------------------------------------------
 
     /// List all table names (for testing schema).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn list_tables(&self) -> Result<Vec<String>> {
         let conn = self.conn()?;
         queries::list_tables(&conn)
@@ -332,6 +407,9 @@ impl EvolutionStore {
     ///
     /// Delegates to `queries::count_rows` which validates the table name
     /// against a whitelist to prevent SQL injection.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn count_rows(&self, table: &str) -> Result<i64> {
         let conn = self.conn()?;
         queries::count_rows(&conn, table)

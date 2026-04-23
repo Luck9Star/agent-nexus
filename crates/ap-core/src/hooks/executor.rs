@@ -1,4 +1,4 @@
-//! HookExecutor — registers and runs hooks, dispatching on HookType.
+//! `HookExecutor` — registers and runs hooks, dispatching on `HookType`.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -27,6 +27,7 @@ impl HookExecutor {
     /// By default `allowed_commands` is `None`, which means ALL command hooks
     /// are rejected (matching Python's default-deny behavior). Use
     /// `with_allowed_commands` to explicitly allow specific programs.
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             hooks: HashMap::new(),
@@ -35,6 +36,7 @@ impl HookExecutor {
     }
 
     /// Set the allowlist of command programs that hooks may invoke.
+    #[must_use] 
     pub fn with_allowed_commands(mut self, cmds: HashSet<String>) -> Self {
         self.allowed_commands = Some(cmds);
         self
@@ -48,7 +50,7 @@ impl HookExecutor {
         self.hooks.entry(hook.event).or_default().push(hook);
     }
 
-    /// Execute a single hook, dispatching on its hook_type.
+    /// Execute a single hook, dispatching on its `hook_type`.
     pub async fn execute(&self, hook: &HookDefinition) -> HookExecution {
         let start = Instant::now();
 
@@ -130,8 +132,7 @@ impl HookExecutor {
                     false,
                     None,
                     Some(format!(
-                        "command '{}' rejected: no allowlist configured",
-                        program
+                        "command '{program}' rejected: no allowlist configured"
                     )),
                     None,
                 );
@@ -140,7 +141,7 @@ impl HookExecutor {
                 return (
                     false,
                     None,
-                    Some(format!("command '{}' not in allowlist", program)),
+                    Some(format!("command '{program}' not in allowlist")),
                     None,
                 );
             }
@@ -182,6 +183,7 @@ impl HookExecutor {
         }
     }
 
+    #[allow(clippy::unused_self)]
     fn execute_http_placeholder(
         &self,
         hook: &HookDefinition,
@@ -207,6 +209,7 @@ impl HookExecutor {
         )
     }
 
+    #[allow(clippy::unused_self)]
     fn execute_prompt_placeholder(
         &self,
         hook: &HookDefinition,
@@ -232,6 +235,7 @@ impl HookExecutor {
         )
     }
 
+    #[allow(clippy::unused_self)]
     fn execute_agent_placeholder(
         &self,
         _hook: &HookDefinition,
@@ -253,7 +257,7 @@ impl HookExecutor {
 fn shlex_split(input: &str) -> Vec<String> {
     shell_words::split(input).unwrap_or_else(|_| {
         // If shell_words can't parse it, fall back to simple whitespace split
-        input.split_whitespace().map(|s| s.to_string()).collect()
+        input.split_whitespace().map(std::string::ToString::to_string).collect()
     })
 }
 

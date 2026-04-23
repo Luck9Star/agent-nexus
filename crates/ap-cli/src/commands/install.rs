@@ -1,4 +1,4 @@
-//! `agent-nexus install <agent>` — install an agent via GitInstaller + LockfileManager.
+//! `agent-nexus install <agent>` — install an agent via `GitInstaller` + `LockfileManager`.
 
 use anyhow::{Context, Result};
 use ap_fetcher::installer::GitInstaller;
@@ -9,11 +9,11 @@ use crate::output::OutputFormatter;
 
 /// Run `install <agent>` command.
 ///
-/// Looks up the agent in configured sources, clones via GitInstaller,
-/// and records in LockfileManager.
+/// Looks up the agent in configured sources, clones via `GitInstaller`,
+/// and records in `LockfileManager`.
 pub fn run(agent: &str, version: Option<&str>, output: &OutputFormatter) -> Result<()> {
     commands::validate_fs_name(agent)
-        .with_context(|| format!("Invalid agent name: {}", agent))?;
+        .with_context(|| format!("Invalid agent name: {agent}"))?;
 
     let root = commands::find_project_root(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
 
@@ -26,8 +26,7 @@ pub fn run(agent: &str, version: Option<&str>, output: &OutputFormatter) -> Resu
         .find(|s| s.name == agent)
         .with_context(|| {
             format!(
-                "Agent '{}' not found in sources. Run `agent-nexus sources list` to see available agents.",
-                agent
+                "Agent '{agent}' not found in sources. Run `agent-nexus sources list` to see available agents."
             )
         })?;
 
@@ -69,7 +68,7 @@ pub fn run(agent: &str, version: Option<&str>, output: &OutputFormatter) -> Resu
         commit_sha,
         agent_type: ap_core::models::agent::AgentType::Atomic,
         installed_at: chrono::Utc::now(),
-        venv_path: format!(".venvs/{}", agent),
+        venv_path: format!(".venvs/{agent}"),
         dependencies: vec![],
     };
 

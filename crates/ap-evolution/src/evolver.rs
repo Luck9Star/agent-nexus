@@ -1,4 +1,4 @@
-//! SkillEvolver — applies evolution actions to skills.
+//! `SkillEvolver` — applies evolution actions to skills.
 //!
 //! Supports FIX evolution: loads a skill, creates a new version with proper
 //! lineage, deactivates the old version atomically.
@@ -43,6 +43,7 @@ pub struct SkillEvolver {
 
 impl SkillEvolver {
     /// Create a new evolver backed by the given store.
+    #[must_use] 
     pub fn new(store: Arc<EvolutionStore>) -> Self {
         Self { store }
     }
@@ -57,6 +58,9 @@ impl SkillEvolver {
     /// 4. Atomically deactivate the old skill and insert the new one via
     ///    `store.evolve_skill()`.
     /// 5. Return the new skill ID.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn evolve_fix(
         &self,
         skill_name: &str,
@@ -85,8 +89,7 @@ impl SkillEvolver {
             lineage_origin: "fix".to_string(),
             lineage_generation: new_generation,
             lineage_content_diff: Some(format!(
-                "Fix evolution: error was '{}'",
-                error
+                "Fix evolution: error was '{error}'"
             )),
             lineage_content_snapshot: skill.lineage_content_snapshot.clone(),
             directory: skill.directory.clone(),

@@ -1,4 +1,4 @@
-//! Self-Evolution Engine models: SkillRecord, EvolutionType, SkillOrigin, SkillLineage.
+//! Self-Evolution Engine models: `SkillRecord`, `EvolutionType`, `SkillOrigin`, `SkillLineage`.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -81,6 +81,9 @@ fn default_true() -> bool { true }
 impl SkillRecord {
     /// Validate counter invariants.
     /// Python source: models/evolution.py `_validate_counters` — 5 checks.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn validate_counters(&self) -> Result<(), String> {
         if self.total_selections == 0
             && (self.total_applied != 0 || self.total_fallbacks != 0)
@@ -102,7 +105,10 @@ impl SkillRecord {
         Ok(())
     }
 
-    /// Shared counter validation logic used by both SkillRecord and EvolutionMetrics.
+    /// Shared counter validation logic used by both `SkillRecord` and `EvolutionMetrics`.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn validate_counters_from_parts(
         selections: u64,
         applied: u64,
@@ -128,7 +134,7 @@ impl SkillRecord {
     }
 }
 
-/// Standalone evolution metrics with same counter validators as SkillRecord.
+/// Standalone evolution metrics with same counter validators as `SkillRecord`.
 ///
 /// Python source: models/evolution.py:97-123 `EvolutionMetrics`
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -144,6 +150,10 @@ pub struct EvolutionMetrics {
 }
 
 impl EvolutionMetrics {
+    /// Validate metric counters.
+    ///
+    /// # Errors
+    /// Returns an error if any counter is invalid.
     pub fn validate(&self) -> Result<(), String> {
         SkillRecord::validate_counters_from_parts(
             self.total_selections, self.total_applied,

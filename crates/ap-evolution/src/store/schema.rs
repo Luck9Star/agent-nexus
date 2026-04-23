@@ -1,10 +1,10 @@
-//! SQLite schema for the evolution store.
+//! `SQLite` schema for the evolution store.
 //!
 //! Wire-compatible with the Python implementation -- exact same table/column names.
 //! 6 tables + 11 indexes.
 
 /// Complete DDL for the evolution database.
-pub const SCHEMA_SQL: &str = r#"
+pub const SCHEMA_SQL: &str = r"
 CREATE TABLE IF NOT EXISTS skill_records (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS agent_records (
 );
 CREATE INDEX IF NOT EXISTS idx_ar_active ON agent_records(is_active);
 CREATE INDEX IF NOT EXISTS idx_ar_name ON agent_records(name);
-"#;
+";
 
 #[cfg(test)]
 mod tests {

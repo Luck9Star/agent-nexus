@@ -1,4 +1,4 @@
-//! Agent system models: AgentManifest, AgentType, RunMode, AgentRole, ModelTier.
+//! Agent system models: `AgentManifest`, `AgentType`, `RunMode`, `AgentRole`, `ModelTier`.
 
 use serde::{Deserialize, Serialize};
 
@@ -65,6 +65,9 @@ fn default_stdio() -> String {
 impl McpServerConfig {
     /// Validate: stdio transport requires command, sse transport requires url.
     /// Python source: models/agent.py:68-83
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn validate(&self) -> Result<(), String> {
         match self.transport.as_str() {
             "stdio"
@@ -139,6 +142,9 @@ pub struct AgentManifest {
 impl AgentManifest {
     /// Validate permission consistency.
     /// Python source: models/agent.py:125-139
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub fn validate(&self) -> Result<(), String> {
         // Check: if permission_mode is set and permissions.mode is also set, they must match
         if let (Some(mode), Some(permissions)) = (&self.permission_mode, &self.permissions) {
@@ -153,7 +159,7 @@ impl AgentManifest {
         let denied_set: std::collections::HashSet<_> = self.denied_tools.iter().collect();
         for tool in &self.tools {
             if denied_set.contains(tool) {
-                return Err(format!("Tool '{}' is in both 'tools' and 'denied_tools'", tool));
+                return Err(format!("Tool '{tool}' is in both 'tools' and 'denied_tools'"));
             }
         }
         Ok(())

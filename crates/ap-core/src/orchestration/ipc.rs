@@ -1,4 +1,4 @@
-//! IpcStream: JSON-lines framing over async stdin/stdout with size limits.
+//! `IpcStream`: JSON-lines framing over async stdin/stdout with size limits.
 //!
 //! Python source: `src/agent_nexus/platform/orchestration/ipc.py` (446 lines)
 
@@ -44,6 +44,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcStream<R, W> {
     }
 
     /// Serialize and send a message as a JSON-line.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn send<T: Serialize>(&mut self, msg: &T) -> Result<(), IpcError> {
         let json = serde_json::to_vec(msg)?;
         if json.len() > MAX_MESSAGE_SIZE {
@@ -59,6 +62,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcStream<R, W> {
     }
 
     /// Receive and deserialize a JSON-line message.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
     pub async fn receive<T: DeserializeOwned>(&mut self) -> Result<T, IpcError> {
         let mut line = Vec::new();
         let n = self.reader.read_until(b'\n', &mut line).await?;

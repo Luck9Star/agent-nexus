@@ -6,6 +6,7 @@ use ap_runtime::mcp_client::ToolInfo;
 ///
 /// Each tool is namespaced via `McpToolAdapter` (`{agent}___{tool}`) with its
 /// description and input schema preserved.
+#[must_use] 
 pub fn merge_tool_schemas(
     agent_name: &str,
     tools: &[ToolInfo],
@@ -36,6 +37,7 @@ pub fn merge_tool_schemas(
 ///
 /// Expects a JSON object with a "name" field (namespaced) and an optional
 /// "arguments" field.
+#[must_use] 
 pub fn extract_tool_call(
     request: &serde_json::Value,
 ) -> Option<(String, String, serde_json::Value)> {

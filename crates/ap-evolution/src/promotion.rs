@@ -1,4 +1,4 @@
-//! AgentPromoter — promotes a mature skill to a standalone agent.
+//! `AgentPromoter` — promotes a mature skill to a standalone agent.
 //!
 //! Generates:
 //! - Agent manifest (YAML)
@@ -71,6 +71,9 @@ fn validate_skill_name(name: &str) -> Result<(), PromotionError> {
 /// 5. Registers the agent in the store.
 ///
 /// On failure, rolls back by removing any files already written.
+///
+/// # Errors
+/// Returns an error if the underlying operation fails.
 pub fn promote_skill(
     store: &EvolutionStore,
     skill_name: &str,
@@ -174,7 +177,7 @@ packages = ["{sanitized}"]
 /// Generate a SKILL.md string.
 fn generate_skill_md(skill_name: &str) -> String {
     format!(
-        r#"# {skill_name}
+        r"# {skill_name}
 
 Auto-promoted from skill evolution.
 
@@ -186,7 +189,7 @@ demonstrating sufficient maturity (selections, success rate, applications).
 ## Usage
 
 Run as an MCP standalone agent or via the platform router.
-"#
+"
     )
 }
 

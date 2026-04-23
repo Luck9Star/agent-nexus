@@ -39,9 +39,9 @@ pub enum AgentToPlatformType {
 ///
 /// Python source: models/ipc.py:37-51
 /// Wire examples:
-///   Chat:  {"type":"chat","content":"...","conversation_id":"..."}
-///   Task:  {"type":"task","content":"...","task_id":"..."}
-///   Data:  {"type":"data_reference","ref_id":"var://...","summary":"..."}
+///   Chat:  {"`type":"chat","content":"...","conversation_id"`:"..."}
+///   Task:  {"`type":"task","content":"...","task_id"`:"..."}
+///   Data:  {"`type":"data_reference","ref_id":"var://...","summary"`:"..."}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlatformToAgent {
     #[serde(rename = "type")]
@@ -62,9 +62,9 @@ pub struct PlatformToAgent {
 ///
 /// Python source: models/ipc.py:54-95
 /// Wire examples:
-///   Result:   {"type":"result","task_id":"...","output":"...","status":"completed"}
-///   Progress: {"type":"progress","task_id":"...","message":"...","progress_pct":50.0}
-///   Error:    {"type":"error","task_id":"...","error":"..."}
+///   Result:   {"`type":"result","task_id":"...","output":"...","status":"completed`"}
+///   Progress: {"`type":"progress","task_id":"...","message":"...","progress_pct":50.0`}
+///   Error:    {"`type":"error","task_id":"...","error"`:"..."}
 ///
 /// NOTE: `is_success` is a computed property in Python, not a wire field.
 /// NOTE: All fields are optional; `type` is the only required discriminator.
@@ -91,6 +91,7 @@ pub struct AgentToPlatform {
 impl AgentToPlatform {
     /// Check if this response indicates successful completion.
     /// Mirrors Python's `is_success` computed property.
+    #[must_use] 
     pub fn is_success(&self) -> bool {
         if self.msg_type == AgentToPlatformType::Error {
             return false;

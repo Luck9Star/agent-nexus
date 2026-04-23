@@ -1,4 +1,4 @@
-//! Permission models: PermissionMode, PermissionConfig, PathRule, PermissionDecision.
+//! Permission models: `PermissionMode`, `PermissionConfig`, `PathRule`, `PermissionDecision`.
 
 use serde::{Deserialize, Serialize};
 

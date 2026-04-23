@@ -1,4 +1,4 @@
-//! HealthTracker — tracks success/failure ratio using EWMA for decay.
+//! `HealthTracker` — tracks success/failure ratio using EWMA for decay.
 
 /// Smoothing factor for EWMA. Higher values weight recent events more.
 /// 0.1 means ~10% weight on the newest event, slow decay of old state.
@@ -19,6 +19,7 @@ pub struct HealthTracker {
 
 impl HealthTracker {
     /// Create a new tracker starting at perfect health (1.0).
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             score: 1.0,
@@ -47,11 +48,13 @@ impl HealthTracker {
     /// Compute the current health score (0.0 to 1.0).
     ///
     /// Returns `1.0` if no data has been recorded yet (no evidence of failure).
+    #[must_use] 
     pub fn get_health_score(&self) -> f64 {
         self.score
     }
 
     /// Total number of recorded events.
+    #[must_use] 
     pub fn total(&self) -> u64 {
         self.total
     }

@@ -31,7 +31,7 @@ pub fn run(output: &OutputFormatter) -> Result<()> {
             passed += 1;
         }
         Err(e) => {
-            output.error(&format!("[FAIL] config.toml: {}", e));
+            output.error(&format!("[FAIL] config.toml: {e}"));
         }
     }
 
@@ -42,7 +42,7 @@ pub fn run(output: &OutputFormatter) -> Result<()> {
             passed += 1;
         }
         Err(e) => {
-            output.error(&format!("[FAIL] sources.yaml: {}", e));
+            output.error(&format!("[FAIL] sources.yaml: {e}"));
         }
     }
 
@@ -79,19 +79,18 @@ pub fn run(output: &OutputFormatter) -> Result<()> {
     }
 
     if passed == total {
-        output.success(&format!("{}/{} checks passed", passed, total));
+        output.success(&format!("{passed}/{total} checks passed"));
         Ok(())
     } else {
-        output.info(&format!("{}/{} checks passed", passed, total));
+        output.info(&format!("{passed}/{total} checks passed"));
         Err(anyhow::anyhow!("Some checks failed -- see messages above"))
     }
 }
 
 /// Check python3 is available and version >= 3.11.
 fn check_python_version(_output: &OutputFormatter) -> bool {
-    let output = match Command::new("python3").arg("--version").output() {
-        Ok(o) => o,
-        Err(_) => return false,
+    let Ok(output) = Command::new("python3").arg("--version").output() else {
+        return false;
     };
     if !output.status.success() {
         return false;
@@ -139,8 +138,7 @@ fn check_command_exists(cmd: &str) -> bool {
     Command::new(finder)
         .arg(cmd)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }
 
 /// Check that at least one API key environment variable is set.

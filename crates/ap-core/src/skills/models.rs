@@ -1,4 +1,4 @@
-//! Skill models: Skill, SkillInput, SkillOutput.
+//! Skill models: Skill, `SkillInput`, `SkillOutput`.
 
 use serde::{Deserialize, Serialize};
 

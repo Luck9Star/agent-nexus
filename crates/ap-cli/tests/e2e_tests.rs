@@ -617,3 +617,297 @@ fn config_set_preserves_unrelated_keys() {
         "new value should be present"
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// 16. evolution promote with invalid skill name
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn evolution_promote_invalid_skill() {
+    // Promoting a non-existent skill should fail gracefully (not panic).
+    // The promotion backend will attempt to look up the skill in the store
+    // and fail with a descriptive error.
+    let result = cli()
+        .args(["evolution", "promote", "nonexistent-skill-xyz"])
+        .assert();
+
+    let output = result.get_output();
+    let exit_success = output.status.success();
+
+    // The command may succeed (placeholder behavior) or fail -- either way
+    // it must not panic. Verify we got meaningful output.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let combined = format!("{stdout}{stderr}");
+
+    // Should reference the skill name somewhere in output
+    assert!(
+        combined.contains("nonexistent-skill-xyz"),
+        "evolution promote should reference the skill name, got: {combined:?}"
+    );
+
+    // Must not panic (which would produce a different exit pattern)
+    assert!(
+        !combined.contains("panic"),
+        "evolution promote should not panic"
+    );
+
+    let _ = exit_success; // success or failure are both acceptable
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 17. runtime exec with extra args passed through
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn runtime_exec_with_args() {
+    // Without a lockfile, runtime exec should fail with "No lockfile found".
+    // The agent name should appear in the error output.
+    let output = cli()
+        .args(["runtime", "exec", "test-agent", "arg1", "arg2"])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&output.get_output().stderr);
+    assert!(
+        stderr.contains("No lockfile found"),
+        "runtime exec should fail with lockfile message, got: {stderr:?}"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 18. create agent with hyphens in the name
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn create_agent_special_chars_name() {
+    let dir = tempfile::tempdir().unwrap();
+
+    cli()
+        .args(["create", "agent", "my-special-agent"])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    // Verify scaffold was created with hyphenated name
+    let agent_dir = dir
+        .path()
+        .join("agents")
+        .join("atomic")
+        .join("my-special-agent");
+    assert!(
+        agent_dir.join("SKILL.md").exists(),
+        "SKILL.md should exist for hyphenated agent name"
+    );
+    assert!(
+        agent_dir.join("pyproject.toml").exists(),
+        "pyproject.toml should exist for hyphenated agent name"
+    );
+    assert!(
+        agent_dir
+            .join("agent_my-special-agent")
+            .join("main.py")
+            .exists(),
+        "main.py should exist inside agent module directory"
+    );
+
+    // SKILL.md should contain the agent name
+    let skill = std::fs::read_to_string(agent_dir.join("SKILL.md")).unwrap();
+    assert!(
+        skill.contains("my-special-agent"),
+        "SKILL.md should contain the agent name"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 19. sources add with empty name or URL validation
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn sources_add_url_validation() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+
+    // Empty URL should be rejected
+    cli()
+        .args(["sources", "add", "bad-url", ""])
+        .current_dir(dir.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("url is empty"));
+
+    // NOTE: Empty name ("") is currently accepted by the CLI -- SourceEntry
+    // validation does not reject empty names. This is a potential bug but we
+    // test against current behavior: the command should not panic regardless.
+    let result = cli()
+        .args(["sources", "add", "", "https://github.com/example/repo"])
+        .current_dir(dir.path())
+        .assert();
+
+    // Verify it doesn't panic (empty name is accepted currently)
+    let stderr = String::from_utf8_lossy(&result.get_output().stderr);
+    let stdout = String::from_utf8_lossy(&result.get_output().stdout);
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        !combined.contains("panic"),
+        "sources add with empty name should not panic"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 20. install with --version flag fails for agent not in sources
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn install_with_version_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+
+    cli()
+        .args(["install", "some-agent", "--version", "v1.0.0"])
+        .current_dir(dir.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found in sources"));
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 21. run with --model flag
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn run_with_model_flag() {
+    // The run command always fails with PlatformRouter message (placeholder),
+    // but the --model flag should be accepted by clap parsing.
+    cli()
+        .args(["run", "test-agent", "--model", "openai:gpt-4o", "some", "task"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("PlatformRouter"));
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 22. config set with float value
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn config_set_float_value() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("config.toml"),
+        "[runtime]\npython_path = \"python3\"\n",
+    )
+    .unwrap();
+
+    cli()
+        .args(["config", "set", "runtime.timeout", "3.5"])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    // Verify the value is stored as a TOML float, not a string
+    let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    assert!(
+        content.contains("timeout = 3.5"),
+        "Float should be stored as TOML float, got: {content:?}"
+    );
+    assert!(
+        !content.contains("timeout = \"3.5\""),
+        "Float should NOT be stored as string, got: {content:?}"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 23. init idempotent with pre-existing files
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn init_idempotent_with_existing_files() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Create a pre-existing file that init should not overwrite
+    let preexisting_content = "this should not be overwritten";
+    std::fs::write(dir.path().join("config.toml"), preexisting_content).unwrap();
+
+    // Run init
+    cli()
+        .args(["init", "--dir", dir.path().to_str().unwrap()])
+        .assert()
+        .success();
+
+    // config.toml should NOT have been overwritten
+    let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    assert_eq!(
+        content, preexisting_content,
+        "init should not overwrite pre-existing config.toml"
+    );
+
+    // sources.yaml should have been created (it did not exist before)
+    assert!(
+        dir.path().join("sources.yaml").exists(),
+        "init should create sources.yaml when it does not exist"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 24. evolution status with --json flag
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn evolution_status_json_output() {
+    let output = cli()
+        .args(["--json", "evolution", "status"])
+        .assert()
+        .success();
+
+    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    // In JSON mode, each non-empty line should be valid JSON
+    for line in stdout.lines() {
+        if !line.trim().is_empty() {
+            let _: serde_json::Value =
+                serde_json::from_str(line).unwrap_or_else(|e| {
+                    panic!("Expected valid JSON line, got: {line:?}\nError: {e}")
+                });
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 25. check with missing git in a directory with config
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn check_with_missing_git() {
+    let dir = tempfile::tempdir().unwrap();
+    // Create config but no git repo -- check should handle gracefully
+    std::fs::write(
+        dir.path().join("config.toml"),
+        "[models]\ndefault = \"openai:gpt-4o\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+
+    // Run check -- it will likely fail (no API key, etc.) but must not panic
+    let result = cli()
+        .env("OPENAI_API_KEY", "sk-test-check-no-git")
+        .arg("check")
+        .current_dir(dir.path())
+        .assert();
+
+    let output = result.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let combined = format!("{stdout}{stderr}");
+
+    // Should mention config.toml check (PASS since we created a valid one)
+    assert!(
+        combined.contains("config.toml"),
+        "check should mention config.toml status, got: {combined:?}"
+    );
+
+    // Must not panic
+    assert!(
+        !combined.contains("panic"),
+        "check should not panic even without git repo"
+    );
+}

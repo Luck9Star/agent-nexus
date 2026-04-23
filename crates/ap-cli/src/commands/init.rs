@@ -34,14 +34,14 @@ pub fn run(dir: &str, output: &OutputFormatter) -> Result<()> {
         output.info("config.toml already exists, skipping");
     } else {
         std::fs::write(&config_path, default_config_toml())?;
-        output.success(&format!("Created config.toml in {}", dir));
+        output.success(&format!("Created config.toml in {dir}"));
     }
 
     if sources_path.exists() {
         output.info("sources.yaml already exists, skipping");
     } else {
         std::fs::write(&sources_path, default_sources_yaml())?;
-        output.success(&format!("Created sources.yaml in {}", dir));
+        output.success(&format!("Created sources.yaml in {dir}"));
     }
 
     // API key detection
@@ -51,10 +51,10 @@ pub fn run(dir: &str, output: &OutputFormatter) -> Result<()> {
         .copied()
         .collect();
 
-    if !detected_keys.is_empty() {
-        output.info(&format!("Detected API keys: {}", detected_keys.join(", ")));
-    } else {
+    if detected_keys.is_empty() {
         output.info("No API keys detected in environment");
+    } else {
+        output.info(&format!("Detected API keys: {}", detected_keys.join(", ")));
     }
 
     // Next steps
