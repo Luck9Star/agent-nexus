@@ -88,6 +88,12 @@ enum Commands {
         #[command(subcommand)]
         action: RuntimeAction,
     },
+
+    /// Show environment information
+    Env,
+
+    /// Print version information
+    Version,
 }
 
 #[derive(Subcommand)]
@@ -140,6 +146,9 @@ enum ConfigAction {
         /// Value to set
         value: String,
     },
+
+    /// Show configuration overview
+    Show,
 }
 
 #[derive(Subcommand)]
@@ -170,7 +179,7 @@ enum RuntimeAction {
 fn main() -> Result<()> {
     // Initialize tracing (minimal default)
     // If init fails (e.g. already initialized), that's acceptable in tests or
-    // when embedded — log a debug message but don't crash.
+    // when embedded -- log a debug message but don't crash.
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -212,6 +221,7 @@ fn main() -> Result<()> {
         Commands::Config { action } => match action {
             ConfigAction::Get { key } => commands::config::run_get(&key, &output)?,
             ConfigAction::Set { key, value } => commands::config::run_set(&key, &value, &output)?,
+            ConfigAction::Show => commands::config::run_show(&output)?,
         },
 
         Commands::Evolution { action } => match action {
@@ -226,6 +236,12 @@ fn main() -> Result<()> {
                 commands::runtime::run_exec(&agent, &args, &output)?
             }
         },
+
+        Commands::Env => commands::env::run(&output)?,
+
+        Commands::Version => {
+            println!("agent-nexus {}", env!("CARGO_PKG_VERSION"));
+        }
     }
 
     Ok(())

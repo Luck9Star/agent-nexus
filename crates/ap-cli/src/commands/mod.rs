@@ -2,6 +2,7 @@ pub mod check;
 pub mod config;
 pub mod create;
 pub mod evolution;
+pub mod env;
 pub mod init;
 pub mod install;
 pub mod run;
@@ -23,6 +24,7 @@ pub fn find_project_root(start: &Path) -> PathBuf {
             None => break,
         }
     }
+    eprintln!("Warning: No config.toml found. Using current directory as project root.");
     start.to_path_buf()
 }
 

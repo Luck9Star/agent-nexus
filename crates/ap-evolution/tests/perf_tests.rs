@@ -5,7 +5,6 @@
 
 use std::time::Instant;
 
-use ap_core::models::common::utc_now;
 use ap_evolution::store::queries::SkillRecord;
 use ap_evolution::EvolutionStore;
 

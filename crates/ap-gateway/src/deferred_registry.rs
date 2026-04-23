@@ -24,6 +24,9 @@ pub enum RegistryError {
 
     #[error("Agent not active: {0}")]
     NotActive(String),
+
+    #[error("Tool execution failed: {0}")]
+    ToolExecutionFailed(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -34,7 +37,7 @@ struct AgentSlot {
     #[allow(dead_code)] // Used for agent metadata lookups in production
     manifest: AgentManifest,
     client: Option<Arc<tokio::sync::Mutex<Box<dyn McpClient>>>>,
-    tools: Vec<ToolInfo>,
+    tools: Arc<Vec<ToolInfo>>,
     last_used: std::time::Instant,
 }
 
@@ -77,7 +80,7 @@ impl DeferredAgentRegistry {
         let slot = AgentSlot {
             manifest,
             client: None,
-            tools: Vec::new(),
+            tools: Arc::new(Vec::new()),
             last_used: std::time::Instant::now(),
         };
         self.agents.lock().await.insert(name, slot);
@@ -116,7 +119,7 @@ impl DeferredAgentRegistry {
                 .get(name)
                 .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
             if slot.client.is_some() {
-                return Ok(slot.tools.clone());
+                return Ok(slot.tools.to_vec());
             }
         }
 
@@ -135,16 +138,18 @@ impl DeferredAgentRegistry {
         if slot.client.is_some() {
             // Another caller activated first — our client is redundant.
             // The client we created will be dropped here, triggering cleanup.
-            return Ok(slot.tools.clone());
+            return Ok(slot.tools.to_vec());
         }
         slot.client = Some(Arc::new(tokio::sync::Mutex::new(client)));
-        slot.tools = tools.clone();
+        let tools_arc = Arc::new(tools);
+        let result = tools_arc.to_vec();
+        slot.tools = tools_arc;
         slot.last_used = std::time::Instant::now();
-        Ok(tools)
+        Ok(result)
     }
 
     /// Get the cached tool list for an active agent.
-    pub async fn get_tools(&self, name: &str) -> Result<Vec<ToolInfo>, RegistryError> {
+    pub async fn get_tools(&self, name: &str) -> Result<Arc<Vec<ToolInfo>>, RegistryError> {
         let agents = self.agents.lock().await;
         let slot = agents
             .get(name)
@@ -153,7 +158,7 @@ impl DeferredAgentRegistry {
         if slot.client.is_none() {
             return Err(RegistryError::NotActive(name.to_string()));
         }
-        Ok(slot.tools.clone())
+        Ok(Arc::clone(&slot.tools))
     }
 
     /// Call a tool on an active agent via its MCP client.
@@ -179,7 +184,7 @@ impl DeferredAgentRegistry {
         client
             .call_tool(tool_name, args)
             .await
-            .map_err(|e| RegistryError::ActivationFailed(e.to_string()))
+            .map_err(|e| RegistryError::ToolExecutionFailed(e.to_string()))
     }
 
     /// Deactivate all agents that have been idle longer than the timeout.
@@ -199,7 +204,7 @@ impl DeferredAgentRegistry {
                     if let Some(client_arc) = slot.client.take() {
                         idle_clients.push(client_arc);
                     }
-                    slot.tools.clear();
+                    slot.tools = Arc::new(Vec::new());
                 }
             }
             idle_clients
@@ -227,7 +232,7 @@ impl DeferredAgentRegistry {
             let slot = agents
                 .get_mut(name)
                 .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
-            slot.tools.clear();
+            slot.tools = Arc::new(Vec::new());
             slot.client.take()
         }; // Lock dropped here
 

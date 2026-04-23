@@ -4,6 +4,7 @@
 //! ProcessManager (which manages a map of processes). AgentProcess owns
 //! exactly one child process and provides lifecycle + I/O extraction.
 
+use std::mem::ManuallyDrop;
 use std::process::Stdio;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::process::{Child, Command};
@@ -30,7 +31,7 @@ pub enum ProcessError {
 
 pub struct AgentProcess {
     id: String,
-    child: Child,
+    child: ManuallyDrop<Child>,
     stdin: Option<Box<dyn AsyncWrite + Unpin + Send>>,
     stdout: Option<Box<dyn AsyncRead + Unpin + Send>>,
 }
@@ -60,7 +61,7 @@ impl AgentProcess {
 
         Ok(Self {
             id: id.to_string(),
-            child,
+            child: ManuallyDrop::new(child),
             stdin: Some(stdin),
             stdout: Some(stdout),
         })
@@ -110,6 +111,7 @@ impl AgentProcess {
         Box<dyn AsyncRead + Unpin + Send>,
         Child,
     ) {
+        let id = std::mem::take(&mut self.id);
         let stdin = self
             .stdin
             .take()
@@ -118,7 +120,24 @@ impl AgentProcess {
             .stdout
             .take()
             .unwrap_or_else(|| Box::new(tokio::io::empty()));
-        (self.id, stdin, stdout, self.child)
+        // SAFETY: We immediately forget(self) after this, preventing Drop
+        // from running on the now-empty ManuallyDrop slot.
+        let child = unsafe { ManuallyDrop::take(&mut self.child) };
+        std::mem::forget(self);
+        (id, stdin, stdout, child)
+    }
+}
+
+impl Drop for AgentProcess {
+    fn drop(&mut self) {
+        // Best-effort kill child process to prevent zombies.
+        // start_kill() is non-async and sends SIGKILL immediately.
+        // When split() was called, ManuallyDrop::take extracted the child
+        // and std::mem::forget prevented this Drop from ever running.
+        // So if Drop *does* run, the child is still owned and safe to kill.
+        if let Err(e) = self.child.start_kill() {
+            tracing::warn!("Failed to kill child process during drop: {}", e);
+        }
     }
 }
 

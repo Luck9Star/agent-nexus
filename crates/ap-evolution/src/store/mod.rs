@@ -15,7 +15,7 @@ pub use error::{Result, StoreError};
 
 // Re-export query types for convenience
 pub use queries::{
-    AgentRecord, ExecutionAnalysis, SkillRecord,
+    AgentRecord, ExecutionAnalysis, SkillJudgment, SkillRecord,
 };
 
 // ---------------------------------------------------------------------------
@@ -75,6 +75,12 @@ impl EvolutionStore {
         queries::get_skill_by_name(&conn, name)
     }
 
+    /// Get a skill by ID (regardless of active status).
+    pub fn get_skill_by_id(&self, id: &str) -> Result<Option<SkillRecord>> {
+        let conn = self.conn()?;
+        queries::get_skill_by_id(&conn, id)
+    }
+
     /// Get all active skills.
     pub fn get_active_skills(&self) -> Result<Vec<SkillRecord>> {
         let conn = self.conn()?;
@@ -82,9 +88,112 @@ impl EvolutionStore {
     }
 
     /// Delete a skill record by id.
-    pub fn delete_skill(&self, id: &str) -> Result<()> {
+    ///
+    /// Returns `Ok(true)` if a row was deleted, `Ok(false)` if no matching row was found.
+    pub fn delete_skill(&self, id: &str) -> Result<bool> {
         let conn = self.conn()?;
         queries::delete_skill(&conn, id)
+    }
+
+    // -----------------------------------------------------------------------
+    // Counter increment operations
+    // -----------------------------------------------------------------------
+
+    /// Increment `total_selections` for a skill.
+    ///
+    /// Returns `Ok(true)` if updated, `Ok(false)` if skill not found.
+    pub fn increment_selections(&self, id: &str) -> Result<bool> {
+        let conn = self.conn()?;
+        queries::increment_selections(&conn, id)
+    }
+
+    /// Increment `total_applied` for a skill.
+    ///
+    /// Returns `Ok(true)` if updated, `Ok(false)` if skill not found.
+    pub fn increment_applied(&self, id: &str) -> Result<bool> {
+        let conn = self.conn()?;
+        queries::increment_applied(&conn, id)
+    }
+
+    /// Increment `total_completions` for a skill.
+    ///
+    /// Returns `Ok(true)` if updated, `Ok(false)` if skill not found.
+    pub fn increment_completions(&self, id: &str) -> Result<bool> {
+        let conn = self.conn()?;
+        queries::increment_completions(&conn, id)
+    }
+
+    /// Increment `total_fallbacks` for a skill.
+    ///
+    /// Returns `Ok(true)` if updated, `Ok(false)` if skill not found.
+    pub fn increment_fallbacks(&self, id: &str) -> Result<bool> {
+        let conn = self.conn()?;
+        queries::increment_fallbacks(&conn, id)
+    }
+
+    // -----------------------------------------------------------------------
+    // Skill lifecycle
+    // -----------------------------------------------------------------------
+
+    /// Deactivate a skill by setting `is_active = 0`.
+    ///
+    /// Returns `Ok(true)` if updated, `Ok(false)` if skill not found.
+    pub fn deactivate_skill(&self, id: &str) -> Result<bool> {
+        let conn = self.conn()?;
+        queries::deactivate_skill(&conn, id)
+    }
+
+    /// Evolve a skill: insert a new version with lineage parents.
+    ///
+    /// If `deactivate_parents` is true (FIX evolution), parents are deactivated.
+    pub fn evolve_skill(
+        &self,
+        new_skill: &SkillRecord,
+        parent_ids: &[&str],
+        deactivate_parents: bool,
+    ) -> Result<()> {
+        let conn = self.conn()?;
+        queries::evolve_skill(&conn, new_skill, parent_ids, deactivate_parents)
+    }
+
+    // -----------------------------------------------------------------------
+    // Judgment operations
+    // -----------------------------------------------------------------------
+
+    /// Insert a skill judgment.
+    pub fn save_judgment(&self, judgment: &SkillJudgment) -> Result<()> {
+        let conn = self.conn()?;
+        queries::save_judgment(&conn, judgment)
+    }
+
+    /// Get judgments for a skill, most recent first.
+    pub fn get_judgments_for_skill(
+        &self,
+        skill_id: &str,
+        limit: i64,
+    ) -> Result<Vec<SkillJudgment>> {
+        let conn = self.conn()?;
+        queries::get_judgments_for_skill(&conn, skill_id, limit)
+    }
+
+    // -----------------------------------------------------------------------
+    // Lineage queries
+    // -----------------------------------------------------------------------
+
+    /// Walk up the lineage tree via BFS, returning ancestors oldest-first.
+    pub fn get_ancestry(
+        &self,
+        skill_id: &str,
+        max_depth: usize,
+    ) -> Result<Vec<SkillRecord>> {
+        let conn = self.conn()?;
+        queries::get_ancestry(&conn, skill_id, max_depth)
+    }
+
+    /// Get child skill IDs derived from the given parent.
+    pub fn get_children(&self, parent_id: &str) -> Result<Vec<String>> {
+        let conn = self.conn()?;
+        queries::get_children(&conn, parent_id)
     }
 
     // -----------------------------------------------------------------------
@@ -192,8 +301,8 @@ impl EvolutionStore {
     // -----------------------------------------------------------------------
 
     /// List all table names (for testing schema).
-    pub fn list_tables(&self) -> Vec<String> {
-        let conn = self.conn().expect("lock should not be poisoned");
+    pub fn list_tables(&self) -> Result<Vec<String>> {
+        let conn = self.conn()?;
         queries::list_tables(&conn)
     }
 
@@ -211,7 +320,7 @@ mod tests {
     #[test]
     fn new_in_memory_creates_all_tables() {
         let store = EvolutionStore::new_in_memory().unwrap();
-        let tables = store.list_tables();
+        let tables = store.list_tables().unwrap();
         assert!(tables.contains(&"skill_records".to_string()));
         assert!(tables.contains(&"skill_lineage_parents".to_string()));
         assert!(tables.contains(&"execution_analyses".to_string()));
@@ -272,7 +381,8 @@ mod tests {
         };
         store.insert_skill(&skill).unwrap();
         assert!(store.get_skill_by_name("to-delete").unwrap().is_some());
-        store.delete_skill("s-del").unwrap();
+        let deleted = store.delete_skill("s-del").unwrap();
+        assert!(deleted, "delete_skill should return true when row exists");
         assert!(store.get_skill_by_name("to-delete").unwrap().is_none());
     }
 
@@ -315,7 +425,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let store = EvolutionStore::new(&db_path).unwrap();
-        let tables = store.list_tables();
+        let tables = store.list_tables().unwrap();
         assert!(tables.contains(&"skill_records".to_string()));
     }
 
@@ -353,5 +463,191 @@ mod tests {
         }
         let active = store.get_active_skills().unwrap();
         assert_eq!(active.len(), 4);
+    }
+
+    // --- New facade tests for missing methods ---
+
+    fn make_facade_skill(id: &str, name: &str) -> SkillRecord {
+        SkillRecord {
+            id: id.to_string(),
+            name: name.to_string(),
+            version: "1.0.0".to_string(),
+            lineage_origin: "imported".to_string(),
+            lineage_generation: 0,
+            lineage_content_diff: None,
+            lineage_content_snapshot: None,
+            directory: Some("/skills/test".to_string()),
+            is_active: true,
+            total_selections: 0,
+            total_applied: 0,
+            total_completions: 0,
+            total_fallbacks: 0,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    #[test]
+    fn facade_get_skill_by_id() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+        let skill = make_facade_skill("facade-1", "facade-skill");
+        store.insert_skill(&skill).unwrap();
+
+        let found = store.get_skill_by_id("facade-1").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "facade-skill");
+
+        let not_found = store.get_skill_by_id("nonexistent").unwrap();
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn facade_increment_counters() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+        let skill = make_facade_skill("ctr-1", "ctr-skill");
+        store.insert_skill(&skill).unwrap();
+
+        assert!(store.increment_selections("ctr-1").unwrap());
+        assert!(store.increment_selections("ctr-1").unwrap());
+        assert!(store.increment_applied("ctr-1").unwrap());
+        assert!(store.increment_completions("ctr-1").unwrap());
+        assert!(store.increment_fallbacks("ctr-1").unwrap());
+
+        let found = store.get_skill_by_id("ctr-1").unwrap().unwrap();
+        assert_eq!(found.total_selections, 2);
+        assert_eq!(found.total_applied, 1);
+        assert_eq!(found.total_completions, 1);
+        assert_eq!(found.total_fallbacks, 1);
+
+        // Missing skill returns false
+        assert!(!store.increment_selections("nonexistent").unwrap());
+    }
+
+    #[test]
+    fn facade_deactivate_skill() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+        let skill = make_facade_skill("deact-1", "deact-skill");
+        store.insert_skill(&skill).unwrap();
+
+        assert!(store.deactivate_skill("deact-1").unwrap());
+        assert!(store.get_skill_by_name("deact-skill").unwrap().is_none());
+        let found = store.get_skill_by_id("deact-1").unwrap().unwrap();
+        assert!(!found.is_active);
+
+        assert!(!store.deactivate_skill("nonexistent").unwrap());
+    }
+
+    #[test]
+    fn facade_evolve_skill() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+
+        let parent = make_facade_skill("ev-parent", "ev-skill");
+        store.insert_skill(&parent).unwrap();
+
+        let mut child = make_facade_skill("ev-child", "ev-skill");
+        child.lineage_generation = 1;
+        child.lineage_origin = "fixed".to_string();
+
+        // evolve_skill inserts the child record itself
+        store.evolve_skill(&child, &["ev-parent"], true).unwrap();
+
+        // Parent deactivated
+        let p = store.get_skill_by_id("ev-parent").unwrap().unwrap();
+        assert!(!p.is_active);
+
+        // Child active
+        let c = store.get_skill_by_id("ev-child").unwrap().unwrap();
+        assert!(c.is_active);
+
+        // Lineage link
+        let children = store.get_children("ev-parent").unwrap();
+        assert_eq!(children, vec!["ev-child"]);
+    }
+
+    #[test]
+    fn facade_save_and_get_judgments() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+
+        let skill = make_facade_skill("j-skill", "j-skill-name");
+        store.insert_skill(&skill).unwrap();
+
+        store.record_analysis("j-task", "j-agent", "analysis", None).unwrap();
+        let analyses = store.get_analyses_for_task("j-task").unwrap();
+        let analysis_id = &analyses[0].id;
+
+        let judgment = SkillJudgment {
+            id: "j-001".to_string(),
+            analysis_id: analysis_id.clone(),
+            skill_id: "j-skill".to_string(),
+            selected: true,
+            applied: true,
+            completed: false,
+            fell_back: false,
+        };
+        store.save_judgment(&judgment).unwrap();
+
+        let judgments = store.get_judgments_for_skill("j-skill", 10).unwrap();
+        assert_eq!(judgments.len(), 1);
+        assert!(judgments[0].selected);
+    }
+
+    #[test]
+    fn facade_get_ancestry() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+
+        let gp = make_facade_skill("anc-gp", "anc-gp");
+        store.insert_skill(&gp).unwrap();
+
+        let mut p = make_facade_skill("anc-p", "anc-p");
+        p.lineage_generation = 1;
+        store.insert_skill(&p).unwrap();
+        // Need to insert lineage parent manually via internal queries
+        {
+            let conn = store.conn().unwrap();
+            conn.execute(
+                "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES ('anc-p', 'anc-gp')",
+                [],
+            ).unwrap();
+        }
+
+        let mut c = make_facade_skill("anc-c", "anc-c");
+        c.lineage_generation = 2;
+        store.insert_skill(&c).unwrap();
+        {
+            let conn = store.conn().unwrap();
+            conn.execute(
+                "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES ('anc-c', 'anc-p')",
+                [],
+            ).unwrap();
+        }
+
+        let ancestry = store.get_ancestry("anc-c", 10).unwrap();
+        assert_eq!(ancestry.len(), 2);
+        assert_eq!(ancestry[0].id, "anc-gp");
+        assert_eq!(ancestry[1].id, "anc-p");
+    }
+
+    #[test]
+    fn facade_get_children() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+
+        let parent = make_facade_skill("ch-parent", "ch-parent");
+        store.insert_skill(&parent).unwrap();
+
+        let child = make_facade_skill("ch-child", "ch-child");
+        store.insert_skill(&child).unwrap();
+        {
+            let conn = store.conn().unwrap();
+            conn.execute(
+                "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES ('ch-child', 'ch-parent')",
+                [],
+            ).unwrap();
+        }
+
+        let children = store.get_children("ch-parent").unwrap();
+        assert_eq!(children, vec!["ch-child"]);
+
+        let empty = store.get_children("nonexistent").unwrap();
+        assert!(empty.is_empty());
     }
 }

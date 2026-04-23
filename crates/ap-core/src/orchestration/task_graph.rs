@@ -247,7 +247,7 @@ impl TaskGraph {
             Err(_) => return Ok(false),
         };
 
-        let mut name_index: HashMap<String, usize> = HashMap::new();
+        let mut name_index: HashMap<String, usize> = HashMap::with_capacity(tasks.len());
         for (i, t) in tasks.iter().enumerate() {
             name_index.insert(t.id.clone(), i);
         }
@@ -306,8 +306,9 @@ impl TaskGraph {
         }
 
         let tasks = self.load_all_tasks()?;
-        let mut in_degree: HashMap<String, usize> = HashMap::new();
-        let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
+        let task_count = tasks.len();
+        let mut in_degree: HashMap<String, usize> = HashMap::with_capacity(task_count);
+        let mut adjacency: HashMap<String, Vec<String>> = HashMap::with_capacity(task_count);
 
         for task in &tasks {
             in_degree.entry(task.id.clone()).or_insert(0);

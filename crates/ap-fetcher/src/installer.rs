@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use thiserror::Error;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Errors from git installer operations.
 #[derive(Debug, Error)]
@@ -92,14 +92,16 @@ impl GitInstaller {
         })();
 
         if result.is_err() {
-            let _ = std::fs::remove_dir_all(&tmp_path);
+            if let Err(e) = std::fs::remove_dir_all(&tmp_path) {
+                warn!("Failed to clean up temp directory {}: {}", tmp_path.display(), e);
+            }
         }
 
         result
     }
 
     /// Find a semver tag matching the given version and check it out.
-    pub fn checkout_version(repo: &git2::Repository, version: &str) -> Result<(), InstallerError> {
+    pub(crate) fn checkout_version(repo: &git2::Repository, version: &str) -> Result<(), InstallerError> {
         let target = semver::Version::parse(version).map_err(|e| {
             InstallerError::VersionNotFound(format!("invalid semver '{}': {}", version, e))
         })?;

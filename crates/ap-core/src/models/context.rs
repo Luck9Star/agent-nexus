@@ -199,23 +199,19 @@ mod tests {
 
     #[test]
     fn trigger_must_exceed_target() {
-        let mut budget = ContextBudget::default();
-        budget.compaction_trigger = 0.3;
-        budget.compaction_target = 0.5;
+        let budget = ContextBudget { compaction_trigger: 0.3, compaction_target: 0.5, ..Default::default() };
         assert!(budget.validate().is_err());
     }
 
     #[test]
     fn bootstrap_must_fit_l0_plus_l1() {
-        let mut budget = ContextBudget::default();
-        budget.bootstrap_max = 1000;
+        let budget = ContextBudget { bootstrap_max: 1000, ..Default::default() };
         assert!(budget.validate().is_err());
     }
 
     #[test]
     fn forced_truncate_must_be_below_ceiling() {
-        let mut budget = ContextBudget::default();
-        budget.forced_truncate_threshold = 0.96;
+        let budget = ContextBudget { forced_truncate_threshold: 0.96, ..Default::default() };
         assert!(budget.validate().is_err());
     }
 

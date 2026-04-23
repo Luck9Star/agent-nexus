@@ -36,7 +36,7 @@ fn get_from_path(path: &Path, key: &str, output: &OutputFormatter) -> Result<()>
         });
         println!("{}", serde_json::to_string_pretty(&obj).expect("TOML values are always JSON-serializable"));
     } else {
-        println!("{} = {}", key, format_toml_value(value));
+        println!("{}", format_toml_value(value));
     }
 
     Ok(())
@@ -63,9 +63,76 @@ fn set_in_path(path: &Path, key: &str, value: &str, output: &OutputFormatter) ->
     set_toml_key(&mut config, key, value).with_context(|| format!("Cannot set key '{}'", key))?;
 
     let new_content = toml::to_string_pretty(&config)?;
-    std::fs::write(path, new_content)?;
+
+    // Atomic write: write to .tmp then rename to prevent corruption on crash
+    let tmp_path = path.with_extension("toml.tmp");
+    std::fs::write(&tmp_path, &new_content)?;
+    std::fs::rename(&tmp_path, path)?;
 
     output.success(&format!("Set {} = {}", key, value));
+    Ok(())
+}
+
+/// Run `config show` command -- display configuration overview.
+pub fn run_show(output: &OutputFormatter) -> Result<()> {
+    let root = commands::find_project_root(&std::env::current_dir()?);
+    let config_path = root.join("config.toml");
+
+    if output.is_json() {
+        let mut obj = serde_json::Map::new();
+        obj.insert("config_dir".into(), serde_json::Value::String(root.display().to_string()));
+
+        if config_path.exists() {
+            let content = std::fs::read_to_string(&config_path)?;
+            let config: toml::Value = toml::from_str(&content).with_context(|| "Invalid config.toml")?;
+            if let Some(models) = config.get("models") {
+                if let Some(default) = models.get("default").and_then(|v| v.as_str()) {
+                    obj.insert("default_model".into(), serde_json::Value::String(default.to_string()));
+                }
+                if let Some(providers) = models.get("providers").and_then(|v| v.as_table()) {
+                    let provider_names: Vec<serde_json::Value> = providers.keys().map(|k| serde_json::Value::String(k.clone())).collect();
+                    obj.insert("providers".into(), serde_json::Value::Array(provider_names));
+                }
+            }
+        } else {
+            obj.insert("default_model".into(), serde_json::Value::String("openai:gpt-4o".into()));
+        }
+        println!("{}", serde_json::to_string_pretty(&obj).expect("JSON serialization is infallible"));
+    } else {
+        println!("Config dir: {}", root.display());
+
+        if config_path.exists() {
+            let content = std::fs::read_to_string(&config_path)?;
+            let config: toml::Value = toml::from_str(&content).with_context(|| "Invalid config.toml")?;
+
+            if let Some(default) = config.get("models").and_then(|m| m.get("default")).and_then(|v| v.as_str()) {
+                println!("Default model: {}", default);
+            } else {
+                println!("Default model: openai:gpt-4o (built-in default)");
+            }
+
+            // Python path
+            if let Some(python) = config.get("runtime").and_then(|r| r.get("python_path")).and_then(|v| v.as_str()) {
+                println!("Python path: {}", python);
+            }
+
+            // uv path
+            if let Some(uv) = config.get("runtime").and_then(|r| r.get("uv_path")).and_then(|v| v.as_str()) {
+                println!("uv path: {}", uv);
+            }
+
+            // Providers
+            if let Some(providers) = config.get("models").and_then(|m| m.get("providers")).and_then(|v| v.as_table()) {
+                println!("Providers:");
+                for (name, _cfg) in providers {
+                    println!("  - {}", name);
+                }
+            }
+        } else {
+            println!("No config.toml found");
+        }
+    }
+
     Ok(())
 }
 

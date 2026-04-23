@@ -1,30 +1,242 @@
 //! EvolutionEngine — top-level facade that ties together the store, analyzer,
-//! and health tracker.
+//! evolver, and health tracker.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::analyzer::{Analyzer, EvolutionSuggestion, TaskResult};
+use crate::evolver::{EvolutionOutcome, EvolverError, SkillEvolver};
 use crate::health::HealthTracker;
 use crate::store::EvolutionStore;
+use crate::thresholds::Thresholds;
+
+/// What initiated an evolution cycle.
+///
+/// Maps to the Python `EvolutionTrigger` enum. Each variant carries the
+/// context needed to dispatch to the correct handler.
+#[derive(Debug, Clone)]
+pub enum EvolveTrigger {
+    /// Post-task analysis: analyze the result and evolve any skills that need fixing.
+    Analysis {
+        task_id: String,
+        agent_name: String,
+    },
+    /// A tool/API the skill depends on has degraded. Evolve affected skills.
+    ToolDegradation {
+        skill_name: String,
+        problem_description: String,
+    },
+    /// Periodic metric check: scan all skills and evolve those with poor health.
+    MetricCheck,
+    /// A specific skill failed. Evolve it immediately.
+    Failure {
+        skill_name: String,
+        error: String,
+    },
+}
+
+/// Result of a single evolution dispatch cycle.
+#[derive(Debug, Clone)]
+pub struct EvolveDispatchResult {
+    /// The trigger that initiated this cycle.
+    pub trigger: EvolveTrigger,
+    /// Individual outcomes, one per skill that was evolved.
+    pub outcomes: Vec<EvolutionOutcome>,
+}
+
+/// Error type for the engine's `evolve()` dispatch.
+#[derive(Debug, thiserror::Error)]
+pub enum EvolveDispatchError {
+    #[error("Store error: {0}")]
+    Store(#[from] crate::store::StoreError),
+
+    #[error("Evolver error: {0}")]
+    Evolver(#[from] EvolverError),
+
+    #[error("No active skill found with name: {0}")]
+    SkillNotFound(String),
+}
 
 /// The main evolution engine.
 ///
-/// Coordinates post-task analysis and health tracking.
+/// Coordinates post-task analysis, trigger-based dispatch, and health tracking.
 pub struct EvolutionEngine {
-    store: Arc<Mutex<EvolutionStore>>,
+    store: Arc<EvolutionStore>,
     analyzer: Analyzer,
-    health: Mutex<HealthTracker>,
+    evolver: Arc<SkillEvolver>,
+    health: std::sync::Mutex<HealthTracker>,
+    thresholds: Thresholds,
 }
 
 impl EvolutionEngine {
     /// Create a new engine backed by the given store.
     pub fn new(store: EvolutionStore) -> Self {
+        let store = Arc::new(store);
+        let evolver = Arc::new(SkillEvolver::new(Arc::clone(&store)));
         Self {
-            store: Arc::new(Mutex::new(store)),
+            store,
             analyzer: Analyzer::new(),
-            health: Mutex::new(HealthTracker::new()),
+            evolver,
+            health: std::sync::Mutex::new(HealthTracker::new()),
+            thresholds: Thresholds::default(),
         }
     }
+
+    /// Create a new engine with custom thresholds.
+    pub fn with_thresholds(store: EvolutionStore, thresholds: Thresholds) -> Self {
+        let store = Arc::new(store);
+        let evolver = Arc::new(SkillEvolver::new(Arc::clone(&store)));
+        Self {
+            store,
+            analyzer: Analyzer::new(),
+            evolver,
+            health: std::sync::Mutex::new(HealthTracker::new()),
+            thresholds,
+        }
+    }
+
+    /// Unified evolve entry point — dispatches by trigger type.
+    ///
+    /// This is the primary API for triggering evolution. It routes to the
+    /// appropriate handler based on the trigger variant:
+    ///
+    /// - **Analysis**: Run post-task analysis, extract suggestions, evolve skills.
+    /// - **Failure**: Look up the named skill, call `evolve_fix()`.
+    /// - **ToolDegradation**: Look up the named skill, call `evolve_fix()`.
+    /// - **MetricCheck**: Scan all active skills, evolve underperforming ones.
+    pub fn evolve(
+        &self,
+        trigger: EvolveTrigger,
+    ) -> Result<EvolveDispatchResult, EvolveDispatchError> {
+        let outcomes = match &trigger {
+            EvolveTrigger::Analysis { task_id, agent_name } => {
+                self.dispatch_analysis(task_id, agent_name)
+            }
+            EvolveTrigger::Failure { skill_name, error } => {
+                self.dispatch_failure(skill_name, error)
+            }
+            EvolveTrigger::ToolDegradation { skill_name, problem_description } => {
+                self.dispatch_tool_degradation(skill_name, problem_description)
+            }
+            EvolveTrigger::MetricCheck => {
+                self.dispatch_metric_check()
+            }
+        }?;
+
+        Ok(EvolveDispatchResult { trigger, outcomes })
+    }
+
+    // -----------------------------------------------------------------------
+    // Dispatch handlers
+    // -----------------------------------------------------------------------
+
+    /// Analysis trigger: analyze the task, then evolve any suggested skills.
+    fn dispatch_analysis(
+        &self,
+        task_id: &str,
+        agent_name: &str,
+    ) -> Result<Vec<EvolutionOutcome>, EvolveDispatchError> {
+        let result = TaskResult {
+            success: false, // Analysis trigger implies something to analyze
+            error: None,
+            agent_name: agent_name.to_string(),
+            task_id: task_id.to_string(),
+        };
+
+        // Update health tracker
+        let mut health = self.health.lock().unwrap_or_else(|e| e.into_inner());
+        health.record_failure();
+        drop(health);
+
+        // Run analysis to get suggestions
+        let suggestions = self.analyzer.analyze(&result);
+
+        // Process each suggestion
+        let mut outcomes = Vec::with_capacity(suggestions.len());
+        for suggestion in &suggestions {
+            let outcome = self.evolver.evolve_fix(
+                &suggestion.skill_name,
+                &suggestion.reason,
+            )?;
+            outcomes.push(outcome);
+        }
+
+        Ok(outcomes)
+    }
+
+    /// Failure trigger: directly fix the named skill.
+    fn dispatch_failure(
+        &self,
+        skill_name: &str,
+        error: &str,
+    ) -> Result<Vec<EvolutionOutcome>, EvolveDispatchError> {
+        // Update health tracker
+        let mut health = self.health.lock().unwrap_or_else(|e| e.into_inner());
+        health.record_failure();
+        drop(health);
+
+        let outcome = self.evolver.evolve_fix(skill_name, error)?;
+        Ok(vec![outcome])
+    }
+
+    /// Tool degradation trigger: fix the named skill with degradation context.
+    fn dispatch_tool_degradation(
+        &self,
+        skill_name: &str,
+        problem_description: &str,
+    ) -> Result<Vec<EvolutionOutcome>, EvolveDispatchError> {
+        let outcome = self.evolver.evolve_fix(
+            skill_name,
+            &format!("Tool degradation: {problem_description}"),
+        )?;
+        Ok(vec![outcome])
+    }
+
+    /// Metric check trigger: scan all active skills, evolve underperforming ones.
+    fn dispatch_metric_check(&self) -> Result<Vec<EvolutionOutcome>, EvolveDispatchError> {
+        let active_skills = self.store.get_active_skills()?;
+        let mut outcomes = Vec::new();
+
+        for skill in &active_skills {
+            // Skip skills without enough data points (anti-loop)
+            if skill.total_selections < self.thresholds.min_selections as i64 {
+                continue;
+            }
+
+            // Compute success rate: completions / selections
+            let success_rate = if skill.total_selections > 0 {
+                skill.total_completions as f64 / skill.total_selections as f64
+            } else {
+                1.0
+            };
+
+            // Check if skill is underperforming
+            let is_viable = self.thresholds.is_viable(
+                skill.total_selections as u32,
+                success_rate,
+                skill.total_applied as u32,
+            );
+
+            if !is_viable {
+                let reason = format!(
+                    "Metric check: skill '{}' health below threshold \
+                     (selections={}, completions={}, rate={:.2})",
+                    skill.name, skill.total_selections,
+                    skill.total_completions, success_rate
+                );
+                let outcome = self.evolver.evolve_fix(
+                    &skill.name,
+                    &reason,
+                )?;
+                outcomes.push(outcome);
+            }
+        }
+
+        Ok(outcomes)
+    }
+
+    // -----------------------------------------------------------------------
+    // Legacy / convenience methods (preserved for backward compat)
+    // -----------------------------------------------------------------------
 
     /// Run post-task evolution analysis.
     ///
@@ -53,16 +265,11 @@ impl EvolutionEngine {
 
     /// Count the number of active skills in the store.
     pub fn get_skill_count(&self) -> crate::store::error::Result<usize> {
-        let store = self.store.lock().map_err(|e| {
-            crate::store::StoreError::Io(std::io::Error::other(format!(
-                "lock poisoned: {e}"
-            )))
-        })?;
-        Ok(store.count_active_skills()? as usize)
+        Ok(self.store.count_active_skills()? as usize)
     }
 
     /// Get a reference to the underlying store (for advanced use).
-    pub fn store(&self) -> &Arc<Mutex<EvolutionStore>> {
+    pub fn store(&self) -> &EvolutionStore {
         &self.store
     }
 }
@@ -70,11 +277,65 @@ impl EvolutionEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::SkillRecord;
 
     fn make_engine() -> EvolutionEngine {
         let store = EvolutionStore::new_in_memory().unwrap();
         EvolutionEngine::new(store)
     }
+
+    fn make_engine_with_skill(skill_name: &str) -> EvolutionEngine {
+        let store = EvolutionStore::new_in_memory().unwrap();
+        let skill = SkillRecord {
+            id: format!("{skill_name}-id"),
+            name: skill_name.to_string(),
+            version: "1.0.0".to_string(),
+            lineage_origin: "imported".to_string(),
+            lineage_generation: 0,
+            lineage_content_diff: None,
+            lineage_content_snapshot: None,
+            directory: Some("/skills/test".to_string()),
+            is_active: true,
+            total_selections: 0,
+            total_applied: 0,
+            total_completions: 0,
+            total_fallbacks: 0,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+        store.insert_skill(&skill).unwrap();
+        EvolutionEngine::new(store)
+    }
+
+    fn make_skill_with_metrics(
+        store: &EvolutionStore,
+        name: &str,
+        selections: i64,
+        applied: i64,
+        completions: i64,
+        fallbacks: i64,
+    ) {
+        let skill = SkillRecord {
+            id: format!("{name}-id"),
+            name: name.to_string(),
+            version: "1.0.0".to_string(),
+            lineage_origin: "imported".to_string(),
+            lineage_generation: 0,
+            lineage_content_diff: None,
+            lineage_content_snapshot: None,
+            directory: Some(format!("/skills/{name}")),
+            is_active: true,
+            total_selections: selections,
+            total_applied: applied,
+            total_completions: completions,
+            total_fallbacks: fallbacks,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+        store.insert_skill(&skill).unwrap();
+    }
+
+    // --- Existing tests (preserved) ---
 
     #[test]
     fn new_engine_has_health_1() {
@@ -151,10 +412,7 @@ mod tests {
     #[test]
     fn get_skill_count_after_insert() {
         let engine = make_engine();
-        let store = engine.store();
-        let store = store.lock().unwrap();
-
-        let skill = crate::store::SkillRecord {
+        let skill = SkillRecord {
             id: "s-001".to_string(),
             name: "test-skill".to_string(),
             version: "1.0.0".to_string(),
@@ -171,9 +429,168 @@ mod tests {
             created_at: chrono::Utc::now().to_rfc3339(),
             updated_at: chrono::Utc::now().to_rfc3339(),
         };
-        store.insert_skill(&skill).unwrap();
-        drop(store); // release lock
+        engine.store().insert_skill(&skill).unwrap();
 
         assert_eq!(engine.get_skill_count().unwrap(), 1);
+    }
+
+    // --- New evolve() dispatch tests ---
+
+    #[test]
+    fn evolve_analysis_trigger_dispatches_fix() {
+        let engine = make_engine_with_skill("failing-agent");
+
+        let result = engine.evolve(EvolveTrigger::Analysis {
+            task_id: "t-100".to_string(),
+            agent_name: "failing-agent".to_string(),
+        }).unwrap();
+
+        assert_eq!(result.outcomes.len(), 1);
+        assert!(matches!(result.outcomes[0], EvolutionOutcome::Success { .. }));
+    }
+
+    #[test]
+    fn evolve_failure_trigger_fixes_skill() {
+        let engine = make_engine_with_skill("my-skill");
+
+        let result = engine.evolve(EvolveTrigger::Failure {
+            skill_name: "my-skill".to_string(),
+            error: "crashed on input".to_string(),
+        }).unwrap();
+
+        assert_eq!(result.outcomes.len(), 1);
+        if let EvolutionOutcome::Success { new_skill_id, .. } = &result.outcomes[0] {
+            assert!(new_skill_id.contains("my-skill"));
+            assert!(new_skill_id.contains("__fix_"));
+        } else {
+            panic!("Expected Success outcome");
+        }
+    }
+
+    #[test]
+    fn evolve_failure_trigger_skill_not_found() {
+        let engine = make_engine();
+
+        let result = engine.evolve(EvolveTrigger::Failure {
+            skill_name: "nonexistent".to_string(),
+            error: "oops".to_string(),
+        });
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            EvolveDispatchError::Evolver(EvolverError::SkillNotFound(name)) => {
+                assert_eq!(name, "nonexistent");
+            }
+            other => panic!("Expected SkillNotFound, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn evolve_tool_degradation_trigger() {
+        let engine = make_engine_with_skill("api-skill");
+
+        let result = engine.evolve(EvolveTrigger::ToolDegradation {
+            skill_name: "api-skill".to_string(),
+            problem_description: "API rate limit hit".to_string(),
+        }).unwrap();
+
+        assert_eq!(result.outcomes.len(), 1);
+        assert!(matches!(result.outcomes[0], EvolutionOutcome::Success { .. }));
+    }
+
+    #[test]
+    fn evolve_metric_check_skips_low_selection_skills() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+        // Skill with only 2 selections — below min_selections=5
+        make_skill_with_metrics(&store, "low-data", 2, 1, 0, 1);
+        let engine = EvolutionEngine::new(store);
+
+        let result = engine.evolve(EvolveTrigger::MetricCheck).unwrap();
+        // Should not evolve — not enough data
+        assert!(result.outcomes.is_empty());
+    }
+
+    #[test]
+    fn evolve_metric_check_evolves_unhealthy_skill() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+        // Skill with 10 selections, 0 completions — success_rate = 0.0 < 0.7
+        make_skill_with_metrics(&store, "unhealthy", 10, 10, 0, 10);
+        let engine = EvolutionEngine::new(store);
+
+        let result = engine.evolve(EvolveTrigger::MetricCheck).unwrap();
+        assert_eq!(result.outcomes.len(), 1);
+        assert!(matches!(result.outcomes[0], EvolutionOutcome::Success { .. }));
+    }
+
+    #[test]
+    fn evolve_metric_check_skips_healthy_skills() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+        // Skill with 10 selections, 10 completions — success_rate = 1.0 >= 0.7
+        make_skill_with_metrics(&store, "healthy", 10, 10, 10, 0);
+        let engine = EvolutionEngine::new(store);
+
+        let result = engine.evolve(EvolveTrigger::MetricCheck).unwrap();
+        assert!(result.outcomes.is_empty());
+    }
+
+    #[test]
+    fn evolve_failure_updates_health_tracker() {
+        let engine = make_engine_with_skill("s1");
+
+        assert_eq!(engine.get_health_score(), 1.0);
+
+        engine.evolve(EvolveTrigger::Failure {
+            skill_name: "s1".to_string(),
+            error: "err".to_string(),
+        }).unwrap();
+
+        // Health should have recorded a failure
+        let score = engine.get_health_score();
+        assert!(score < 1.0);
+    }
+
+    #[test]
+    fn evolve_failure_deactivates_old_skill() {
+        let engine = make_engine_with_skill("old-skill");
+
+        engine.evolve(EvolveTrigger::Failure {
+            skill_name: "old-skill".to_string(),
+            error: "broken".to_string(),
+        }).unwrap();
+
+        // Old skill should be deactivated (verify by ID, not name — new skill has same name)
+        let old_by_id = engine.store().get_skill_by_id("old-skill-id").unwrap();
+        assert!(old_by_id.is_some(), "old skill should still exist in DB");
+        assert!(!old_by_id.unwrap().is_active, "old skill should be deactivated");
+
+        // New skill with same name should be the active one
+        let active = engine.store().get_skill_by_name("old-skill").unwrap();
+        assert!(active.is_some(), "new skill should be found by name");
+        assert_ne!(active.unwrap().id, "old-skill-id", "active skill should be the new one, not old");
+    }
+
+    #[test]
+    fn evolve_fix_creates_new_skill_version() {
+        let engine = make_engine_with_skill("versioned");
+
+        let result = engine.evolve(EvolveTrigger::Failure {
+            skill_name: "versioned".to_string(),
+            error: "need update".to_string(),
+        }).unwrap();
+
+        if let EvolutionOutcome::Success { new_skill_id, .. } = &result.outcomes[0] {
+            // New skill should exist in store
+            let new_skill = engine.store().get_skill_by_id(new_skill_id).unwrap();
+            assert!(new_skill.is_some());
+            let new_skill = new_skill.unwrap();
+            assert_eq!(new_skill.name, "versioned");
+            assert_eq!(new_skill.lineage_origin, "fix");
+            assert_eq!(new_skill.lineage_generation, 1);
+            assert!(new_skill.is_active);
+            assert!(new_skill.lineage_content_diff.is_some());
+            assert!(new_skill.lineage_content_diff.unwrap().contains("need update"));
+        } else {
+            panic!("Expected Success outcome");
+        }
     }
 }

@@ -14,6 +14,36 @@ use crate::deferred_registry::{DeferredAgentRegistry, RegistryError};
 use crate::tool_adapter::McpToolAdapter;
 
 // ---------------------------------------------------------------------------
+// Input validation
+// ---------------------------------------------------------------------------
+
+/// Maximum allowed length for agent or tool names.
+const MAX_NAME_LENGTH: usize = 64;
+
+/// Validate an agent or tool name.
+///
+/// Names must be non-empty, at most `MAX_NAME_LENGTH` characters, and contain
+/// only alphanumeric characters, underscores, and hyphens (`[a-zA-Z0-9_-]+`).
+fn validate_name(label: &str, value: &str) -> Result<(), GatewayError> {
+    if value.is_empty() {
+        return Err(GatewayError::ValidationError(format!(
+            "{label} must not be empty"
+        )));
+    }
+    if value.len() > MAX_NAME_LENGTH {
+        return Err(GatewayError::ValidationError(format!(
+            "{label} exceeds maximum length of {MAX_NAME_LENGTH} characters"
+        )));
+    }
+    if !value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Err(GatewayError::ValidationError(format!(
+            "{label} contains invalid characters: only alphanumeric, underscore, and hyphen are allowed"
+        )));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Error type
 // ---------------------------------------------------------------------------
 
@@ -28,6 +58,9 @@ pub enum GatewayError {
 
     #[error("Tool call failed: {0}")]
     ToolCall(String),
+
+    #[error("Validation error: {0}")]
+    ValidationError(String),
 }
 
 impl axum::response::IntoResponse for GatewayError {
@@ -43,8 +76,14 @@ impl axum::response::IntoResponse for GatewayError {
             GatewayError::Registry(RegistryError::ActivationFailed(_)) => {
                 (axum::http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
+            GatewayError::Registry(RegistryError::ToolExecutionFailed(_)) => {
+                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
+            }
             GatewayError::ToolCall(_) => {
                 (axum::http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
+            }
+            GatewayError::ValidationError(_) => {
+                (axum::http::StatusCode::BAD_REQUEST, self.to_string())
             }
         };
         (status, Json(serde_json::json!({ "error": message }))).into_response()
@@ -85,7 +124,7 @@ impl Default for GatewayConfig {
 /// multiple agents behind a unified namespace.
 pub struct McpGateway {
     config: GatewayConfig,
-    registry: Arc<Mutex<DeferredAgentRegistry>>,
+    registry: Arc<DeferredAgentRegistry>,
     #[allow(dead_code)] // Used for direct namespace lookups in production
     adapter: McpToolAdapter,
     shutdown: Mutex<ShutdownState>,
@@ -94,9 +133,9 @@ pub struct McpGateway {
 impl McpGateway {
     /// Create a new gateway with the given configuration.
     pub fn new(config: GatewayConfig) -> Self {
-        let registry = Arc::new(Mutex::new(DeferredAgentRegistry::with_idle_timeout(
+        let registry = Arc::new(DeferredAgentRegistry::with_idle_timeout(
             std::time::Duration::from_secs(config.idle_timeout_secs),
-        )));
+        ));
         Self {
             config,
             registry,
@@ -106,7 +145,7 @@ impl McpGateway {
     }
 
     /// Get a reference to the inner registry for external registration.
-    pub fn registry(&self) -> Arc<Mutex<DeferredAgentRegistry>> {
+    pub fn registry(&self) -> Arc<DeferredAgentRegistry> {
         Arc::clone(&self.registry)
     }
 
@@ -161,13 +200,12 @@ impl McpGateway {
     async fn list_tools_handler(
         State(gw): State<Arc<Self>>,
     ) -> Json<Vec<serde_json::Value>> {
-        let registry = gw.registry.lock().await;
-        let agent_names = registry.list_agents().await;
+        let agent_names = gw.registry.list_agents().await;
 
         let mut all_tools = Vec::new();
         for name in agent_names {
             // Try to get cached tools; skip inactive agents
-            if let Ok(tools) = registry.get_tools(&name).await {
+            if let Ok(tools) = gw.registry.get_tools(&name).await {
                 let schemas = crate::schema::merge_tool_schemas(&name, &tools);
                 all_tools.extend(schemas);
             }
@@ -186,11 +224,14 @@ impl McpGateway {
                 GatewayError::ToolCall("Invalid tool call request: missing or malformed 'name'".to_string())
             })?;
 
+        // Validate agent and tool names before any lookup.
+        validate_name("agent_name", &agent)?;
+        validate_name("tool_name", &tool)?;
+
         // Ensure agent is active (attempt activation with NoopMcpClient if not).
         // In production, a real client factory would be injected. For now we
         // just try to call if already active.
-        let registry = gw.registry.lock().await;
-        let result = registry.call_tool(&agent, &tool, arguments).await?;
+        let result = gw.registry.call_tool(&agent, &tool, arguments).await?;
         Ok(Json(result))
     }
 }
@@ -206,6 +247,58 @@ mod tests {
     use ap_runtime::mcp_client::ToolInfo;
     use std::future::Future;
     use std::pin::Pin;
+
+    // -----------------------------------------------------------------------
+    // Validation unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn validate_name_accepts_valid_names() {
+        assert!(validate_name("agent_name", "code-reviewer").is_ok());
+        assert!(validate_name("agent_name", "my_agent").is_ok());
+        assert!(validate_name("tool_name", "review").is_ok());
+        assert!(validate_name("tool_name", "a").is_ok());
+        assert!(validate_name("tool_name", "tool-v2").is_ok());
+        assert!(validate_name("tool_name", "ABC123").is_ok());
+    }
+
+    #[test]
+    fn validate_name_rejects_empty() {
+        let err = validate_name("agent_name", "").unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn validate_name_rejects_special_characters() {
+        let err = validate_name("agent_name", "agent.with.dots").unwrap_err();
+        assert!(err.to_string().contains("invalid characters"));
+
+        let err = validate_name("tool_name", "tool name with spaces").unwrap_err();
+        assert!(err.to_string().contains("invalid characters"));
+
+        let err = validate_name("tool_name", "tool;DROP TABLE").unwrap_err();
+        assert!(err.to_string().contains("invalid characters"));
+
+        let err = validate_name("tool_name", "../../../etc/passwd").unwrap_err();
+        assert!(err.to_string().contains("invalid characters"));
+    }
+
+    #[test]
+    fn validate_name_rejects_overly_long() {
+        let long_name = "a".repeat(65);
+        let err = validate_name("agent_name", &long_name).unwrap_err();
+        assert!(err.to_string().contains("maximum length"));
+    }
+
+    #[test]
+    fn validate_name_accepts_max_length() {
+        let max_name = "a".repeat(64);
+        assert!(validate_name("agent_name", &max_name).is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // Gateway integration tests
+    // -----------------------------------------------------------------------
 
     /// Mock MCP client for gateway integration tests.
     struct MockMcpClient {
@@ -334,11 +427,9 @@ mod tests {
         let registry = gw.registry();
 
         // Register and activate an agent
-        registry.lock().await.register_manifest(test_manifest("code-reviewer")).await;
+        registry.register_manifest(test_manifest("code-reviewer")).await;
         let tools = sample_tools();
         registry
-            .lock()
-            .await
             .activate(
                 "code-reviewer",
                 Box::new(move || Box::new(MockMcpClient::new(tools))),
@@ -371,11 +462,9 @@ mod tests {
         let registry = gw.registry();
 
         // Register and activate an agent
-        registry.lock().await.register_manifest(test_manifest("code-reviewer")).await;
+        registry.register_manifest(test_manifest("code-reviewer")).await;
         let tools = sample_tools();
         registry
-            .lock()
-            .await
             .activate(
                 "code-reviewer",
                 Box::new(move || Box::new(MockMcpClient::new(tools))),
@@ -413,7 +502,7 @@ mod tests {
         let registry = gw.registry();
 
         // Register but do NOT activate
-        registry.lock().await.register_manifest(test_manifest("reviewer")).await;
+        registry.register_manifest(test_manifest("reviewer")).await;
 
         let addr = gw.start().await.unwrap();
 
@@ -451,6 +540,53 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn call_tool_special_chars_in_agent_name_returns_400() {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        };
+        let gw = Arc::new(McpGateway::new(config));
+        let addr = gw.start().await.unwrap();
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("http://{addr}/tools/call"))
+            .json(&serde_json::json!({
+                "name": "../etc___passwd",
+                "arguments": {}
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert!(body["error"].as_str().unwrap().contains("invalid characters"));
+    }
+
+    #[tokio::test]
+    async fn call_tool_special_chars_in_tool_name_returns_400() {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        };
+        let gw = Arc::new(McpGateway::new(config));
+        let addr = gw.start().await.unwrap();
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("http://{addr}/tools/call"))
+            .json(&serde_json::json!({
+                "name": "agent___tool with spaces",
+                "arguments": {}
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

@@ -33,11 +33,46 @@ fn default_model() -> String {
     "openai:gpt-4o".to_string()
 }
 
+fn default_providers() -> std::collections::HashMap<String, ProviderConfig> {
+    let mut providers = std::collections::HashMap::new();
+    providers.insert("openai".into(), ProviderConfig {
+        base_url: String::new(),
+        api_key_env: "OPENAI_API_KEY".into(),
+        api: ProviderApiType::OpenaiCompatible,
+    });
+    providers.insert("anthropic".into(), ProviderConfig {
+        base_url: String::new(),
+        api_key_env: "ANTHROPIC_API_KEY".into(),
+        api: ProviderApiType::AnthropicMessages,
+    });
+    providers.insert("deepseek".into(), ProviderConfig {
+        base_url: "https://api.deepseek.com/v1".into(),
+        api_key_env: "DEEPSEEK_API_KEY".into(),
+        api: ProviderApiType::OpenaiCompatible,
+    });
+    providers.insert("minimax".into(), ProviderConfig {
+        base_url: String::new(),
+        api_key_env: "MINIMAX_API_KEY".into(),
+        api: ProviderApiType::OpenaiCompatible,
+    });
+    providers.insert("qwen".into(), ProviderConfig {
+        base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
+        api_key_env: "DASHSCOPE_API_KEY".into(),
+        api: ProviderApiType::OpenaiCompatible,
+    });
+    providers.insert("ollama".into(), ProviderConfig {
+        base_url: "http://localhost:11434/v1".into(),
+        api_key_env: String::new(),
+        api: ProviderApiType::Ollama,
+    });
+    providers
+}
+
 impl Default for ModelConfig {
     fn default() -> Self {
         Self {
             default: default_model(),
-            providers: std::collections::HashMap::new(),
+            providers: default_providers(),
         }
     }
 }

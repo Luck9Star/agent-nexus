@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn analyzer_default_trait() {
-        let analyzer = Analyzer::default();
+        let analyzer = Analyzer;
         let result = success_result();
         let suggestions = analyzer.analyze(&result);
         assert!(suggestions.is_empty());

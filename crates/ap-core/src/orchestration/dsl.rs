@@ -74,7 +74,7 @@ impl OrchestrationDsl {
         }
 
         // Build name index, check for duplicates
-        let mut name_index = HashMap::new();
+        let mut name_index = HashMap::with_capacity(tasks.len());
         for (i, task) in tasks.iter().enumerate() {
             if name_index.contains_key(&task.name) {
                 return Err(DslError::DuplicateTask(task.name.clone()));
@@ -128,8 +128,9 @@ impl OrchestrationDsl {
     /// Topological execution order (BFS/Kahn's algorithm).
     /// Respects phase ordering for ties.
     pub fn get_execution_order(&self) -> Vec<&DslTask> {
-        let mut in_degree: HashMap<&str, usize> = HashMap::new();
-        let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
+        let task_count = self.tasks.len();
+        let mut in_degree: HashMap<&str, usize> = HashMap::with_capacity(task_count);
+        let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::with_capacity(task_count);
 
         for task in &self.tasks {
             in_degree.entry(&task.name).or_insert(0);

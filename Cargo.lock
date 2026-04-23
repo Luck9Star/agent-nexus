@@ -101,6 +101,7 @@ dependencies = [
  "assert_cmd",
  "chrono",
  "clap",
+ "git2",
  "owo-colors",
  "predicates",
  "serde",
@@ -111,6 +112,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -119,6 +121,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dashmap",
+ "libc",
  "rstest",
  "rusqlite",
  "serde",

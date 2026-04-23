@@ -60,13 +60,13 @@ impl ConfigLoader {
 
 /// Merge built-in provider defaults for any providers not already configured.
 ///
-/// Mirrors Python's `DEFAULT_PROVIDERS`: openai, anthropic, ollama, deepseek.
+/// Mirrors Python's `DEFAULT_PROVIDERS`: openai, anthropic, deepseek, minimax, qwen, ollama.
 fn apply_builtin_providers(config: &mut PlatformConfig) {
-    let defaults: [(&str, ProviderConfig); 4] = [
+    let defaults: [(&str, ProviderConfig); 6] = [
         (
             "openai",
             ProviderConfig {
-                base_url: "https://api.openai.com/v1".into(),
+                base_url: String::new(),
                 api_key_env: "OPENAI_API_KEY".into(),
                 api: ProviderApiType::OpenaiCompatible,
             },
@@ -74,8 +74,32 @@ fn apply_builtin_providers(config: &mut PlatformConfig) {
         (
             "anthropic",
             ProviderConfig {
-                base_url: "https://api.anthropic.com".into(),
+                base_url: String::new(),
                 api_key_env: "ANTHROPIC_API_KEY".into(),
+                api: ProviderApiType::AnthropicMessages,
+            },
+        ),
+        (
+            "deepseek",
+            ProviderConfig {
+                base_url: "https://api.deepseek.com/v1".into(),
+                api_key_env: "DEEPSEEK_API_KEY".into(),
+                api: ProviderApiType::OpenaiCompatible,
+            },
+        ),
+        (
+            "minimax",
+            ProviderConfig {
+                base_url: String::new(),
+                api_key_env: "MINIMAX_API_KEY".into(),
+                api: ProviderApiType::OpenaiCompatible,
+            },
+        ),
+        (
+            "qwen",
+            ProviderConfig {
+                base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
+                api_key_env: "DASHSCOPE_API_KEY".into(),
                 api: ProviderApiType::OpenaiCompatible,
             },
         ),
@@ -85,14 +109,6 @@ fn apply_builtin_providers(config: &mut PlatformConfig) {
                 base_url: "http://localhost:11434/v1".into(),
                 api_key_env: String::new(),
                 api: ProviderApiType::Ollama,
-            },
-        ),
-        (
-            "deepseek",
-            ProviderConfig {
-                base_url: "https://api.deepseek.com/v1".into(),
-                api_key_env: "DEEPSEEK_API_KEY".into(),
-                api: ProviderApiType::OpenaiCompatible,
             },
         ),
     ];
@@ -233,15 +249,16 @@ api = "ollama"
     #[test]
     fn load_from_str_roundtrip() {
         with_model_env(|| {
-            // Note: load_from_str now merges built-in providers, so we compare
-            // the fields that survive TOML serialization, not the full PlatformConfig.
+            // ModelConfig::default() now includes 6 built-in providers.
+            // After serialization + load_from_str, the same providers are present
+            // (apply_builtin_providers merges via or_insert, so no duplicates).
             let original = PlatformConfig::default();
             let toml_str = toml::to_string(&original).unwrap();
             let loaded = ConfigLoader::load_from_str(&toml_str).unwrap();
             assert_eq!(original.runtime, loaded.runtime);
             assert_eq!(original.models.default, loaded.models.default);
-            // Original has no providers, loaded has built-ins merged in
-            for key in &["openai", "anthropic", "ollama", "deepseek"] {
+            // Both original and loaded should have all 6 providers
+            for key in &["openai", "anthropic", "deepseek", "minimax", "qwen", "ollama"] {
                 assert!(loaded.models.providers.contains_key(*key));
             }
         });
@@ -250,14 +267,15 @@ api = "ollama"
     #[test]
     fn builtin_providers_merged_for_minimal_config() {
         with_model_env(|| {
-            // Loading an empty config should still have all four built-in providers
+            // Loading an empty config should still have all six built-in providers
             let config = ConfigLoader::load_from_str("").unwrap();
             assert!(config.models.providers.contains_key("openai"));
             assert!(config.models.providers.contains_key("anthropic"));
             assert!(config.models.providers.contains_key("ollama"));
             assert!(config.models.providers.contains_key("deepseek"));
+            assert!(config.models.providers.contains_key("minimax"));
+            assert!(config.models.providers.contains_key("qwen"));
             let openai = &config.models.providers["openai"];
-            assert_eq!(openai.base_url, "https://api.openai.com/v1");
             assert_eq!(openai.api_key_env, "OPENAI_API_KEY");
         });
     }
@@ -289,6 +307,8 @@ api = "openai-compatible"
             assert!(config.models.providers.contains_key("anthropic"));
             assert!(config.models.providers.contains_key("ollama"));
             assert!(config.models.providers.contains_key("deepseek"));
+            assert!(config.models.providers.contains_key("minimax"));
+            assert!(config.models.providers.contains_key("qwen"));
         });
     }
 

@@ -147,7 +147,7 @@ fn skill_lifecycle_with_thresholds() {
 #[test]
 fn evolution_store_schema_has_python_tables() {
     let store = EvolutionStore::new_in_memory().unwrap();
-    let tables = store.list_tables();
+    let tables = store.list_tables().unwrap();
     assert!(tables.contains(&"skill_records".to_string()), "Missing skill_records");
     assert!(tables.contains(&"skill_lineage_parents".to_string()), "Missing skill_lineage_parents");
     assert!(tables.contains(&"execution_analyses".to_string()), "Missing execution_analyses");

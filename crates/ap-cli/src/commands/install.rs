@@ -51,10 +51,19 @@ pub fn run(agent: &str, version: Option<&str>, output: &OutputFormatter) -> Resu
     let lockfile_path = root.join("lockfile.json");
     let mut lockfile_mgr = LockfileManager::new(lockfile_path);
 
+    // Resolve actual HEAD commit SHA for reproducible installs
+    let commit_sha = git2::Repository::open(&installed_path)
+        .ok()
+        .and_then(|repo| {
+            let head = repo.head().ok()?;
+            head.target().map(|oid| oid.to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
     let entry = ap_core::models::distribution::LockfileEntry {
         version: version.unwrap_or("latest").to_string(),
         source: agent.to_string(),
-        commit_sha: "latest".to_string(),
+        commit_sha,
         agent_type: ap_core::models::agent::AgentType::Atomic,
         installed_at: chrono::Utc::now(),
         venv_path: format!(".venvs/{}", agent),

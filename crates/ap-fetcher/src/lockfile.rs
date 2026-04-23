@@ -57,6 +57,9 @@ impl LockfileManager {
             p.set_extension("json.tmp");
             p
         };
+
+        // Clean stale tmp from previous crash
+        let _ = std::fs::remove_file(&tmp_path);
         std::fs::write(&tmp_path, &json)?;
         std::fs::rename(&tmp_path, &self.path)?;
         debug!(

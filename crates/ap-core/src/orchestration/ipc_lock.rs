@@ -34,7 +34,7 @@ impl IpcLockRegistry {
                 e.insert(lock);
 
                 // Evict oldest if over limit
-                let mut order = self.order.lock().unwrap();
+                let mut order = self.order.lock().unwrap_or_else(|e| e.into_inner());
                 order.push_back(agent_id.to_string());
                 if order.len() > MAX_LOCKS {
                     if let Some(old_id) = order.pop_front() {

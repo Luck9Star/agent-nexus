@@ -14,11 +14,20 @@ pub fn merge_tool_schemas(
     tools
         .iter()
         .map(|tool| {
-            serde_json::json!({
-                "name": adapter.namespace_tool(agent_name, &tool.name),
-                "description": tool.description,
-                "inputSchema": tool.input_schema,
-            })
+            let mut map = serde_json::Map::with_capacity(3);
+            map.insert(
+                "name".to_string(),
+                serde_json::Value::String(adapter.namespace_tool(agent_name, &tool.name)),
+            );
+            map.insert(
+                "description".to_string(),
+                tool.description.as_ref().map_or(serde_json::Value::Null, |d| serde_json::Value::String(d.clone())),
+            );
+            map.insert(
+                "inputSchema".to_string(),
+                tool.input_schema.clone().unwrap_or(serde_json::Value::Null),
+            );
+            serde_json::Value::Object(map)
         })
         .collect()
 }

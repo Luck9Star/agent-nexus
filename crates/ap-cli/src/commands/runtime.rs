@@ -1,17 +1,139 @@
-//! `agent-nexus runtime` — runtime commands (placeholder).
+//! `agent-nexus runtime` — runtime commands for executing agents via subprocess + IPC.
 
-use anyhow::Result;
+use std::path::PathBuf;
+use std::time::Duration;
 
+use anyhow::{bail, Context, Result};
+
+use crate::commands;
 use crate::output::OutputFormatter;
+
+/// Default timeout for waiting on an agent response.
+const RESPONSE_TIMEOUT_SECS: u64 = 120;
 
 /// Run `runtime exec <agent>` command.
 ///
-/// Placeholder — full implementation requires the Platform Router.
+/// Looks up the agent in the lockfile, spawns it as a subprocess via
+/// `AgentProcess`, communicates via IPC (JSON-lines), and displays the result.
 pub fn run_exec(agent: &str, args: &[String], output: &OutputFormatter) -> Result<()> {
-    let args_str = args.join(" ");
-    output.info(&format!(
-        "[placeholder] Execute agent '{}' with args: '{}' — requires PlatformRouter (not yet implemented)",
-        agent, args_str
-    ));
+    let root = commands::find_project_root(
+        &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    );
+
+    // 1. Look up the agent in the lockfile
+    let lockfile_path = root.join("lockfile.json");
+    if !lockfile_path.exists() {
+        bail!(
+            "No lockfile found at {}. Install an agent first with `agent-nexus install <agent>`.",
+            lockfile_path.display()
+        );
+    }
+
+    let lockfile_mgr = ap_fetcher::lockfile::LockfileManager::new(lockfile_path);
+    let entry = lockfile_mgr
+        .get(agent)
+        .context("Failed to read lockfile")?
+        .with_context(|| {
+            format!(
+                "Agent '{}' not found in lockfile. Install it first with `agent-nexus install {}`.",
+                agent, agent
+            )
+        })?;
+
+    // 2. Find the agent's install directory
+    let install_dir = root.join(".agents").join(agent);
+    if !install_dir.exists() {
+        bail!(
+            "Agent install directory not found at {}. Try reinstalling with `agent-nexus install {}`.",
+            install_dir.display(),
+            agent
+        );
+    }
+
+    // 3. Determine the command to run.
+    //    Look for a `main.py` entrypoint; fall back to `python -m <agent>`.
+    let entrypoint = install_dir.join("main.py");
+    let (cmd, cmd_args) = if entrypoint.exists() {
+        let python = std::env::var("AGENT_NEXUS_PYTHON")
+            .unwrap_or_else(|_| "python3".to_string());
+        let mut a = vec![entrypoint.to_string_lossy().to_string()];
+        a.extend(args.iter().cloned());
+        (python, a)
+    } else {
+        // Fall back: try running the agent module directly
+        let python = std::env::var("AGENT_NEXUS_PYTHON")
+            .unwrap_or_else(|_| "python3".to_string());
+        let mut a = vec!["-m".to_string(), agent.replace('-', "_")];
+        a.extend(args.iter().cloned());
+        (python, a)
+    };
+
+    output.info(&format!("Spawning agent '{}' via {} ...", agent, cmd));
+    if !args.is_empty() {
+        output.info(&format!("  Args: {}", args.join(" ")));
+    }
+
+    // 4. Spawn and communicate via tokio runtime
+    let rt = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
+    rt.block_on(async_exec(agent, &cmd, &cmd_args, entry.source.as_str(), output))?;
+
+    Ok(())
+}
+
+/// Async inner: spawn AgentProcess, send task via IPC, display result.
+async fn async_exec(
+    agent_id: &str,
+    cmd: &str,
+    args: &[String],
+    _source: &str,
+    output: &OutputFormatter,
+) -> Result<()> {
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    let mut proc = ap_runtime::AgentProcess::spawn(agent_id, cmd, &arg_refs)
+        .await
+        .with_context(|| format!("Failed to spawn agent process: {} {}", cmd, args.join(" ")))?;
+
+    output.info(&format!("Agent process started (id={})", proc.id()));
+
+    // Take I/O handles for IPC communication
+    let (stdin, stdout) = proc.take_io();
+
+    // Create IPC protocol layer
+    let mut proto = ap_runtime::AgentProtocol::new(stdout, stdin);
+
+    // Generate a task ID
+    let task_id = format!("cli-{}-{}", std::process::id(), chrono::Utc::now().timestamp_millis());
+
+    // Send the task
+    let task_content = args.join(" ");
+    proto
+        .send_task(&task_content, &task_id)
+        .await
+        .context("Failed to send task to agent via IPC")?;
+
+    output.info(&format!("Task sent (id={}), waiting for response...", task_id));
+
+    // Wait for response with timeout
+    let timeout = Duration::from_secs(RESPONSE_TIMEOUT_SECS);
+    match proto.receive_result(Some(timeout)).await {
+        Ok(result) => {
+            if result.success {
+                output.success("Agent completed successfully:");
+                output.info(&result.content);
+            } else {
+                output.error(&format!("Agent returned failure: {}", result.content));
+            }
+        }
+        Err(e) => {
+            output.error(&format!("Agent communication error: {}", e));
+        }
+    }
+
+    // Clean up: kill the process
+    if proc.is_alive() {
+        let _ = proc.kill().await;
+    }
+
     Ok(())
 }

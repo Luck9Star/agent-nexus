@@ -157,6 +157,7 @@ fn check_command() {
 
     Command::cargo_bin("agent-nexus")
         .unwrap()
+        .env("OPENAI_API_KEY", "sk-test-key-for-check-test")
         .arg("check")
         .current_dir(dir.path())
         .assert()
@@ -243,12 +244,14 @@ fn run_placeholder() {
 }
 
 #[test]
-fn runtime_exec_placeholder() {
+fn runtime_exec_requires_lockfile() {
+    // Without a lockfile, runtime exec should fail with a clear error message
     Command::cargo_bin("agent-nexus")
         .unwrap()
         .args(["runtime", "exec", "test-agent"])
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains("No lockfile found"));
 }
 
 #[test]

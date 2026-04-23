@@ -339,6 +339,7 @@ fn check_json_output() {
 
     let output = Command::cargo_bin("agent-nexus")
         .unwrap()
+        .env("OPENAI_API_KEY", "sk-test-key-for-check-test")
         .args(["--json", "check"])
         .current_dir(dir.path())
         .assert()
@@ -431,6 +432,8 @@ fn help_shows_all_subcommands() {
         "config",
         "evolution",
         "runtime",
+        "env",
+        "version",
     ];
     for subcmd in &expected_subcommands {
         assert!(

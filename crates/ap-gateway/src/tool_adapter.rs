@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn default_trait_works() {
-        let adapter = McpToolAdapter::default();
+        let adapter = McpToolAdapter;
         assert_eq!(adapter.namespace_tool("foo", "bar"), "foo___bar");
     }
 

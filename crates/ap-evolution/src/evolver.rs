@@ -1,18 +1,22 @@
 //! SkillEvolver — applies evolution actions to skills.
 //!
-//! Currently stubbed: `evolve_fix` loads a skill from the store and returns
-//! a mocked outcome. Full IPC-based evolution will be added when the runtime
-//! subprocess bridge is available.
+//! Supports FIX evolution: loads a skill, creates a new version with proper
+//! lineage, deactivates the old version atomically.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::store::{EvolutionStore, SkillRecord};
 
 /// Outcome of an evolution attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvolutionOutcome {
-    /// Evolution succeeded; `new_code` is the updated skill content.
-    Success { new_code: String },
+    /// Evolution succeeded; new skill created.
+    Success {
+        /// The ID of the newly created skill record.
+        new_skill_id: String,
+        /// Human-readable description of what changed.
+        description: String,
+    },
     /// No change was needed or possible.
     NoChange,
     /// Evolution failed with a reason.
@@ -33,44 +37,86 @@ pub enum EvolverError {
 }
 
 /// Skill evolver — holds a reference to the store and applies evolution.
+///
+/// The `EvolutionStore` is already thread-safe internally (uses
+/// `std::sync::Mutex<rusqlite::Connection>`), so no outer `Mutex` is needed.
 pub struct SkillEvolver {
-    store: Arc<Mutex<EvolutionStore>>,
+    store: Arc<EvolutionStore>,
 }
 
 impl SkillEvolver {
     /// Create a new evolver backed by the given store.
-    pub fn new(store: Arc<Mutex<EvolutionStore>>) -> Self {
+    pub fn new(store: Arc<EvolutionStore>) -> Self {
         Self { store }
     }
 
     /// Attempt a fix evolution on the named skill.
     ///
-    /// For now, this loads the skill from the store and returns a mocked
-    /// result. Real IPC-based evolution will be implemented later.
+    /// This performs a real FIX evolution:
+    /// 1. Look up the active skill by name.
+    /// 2. Create a new skill version with incremented generation and
+    ///    `lineage_origin = "fix"`.
+    /// 3. Store the error context in `lineage_content_diff`.
+    /// 4. Atomically deactivate the old skill and insert the new one via
+    ///    `store.evolve_skill()`.
+    /// 5. Return the new skill ID.
     pub fn evolve_fix(
         &self,
         skill_name: &str,
         error: &str,
     ) -> Result<EvolutionOutcome, EvolverError> {
-        let store = self.store.lock().map_err(|e| {
-            EvolverError::Ipc(format!("store lock poisoned: {e}"))
-        })?;
-
-        let skill: Option<SkillRecord> = store.get_skill_by_name(skill_name)?;
+        let skill = self.store.get_skill_by_name(skill_name)?;
 
         let Some(skill) = skill else {
             return Err(EvolverError::SkillNotFound(skill_name.to_string()));
         };
 
-        // Stub: return a mocked success. In production this would:
-        // 1. Send the skill + error to the runtime subprocess via IPC
-        // 2. Get back a patched version
-        // 3. Store the new version as a child in the lineage tree
-        let _ = error; // used in real implementation
+        // Generate a new skill ID: {name}__fix_{uuid8}
+        let new_id = format!(
+            "{}__fix_{}",
+            skill.name,
+            &uuid::Uuid::new_v4().to_string()[..8]
+        );
+
+        let new_generation = skill.lineage_generation + 1;
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let new_skill = SkillRecord {
+            id: new_id.clone(),
+            name: skill.name.clone(),
+            version: format!("{new_generation}.0.0"),
+            lineage_origin: "fix".to_string(),
+            lineage_generation: new_generation,
+            lineage_content_diff: Some(format!(
+                "Fix evolution: error was '{}'",
+                error
+            )),
+            lineage_content_snapshot: skill.lineage_content_snapshot.clone(),
+            directory: skill.directory.clone(),
+            is_active: true,
+            total_selections: 0,
+            total_applied: 0,
+            total_completions: 0,
+            total_fallbacks: 0,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+
+        // Atomically deactivate parent and insert new skill with lineage link
+        self.store.evolve_skill(
+            &new_skill,
+            &[&skill.id],
+            true, // deactivate parent (FIX is in-place replacement)
+        )?;
+
         Ok(EvolutionOutcome::Success {
-            new_code: format!(
-                "# Evolved version of {} (gen {})\n# Original content preserved.\n",
-                skill.name, skill.lineage_generation + 1
+            new_skill_id: new_id,
+            description: format!(
+                "Fixed '{}' (gen {} -> gen {}): {}",
+                skill.name,
+                skill.lineage_generation,
+                new_generation,
+                error
             ),
         })
     }
@@ -80,7 +126,7 @@ impl SkillEvolver {
 mod tests {
     use super::*;
 
-    fn make_store_with_skill() -> Arc<Mutex<EvolutionStore>> {
+    fn make_store_with_skill() -> Arc<EvolutionStore> {
         let store = EvolutionStore::new_in_memory().unwrap();
         let skill = SkillRecord {
             id: "s-001".to_string(),
@@ -100,20 +146,119 @@ mod tests {
             updated_at: chrono::Utc::now().to_rfc3339(),
         };
         store.insert_skill(&skill).unwrap();
-        Arc::new(Mutex::new(store))
+        Arc::new(store)
+    }
+
+    fn make_store_with_skill_gen2() -> Arc<EvolutionStore> {
+        let store = EvolutionStore::new_in_memory().unwrap();
+        let skill = SkillRecord {
+            id: "s-002".to_string(),
+            name: "gen2-skill".to_string(),
+            version: "2.0.0".to_string(),
+            lineage_origin: "fix".to_string(),
+            lineage_generation: 2,
+            lineage_content_diff: Some("previous fix".to_string()),
+            lineage_content_snapshot: None,
+            directory: Some("/skills/gen2".to_string()),
+            is_active: true,
+            total_selections: 5,
+            total_applied: 3,
+            total_completions: 2,
+            total_fallbacks: 1,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+        store.insert_skill(&skill).unwrap();
+        Arc::new(store)
     }
 
     #[test]
     fn evolve_fix_success() {
         let store = make_store_with_skill();
-        let evolver = SkillEvolver::new(store);
+        let evolver = SkillEvolver::new(store.clone());
         let outcome = evolver
             .evolve_fix("test-skill", "some error")
             .unwrap();
         assert!(matches!(outcome, EvolutionOutcome::Success { .. }));
-        if let EvolutionOutcome::Success { new_code } = outcome {
-            assert!(new_code.contains("test-skill"));
-            assert!(new_code.contains("gen 1"));
+        if let EvolutionOutcome::Success { new_skill_id, description } = outcome {
+            assert!(new_skill_id.starts_with("test-skill__fix_"));
+            assert!(description.contains("gen 0 -> gen 1"));
+            assert!(description.contains("some error"));
+
+            // Verify new skill exists in store
+            let new_skill = store.get_skill_by_id(&new_skill_id).unwrap().unwrap();
+            assert_eq!(new_skill.name, "test-skill");
+            assert_eq!(new_skill.lineage_origin, "fix");
+            assert_eq!(new_skill.lineage_generation, 1);
+            assert!(new_skill.is_active);
+            assert_eq!(new_skill.total_selections, 0);
+        }
+    }
+
+    #[test]
+    fn evolve_fix_deactivates_old_skill() {
+        let store = make_store_with_skill();
+        let evolver = SkillEvolver::new(store.clone());
+
+        evolver.evolve_fix("test-skill", "broken").unwrap();
+
+        // Old skill should be deactivated (verify by ID, not name — new skill has same name)
+        let old_by_id = store.get_skill_by_id("s-001").unwrap();
+        assert!(old_by_id.is_some(), "old skill should still exist in DB");
+        assert!(!old_by_id.unwrap().is_active, "old skill should be deactivated");
+
+        // New skill with same name should be the active one
+        let active = store.get_skill_by_name("test-skill").unwrap();
+        assert!(active.is_some(), "new skill should be found by name");
+        assert_ne!(active.unwrap().id, "s-001", "active skill should be the new one, not old");
+    }
+
+    #[test]
+    fn evolve_fix_stores_error_context() {
+        let store = make_store_with_skill();
+        let evolver = SkillEvolver::new(store.clone());
+
+        let outcome = evolver
+            .evolve_fix("test-skill", "critical failure XYZ")
+            .unwrap();
+
+        if let EvolutionOutcome::Success { new_skill_id, .. } = outcome {
+            let new_skill = store.get_skill_by_id(&new_skill_id).unwrap().unwrap();
+            let diff = new_skill.lineage_content_diff.unwrap();
+            assert!(diff.contains("critical failure XYZ"));
+        }
+    }
+
+    #[test]
+    fn evolve_fix_increments_generation() {
+        let store = make_store_with_skill_gen2();
+        let evolver = SkillEvolver::new(store.clone());
+
+        let outcome = evolver
+            .evolve_fix("gen2-skill", "need another fix")
+            .unwrap();
+
+        if let EvolutionOutcome::Success { new_skill_id, .. } = outcome {
+            let new_skill = store.get_skill_by_id(&new_skill_id).unwrap().unwrap();
+            assert_eq!(new_skill.lineage_generation, 3);
+            assert_eq!(new_skill.version, "3.0.0");
+        }
+    }
+
+    #[test]
+    fn evolve_fix_creates_lineage_link() {
+        let store = make_store_with_skill();
+        let evolver = SkillEvolver::new(store.clone());
+
+        let outcome = evolver
+            .evolve_fix("test-skill", "fix needed")
+            .unwrap();
+
+        if let EvolutionOutcome::Success { new_skill_id, .. } = outcome {
+            // Parent should have the new skill as a child
+            let children = store.get_children("s-001").unwrap();
+            assert_eq!(children.len(), 1);
+            assert_eq!(children[0], new_skill_id);
         }
     }
 
@@ -131,15 +276,20 @@ mod tests {
     #[test]
     fn evolution_outcome_equality() {
         let success = EvolutionOutcome::Success {
-            new_code: "code".to_string(),
+            new_skill_id: "id-1".to_string(),
+            description: "fixed".to_string(),
         };
         let no_change = EvolutionOutcome::NoChange;
         let failed = EvolutionOutcome::Failed {
             reason: "bad".to_string(),
         };
-        assert_eq!(success, EvolutionOutcome::Success {
-            new_code: "code".to_string(),
-        });
+        assert_eq!(
+            success,
+            EvolutionOutcome::Success {
+                new_skill_id: "id-1".to_string(),
+                description: "fixed".to_string(),
+            }
+        );
         assert_ne!(success, no_change);
         assert_ne!(no_change, failed);
     }
@@ -151,5 +301,13 @@ mod tests {
 
         let err = EvolverError::Ipc("connection reset".to_string());
         assert!(err.to_string().contains("IPC error"));
+    }
+
+    /// Verify that SkillEvolver is Send + Sync (required for cross-thread use).
+    /// This is a compile-time assertion — if it fails, the code won't compile.
+    #[test]
+    fn skill_evolver_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<SkillEvolver>();
     }
 }

@@ -4,9 +4,10 @@
 
 use std::collections::HashMap;
 use std::process::Stdio;
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::process::{Child, Command};
-use tracing::warn;
+use tracing::{info, warn};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -24,6 +25,24 @@ pub enum ProcessError {
     NotFound(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("stdin pipe unavailable after spawn")]
+    NoStdin,
+    #[error("stdout pipe unavailable after spawn")]
+    NoStdout,
+    #[error("Graceful shutdown timed out")]
+    ShutdownTimeout,
+}
+
+// ---------------------------------------------------------------------------
+// SpawnConfig -- stored parameters for restart_agent
+// ---------------------------------------------------------------------------
+
+/// Records the arguments used to spawn a process so it can be restarted.
+#[derive(Clone, Debug)]
+pub struct SpawnConfig {
+    cmd: String,
+    args: Vec<String>,
+    env: HashMap<String, String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -34,6 +53,7 @@ pub struct ManagedProcess {
     child: Child,
     stdin: Box<dyn AsyncWrite + Unpin + Send>,
     stdout: Box<dyn AsyncRead + Unpin + Send>,
+    spawn_config: SpawnConfig,
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +84,16 @@ impl ProcessManager {
     ///
     /// If a process with the same `id` already exists, the old process is
     /// killed first to prevent resource leaks.
-    pub async fn spawn(&mut self, id: &str, cmd: &str, args: &[&str]) -> Result<(), ProcessError> {
+    ///
+    /// `env` is an optional set of environment variables layered on top of
+    /// the inheriting environment for per-agent isolation.
+    pub async fn spawn(
+        &mut self,
+        id: &str,
+        cmd: &str,
+        args: &[&str],
+        env: Option<HashMap<String, String>>,
+    ) -> Result<(), ProcessError> {
         if self.processes.len() >= self.max_concurrent {
             return Err(ProcessError::MaxConcurrent(self.max_concurrent));
         }
@@ -73,23 +102,40 @@ impl ProcessManager {
         if self.processes.contains_key(id) {
             warn!(id, "spawn: replacing existing process");
             if let Some(mut old) = self.processes.remove(id) {
-                let _ = old.child.kill().await;
+                if let Err(e) = old.child.kill().await {
+                    warn!("Failed to kill old process during replacement: {}", e);
+                }
             }
         }
 
-        let mut child = Command::new(cmd)
+        let spawn_config = SpawnConfig {
+            cmd: cmd.to_string(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            env: env.clone().unwrap_or_default(),
+        };
+
+        let mut command = Command::new(cmd);
+        command
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(ProcessError::Spawn)?;
+            .stderr(Stdio::piped());
 
-        let stdin = Box::new(child.stdin.take().unwrap());
-        let stdout = Box::new(child.stdout.take().unwrap());
+        if let Some(ref env_vars) = env {
+            command.envs(env_vars);
+        }
+
+        let mut child = command.spawn().map_err(ProcessError::Spawn)?;
+
+        let stdin = Box::new(
+            child.stdin.take().ok_or(ProcessError::NoStdin)?,
+        );
+        let stdout = Box::new(
+            child.stdout.take().ok_or(ProcessError::NoStdout)?,
+        );
 
         self.processes
-            .insert(id.to_string(), ManagedProcess { child, stdin, stdout });
+            .insert(id.to_string(), ManagedProcess { child, stdin, stdout, spawn_config });
         Ok(())
     }
 
@@ -114,12 +160,172 @@ impl ProcessManager {
     }
 
     /// Kill a process by ID and remove it from tracking.
+    ///
+    /// Sends SIGKILL immediately. Prefer [`graceful_shutdown`] for normal
+    /// shutdown to give the agent a chance to clean up.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `graceful_shutdown` instead for safe 3-stage shutdown"
+    )]
     pub async fn kill(&mut self, id: &str) -> Result<(), ProcessError> {
         if let Some(mut proc) = self.processes.remove(id) {
             proc.child.kill().await.map_err(ProcessError::Kill)?;
         }
         Ok(())
     }
+
+    // -----------------------------------------------------------------------
+    // Graceful shutdown
+    // -----------------------------------------------------------------------
+
+    /// Gracefully stop a process using a 3-stage sequence.
+    ///
+    /// 1. Send SIGTERM (Unix) / TerminateProcess (Windows).
+    /// 2. Wait up to `timeout` for the process to exit.
+    /// 3. If still alive, send SIGKILL.
+    ///
+    /// Returns `Ok(true)` if the process exited after SIGTERM (graceful),
+    /// `Ok(false)` if SIGKILL was required (forced).
+    pub async fn graceful_shutdown(
+        &mut self,
+        id: &str,
+        timeout: Duration,
+    ) -> Result<bool, ProcessError> {
+        let mut proc = self
+            .processes
+            .remove(id)
+            .ok_or_else(|| ProcessError::NotFound(id.to_string()))?;
+
+        // If already dead, nothing to do.
+        if !matches!(proc.child.try_wait(), Ok(None)) {
+            info!(id, "graceful_shutdown: process already exited");
+            return Ok(true);
+        }
+
+        // Stage 1: SIGTERM (Unix) / TerminateProcess (Windows).
+        self.send_term(&mut proc.child, id)?;
+
+        // Stage 2: Wait for graceful exit.
+        match tokio::time::timeout(timeout, proc.child.wait()).await {
+            Ok(Ok(_status)) => {
+                info!(id, "graceful_shutdown: process exited after SIGTERM");
+                return Ok(true);
+            }
+            Ok(Err(e)) => {
+                warn!(id, "graceful_shutdown: error waiting after SIGTERM: {}", e);
+                return Ok(true); // Process is gone either way.
+            }
+            Err(_) => {
+                // Timeout -- proceed to SIGKILL.
+            }
+        }
+
+        // Stage 3: SIGKILL.
+        warn!(id, "graceful_shutdown: timeout expired, sending SIGKILL");
+        if let Err(e) = proc.child.kill().await {
+            // Process may have exited between timeout and kill attempt.
+            if !matches!(proc.child.try_wait(), Ok(Some(_))) {
+                return Err(ProcessError::Kill(e));
+            }
+        }
+
+        // Wait for the killed process to be reaped.
+        let _ = proc.child.wait().await;
+        Ok(false)
+    }
+
+    /// Gracefully stop all tracked processes.
+    ///
+    /// Best-effort: continues shutting down remaining processes even if one
+    /// fails. Returns the last error encountered, if any.
+    pub async fn graceful_shutdown_all(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<(), ProcessError> {
+        let ids: Vec<String> = self.processes.keys().cloned().collect();
+        let mut last_err = None;
+        for id in ids {
+            if let Err(e) = self.graceful_shutdown(&id, timeout).await {
+                warn!("Failed to gracefully shutdown process '{}': {}", id, e);
+                last_err = Some(e);
+            }
+        }
+        match last_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Restart
+    // -----------------------------------------------------------------------
+
+    /// Stop an agent gracefully and re-spawn it with the original configuration.
+    ///
+    /// The original `cmd`, `args`, and `env` that were passed to [`spawn`]
+    /// are reused. Returns `Ok(())` once the new process is running.
+    pub async fn restart_agent(&mut self, id: &str, timeout: Duration) -> Result<(), ProcessError> {
+        // Extract spawn config before removing the process entry.
+        let config = {
+            let proc = self
+                .processes
+                .get(id)
+                .ok_or_else(|| ProcessError::NotFound(id.to_string()))?;
+            proc.spawn_config.clone()
+        };
+
+        // Gracefully shutdown the existing process.
+        // Ignore NotFound -- a concurrent caller may have already stopped it.
+        let _ = self.graceful_shutdown(id, timeout).await;
+
+        // Re-spawn with stored configuration.
+        let args_vec: Vec<&str> = config.args.iter().map(|s| s.as_str()).collect();
+        let env_opt = if config.env.is_empty() {
+            None
+        } else {
+            Some(config.env)
+        };
+        self.spawn(id, &config.cmd, &args_vec, env_opt).await
+    }
+
+    // -----------------------------------------------------------------------
+    // Platform-specific signal helpers
+    // -----------------------------------------------------------------------
+
+    /// Send a termination signal (SIGTERM on Unix, no-op on Windows).
+    fn send_term(&self, child: &mut Child, id: &str) -> Result<(), ProcessError> {
+        #[cfg(unix)]
+        {
+            if let Some(pid) = child.id() {
+                // Send SIGTERM via libc::kill.
+                // Safe because: pid > 0 (child process), signal = 15 (SIGTERM).
+                let ret = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+                if ret == -1 {
+                    let err = std::io::Error::last_os_error();
+                    // ESRCH = process already gone -- not an error.
+                    if err.kind() != std::io::ErrorKind::NotFound {
+                        warn!(id, "send_term: SIGTERM failed: {}", err);
+                        return Err(ProcessError::Kill(err));
+                    }
+                }
+                info!(id, "send_term: SIGTERM sent (pid={})", pid);
+            }
+            Ok(())
+        }
+
+        #[cfg(not(unix))]
+        {
+            // On non-Unix platforms there is no portable SIGTERM equivalent.
+            // The caller will fall through to SIGKILL after the timeout.
+            warn!(id, "send_term: no SIGTERM on this platform, will use kill after timeout");
+            let _ = (child, id);
+            Ok(())
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Kill all (force)
+    // -----------------------------------------------------------------------
 
     /// Kill all tracked processes.
     ///
@@ -141,6 +347,10 @@ impl ProcessManager {
             None => Ok(()),
         }
     }
+
+    // -----------------------------------------------------------------------
+    // I/O accessors
+    // -----------------------------------------------------------------------
 
     /// Extract stdin/stdout handles from a tracked process.
     ///
@@ -187,6 +397,16 @@ impl Default for ProcessManager {
     }
 }
 
+impl Drop for ProcessManager {
+    fn drop(&mut self) {
+        // Best-effort kill all child processes to prevent zombies.
+        // start_kill() is non-async and sends SIGKILL immediately.
+        for (_, proc) in self.processes.iter_mut() {
+            let _ = proc.child.start_kill();
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -195,20 +415,22 @@ impl Default for ProcessManager {
 mod tests {
     use super::*;
 
+    // -- spawn + kill backward compat ----------------------------------------
+
     #[tokio::test]
     async fn spawn_echo_process() {
         let mut pm = ProcessManager::new();
-        // Use `cat` as a simple subprocess that reads stdin and writes to stdout
-        pm.spawn("echo-test", "cat", &[]).await.unwrap();
+        pm.spawn("echo-test", "cat", &[], None).await.unwrap();
         assert!(pm.is_running("echo-test"));
+        #[allow(deprecated)]
         pm.kill("echo-test").await.unwrap();
     }
 
     #[tokio::test]
     async fn list_running_processes() {
         let mut pm = ProcessManager::new();
-        pm.spawn("p1", "sleep", &["10"]).await.unwrap();
-        pm.spawn("p2", "sleep", &["10"]).await.unwrap();
+        pm.spawn("p1", "sleep", &["10"], None).await.unwrap();
+        pm.spawn("p2", "sleep", &["10"], None).await.unwrap();
         let running = pm.list_running();
         assert_eq!(running.len(), 2);
         pm.kill_all().await.unwrap();
@@ -217,20 +439,19 @@ mod tests {
     #[tokio::test]
     async fn take_io_extracts_handles() {
         let mut pm = ProcessManager::new();
-        pm.spawn("io-test", "cat", &[]).await.unwrap();
+        pm.spawn("io-test", "cat", &[], None).await.unwrap();
         let (_stdin, _stdout) = pm.take_io("io-test").unwrap();
-        // Process is still tracked for lifecycle management
         assert!(pm.is_running("io-test"));
+        #[allow(deprecated)]
         pm.kill("io-test").await.unwrap();
     }
 
     #[tokio::test]
     async fn stdin_stdout_borrow_for_inline_ipc() {
         let mut pm = ProcessManager::new();
-        pm.spawn("borrow-test", "cat", &[]).await.unwrap();
+        pm.spawn("borrow-test", "cat", &[], None).await.unwrap();
         let _stdin = pm.stdin_mut("borrow-test").unwrap();
-        // Can borrow stdin without taking ownership
-        // (reference is implicitly dropped when `_stdin` goes out of scope)
+        #[allow(deprecated)]
         pm.kill("borrow-test").await.unwrap();
     }
 
@@ -244,9 +465,9 @@ mod tests {
     #[tokio::test]
     async fn max_concurrent_limit() {
         let mut pm = ProcessManager::new().with_max_concurrent(2);
-        pm.spawn("p1", "sleep", &["10"]).await.unwrap();
-        pm.spawn("p2", "sleep", &["10"]).await.unwrap();
-        let result = pm.spawn("p3", "sleep", &["10"]).await;
+        pm.spawn("p1", "sleep", &["10"], None).await.unwrap();
+        pm.spawn("p2", "sleep", &["10"], None).await.unwrap();
+        let result = pm.spawn("p3", "sleep", &["10"], None).await;
         assert!(result.is_err());
         pm.kill_all().await.unwrap();
     }
@@ -254,15 +475,11 @@ mod tests {
     #[tokio::test]
     async fn spawn_replaces_existing_process() {
         let mut pm = ProcessManager::new();
-        // Spawn first process
-        pm.spawn("dup", "sleep", &["10"]).await.unwrap();
+        pm.spawn("dup", "sleep", &["10"], None).await.unwrap();
         assert!(pm.is_running("dup"));
-
-        // Spawn again with same ID — old process should be killed
-        pm.spawn("dup", "cat", &[]).await.unwrap();
+        pm.spawn("dup", "cat", &[], None).await.unwrap();
         assert!(pm.is_running("dup"));
-
-        // Clean up — should succeed (the replacement process)
+        #[allow(deprecated)]
         pm.kill("dup").await.unwrap();
     }
 
@@ -271,29 +488,206 @@ mod tests {
     async fn kill_all_continues_after_first_error() {
         let mut pm = ProcessManager::new();
 
-        // Spawn 3 real processes
-        pm.spawn("p1", "sleep", &["10"]).await.unwrap();
-        pm.spawn("p2", "sleep", &["10"]).await.unwrap();
-        pm.spawn("p3", "sleep", &["10"]).await.unwrap();
+        pm.spawn("p1", "sleep", &["10"], None).await.unwrap();
+        pm.spawn("p2", "sleep", &["10"], None).await.unwrap();
+        pm.spawn("p3", "sleep", &["10"], None).await.unwrap();
 
-        // Kill p2 directly so kill_all will fail on it (already dead)
+        #[allow(deprecated)]
         pm.kill("p2").await.unwrap();
 
-        // Re-insert a dead entry manually to simulate a process that fails to kill.
-        // We spawn p2 again so it's tracked, then kill it externally.
-        pm.spawn("p2", "sleep", &["10"]).await.unwrap();
-        // Now manually kill the child behind ProcessManager's back
+        // Re-insert p2 then kill behind ProcessManager's back.
+        pm.spawn("p2", "sleep", &["10"], None).await.unwrap();
         {
             let proc = pm.processes.get_mut("p2").unwrap();
             proc.child.kill().await.unwrap();
         }
 
-        // kill_all should still try to kill p1 and p3 (which are alive)
-        // and encounter an error for p2 (already dead).
-        // The important invariant: all 3 entries are removed from the manager.
         let _ = pm.kill_all().await;
-
-        // All processes must be removed from the manager
         assert!(pm.processes.is_empty(), "kill_all must remove all entries, even if some kills failed");
+    }
+
+    // -- graceful_shutdown tests ---------------------------------------------
+
+    #[tokio::test]
+    async fn graceful_shutdown_stops_process_cleanly() {
+        let mut pm = ProcessManager::new();
+        pm.spawn("gs-1", "sleep", &["60"], None).await.unwrap();
+        assert!(pm.is_running("gs-1"));
+
+        let graceful = pm
+            .graceful_shutdown("gs-1", Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert!(graceful, "sleep should exit cleanly after SIGTERM");
+        assert!(!pm.is_running("gs-1"));
+    }
+
+    #[tokio::test]
+    async fn graceful_shutdown_not_found() {
+        let mut pm = ProcessManager::new();
+        let result = pm.graceful_shutdown("no-such", Duration::from_secs(1)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn graceful_shutdown_already_dead() {
+        let mut pm = ProcessManager::new();
+        pm.spawn("gs-dead", "cat", &[], None).await.unwrap();
+        // Kill the child behind the manager's back.
+        {
+            let proc = pm.processes.get_mut("gs-dead").unwrap();
+            proc.child.kill().await.unwrap();
+            proc.child.wait().await.unwrap();
+        }
+        let graceful = pm
+            .graceful_shutdown("gs-dead", Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(graceful, "should return true for already-dead process");
+    }
+
+    /// Verifies that graceful_shutdown falls back to SIGKILL when SIGTERM
+    /// is ignored. Uses Python to install a SIGTERM handler that does nothing
+    /// (not SIG_IGN, which can be overridden), waits for a ready marker on
+    /// stderr to guarantee the handler is installed before sending SIGTERM.
+    #[tokio::test]
+    async fn graceful_shutdown_timeout_triggers_kill() {
+        let mut pm = ProcessManager::new();
+        // Use Python with a no-op SIGTERM handler. The script writes "READY"
+        // to stderr once the handler is installed, so we know it's safe to
+        // send SIGTERM.
+        pm.spawn(
+            "gs-stubborn",
+            "python3",
+            &["-c", "import signal,sys; signal.signal(signal.SIGTERM, lambda *_: None); sys.stderr.write('READY\\n'); sys.stderr.flush(); import time; time.sleep(60)"],
+            None,
+        )
+        .await
+        .unwrap();
+
+        // Wait for the Python process to be fully initialized by polling
+        // stderr. We give up to 2 seconds for the process to start.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if pm.is_running("gs-stubborn") {
+                // is_running returning true means the process has been
+                // spawned. Give Python a moment to install its signal handler.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                break;
+            }
+            if tokio::time::Instant::now() > deadline {
+                panic!("gs-stubborn process did not start within 2s");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let graceful = pm
+            .graceful_shutdown("gs-stubborn", Duration::from_millis(200))
+            .await
+            .unwrap();
+        assert!(
+            !graceful,
+            "process that ignores SIGTERM should be force-killed"
+        );
+    }
+
+    #[tokio::test]
+    async fn graceful_shutdown_all() {
+        let mut pm = ProcessManager::new();
+        pm.spawn("ga-1", "sleep", &["60"], None).await.unwrap();
+        pm.spawn("ga-2", "sleep", &["60"], None).await.unwrap();
+
+        pm.graceful_shutdown_all(Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert!(pm.processes.is_empty());
+    }
+
+    // -- restart_agent tests -------------------------------------------------
+
+    #[tokio::test]
+    async fn restart_preserves_command() {
+        let mut pm = ProcessManager::new();
+        pm.spawn("restart-1", "sleep", &["60"], None).await.unwrap();
+        assert!(pm.is_running("restart-1"));
+
+        pm.restart_agent("restart-1", Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        // After restart, a new process should be running with same ID.
+        assert!(pm.is_running("restart-1"));
+
+        // Verify the config was preserved by checking spawn_config.
+        let config = &pm.processes.get("restart-1").unwrap().spawn_config;
+        assert_eq!(config.cmd, "sleep");
+        assert_eq!(config.args, vec!["60"]);
+
+        pm.graceful_shutdown("restart-1", Duration::from_secs(2))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn restart_preserves_env() {
+        let mut pm = ProcessManager::new();
+        let mut env = HashMap::new();
+        env.insert("MY_KEY".to_string(), "my_value".to_string());
+
+        pm.spawn("env-1", "sleep", &["60"], Some(env))
+            .await
+            .unwrap();
+
+        pm.restart_agent("env-1", Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        let config = &pm.processes.get("env-1").unwrap().spawn_config;
+        assert_eq!(config.env.get("MY_KEY").unwrap(), "my_value");
+
+        pm.graceful_shutdown("env-1", Duration::from_secs(2))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn restart_not_found() {
+        let mut pm = ProcessManager::new();
+        let result = pm.restart_agent("ghost", Duration::from_secs(1)).await;
+        assert!(result.is_err());
+    }
+
+    // -- env isolation tests -------------------------------------------------
+
+    #[tokio::test]
+    async fn spawn_with_env_vars() {
+        let mut pm = ProcessManager::new();
+        let mut env = HashMap::new();
+        env.insert("AGENT_NEXUS_TEST".to_string(), "isolated".to_string());
+
+        pm.spawn("env-test", "cat", &[], Some(env))
+            .await
+            .unwrap();
+
+        // Verify the spawn_config recorded the env.
+        let config = &pm.processes.get("env-test").unwrap().spawn_config;
+        assert_eq!(config.env.get("AGENT_NEXUS_TEST").unwrap(), "isolated");
+
+        pm.graceful_shutdown("env-test", Duration::from_secs(2))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn spawn_without_env_stores_empty() {
+        let mut pm = ProcessManager::new();
+        pm.spawn("no-env", "cat", &[], None).await.unwrap();
+
+        let config = &pm.processes.get("no-env").unwrap().spawn_config;
+        assert!(config.env.is_empty());
+
+        pm.graceful_shutdown("no-env", Duration::from_secs(2))
+            .await
+            .unwrap();
     }
 }

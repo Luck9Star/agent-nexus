@@ -18,5 +18,5 @@ pub use dsl::{DslError, DslTask, OrchestrationDsl};
 pub use ipc::{IpcError, IpcStream};
 pub use ipc_lock::IpcLockRegistry;
 pub use ipc_protocol::{AgentResult, IpcProtocol};
-pub use process_manager::{ManagedProcess, ProcessError, ProcessManager};
+pub use process_manager::{ManagedProcess, ProcessError, ProcessManager, SpawnConfig};
 pub use task_graph::{TaskGraph, TaskGraphError};
