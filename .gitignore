@@ -44,6 +44,9 @@ target/
 **/*.rs.bk
 Cargo.lock
 
+# Test-generated agent promotion fixtures
+.agents/
+
 # Graphify output (generated)
 graphify-out/
 
