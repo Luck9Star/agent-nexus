@@ -242,12 +242,14 @@ pub(crate) fn evolve_skill(
     parent_ids: &[&str],
     deactivate_parents: bool,
 ) -> Result<(), StoreError> {
+    let tx = conn.unchecked_transaction()?;
+
     let now = chrono::Utc::now().to_rfc3339();
 
     // Step 1: Deactivate parents if requested (FIX evolution)
     if deactivate_parents {
         for pid in parent_ids {
-            conn.execute(
+            tx.execute(
                 "UPDATE skill_records SET is_active = 0, updated_at = ?1 WHERE id = ?2",
                 params![now, pid],
             )?;
@@ -255,16 +257,17 @@ pub(crate) fn evolve_skill(
     }
 
     // Step 2: Insert the new skill record
-    insert_skill(conn, new_skill)?;
+    insert_skill(&tx, new_skill)?;
 
     // Step 3: Insert lineage parent edges
     for pid in parent_ids {
-        conn.execute(
+        tx.execute(
             "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES (?1, ?2)",
             params![new_skill.id, pid],
         )?;
     }
 
+    tx.commit()?;
     Ok(())
 }
 
@@ -360,12 +363,22 @@ pub(crate) fn get_ancestry(
         return Ok(Vec::new());
     }
 
-    // Phase 2: Load all ancestor records
+    // Phase 2: Batch-load all ancestor records in a single query
     let mut ancestors: Vec<SkillRecord> = Vec::with_capacity(visited.len());
-    for aid in &visited {
-        if let Some(record) = get_skill_by_id(conn, aid)? {
-            ancestors.push(record);
-        }
+    let placeholders: Vec<String> = visited.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+    let sql = format!(
+        "SELECT id, name, version, lineage_origin, lineage_generation,
+                lineage_content_diff, lineage_content_snapshot, directory, is_active,
+                total_selections, total_applied, total_completions, total_fallbacks,
+                created_at, updated_at
+         FROM skill_records WHERE id IN ({})",
+        placeholders.join(",")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params: Vec<&str> = visited.iter().map(|s| s.as_str()).collect();
+    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter().copied()), skill_record_from_row)?;
+    for skill in rows {
+        ancestors.push(skill?);
     }
 
     // Sort by generation ascending (oldest first), matching Python behavior

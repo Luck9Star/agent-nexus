@@ -94,6 +94,11 @@ impl EvolutionEngine {
         }
     }
 
+    /// Acquire the health mutex, recovering from a poisoned lock.
+    fn health_guard(&self) -> std::sync::MutexGuard<'_, HealthTracker> {
+        self.health.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Unified evolve entry point — dispatches by trigger type.
     ///
     /// This is the primary API for triggering evolution. It routes to the
@@ -143,9 +148,8 @@ impl EvolutionEngine {
         };
 
         // Update health tracker
-        let mut health = self.health.lock().unwrap_or_else(|e| e.into_inner());
+        let mut health = self.health_guard();
         health.record_failure();
-        drop(health);
 
         // Run analysis to get suggestions
         let suggestions = self.analyzer.analyze(&result);
@@ -170,9 +174,8 @@ impl EvolutionEngine {
         error: &str,
     ) -> Result<Vec<EvolutionOutcome>, EvolveDispatchError> {
         // Update health tracker
-        let mut health = self.health.lock().unwrap_or_else(|e| e.into_inner());
+        let mut health = self.health_guard();
         health.record_failure();
-        drop(health);
 
         let outcome = self.evolver.evolve_fix(skill_name, error)?;
         Ok(vec![outcome])
@@ -243,8 +246,8 @@ impl EvolutionEngine {
     /// Returns a list of evolution suggestions (may be empty).
     /// Updates the health tracker based on success/failure.
     pub fn post_task_evolve(&self, result: &TaskResult) -> Vec<EvolutionSuggestion> {
-        // Update health tracker — recover from poisoned lock
-        let mut health = self.health.lock().unwrap_or_else(|e| e.into_inner());
+        // Update health tracker
+        let mut health = self.health_guard();
         if result.success {
             health.record_success();
         } else {
@@ -257,10 +260,7 @@ impl EvolutionEngine {
 
     /// Get the current health score (0.0 - 1.0).
     pub fn get_health_score(&self) -> f64 {
-        self.health
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get_health_score()
+        self.health_guard().get_health_score()
     }
 
     /// Count the number of active skills in the store.

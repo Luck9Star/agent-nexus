@@ -245,28 +245,16 @@ impl HookExecutor {
     }
 }
 
-/// Minimal shlex-like split: splits on whitespace, respects double quotes.
-fn shlex_split(s: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    let chars = s.chars();
-
-    for ch in chars {
-        match ch {
-            '"' => in_quotes = !in_quotes,
-            ' ' | '\t' if !in_quotes => {
-                if !current.is_empty() {
-                    tokens.push(std::mem::take(&mut current));
-                }
-            }
-            _ => current.push(ch),
-        }
-    }
-    if !current.is_empty() {
-        tokens.push(current);
-    }
-    tokens
+/// Split a command string into tokens using proper shell word splitting.
+///
+/// Delegates to the `shell-words` crate which correctly handles double quotes,
+/// single quotes, and escape sequences — unlike the previous custom implementation
+/// which only handled double quotes.
+fn shlex_split(input: &str) -> Vec<String> {
+    shell_words::split(input).unwrap_or_else(|_| {
+        // If shell_words can't parse it, fall back to simple whitespace split
+        input.split_whitespace().map(|s| s.to_string()).collect()
+    })
 }
 
 #[cfg(test)]

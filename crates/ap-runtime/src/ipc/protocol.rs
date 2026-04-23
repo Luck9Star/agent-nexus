@@ -14,12 +14,8 @@ use super::stream::AgentIpcStream;
 /// Default heartbeat timeout: 10 seconds.
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Parsed result from an agent response.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AgentResult {
-    pub content: String,
-    pub success: bool,
-}
+/// Re-export AgentResult from ap-core (canonical definition).
+pub use ap_core::orchestration::ipc_protocol::AgentResult;
 
 // ---------------------------------------------------------------------------
 // AgentProtocol

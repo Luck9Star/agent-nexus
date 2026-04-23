@@ -32,6 +32,8 @@ pub enum TaskGraphError {
         from: String,
         to: String,
     },
+    #[error("Invalid task state: {0}")]
+    InvalidState(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -135,51 +137,7 @@ impl TaskGraph {
              FROM tasks WHERE task_id = ?1",
         )?;
 
-        let result = stmt.query_row(params![task_id], |row| {
-            let id: String = row.get(0)?;
-            let agent: String = row.get(1)?;
-            let description: String = row.get(2)?;
-            let state_str: String = row.get(3)?;
-            let blocked_json: String = row.get(4)?;
-            let vars_str: String = row.get::<_, String>(5)?;
-            let result_str: Option<String> = row.get(6)?;
-            let created_str: String = row.get(7)?;
-            let updated_str: String = row.get(8)?;
-
-            let state = Self::str_to_state(&state_str);
-            let blocked_by: Vec<String> = serde_json::from_str(&blocked_json).unwrap_or_else(|e| {
-                debug!("Failed to parse blocked_by JSON for task {}: {}", id, e);
-                Vec::new()
-            });
-            let vars: serde_json::Value = serde_json::from_str(&vars_str).unwrap_or_else(|e| {
-                debug!("Failed to parse vars JSON for task {}: {}", id, e);
-                serde_json::Value::Null
-            });
-            let result: Option<serde_json::Value> = result_str
-                .as_deref()
-                .and_then(|s| serde_json::from_str(s).map_err(|e| {
-                    debug!("Failed to parse result JSON for task {}: {}", id, e);
-                    e
-                }).ok());
-            let created_at = chrono::DateTime::parse_from_rfc3339(&created_str)
-                .map(|dt| dt.to_utc())
-                .unwrap_or_else(|_| utc_now());
-            let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_str)
-                .map(|dt| dt.to_utc())
-                .unwrap_or_else(|_| utc_now());
-
-            Ok(TaskItem {
-                id,
-                description,
-                agent,
-                blocked_by,
-                vars,
-                state,
-                result,
-                created_at,
-                updated_at,
-            })
-        });
+        let result = stmt.query_row(params![task_id], |row| Self::task_from_row(row));
 
         match result {
             Ok(task) => Ok(Some(task)),
@@ -394,58 +352,61 @@ impl TaskGraph {
              FROM tasks",
         )?;
 
-        let rows = stmt.query_map([], |row| {
-            let id: String = row.get(0)?;
-            let agent: String = row.get(1)?;
-            let description: String = row.get(2)?;
-            let state_str: String = row.get(3)?;
-            let blocked_json: String = row.get(4)?;
-            let vars_str: String = row.get::<_, String>(5)?;
-            let result_str: Option<String> = row.get(6)?;
-            let created_str: String = row.get(7)?;
-            let updated_str: String = row.get(8)?;
-
-            let state = Self::str_to_state(&state_str);
-            let blocked_by: Vec<String> =
-                serde_json::from_str(&blocked_json).unwrap_or_else(|e| {
-                    debug!("Failed to parse blocked_by JSON for task {}: {}", id, e);
-                    Vec::new()
-                });
-            let vars: serde_json::Value =
-                serde_json::from_str(&vars_str).unwrap_or_else(|e| {
-                    debug!("Failed to parse vars JSON for task {}: {}", id, e);
-                    serde_json::Value::Null
-                });
-            let result: Option<serde_json::Value> =
-                result_str.as_deref().and_then(|s| serde_json::from_str(s).map_err(|e| {
-                    debug!("Failed to parse result JSON for task {}: {}", id, e);
-                    e
-                }).ok());
-            let created_at = chrono::DateTime::parse_from_rfc3339(&created_str)
-                .map(|dt| dt.to_utc())
-                .unwrap_or_else(|_| utc_now());
-            let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_str)
-                .map(|dt| dt.to_utc())
-                .unwrap_or_else(|_| utc_now());
-
-            Ok(TaskItem {
-                id,
-                description,
-                agent,
-                blocked_by,
-                vars,
-                state,
-                result,
-                created_at,
-                updated_at,
-            })
-        })?;
+        let rows = stmt.query_map([], |row| Self::task_from_row(row))?;
 
         let mut tasks = Vec::new();
         for task in rows {
             tasks.push(task?);
         }
         Ok(tasks)
+    }
+
+    fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskItem> {
+        let id: String = row.get(0)?;
+        let agent: String = row.get(1)?;
+        let description: String = row.get(2)?;
+        let state_str: String = row.get(3)?;
+        let blocked_json: String = row.get(4)?;
+        let vars_str: String = row.get::<_, String>(5)?;
+        let result_str: Option<String> = row.get(6)?;
+        let created_str: String = row.get(7)?;
+        let updated_str: String = row.get(8)?;
+
+        let state = Self::str_to_state(&state_str).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
+        })?;
+        let blocked_by: Vec<String> = serde_json::from_str(&blocked_json).unwrap_or_else(|e| {
+            debug!("Failed to parse blocked_by JSON for task {}: {}", id, e);
+            Vec::new()
+        });
+        let vars: serde_json::Value = serde_json::from_str(&vars_str).unwrap_or_else(|e| {
+            debug!("Failed to parse vars JSON for task {}: {}", id, e);
+            serde_json::Value::Null
+        });
+        let result: Option<serde_json::Value> = result_str
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).map_err(|e| {
+                debug!("Failed to parse result JSON for task {}: {}", id, e);
+                e
+            }).ok());
+        let created_at = chrono::DateTime::parse_from_rfc3339(&created_str)
+            .map(|dt| dt.to_utc())
+            .unwrap_or_else(|_| utc_now());
+        let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_str)
+            .map(|dt| dt.to_utc())
+            .unwrap_or_else(|_| utc_now());
+
+        Ok(TaskItem {
+            id,
+            description,
+            agent,
+            blocked_by,
+            vars,
+            state,
+            result,
+            created_at,
+            updated_at,
+        })
     }
 
     fn state_to_str(state: TaskState) -> &'static str {
@@ -457,13 +418,13 @@ impl TaskGraph {
         }
     }
 
-    fn str_to_state(s: &str) -> TaskState {
+    fn str_to_state(s: &str) -> Result<TaskState, TaskGraphError> {
         match s {
-            "pending" => TaskState::Pending,
-            "in_progress" => TaskState::InProgress,
-            "completed" => TaskState::Completed,
-            "failed" => TaskState::Failed,
-            _ => TaskState::Pending,
+            "pending" => Ok(TaskState::Pending),
+            "in_progress" => Ok(TaskState::InProgress),
+            "completed" => Ok(TaskState::Completed),
+            "failed" => Ok(TaskState::Failed),
+            other => Err(TaskGraphError::InvalidState(other.to_string())),
         }
     }
 }

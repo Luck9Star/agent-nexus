@@ -15,6 +15,7 @@ rusqlite = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 dashmap = { workspace = true }
+shell-words = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -153,7 +153,8 @@ impl OrchestrationDsl {
             result.push(task);
             if let Some(deps) = adjacency.get(task.name.as_str()) {
                 for &dep_name in deps {
-                    let degree = in_degree.get_mut(dep_name).unwrap();
+                    let degree = in_degree.get_mut(dep_name)
+                        .expect("invariant violation: node not found in in_degree map during topo sort");
                     *degree -= 1;
                     if *degree == 0 {
                         if let Some(t) = self.get_task(dep_name) {

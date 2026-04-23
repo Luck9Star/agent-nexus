@@ -11,6 +11,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 // ---------------------------------------------------------------------------
 
 /// Parsed result from an agent response.
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentResult {
     pub content: String,
     pub success: bool,
