@@ -12,6 +12,9 @@ use crate::output::OutputFormatter;
 /// Looks up the agent in configured sources, clones via GitInstaller,
 /// and records in LockfileManager.
 pub fn run(agent: &str, version: Option<&str>, output: &OutputFormatter) -> Result<()> {
+    commands::validate_fs_name(agent)
+        .with_context(|| format!("Invalid agent name: {}", agent))?;
+
     let root = commands::find_project_root(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
 
     // Load sources to find the URL for the requested agent
@@ -49,7 +52,7 @@ pub fn run(agent: &str, version: Option<&str>, output: &OutputFormatter) -> Resu
 
     // Update lockfile
     let lockfile_path = root.join("lockfile.json");
-    let mut lockfile_mgr = LockfileManager::new(lockfile_path);
+    let lockfile_mgr = LockfileManager::new(lockfile_path);
 
     // Resolve actual HEAD commit SHA for reproducible installs
     let commit_sha = git2::Repository::open(&installed_path)

@@ -64,8 +64,8 @@ fn set_in_path(path: &Path, key: &str, value: &str, output: &OutputFormatter) ->
 
     let new_content = toml::to_string_pretty(&config)?;
 
-    // Atomic write: write to .tmp then rename to prevent corruption on crash
-    let tmp_path = path.with_extension("toml.tmp");
+    // Atomic write: write to PID-based tmp then rename to prevent corruption on crash
+    let tmp_path = path.with_file_name(format!("config.toml.{}.tmp", std::process::id()));
     std::fs::write(&tmp_path, &new_content)?;
     std::fs::rename(&tmp_path, path)?;
 

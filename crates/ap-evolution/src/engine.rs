@@ -19,6 +19,8 @@ pub enum EvolveTrigger {
     Analysis {
         task_id: String,
         agent_name: String,
+        success: bool,
+        error: Option<String>,
     },
     /// A tool/API the skill depends on has degraded. Evolve affected skills.
     ToolDegradation {
@@ -113,8 +115,8 @@ impl EvolutionEngine {
         trigger: EvolveTrigger,
     ) -> Result<EvolveDispatchResult, EvolveDispatchError> {
         let outcomes = match &trigger {
-            EvolveTrigger::Analysis { task_id, agent_name } => {
-                self.dispatch_analysis(task_id, agent_name)
+            EvolveTrigger::Analysis { task_id, agent_name, success, error } => {
+                self.dispatch_analysis(task_id, agent_name, *success, error)
             }
             EvolveTrigger::Failure { skill_name, error } => {
                 self.dispatch_failure(skill_name, error)
@@ -139,17 +141,23 @@ impl EvolutionEngine {
         &self,
         task_id: &str,
         agent_name: &str,
+        success: bool,
+        error: &Option<String>,
     ) -> Result<Vec<EvolutionOutcome>, EvolveDispatchError> {
         let result = TaskResult {
-            success: false, // Analysis trigger implies something to analyze
-            error: None,
+            success,
+            error: error.clone(),
             agent_name: agent_name.to_string(),
             task_id: task_id.to_string(),
         };
 
         // Update health tracker
         let mut health = self.health_guard();
-        health.record_failure();
+        if !success {
+            health.record_failure();
+        } else {
+            health.record_success();
+        }
 
         // Run analysis to get suggestions
         let suggestions = self.analyzer.analyze(&result);
@@ -443,6 +451,8 @@ mod tests {
         let result = engine.evolve(EvolveTrigger::Analysis {
             task_id: "t-100".to_string(),
             agent_name: "failing-agent".to_string(),
+            success: false,
+            error: Some("task failed".to_string()),
         }).unwrap();
 
         assert_eq!(result.outcomes.len(), 1);

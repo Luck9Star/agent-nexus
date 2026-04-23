@@ -17,9 +17,10 @@ pub enum UvError {
 }
 
 /// Bridges to the `uv` Python package manager via subprocess calls.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct UvBridge {
     uv_path: String,
+    resolved: std::sync::Mutex<Option<String>>,
 }
 
 impl UvBridge {
@@ -27,13 +28,16 @@ impl UvBridge {
     pub fn new() -> Self {
         Self {
             uv_path: "uv".to_string(),
+            resolved: std::sync::Mutex::new(None),
         }
     }
 
     /// Builder: specify a custom path to the `uv` binary.
-    pub fn with_path(mut self, path: impl Into<String>) -> Self {
-        self.uv_path = path.into();
-        self
+    pub fn with_path(self, path: impl Into<String>) -> Self {
+        Self {
+            uv_path: path.into(),
+            resolved: std::sync::Mutex::new(None),
+        }
     }
 
     /// Check if `uv` is available by running `uv --version`.
@@ -155,9 +159,14 @@ impl UvBridge {
 
     /// Resolve the path to a working `uv` binary.
     ///
-    /// Returns the first candidate that is available, or the configured path
-    /// if none is found (the command will fail at execution time).
+    /// Caches the result after the first successful detection so subsequent
+    /// calls avoid spawning `uv --version` again.
     async fn resolved_path(&self) -> Result<String, UvError> {
+        // Check cache first
+        if let Some(ref path) = *self.resolved.lock().unwrap() {
+            return Ok(path.clone());
+        }
+
         let candidates = self.candidates();
         for candidate in &candidates {
             if let Ok(status) = Command::new(candidate)
@@ -168,6 +177,8 @@ impl UvBridge {
                 .await
             {
                 if status.success() {
+                    let mut cache = self.resolved.lock().unwrap();
+                    *cache = Some(candidate.clone());
                     return Ok(candidate.clone());
                 }
             }

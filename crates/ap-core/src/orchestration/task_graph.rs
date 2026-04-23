@@ -191,8 +191,8 @@ impl TaskGraph {
     }
 
     /// Detect cycles via DFS with three-color marking (delegates to connection-agnostic helper).
-    pub fn detect_cycle(&self) -> bool {
-        self.detect_cycle_with_conn(&self.conn).unwrap_or(false)
+    pub fn detect_cycle(&self) -> Result<bool, TaskGraphError> {
+        self.detect_cycle_with_conn(&self.conn)
     }
 
     /// Connection-agnostic cycle detection used by both `detect_cycle` and `add_task` transaction.
@@ -200,10 +200,7 @@ impl TaskGraph {
         &self,
         conn: &Connection,
     ) -> Result<bool, TaskGraphError> {
-        let tasks = match Self::load_all_tasks_from_conn(conn) {
-            Ok(t) => t,
-            Err(_) => return Ok(false),
-        };
+        let tasks = Self::load_all_tasks_from_conn(conn)?;
 
         let mut name_index: HashMap<String, usize> = HashMap::with_capacity(tasks.len());
         for (i, t) in tasks.iter().enumerate() {
@@ -259,7 +256,7 @@ impl TaskGraph {
 
     /// Return tasks in topological execution order (Kahn's algorithm).
     pub fn topological_sort(&self) -> Result<Vec<String>, TaskGraphError> {
-        if self.detect_cycle() {
+        if self.detect_cycle()? {
             return Err(TaskGraphError::CycleDetected);
         }
 
@@ -287,7 +284,8 @@ impl TaskGraph {
             result.push(name.clone());
             if let Some(deps) = adjacency.get(&name) {
                 for dep_name in deps {
-                    let degree = in_degree.get_mut(dep_name).unwrap();
+                    let degree = in_degree.get_mut(dep_name)
+                        .expect("invariant violation: node not found in in_degree map during topo sort");
                     *degree -= 1;
                     if *degree == 0 {
                         queue.push_back(dep_name.clone());
@@ -513,7 +511,7 @@ mod tests {
         tg.add_task(&simple_task("t1", "a", &[])).unwrap();
         tg.add_task(&simple_task("t2", "a", &["t1"])).unwrap();
         tg.add_task(&simple_task("t3", "a", &["t2"])).unwrap();
-        assert!(!tg.detect_cycle());
+        assert!(!tg.detect_cycle().unwrap());
         let order = tg.topological_sort().unwrap();
         assert_eq!(order.len(), 3);
     }
@@ -556,7 +554,7 @@ mod tests {
                 params![r#"["t1"]"#],
             )
             .unwrap();
-        assert!(tg.detect_cycle());
+        assert!(tg.detect_cycle().unwrap());
     }
 
     #[test]
@@ -565,7 +563,7 @@ mod tests {
         tg.add_task(&simple_task("t1", "a", &[])).unwrap();
         tg.add_task(&simple_task("t2", "a", &["t1"])).unwrap();
         tg.add_task(&simple_task("t3", "a", &["t2"])).unwrap();
-        assert!(!tg.detect_cycle());
+        assert!(!tg.detect_cycle().unwrap());
     }
 
     #[test]

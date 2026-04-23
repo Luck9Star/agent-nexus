@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS skill_records (
 CREATE INDEX IF NOT EXISTS idx_sr_active ON skill_records(is_active);
 CREATE INDEX IF NOT EXISTS idx_sr_name ON skill_records(name);
 CREATE INDEX IF NOT EXISTS idx_sr_updated ON skill_records(updated_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sr_unique_active_name ON skill_records(name) WHERE is_active = 1;
 
 CREATE TABLE IF NOT EXISTS skill_lineage_parents (
     skill_id TEXT NOT NULL,

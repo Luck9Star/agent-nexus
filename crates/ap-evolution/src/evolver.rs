@@ -29,9 +29,6 @@ pub enum EvolverError {
     #[error("Skill not found: {0}")]
     SkillNotFound(String),
 
-    #[error("IPC error: {0}")]
-    Ipc(String),
-
     #[error("Store error: {0}")]
     Store(#[from] crate::store::StoreError),
 }
@@ -298,9 +295,6 @@ mod tests {
     fn evolver_error_display() {
         let err = EvolverError::SkillNotFound("my-skill".to_string());
         assert!(err.to_string().contains("my-skill"));
-
-        let err = EvolverError::Ipc("connection reset".to_string());
-        assert!(err.to_string().contains("IPC error"));
     }
 
     /// Verify that SkillEvolver is Send + Sync (required for cross-thread use).

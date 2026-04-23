@@ -16,6 +16,9 @@ const RESPONSE_TIMEOUT_SECS: u64 = 120;
 /// Looks up the agent in the lockfile, spawns it as a subprocess via
 /// `AgentProcess`, communicates via IPC (JSON-lines), and displays the result.
 pub fn run_exec(agent: &str, args: &[String], output: &OutputFormatter) -> Result<()> {
+    commands::validate_fs_name(agent)
+        .with_context(|| format!("Invalid agent name: {}", agent))?;
+
     let root = commands::find_project_root(
         &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
     );

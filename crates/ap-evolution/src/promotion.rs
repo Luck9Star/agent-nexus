@@ -10,6 +10,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use uuid::Uuid;
+
 use crate::store::EvolutionStore;
 
 /// Errors during promotion.
@@ -181,7 +183,10 @@ Run as an MCP standalone agent or via the platform router.
 
 /// Write content to a file atomically: write to `.tmp` then `fs::rename`.
 fn atomic_write(path: &Path, content: &str) -> Result<(), PromotionError> {
-    let tmp_path = path.with_extension("tmp");
+    let tmp_path = path.with_file_name(format!(
+        ".{}.tmp",
+        Uuid::new_v4()
+    ));
     fs::write(&tmp_path, content)?;
     fs::rename(&tmp_path, path)?;
     Ok(())

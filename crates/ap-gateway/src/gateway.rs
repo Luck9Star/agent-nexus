@@ -204,10 +204,15 @@ impl McpGateway {
 
         let mut all_tools = Vec::new();
         for name in agent_names {
-            // Try to get cached tools; skip inactive agents
-            if let Ok(tools) = gw.registry.get_tools(&name).await {
-                let schemas = crate::schema::merge_tool_schemas(&name, &tools);
-                all_tools.extend(schemas);
+            // Try to get cached tools; log and skip inactive agents
+            match gw.registry.get_tools(&name).await {
+                Ok(tools) => {
+                    let schemas = crate::schema::merge_tool_schemas(&name, &tools);
+                    all_tools.extend(schemas);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to get tools for agent '{}': {}", name, e);
+                }
             }
         }
         Json(all_tools)
