@@ -4,11 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Agent Nexus is an MCP-native Agent Platform with self-built orchestration. It provides Git-based Agent distribution, Python Runtime execution layer, and Self-Evolution Engine. Agents are distributed via Git repos (Homebrew tap model), run locally, and use user-configured models. Python implementation complete (Phases 1-6); Rust rewrite (Phase 7) pending.
+Agent Nexus is an MCP-native Agent Platform with self-built orchestration. It provides Git-based Agent distribution, Python Runtime execution layer, and Self-Evolution Engine. Agents are distributed via Git repos (Homebrew tap model), run locally, and use user-configured models. **Dual implementation**: Python platform complete (Phases 1-6), Rust platform rewrite in progress (6 crates, ~18K LOC).
 
-- **Tech stack**: Python (production) → Rust (future platform rewrite), MCP protocol, self-built orchestration (referencing ClawTeam)
+- **Tech stack**: Python (production platform) + Rust (platform rewrite in progress), MCP protocol, self-built orchestration
 - **License**: MIT
 - **Language**: Documentation is primarily in Chinese
+
+## Commands
+
+```bash
+# Python platform
+hatch env create              # Create dev environment
+hatch run test                # Run all Python tests
+pytest tests/ -m unit         # Unit tests only
+pytest tests/ -m integration  # Integration tests only
+pytest tests/ -m e2e          # E2E tests only
+ruff check src/ agents/       # Lint
+ruff format src/ agents/      # Format
+
+# Rust platform (workspace at repo root)
+cargo build                   # Build all 6 crates
+cargo test                    # Test all crates
+cargo test -p ap-core         # Test single crate
+cargo clippy                  # Lint
+cargo clippy -p ap-cli        # Lint single crate
+```
 
 ## Documentation Index
 
@@ -45,7 +65,7 @@ Four-layer architecture (top to bottom):
 - **Runtime-First Hybrid** — Python Runtime is primary execution, MCP for external communication
 - **MCP protocol boundary = language boundary** — Rust platform communicates with Python Agent subprocesses via MCP stdio/SSE. Agent internals stay Python forever.
 - **Git-based distribution** — Agents distributed via Git repos (Official monorepo + Private repos + Direct URL). No cloud infrastructure needed. Homebrew tap model.
-- **Rust rewrite scope** — Only upper layers (Gateway, Fetcher, Supervisor, CLI). Agent Runtime stays Python. Interfaces must remain format-compatible during migration.
+- **Rust rewrite scope** — Upper layers only (Gateway, Fetcher, Evolution, CLI). Agent Runtime stays Python. 6 crates already implemented: ap-core, ap-runtime, ap-gateway, ap-fetcher, ap-evolution, ap-cli. Interfaces must remain format-compatible during migration.
 
 ## Reference Projects (local clones)
 
@@ -80,8 +100,15 @@ agent-nexus/
 │   └── e2e/
 ├── templates/                # OrchestrationDSL TOML templates
 ├── docs/                     # Design documents
-├── crates/                   # Rust rewrite (future): ap-core, ap-fetcher, ap-runtime, ap-gateway, ap-cli
-└── pyproject.toml            # Platform package config
+├── crates/                   # Rust platform rewrite (in progress)
+│   ├── ap-core/              # Core: TaskGraph, ProcessManager, StateMachine, DSL, IPC, Hooks, Skills
+│   ├── ap-cli/               # CLI: clap derive, 9 commands (init, install, run, status, etc.)
+│   ├── ap-gateway/           # MCP Gateway: deferred agent loading, tool aggregation
+│   ├── ap-fetcher/           # Git-based agent distribution (clone, update, verify)
+│   ├── ap-evolution/         # Self-Evolution Engine: SQLite store, analyzer, evolver, promotion
+│   └── ap-runtime/           # Python subprocess bridge (spawn, IPC, health check)
+├── Cargo.toml                # Rust workspace config
+└── pyproject.toml            # Python platform config
 ```
 
 ## Security Architecture (Defense-in-Depth)
@@ -92,7 +119,7 @@ agent-nexus/
 
 ## Implementation Phases
 
-Phase 1 (W1-2): Self-built orchestration basics + first Agent → Phase 2 (W3-4): Platform Router → Phase 3 (W5): MCP Gateway → Phase 4 (W6-7): Git-based Distribution + CLI → Phase 5 (W8-10): Runtime + Evolution → Phase 6 (W11-12): Polish → Phase 7 (W13-20): Rust rewrite
+Phase 1 (W1-2): Self-built orchestration basics + first Agent → Phase 2 (W3-4): Platform Router → Phase 3 (W5): MCP Gateway → Phase 4 (W6-7): Git-based Distribution + CLI → Phase 5 (W8-10): Runtime + Evolution → Phase 6 (W11-12): Polish → **Phase 7 (W13-20): Rust rewrite — IN PROGRESS** (ap-core ✅ ap-runtime ✅ ap-gateway ✅ ap-fetcher ✅ ap-evolution ✅ ap-cli ✅)
 
 See `docs/09-implementation-plan.md` for full phase details and risk matrix.
 
