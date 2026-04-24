@@ -14,9 +14,9 @@
       "P2": 15
     },
     "by_status": {
-      "open": 2,
-      "fixed": 19,
-      "deferred": 4,
+      "open": 0,
+      "fixed": 25,
+      "deferred": 0,
       "false_positive": 1
     }
   },
@@ -40,8 +40,9 @@
       "description": "ap-cli directly uses std::process::Command for daemon spawning instead of reusing ap-runtime AgentProcess, creating parallel implementations.",
       "fix": "Refactor ap-cli to use ap-runtime AgentProcess or document the design reason.",
       "effort": "30 lines",
-      "status": "open",
-      "source": "arch-v4.1"
+      "status": "fixed",
+      "source": "arch-v4.1",
+      "fix_detail": "Documented sync-by-design decision in runtime.rs module doc comment"
     },
     {
       "id": "FP-D2-001",
@@ -67,11 +68,10 @@
       "line": null,
       "description": "All CLI commands return anyhow::Result. Cannot programmatically distinguish error types.",
       "fix": "Define CLI-specific error enums for machine-consumable error reporting.",
-      "effort": "deferred",
-      "status": "deferred",
-      "trigger": "When CLI needs programmatic consumption",
-      "risk": "Low",
-      "source": "arch-v4.1"
+      "effort": "50 lines",
+      "status": "fixed",
+      "source": "arch-v4.1",
+      "fix_detail": "Added CliError enum with 8 variants, manual Display/Error impls, From conversions, and 4 unit tests"
     },
     {
       "id": "FP-D2-003",
@@ -113,11 +113,10 @@
       "line": 88,
       "description": "EvolutionStore, GitInstaller, TaskGraph are concrete types. Testing requires real I/O backends.",
       "fix": "Introduce Store and Installer traits when test friction demands it.",
-      "effort": "deferred",
-      "status": "deferred",
-      "trigger": "When unit testing without SQLite becomes a bottleneck",
-      "risk": "Medium",
-      "source": "arch-v4.1"
+      "effort": "50 lines",
+      "status": "fixed",
+      "source": "arch-v4.1",
+      "fix_detail": "Added Store trait (9 methods) and Installer trait (1 method) with delegating impls on concrete types"
     },
     {
       "id": "FP-D5-001",
@@ -158,11 +157,10 @@
       "line": 11,
       "description": "LockRegistry is a pure type alias re-export. AgentProtocol wraps IpcProtocol with near-identical methods.",
       "fix": "Remove or document as intentional facade.",
-      "effort": "deferred",
-      "status": "deferred",
-      "trigger": "When ap-runtime gains its own logic",
-      "risk": "Low",
-      "source": "arch-v4.1"
+      "effort": "5 lines",
+      "status": "fixed",
+      "source": "arch-v4.1",
+      "fix_detail": "Added facade pattern documentation to ap-runtime lib.rs module doc comment"
     },
     {
       "id": "FP-D7-001",
@@ -318,11 +316,10 @@
       "line": 52,
       "description": "IPC protocol reads up to 4MB into Vec before checking size limit. Large messages fully allocated before potential rejection.",
       "fix": "Consider streaming serialization or incremental size checking.",
-      "effort": "deferred",
-      "status": "deferred",
-      "trigger": "When IPC messages approach 4MB limit",
-      "risk": "Low",
-      "source": "perf-sec-v4.1"
+      "effort": "30 lines",
+      "status": "fixed",
+      "source": "perf-sec-v4.1",
+      "fix_detail": "Added LimitedWriter struct that checks size incrementally during serialization, rejecting oversized messages early"
     },
     {
       "id": "PS-DEP-001",
@@ -335,8 +332,9 @@
       "description": "serde_yaml is officially deprecated. Should migrate to serde_yml.",
       "fix": "Replace serde_yaml with serde_yml.",
       "effort": "5 lines",
-      "status": "open",
-      "source": "perf-sec-v4.1"
+      "status": "fixed",
+      "source": "perf-sec-v4.1",
+      "fix_detail": "Migrated serde_yaml 0.9 to serde_yml 0.0.12 across all 5 crates (workspace + ap-core, ap-fetcher, ap-cli, ap-evolution)"
     },
     {
       "id": "PS-DEP-002",
@@ -459,26 +457,5 @@
     "Loose dependency version constraints",
     "No centralized unsafe module boundary"
   ],
-  "deferred_findings": [
-    {
-      "id": "FP-D2-002",
-      "trigger": "When CLI needs programmatic consumption",
-      "risk": "Low"
-    },
-    {
-      "id": "FP-D4-001",
-      "trigger": "When unit testing without SQLite becomes bottleneck",
-      "risk": "Medium"
-    },
-    {
-      "id": "FP-D6-001",
-      "trigger": "When ap-runtime gains its own logic",
-      "risk": "Low"
-    },
-    {
-      "id": "PS-IPC-001",
-      "trigger": "When IPC messages approach 4MB limit",
-      "risk": "Low"
-    }
-  ]
+  "deferred_findings": []
 }

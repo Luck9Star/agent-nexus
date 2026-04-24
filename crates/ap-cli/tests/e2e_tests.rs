@@ -508,8 +508,8 @@ fn init_creates_sources_with_official() {
         .success();
 
     let content = std::fs::read_to_string(dir.path().join("sources.yaml")).unwrap();
-    let sources: serde_yaml::Value =
-        serde_yaml::from_str(&content).expect("sources.yaml should be valid YAML");
+    let sources: serde_yml::Value =
+        serde_yml::from_str(&content).expect("sources.yaml should be valid YAML");
 
     let sources_list = sources
         .get("sources")

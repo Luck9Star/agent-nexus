@@ -243,7 +243,7 @@ type: atomic
 version: "0.1.0"
 description: Code review agent
 "#;
-        let manifest: AgentManifest = serde_yaml::from_str(yaml).unwrap();
+        let manifest: AgentManifest = serde_yml::from_str(yaml).unwrap();
         assert_eq!(manifest.name, "code-reviewer");
         assert_eq!(manifest.agent_type, AgentType::Atomic);
         assert!(manifest.capabilities.is_empty());
@@ -266,7 +266,7 @@ permissions:
   allowed_tools: [file_read, grep]
   denied_tools: [bash]
 "#;
-        let manifest: AgentManifest = serde_yaml::from_str(yaml).unwrap();
+        let manifest: AgentManifest = serde_yml::from_str(yaml).unwrap();
         assert_eq!(manifest.agent_type, AgentType::Composite);
         assert_eq!(manifest.capabilities.len(), 2);
         assert!(manifest.model_preferences.is_some());
@@ -283,7 +283,7 @@ description: test
 model_config:
   recommended: powerful
 "#;
-        let manifest: AgentManifest = serde_yaml::from_str(yaml).unwrap();
+        let manifest: AgentManifest = serde_yml::from_str(yaml).unwrap();
         let prefs = manifest.model_preferences.unwrap();
         assert_eq!(prefs.recommended.as_deref(), Some("powerful"));
     }

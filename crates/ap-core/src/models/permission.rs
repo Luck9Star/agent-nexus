@@ -67,7 +67,7 @@ path_rules:
   - pattern: "*.env"
     access: deny
 "#;
-        let config: PermissionConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: PermissionConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(config.mode, PermissionMode::Default);
         assert_eq!(config.allowed_tools.len(), 2);
         assert_eq!(config.denied_tools, vec!["bash"]);

@@ -46,8 +46,8 @@ fn init_command_creates_valid_config() {
 
     // Verify sources.yaml is valid YAML
     let content = std::fs::read_to_string(dir.path().join("sources.yaml")).unwrap();
-    let _: serde_yaml::Value =
-        serde_yaml::from_str(&content).expect("sources.yaml should be valid YAML");
+    let _: serde_yml::Value =
+        serde_yml::from_str(&content).expect("sources.yaml should be valid YAML");
 }
 
 #[test]

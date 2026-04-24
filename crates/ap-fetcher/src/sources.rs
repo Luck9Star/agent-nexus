@@ -16,7 +16,7 @@ pub enum SourceError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("YAML parse error: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    Yaml(#[from] serde_yml::Error),
     #[error("source not found: {0}")]
     NotFound(String),
     #[error("validation error: {0}")]
@@ -60,7 +60,7 @@ impl SourceManager {
         }
 
         // Try wrapped format first: { sources: [...] }
-        match serde_yaml::from_str::<SourcesYaml>(trimmed) {
+        match serde_yml::from_str::<SourcesYaml>(trimmed) {
             Ok(wrapped) => {
                 debug!("Parsed sources as wrapped format");
                 return Ok(wrapped.sources);
@@ -71,7 +71,7 @@ impl SourceManager {
         }
 
         // Try bare array format: [...]
-        let entries = serde_yaml::from_str::<Vec<SourceEntry>>(trimmed)?;
+        let entries = serde_yml::from_str::<Vec<SourceEntry>>(trimmed)?;
         debug!("Parsed sources as bare array format, count={}", entries.len());
         Ok(entries)
     }
@@ -112,7 +112,7 @@ impl SourceManager {
         let wrapped = SourcesYaml {
             sources: sources.to_vec(),
         };
-        let yaml = serde_yaml::to_string(&wrapped)?;
+        let yaml = serde_yml::to_string(&wrapped)?;
 
         // Atomic write: write to tmp file, then rename
         let tmp_path = self.path.with_extension("yaml.tmp");

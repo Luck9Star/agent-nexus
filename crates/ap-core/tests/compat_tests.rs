@@ -69,7 +69,7 @@ fn read_python_config_typed() {
 #[test]
 fn read_python_sources_yaml() {
     let yaml = include_str!("compat/fixtures/sources_python.yaml");
-    let sources: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+    let sources: serde_yml::Value = serde_yml::from_str(yaml).unwrap();
     let list = sources["sources"].as_sequence().unwrap();
     assert_eq!(list.len(), 2);
     assert_eq!(list[0]["name"].as_str(), Some("official"));

@@ -27,6 +27,89 @@ pub enum IpcError {
 }
 
 // ---------------------------------------------------------------------------
+// Size-limited writer for early oversized-message rejection
+// ---------------------------------------------------------------------------
+
+/// A `std::io::Write` wrapper that aborts once the written bytes exceed a limit.
+/// This prevents `serde_json::to_writer` from allocating the full message before
+/// we can reject it as oversized.
+struct LimitedWriter {
+    buf: Vec<u8>,
+    limit: usize,
+    written: usize,
+    exceeded: bool,
+}
+
+impl LimitedWriter {
+    fn new(limit: usize) -> Self {
+        Self {
+            buf: Vec::with_capacity(4096),
+            limit,
+            written: 0,
+            exceeded: false,
+        }
+    }
+    fn into_bytes(self) -> Vec<u8> {
+        self.buf
+    }
+}
+
+impl std::io::Write for LimitedWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.written + buf.len() > self.limit {
+            self.exceeded = true;
+            return Err(std::io::Error::other("message exceeds size limit"));
+        }
+        self.buf.extend_from_slice(buf);
+        self.written += buf.len();
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod limited_writer_tests {
+    use std::io::Write;
+    use super::*;
+
+    #[test]
+    fn writer_allows_within_limit() {
+        let mut w = LimitedWriter::new(100);
+        assert!(w.write_all(b"hello").is_ok());
+        let bytes = w.into_bytes();
+        assert_eq!(bytes, b"hello");
+    }
+
+    #[test]
+    fn writer_rejects_over_limit() {
+        let mut w = LimitedWriter::new(10);
+        let result = w.write_all(b"this is way more than ten bytes");
+        assert!(result.is_err());
+        assert!(w.exceeded);
+        // Partial data should not be in the buffer — write_all failed before extending
+        assert!(w.buf.len() <= 10);
+    }
+
+    #[test]
+    fn writer_exact_limit_passes() {
+        let data = vec![0xABu8; 64];
+        let mut w = LimitedWriter::new(64);
+        assert!(w.write_all(&data).is_ok());
+        assert_eq!(w.into_bytes().len(), 64);
+    }
+
+    #[test]
+    fn writer_one_over_limit_rejected() {
+        let data = vec![0xABu8; 65];
+        let mut w = LimitedWriter::new(64);
+        assert!(w.write_all(&data).is_err());
+        assert!(w.exceeded);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // IpcStream
 // ---------------------------------------------------------------------------
 
@@ -45,16 +128,24 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcStream<R, W> {
 
     /// Serialize and send a message as a JSON-line.
     ///
+    /// Uses a size-limited writer to reject oversized messages without allocating
+    /// the full serialized buffer first.
+    ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub async fn send<T: Serialize>(&mut self, msg: &T) -> Result<(), IpcError> {
-        let json = serde_json::to_vec(msg)?;
-        if json.len() > MAX_MESSAGE_SIZE {
-            return Err(IpcError::Oversized {
-                size: json.len(),
-                max: MAX_MESSAGE_SIZE,
-            });
-        }
+        let mut writer = LimitedWriter::new(MAX_MESSAGE_SIZE);
+        serde_json::to_writer(&mut writer, msg).map_err(|e| {
+            if writer.exceeded {
+                IpcError::Oversized {
+                    size: writer.written,
+                    max: MAX_MESSAGE_SIZE,
+                }
+            } else {
+                IpcError::from(e)
+            }
+        })?;
+        let json = writer.into_bytes();
         self.writer.write_all(&json).await?;
         self.writer.write_all(b"\n").await?;
         self.writer.flush().await?;

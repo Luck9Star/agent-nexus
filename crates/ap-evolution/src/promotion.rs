@@ -230,7 +230,7 @@ mod tests {
         assert!(yaml.contains("type: atomic"));
         assert!(yaml.contains("entrypoint: main.py"));
         // Should parse as valid YAML
-        let parsed: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+        let parsed: serde_yml::Value = serde_yml::from_str(&yaml).unwrap();
         assert_eq!(parsed["name"].as_str(), Some("my-agent"));
     }
 

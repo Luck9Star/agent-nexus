@@ -279,7 +279,7 @@ type: git
 url: https://github.com/test/repo
 branch: main
 "#;
-        let entry: SourceEntry = serde_yaml::from_str(yaml).unwrap();
+        let entry: SourceEntry = serde_yml::from_str(yaml).unwrap();
         assert_eq!(entry.source_type, "git");
         // Verify serialization uses "type" key
         let serialized = serde_json::to_string(&entry).unwrap();

@@ -1,4 +1,12 @@
 //! `agent-nexus runtime` — runtime commands for managing agent processes.
+//!
+//! ## Design Decision: Sync Process Management
+//!
+//! This module uses `std::process::Command` instead of `ap_runtime::AgentProcess` (which wraps
+//! `tokio::process::Command`). This is intentional: ap-cli is a synchronous CLI tool and avoids
+//! pulling in the tokio async runtime overhead for process lifecycle management. The trade-off is
+//! two independent process-management codepaths, but ap-cli's use case (fire-and-forget daemon
+//! spawning with PID-file tracking) doesn't benefit from tokio's async process model.
 
 use std::path::PathBuf;
 
@@ -549,19 +557,16 @@ mod tests {
     }
 
     #[test]
-    fn resolve_python_falls_back_to_python3() {
-        // When AGENT_NEXUS_PYTHON is not set, should return "python3"
-        std::env::remove_var("AGENT_NEXUS_PYTHON");
-        let python = resolve_python();
-        assert_eq!(python, "python3");
-    }
-
-    #[test]
-    fn resolve_python_uses_env_when_set() {
+    fn resolve_python_env_set_and_fallback() {
+        // Test env-var path takes priority
         std::env::set_var("AGENT_NEXUS_PYTHON", "/custom/python");
         let python = resolve_python();
         assert_eq!(python, "/custom/python");
+
+        // Test fallback when env-var is removed
         std::env::remove_var("AGENT_NEXUS_PYTHON");
+        let python = resolve_python();
+        assert_eq!(python, "python3");
     }
 
     #[test]

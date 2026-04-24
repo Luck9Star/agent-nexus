@@ -126,7 +126,7 @@ fn check_sources(root: &Path) -> Result<()> {
         return Err(anyhow::anyhow!("not found (run `agent-nexus init` to create)"));
     }
     let content = std::fs::read_to_string(path)?;
-    let _sources: serde_yaml::Value = serde_yaml::from_str(&content)?;
+    let _sources: serde_yml::Value = serde_yml::from_str(&content)?;
     Ok(())
 }
 

@@ -6,12 +6,14 @@
 pub mod error;
 pub mod queries;
 pub mod schema;
+pub mod traits;
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use std::path::Path;
 
 pub use error::{Result, StoreError};
+pub use traits::Store;
 
 // Re-export query types for convenience
 pub use queries::{
@@ -550,6 +552,53 @@ impl EvolutionStore {
     pub fn count_rows(&self, table: &str) -> Result<i64> {
         let conn = self.conn()?;
         queries::count_rows(&conn, table)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Trait implementation
+// ---------------------------------------------------------------------------
+
+impl traits::Store for EvolutionStore {
+    fn insert_skill(&self, skill: &SkillRecord) -> Result<()> {
+        self.insert_skill(skill)
+    }
+
+    fn get_skill_by_name(&self, name: &str) -> Result<Option<SkillRecord>> {
+        self.get_skill_by_name(name)
+    }
+
+    fn get_skill_by_id(&self, id: &str) -> Result<Option<SkillRecord>> {
+        self.get_skill_by_id(id)
+    }
+
+    fn get_active_skills(&self) -> Result<Vec<SkillRecord>> {
+        self.get_active_skills()
+    }
+
+    fn get_children(&self, parent_id: &str) -> Result<Vec<String>> {
+        self.get_children(parent_id)
+    }
+
+    fn evolve_skill(
+        &self,
+        new_skill: &SkillRecord,
+        parent_ids: &[&str],
+        deactivate_parents: bool,
+    ) -> Result<()> {
+        self.evolve_skill(new_skill, parent_ids, deactivate_parents)
+    }
+
+    fn load_health_state(&self) -> Result<(f64, u64)> {
+        self.load_health_state()
+    }
+
+    fn save_health_state(&self, score: f64, total: u64) -> Result<()> {
+        self.save_health_state(score, total)
+    }
+
+    fn count_active_skills(&self) -> Result<i64> {
+        self.count_active_skills()
     }
 }
 

@@ -1,9 +1,9 @@
 //! agent-nexus CLI -- MCP-native Agent Platform command-line interface.
 
 mod commands;
+pub mod error;
 mod output;
 
-use anyhow::Result;
 use clap::{Parser, Subcommand};
 use output::OutputFormatter;
 
@@ -341,7 +341,135 @@ enum RuntimeAction {
     },
 }
 
-fn main() -> Result<()> {
+fn run(cli: Cli, output: &OutputFormatter) -> anyhow::Result<()> {
+    match cli.command {
+            Commands::Init { dir } => commands::init::run(&dir, output)?,
+
+            Commands::Sources { action } => match action {
+                SourcesAction::List => commands::sources::run_list(output)?,
+                SourcesAction::Add { name, url, r#type, branch } => {
+                    commands::sources::run_add(&name, &url, r#type.as_deref(), branch.as_deref(), output)?;
+                }
+                SourcesAction::Remove { name } => commands::sources::run_remove(&name, output)?,
+            },
+
+            Commands::Install { agent, version, source, local } => {
+                commands::install::run(&agent, version.as_deref(), source.as_deref(), local, output)?;
+            }
+
+            Commands::Uninstall { agent } => {
+                commands::install::run_uninstall(&agent, output)?;
+            }
+
+            Commands::Update { agent, all } => {
+                commands::install::run_update(agent.as_deref(), all, output)?;
+            }
+
+            Commands::Run {
+                agent,
+                mode,
+                transport,
+                extra,
+            } => commands::run::run(&agent, &mode, &transport, &extra, output)?,
+
+            Commands::List => commands::install::run_list(output)?,
+
+            Commands::Search { query } => commands::install::run_search(&query, output)?,
+
+            Commands::Info { agent } => commands::install::run_info(&agent, output)?,
+
+            Commands::Create { action } => match action {
+                CreateAction::Agent {
+                    name,
+                    description,
+                    tools,
+                    wizard,
+                    output: out_dir,
+                } => commands::create::run_agent(
+                    &name,
+                    description.as_deref(),
+                    &tools,
+                    wizard,
+                    out_dir.as_deref(),
+                    output,
+                )?,
+            },
+
+            Commands::Check { path } => {
+                match path {
+                    Some(p) => commands::check::run_check_package(&p, output)?,
+                    None => commands::check::run(output)?,
+                }
+            }
+
+            Commands::Config { action } => match action {
+                ConfigAction::Show => commands::config::run_show(output)?,
+                ConfigAction::Get { key } => commands::config::run_get(&key, output)?,
+                ConfigAction::Set { key, value } => commands::config::run_set(&key, &value, output)?,
+                ConfigAction::Edit => commands::config::run_edit(output)?,
+                ConfigAction::Validate => commands::config::run_validate(output)?,
+                ConfigAction::Providers => commands::config::run_providers(output)?,
+                ConfigAction::Path => commands::config::run_path(output)?,
+            },
+
+            Commands::Evolution { action } => match action {
+                EvolutionAction::Status => commands::evolution::run_status(output)?,
+                EvolutionAction::Health { skill_name, verbose } => {
+                    commands::evolution::run_health(skill_name.as_deref(), verbose, output)?;
+                }
+                EvolutionAction::List { all } => {
+                    commands::evolution::run_list(all, output)?;
+                }
+                EvolutionAction::History { skill_name } => {
+                    commands::evolution::run_history(&skill_name, output)?;
+                }
+                EvolutionAction::Metrics { agent } => {
+                    commands::evolution::run_metrics(agent.as_deref(), output)?;
+                }
+                EvolutionAction::Fix { skill_id } => {
+                    commands::evolution::run_fix(&skill_id, output)?;
+                }
+                EvolutionAction::Promote { skill_id } => {
+                    commands::evolution::run_promote(&skill_id, output)?;
+                }
+            },
+
+            Commands::Runtime { action } => match action {
+                RuntimeAction::Start { agent, all } => {
+                    commands::runtime::run_start(agent.as_deref(), all, output)?;
+                }
+                RuntimeAction::Stop { agent, all } => {
+                    commands::runtime::run_stop(agent.as_deref(), all, output)?;
+                }
+                RuntimeAction::Restart { agent } => {
+                    commands::runtime::run_restart(&agent, output)?;
+                }
+                RuntimeAction::Status => {
+                    commands::runtime::run_status(output)?;
+                }
+                RuntimeAction::Logs { agent, lines, follow } => {
+                    commands::runtime::run_logs(&agent, lines, follow, output)?;
+                }
+                RuntimeAction::Ps => {
+                    commands::runtime::run_status(output)?;
+                }
+                RuntimeAction::Exec { agent, args } => {
+                    commands::runtime::run_exec(&agent, &args, output)?;
+                }
+            },
+
+            Commands::Env => commands::env::run(output)?,
+
+            Commands::Doctor => commands::check::run(output)?,
+
+            Commands::Version => {
+                println!("agent-nexus {}", env!("CARGO_PKG_VERSION"));
+            }
+        }
+    Ok(())
+}
+
+fn main() {
     // Initialize tracing (minimal default)
     // If init fails (e.g. already initialized), that's acceptable in tests or
     // when embedded -- log a debug message but don't crash.
@@ -356,130 +484,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let output = OutputFormatter::new(cli.json, cli.follow);
 
-    match cli.command {
-        Commands::Init { dir } => commands::init::run(&dir, &output)?,
-
-        Commands::Sources { action } => match action {
-            SourcesAction::List => commands::sources::run_list(&output)?,
-            SourcesAction::Add { name, url, r#type, branch } => {
-                commands::sources::run_add(&name, &url, r#type.as_deref(), branch.as_deref(), &output)?;
-            }
-            SourcesAction::Remove { name } => commands::sources::run_remove(&name, &output)?,
-        },
-
-        Commands::Install { agent, version, source, local } => {
-            commands::install::run(&agent, version.as_deref(), source.as_deref(), local, &output)?;
-        }
-
-        Commands::Uninstall { agent } => {
-            commands::install::run_uninstall(&agent, &output)?;
-        }
-
-        Commands::Update { agent, all } => {
-            commands::install::run_update(agent.as_deref(), all, &output)?;
-        }
-
-        Commands::Run {
-            agent,
-            mode,
-            transport,
-            extra,
-        } => commands::run::run(&agent, &mode, &transport, &extra, &output)?,
-
-        Commands::List => commands::install::run_list(&output)?,
-
-        Commands::Search { query } => commands::install::run_search(&query, &output)?,
-
-        Commands::Info { agent } => commands::install::run_info(&agent, &output)?,
-
-        Commands::Create { action } => match action {
-            CreateAction::Agent {
-                name,
-                description,
-                tools,
-                wizard,
-                output: out_dir,
-            } => commands::create::run_agent(
-                &name,
-                description.as_deref(),
-                &tools,
-                wizard,
-                out_dir.as_deref(),
-                &output,
-            )?,
-        },
-
-        Commands::Check { path } => {
-            match path {
-                Some(p) => commands::check::run_check_package(&p, &output)?,
-                None => commands::check::run(&output)?,
-            }
-        }
-
-        Commands::Config { action } => match action {
-            ConfigAction::Show => commands::config::run_show(&output)?,
-            ConfigAction::Get { key } => commands::config::run_get(&key, &output)?,
-            ConfigAction::Set { key, value } => commands::config::run_set(&key, &value, &output)?,
-            ConfigAction::Edit => commands::config::run_edit(&output)?,
-            ConfigAction::Validate => commands::config::run_validate(&output)?,
-            ConfigAction::Providers => commands::config::run_providers(&output)?,
-            ConfigAction::Path => commands::config::run_path(&output)?,
-        },
-
-        Commands::Evolution { action } => match action {
-            EvolutionAction::Status => commands::evolution::run_status(&output)?,
-            EvolutionAction::Health { skill_name, verbose } => {
-                commands::evolution::run_health(skill_name.as_deref(), verbose, &output)?;
-            }
-            EvolutionAction::List { all } => {
-                commands::evolution::run_list(all, &output)?;
-            }
-            EvolutionAction::History { skill_name } => {
-                commands::evolution::run_history(&skill_name, &output)?;
-            }
-            EvolutionAction::Metrics { agent } => {
-                commands::evolution::run_metrics(agent.as_deref(), &output)?;
-            }
-            EvolutionAction::Fix { skill_id } => {
-                commands::evolution::run_fix(&skill_id, &output)?;
-            }
-            EvolutionAction::Promote { skill_id } => {
-                commands::evolution::run_promote(&skill_id, &output)?;
-            }
-        },
-
-        Commands::Runtime { action } => match action {
-            RuntimeAction::Start { agent, all } => {
-                commands::runtime::run_start(agent.as_deref(), all, &output)?;
-            }
-            RuntimeAction::Stop { agent, all } => {
-                commands::runtime::run_stop(agent.as_deref(), all, &output)?;
-            }
-            RuntimeAction::Restart { agent } => {
-                commands::runtime::run_restart(&agent, &output)?;
-            }
-            RuntimeAction::Status => {
-                commands::runtime::run_status(&output)?;
-            }
-            RuntimeAction::Logs { agent, lines, follow } => {
-                commands::runtime::run_logs(&agent, lines, follow, &output)?;
-            }
-            RuntimeAction::Ps => {
-                commands::runtime::run_status(&output)?;
-            }
-            RuntimeAction::Exec { agent, args } => {
-                commands::runtime::run_exec(&agent, &args, &output)?;
-            }
-        },
-
-        Commands::Env => commands::env::run(&output)?,
-
-        Commands::Doctor => commands::check::run(&output)?,
-
-        Commands::Version => {
-            println!("agent-nexus {}", env!("CARGO_PKG_VERSION"));
-        }
+    if let Err(err) = run(cli, &output) {
+        output.error(&format!("{err:#}"));
+        std::process::exit(1);
     }
-
-    Ok(())
 }

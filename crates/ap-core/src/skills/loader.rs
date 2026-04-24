@@ -74,7 +74,7 @@ pub fn parse_skill(content: &str) -> Result<Skill, String> {
         });
     }
 
-    let mut skill: Skill = serde_yaml::from_str(&yaml_str)
+    let mut skill: Skill = serde_yml::from_str(&yaml_str)
         .map_err(|e| format!("invalid YAML frontmatter: {e}"))?;
     skill.body = body;
     Ok(skill)

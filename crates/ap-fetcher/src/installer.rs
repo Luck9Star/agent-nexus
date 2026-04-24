@@ -361,6 +361,17 @@ impl GitInstaller {
     }
 }
 
+impl crate::traits::Installer for GitInstaller {
+    fn install(
+        &self,
+        url: &str,
+        branch: Option<&str>,
+        version: Option<&str>,
+    ) -> Result<PathBuf, InstallerError> {
+        self.install(url, branch, version)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
