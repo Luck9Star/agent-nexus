@@ -19,7 +19,7 @@ use crate::output::OutputFormatter;
 const RESPONSE_TIMEOUT_SECS: u64 = 120;
 
 /// Resolve the Python interpreter from `AGENT_NEXUS_PYTHON` or fall back to `python3`.
-fn resolve_python() -> String {
+pub(super) fn resolve_python() -> String {
     match std::env::var("AGENT_NEXUS_PYTHON") {
         Ok(val) if !val.is_empty() => {
             if val.contains("..") || val.contains('\0') {
@@ -37,7 +37,7 @@ fn resolve_python() -> String {
 
 /// Check if the agent has a local venv with a python binary.
 /// Looks in `<install_dir>/.venv/bin/python3`.
-fn resolve_venv_python(install_dir: &std::path::Path) -> Option<String> {
+pub(super) fn resolve_venv_python(install_dir: &std::path::Path) -> Option<String> {
     let venv_python = install_dir.join(".venv").join("bin").join("python3");
     if venv_python.exists() {
         Some(venv_python.to_string_lossy().to_string())
@@ -49,7 +49,7 @@ fn resolve_venv_python(install_dir: &std::path::Path) -> Option<String> {
 /// Resolve the agent entrypoint by checking multiple known files.
 /// Returns `(Some(path), false)` if a direct script is found,
 /// or `(None, true)` if python -m fallback should be used.
-fn resolve_entrypoint(install_dir: &std::path::Path, agent_name: &str) -> (Option<PathBuf>, bool) {
+pub(super) fn resolve_entrypoint(install_dir: &std::path::Path, agent_name: &str) -> (Option<PathBuf>, bool) {
     let candidates = ["main.py", "agent.py"];
     for name in &candidates {
         let path = install_dir.join(name);
