@@ -1,10 +1,57 @@
 //! `agent-nexus init` — create config.toml with defaults and sources.yaml.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
 use crate::output::OutputFormatter;
+
+// ---------------------------------------------------------------------------
+// InitError — separates validation failures from I/O errors
+// ---------------------------------------------------------------------------
+
+/// Errors specific to the `init` command.
+#[derive(Debug)]
+enum InitError {
+    /// Directory path contains `..` traversal.
+    PathTraversal,
+    /// Directory points to a protected system directory.
+    SystemDirectory(String),
+    /// Underlying I/O failure.
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for InitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InitError::PathTraversal => {
+                write!(f, "Invalid directory: path traversal ('..') is not allowed")
+            }
+            InitError::SystemDirectory(dir) => {
+                write!(
+                    f,
+                    "Invalid directory: cannot write to system directory '{dir}'"
+                )
+            }
+            InitError::Io(e) => write!(f, "I/O error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for InitError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            InitError::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for InitError {
+    fn from(e: std::io::Error) -> Self {
+        InitError::Io(e)
+    }
+}
 
 /// Default config.toml content.
 fn default_config_toml() -> String {
@@ -19,12 +66,66 @@ fn default_sources_yaml() -> String {
     "sources:\n  - name: official\n    type: git\n    url: https://github.com/anthropics/agent-nexus-packages.git\n    branch: main\n".to_string()
 }
 
+/// Validate that the init directory is safe to write into.
+///
+/// Rejects path traversal (`..`) and blocked system directories. Ensures
+/// the resolved path is within the current working directory, user home,
+/// or a standard temp directory.
+fn validate_init_dir(dir: &str) -> Result<PathBuf, InitError> {
+    if dir.contains("..") {
+        return Err(InitError::PathTraversal);
+    }
+
+    let path = Path::new(dir);
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+
+    // Canonicalize to resolve symlinks before checking blocked prefixes.
+    // If the path doesn't exist yet (fresh init), canonicalize the parent instead.
+    let resolved = if resolved.exists() {
+        resolved.canonicalize()?
+    } else if let Some(parent) = resolved.parent() {
+        if parent.exists() {
+            parent.canonicalize()?.join(
+                resolved.file_name().unwrap_or_default()
+            )
+        } else {
+            resolved
+        }
+    } else {
+        resolved
+    };
+
+    const BLOCKED_PREFIXES: &[&str] = &[
+        "/etc",
+        "/usr",
+        "/bin",
+        "/sbin",
+        "/System",
+        "/Library/System",
+        "/private/etc",
+        "/private/var/db",
+    ];
+
+    let resolved_str = resolved.to_string_lossy();
+    for prefix in BLOCKED_PREFIXES {
+        if resolved_str.starts_with(prefix) {
+            return Err(InitError::SystemDirectory(prefix.to_string()));
+        }
+    }
+
+    Ok(resolved)
+}
+
 /// Run `init` command: create config.toml and sources.yaml in the target directory.
 pub fn run(dir: &str, output: &OutputFormatter) -> Result<()> {
-    let target = Path::new(dir);
+    let target = validate_init_dir(dir).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if !target.exists() {
-        std::fs::create_dir_all(target)?;
+        std::fs::create_dir_all(&target)?;
     }
 
     let config_path = target.join("config.toml");
@@ -111,5 +212,21 @@ mod tests {
         run(nested.to_str().unwrap(), &output).unwrap();
 
         assert!(nested.join("config.toml").exists());
+    }
+
+    #[test]
+    fn rejects_path_traversal() {
+        let output = OutputFormatter::new(true, false);
+        let result = run("../../../../tmp/evil", &output);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[test]
+    fn rejects_absolute_system_path() {
+        let output = OutputFormatter::new(true, false);
+        let result = run("/etc/agent-nexus", &output);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("system directory"));
     }
 }

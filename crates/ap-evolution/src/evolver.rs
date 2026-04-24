@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::store::{EvolutionStore, SkillRecord};
+use crate::store::{EvolutionStore, SkillRecord, StoreError};
 
 /// Outcome of an evolution attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,10 +114,7 @@ impl SkillEvolver {
             &[&skill.id],
             true, // deactivate parent (FIX is in-place replacement)
         ) {
-            let err_str = e.to_string();
-            if err_str.contains("UNIQUE constraint failed")
-                || err_str.contains("constraint violation")
-            {
+            if is_constraint_violation(&e) {
                 return Err(EvolverError::ConcurrentModification(skill_name.to_string()));
             }
             return Err(EvolverError::Store(e));
@@ -133,6 +130,18 @@ impl SkillEvolver {
                 error
             ),
         })
+    }
+}
+
+/// Check whether a [`StoreError`] originated from an SQLite constraint violation
+/// (e.g. UNIQUE, CHECK, NOT NULL).  Uses rusqlite's typed error code instead
+/// of string matching so it is locale-independent and forwards-compatible.
+fn is_constraint_violation(err: &StoreError) -> bool {
+    match err {
+        StoreError::Sqlite(rusqlite::Error::SqliteFailure(failure, _)) => {
+            failure.code == rusqlite::ErrorCode::ConstraintViolation
+        }
+        _ => false,
     }
 }
 

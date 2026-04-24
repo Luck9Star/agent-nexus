@@ -5,7 +5,6 @@
 //! specific MCP transport (stdio, SSE, etc.).
 
 use serde_json::Value as JsonValue;
-use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -26,52 +25,23 @@ pub struct ToolInfo {
 // ---------------------------------------------------------------------------
 
 /// Errors that can occur during MCP client operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum McpError {
     /// Failed to connect to the MCP server.
+    #[error("MCP connection failed: {0}")]
     ConnectionFailed(String),
     /// The requested tool was not found.
+    #[error("Tool not found: {0}")]
     ToolNotFound(String),
     /// Tool invocation returned an error.
+    #[error("MCP tool execution failed: {0}")]
     ExecutionFailed(String),
     /// Serialization/deserialization error.
-    Serde(serde_json::Error),
+    #[error("MCP serialization error: {0}")]
+    Serde(#[from] serde_json::Error),
     /// IO error during transport.
-    Io(std::io::Error),
-}
-
-impl fmt::Display for McpError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            McpError::ConnectionFailed(msg) => write!(f, "MCP connection failed: {msg}"),
-            McpError::ToolNotFound(name) => write!(f, "Tool not found: {name}"),
-            McpError::ExecutionFailed(msg) => write!(f, "MCP tool execution failed: {msg}"),
-            McpError::Serde(err) => write!(f, "MCP serialization error: {err}"),
-            McpError::Io(err) => write!(f, "MCP IO error: {err}"),
-        }
-    }
-}
-
-impl std::error::Error for McpError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            McpError::Serde(err) => Some(err),
-            McpError::Io(err) => Some(err),
-            _ => None,
-        }
-    }
-}
-
-impl From<serde_json::Error> for McpError {
-    fn from(err: serde_json::Error) -> Self {
-        McpError::Serde(err)
-    }
-}
-
-impl From<std::io::Error> for McpError {
-    fn from(err: std::io::Error) -> Self {
-        McpError::Io(err)
-    }
+    #[error("MCP IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 // ---------------------------------------------------------------------------
@@ -198,5 +168,65 @@ mod tests {
         let client: Box<dyn McpClient> = Box::new(NoopMcpClient);
         let tools = client.list_tools().await.unwrap();
         assert!(tools.is_empty());
+    }
+
+    // --- McpError thiserror migration tests ---
+
+    #[test]
+    fn mcp_error_serde_displays_correctly() {
+        let json_err = serde_json::from_str::<serde_json::Value>("not valid json");
+        let mcp_err = McpError::Serde(json_err.unwrap_err());
+        let msg = format!("{mcp_err}");
+        assert!(
+            msg.starts_with("MCP serialization error:"),
+            "Serde variant should display with 'MCP serialization error:' prefix, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn mcp_error_io_displays_correctly() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe broke");
+        let mcp_err = McpError::Io(io_err);
+        let msg = format!("{mcp_err}");
+        assert!(
+            msg.starts_with("MCP IO error:"),
+            "Io variant should display with 'MCP IO error:' prefix, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn mcp_error_from_serde_json_error() {
+        let json_err = serde_json::from_str::<serde_json::Value>("{bad").unwrap_err();
+        let mcp_err: McpError = json_err.into();
+        match mcp_err {
+            McpError::Serde(_) => {} // expected
+            other => panic!("expected Serde variant, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn mcp_error_from_std_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "unexpected eof");
+        let mcp_err: McpError = io_err.into();
+        match mcp_err {
+            McpError::Io(e) => assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof),
+            other => panic!("expected Io variant, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn mcp_error_source_chain_for_io() {
+        use std::error::Error;
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe broke");
+        let mcp_err: McpError = io_err.into();
+        assert!(mcp_err.source().is_some(), "Io variant should have a source");
+    }
+
+    #[test]
+    fn mcp_error_source_chain_for_serde() {
+        use std::error::Error;
+        let json_err = serde_json::from_str::<serde_json::Value>("bad").unwrap_err();
+        let mcp_err: McpError = json_err.into();
+        assert!(mcp_err.source().is_some(), "Serde variant should have a source");
     }
 }

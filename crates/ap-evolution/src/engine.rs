@@ -65,6 +65,9 @@ pub struct EvolutionEngine {
     store: Arc<EvolutionStore>,
     analyzer: Analyzer,
     evolver: Arc<SkillEvolver>,
+    // std::sync::Mutex chosen deliberately: lock is held only for brief arithmetic
+    // updates (increment counters) and never across an .await point.  tokio::sync::Mutex
+    // would add unnecessary overhead for this purely synchronous access pattern.
     health: std::sync::Mutex<HealthTracker>,
     thresholds: Thresholds,
 }

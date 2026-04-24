@@ -56,12 +56,14 @@ impl EvolutionStore {
     pub fn new(path: &Path) -> Result<Self> {
         let manager = SqliteConnectionManager::file(path)
             .with_init(|conn| {
-                conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+                conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL;")?;
                 conn.execute_batch(schema::SCHEMA_SQL)?;
                 Self::run_migrations(conn)?;
                 Ok(())
             });
-        let pool = Pool::builder().build(manager)?;
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)?;
         Ok(Self { pool })
     }
 
@@ -120,6 +122,27 @@ impl EvolutionStore {
     #[cfg(test)]
     fn raw_conn(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>> {
         self.conn()
+    }
+
+    /// Execute a closure inside a transaction.
+    ///
+    /// Automatically handles BEGIN / COMMIT / ROLLBACK.
+    pub fn with_transaction<T, E: From<StoreError>>(
+        &self,
+        f: impl FnOnce(&rusqlite::Connection) -> std::result::Result<T, E>,
+    ) -> std::result::Result<T, E> {
+        let conn = self.pool.get().map_err(StoreError::from)?;
+        let tx = conn.unchecked_transaction().map_err(StoreError::from)?;
+        match f(&tx) {
+            Ok(v) => {
+                tx.commit().map_err(StoreError::from)?;
+                Ok(v)
+            }
+            Err(e) => {
+                let _ = tx.rollback();
+                Err(e)
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -228,6 +251,25 @@ impl EvolutionStore {
     pub fn increment_fallbacks(&self, id: &str) -> Result<bool> {
         let conn = self.conn()?;
         queries::increment_fallbacks(&conn, id)
+    }
+
+    /// Batch-increment multiple counters for a single skill in one SQL statement.
+    ///
+    /// Each delta can be 0 (no change). More efficient than calling individual
+    /// `increment_*` methods when multiple counters need updating.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub fn batch_increment(
+        &self,
+        id: &str,
+        selections: u32,
+        applied: u32,
+        completions: u32,
+        fallbacks: u32,
+    ) -> Result<bool> {
+        let conn = self.conn()?;
+        queries::batch_increment(&conn, id, selections, applied, completions, fallbacks)
     }
 
     // -----------------------------------------------------------------------
@@ -472,14 +514,16 @@ impl EvolutionStore {
     /// Persist the health score and total count to `_meta`.
     pub fn save_health_state(&self, score: f64, total: u64) -> Result<()> {
         let conn = self.conn()?;
-        conn.execute(
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
             "INSERT OR REPLACE INTO _meta (key, value) VALUES ('health_score', ?1)",
             [score.to_string()],
         )?;
-        conn.execute(
+        tx.execute(
             "INSERT OR REPLACE INTO _meta (key, value) VALUES ('health_total', ?1)",
             [total.to_string()],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -869,5 +913,96 @@ mod tests {
 
         let empty = store.get_children("nonexistent").unwrap();
         assert!(empty.is_empty());
+    }
+
+    // --- with_transaction tests ---
+
+    #[test]
+    fn with_transaction_commits_on_success() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+
+        // Insert a skill inside a transaction
+        let skill = make_facade_skill("tx-commit", "tx-skill");
+        store.with_transaction::<(), StoreError>(|conn| {
+            queries::insert_skill(conn, &skill)?;
+            Ok(())
+        }).unwrap();
+
+        // Data should be visible after commit
+        let found = store.get_skill_by_name("tx-skill").unwrap();
+        assert!(found.is_some(), "Transaction should have committed the skill");
+    }
+
+    #[test]
+    fn with_transaction_rolls_back_on_error() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+
+        // Insert a skill normally first
+        let skill = make_facade_skill("tx-rollback", "tx-skill-pre");
+        store.insert_skill(&skill).unwrap();
+
+        // Attempt a transaction that inserts then fails — the new insert should be rolled back
+        let new_skill = make_facade_skill("tx-rollback-2", "tx-skill-should-not-exist");
+        let result: std::result::Result<(), StoreError> = store.with_transaction(|conn| {
+            queries::insert_skill(conn, &new_skill)?;
+            Err(StoreError::Sqlite(rusqlite::Error::InvalidParameterName("force_error".to_string())))
+        });
+
+        assert!(result.is_err(), "Transaction should have returned error");
+        // The second skill should NOT exist — rollback should have discarded it
+        let found = store.get_skill_by_name("tx-skill-should-not-exist").unwrap();
+        assert!(found.is_none(), "Rolled-back insert should not be visible");
+    }
+
+    #[test]
+    fn with_transaction_handles_nested_error_types() {
+        let store = EvolutionStore::new_in_memory().unwrap();
+
+        // Use a custom error type that can be created from StoreError
+        #[derive(Debug)]
+        enum AppError {
+            Store(StoreError),
+            Custom(String),
+        }
+
+        impl std::fmt::Display for AppError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    AppError::Store(e) => write!(f, "{e}"),
+                    AppError::Custom(msg) => write!(f, "{msg}"),
+                }
+            }
+        }
+
+        impl std::error::Error for AppError {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                match self {
+                    AppError::Store(e) => Some(e),
+                    AppError::Custom(_) => None,
+                }
+            }
+        }
+
+        impl From<StoreError> for AppError {
+            fn from(e: StoreError) -> Self {
+                AppError::Store(e)
+            }
+        }
+
+        // Insert in transaction, then return a custom error
+        let skill = make_facade_skill("tx-nested", "tx-nested-skill");
+        let result: std::result::Result<(), AppError> = store.with_transaction(|conn| {
+            queries::insert_skill(conn, &skill)?;
+            Err(AppError::Custom("application-level failure".to_string()))
+        });
+
+        match result {
+            Err(AppError::Custom(msg)) => assert_eq!(msg, "application-level failure"),
+            other => panic!("expected Custom error, got: {other:?}"),
+        }
+
+        // Skill should NOT have been committed due to rollback
+        let found = store.get_skill_by_name("tx-nested-skill").unwrap();
+        assert!(found.is_none(), "Transaction should have rolled back on custom error");
     }
 }

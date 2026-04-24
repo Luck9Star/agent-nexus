@@ -58,6 +58,11 @@ pub fn run(
         .install(&git_url, Some("main"), version)
         .with_context(|| format!("Failed to install agent '{agent}'"))?;
 
+    let agent_dir = installed_path.join(agent);
+    if !agent_dir.exists() {
+        anyhow::bail!("Agent '{}' not found in source repository", agent);
+    }
+
     // Resolve actual HEAD commit SHA for reproducible installs
     let commit_sha = git2::Repository::open(&installed_path)
         .ok()

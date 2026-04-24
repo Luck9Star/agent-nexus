@@ -322,7 +322,10 @@ impl TaskGraph {
             if let Some(deps) = adjacency.get(&name) {
                 for dep_name in deps {
                     let degree = in_degree.get_mut(dep_name)
-                        .expect("invariant violation: node not found in in_degree map during topo sort");
+                        .ok_or_else(|| TaskGraphError::IncompleteTopoSort {
+                            dropped_count: 0,
+                            dropped_ids: vec![dep_name.clone()],
+                        })?;
                     *degree -= 1;
                     if *degree == 0 {
                         queue.push_back(dep_name.clone());
@@ -815,5 +818,64 @@ mod tests {
         // t1 is ready (no deps), dangling is NOT ready (dangling dep on "ghost")
         assert_eq!(ready.len(), 1);
         assert_eq!(ready[0].id, "t1");
+    }
+
+    /// Test IncompleteTopoSort error: tasks with dangling blocked_by
+    /// references that survive the cycle-free check.
+    #[test]
+    fn topological_sort_incomplete_on_dangling_deps() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+
+        // Insert tasks via raw SQL to bypass add_task validation
+        tg.conn
+            .execute(
+                "INSERT INTO tasks (task_id, agent_name, description, state, blocked_by, vars, result, created_at, updated_at)
+                 VALUES ('t1', 'a', 'task 1', 'pending', '[\"nonexistent\"]', 'null', NULL, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        let result = tg.topological_sort();
+        match result {
+            Err(TaskGraphError::IncompleteTopoSort { dropped_count, dropped_ids }) => {
+                assert!(dropped_count > 0, "should report dropped tasks");
+                assert!(
+                    dropped_ids.contains(&"t1".to_string()),
+                    "t1 should be in dropped_ids"
+                );
+            }
+            other => panic!("expected IncompleteTopoSort, got {:?}", other),
+        }
+    }
+
+    /// Test InvalidState error: raw DB row with unknown state string.
+    #[test]
+    fn load_rejects_invalid_state_string() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+
+        // Insert a task with a state value not in the enum
+        tg.conn
+            .execute(
+                "INSERT INTO tasks (task_id, agent_name, description, state, blocked_by, vars, result, created_at, updated_at)
+                 VALUES ('bad-state', 'a', 'corrupted', 'running', '[]', 'null', NULL, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        let result = tg.load_all_tasks();
+        // str_to_state wraps InvalidState inside FromSqlConversionFailure,
+        // which then becomes TaskGraphError::Sqlite(...)
+        match result {
+            Err(TaskGraphError::Sqlite(
+                rusqlite::Error::FromSqlConversionFailure(_, _, inner),
+            )) => {
+                let msg = inner.to_string();
+                assert!(
+                    msg.contains("running"),
+                    "Error message should mention the bad state, got: {msg}"
+                );
+            }
+            other => panic!("expected Sqlite(FromSqlConversionFailure), got {:?}", other),
+        }
     }
 }

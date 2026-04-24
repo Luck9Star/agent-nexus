@@ -237,6 +237,34 @@ pub(crate) fn increment_fallbacks(conn: &Connection, id: &str) -> Result<bool, S
     Ok(rows > 0)
 }
 
+/// Batch-increment multiple counters for a single skill in one statement.
+///
+/// Each delta can be 0 (no change). This is more efficient than calling
+/// individual `increment_*` functions when multiple counters need updating.
+///
+/// Returns `Ok(true)` if a row was updated, `Ok(false)` if the skill was not found.
+pub(crate) fn batch_increment(
+    conn: &Connection,
+    id: &str,
+    selections: u32,
+    applied: u32,
+    completions: u32,
+    fallbacks: u32,
+) -> Result<bool, StoreError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let rows = conn.execute(
+        "UPDATE skill_records SET
+            total_selections = total_selections + ?1,
+            total_applied = total_applied + ?2,
+            total_completions = total_completions + ?3,
+            total_fallbacks = total_fallbacks + ?4,
+            updated_at = ?5
+         WHERE id = ?6",
+        params![selections, applied, completions, fallbacks, now, id],
+    )?;
+    Ok(rows > 0)
+}
+
 // ---------------------------------------------------------------------------
 // Skill lifecycle
 // ---------------------------------------------------------------------------

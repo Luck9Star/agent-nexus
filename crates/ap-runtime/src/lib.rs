@@ -14,4 +14,4 @@ pub mod process;
 pub use ipc::{AgentIpcStream, AgentProtocol, AgentResult};
 pub use lock::LockRegistry;
 pub use mcp_client::{McpClient, McpError, NoopMcpClient, ToolInfo};
-pub use process::{AgentProcess, ProcessError};
+pub use process::{AgentProcess, DetachedProcess, ProcessError};

@@ -56,6 +56,8 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
         vec![name.to_string()]
     };
 
+    let mut reaper_handles: Vec<std::thread::JoinHandle<()>> = Vec::new();
+
     for agent_name in &agents {
         let install_dir = root.join(".agents").join(agent_name);
         if !install_dir.exists() {
@@ -77,7 +79,7 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
         }
 
         let python = resolve_python();
-        let child = std::process::Command::new(&python)
+        let mut child = std::process::Command::new(&python)
             .arg(&entrypoint)
             .current_dir(&install_dir)
             .env("AGENT_NEXUS_ROOT", &root)
@@ -94,11 +96,30 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
             .as_secs();
         // Store both PID and start_time as "pid:start_time" for PID recycling protection
         std::fs::write(&pid_file, format!("{pid}:{start_time}"))?;
-        // Detach child: redirect stdin to /dev/null so child doesn't hang on stdin reads
-        // Child handle is intentionally kept alive via leak to prevent orphan process
-        // until the user stops it via `runtime stop`
-        std::mem::forget(child);
+        // Close stdio handles to release FDs — child process keeps running independently
+        drop(child.stdin.take());
+        drop(child.stdout.take());
+        drop(child.stderr.take());
+        // Spawn a background reaper thread to call wait() so the OS can
+        // reap the child when it exits — prevents zombie processes.
+        let agent_label = agent_name.clone();
+        let handle = std::thread::spawn(move || {
+            if let Err(e) = child.wait() {
+                tracing::warn!("Reaper for agent '{agent_label}' failed: {e}");
+            }
+        });
+        reaper_handles.push(handle);
         output.success(&format!("Agent '{agent_name}' started (PID: {pid})."));
+    }
+
+    // Check reaper threads for errors (non-blocking; threads may still be running)
+    for handle in reaper_handles {
+        if handle.is_finished() {
+            if let Err(e) = handle.join() {
+                tracing::warn!("Reaper thread panicked: {e:?}");
+            }
+        }
+        // Otherwise the thread is still waiting on child.wait() — let it run.
     }
 
     Ok(())
@@ -146,6 +167,9 @@ pub fn run_stop(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Res
             #[cfg(unix)]
             {
                 // Verify the process exists before signaling (PID recycling protection)
+                // SAFETY: pid comes from a PID file written by this tool at start time.
+                // The start_time component in the PID file provides recycling protection.
+                // kill(pid, 0) is a standard permission/existence check — no signal sent.
                 let signal_ret = unsafe { libc::kill(pid as i32, 0) };
                 if signal_ret == 0 {
                     // Process exists — check start_time if available for PID recycling protection
@@ -165,6 +189,9 @@ pub fn run_stop(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Res
                     };
 
                     if should_kill {
+                        // SAFETY: pid was validated above — signal_ret confirmed process exists.
+                        // start_time in PID file guards against PID recycling.
+                        // SIGTERM is the standard graceful termination signal.
                         let ret = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
                         if ret == 0 {
                             output.success(&format!("Agent '{agent_name}' (PID: {pid}) stopped."));
@@ -196,6 +223,35 @@ pub fn run_restart(agent: &str, output: &OutputFormatter) -> Result<()> {
     Ok(())
 }
 
+/// Parse elapsed time from `ps -o etime=` output (e.g. "1-03:45:22" or "  45:22" or "    01").
+/// Returns total elapsed seconds.
+fn parse_ps_elapsed(s: &str) -> u64 {
+    let s = s.trim();
+    let mut days: u64 = 0;
+    let rest = if let Some((d, r)) = s.split_once('-') {
+        days = d.parse().unwrap_or(0);
+        r
+    } else {
+        s
+    };
+    let parts: Vec<&str> = rest.split(':').collect();
+    match parts.len() {
+        3 => {
+            let h: u64 = parts[0].parse().unwrap_or(0);
+            let m: u64 = parts[1].parse().unwrap_or(0);
+            let sec: u64 = parts[2].parse().unwrap_or(0);
+            days * 86400 + h * 3600 + m * 60 + sec
+        }
+        2 => {
+            let m: u64 = parts[0].parse().unwrap_or(0);
+            let sec: u64 = parts[1].parse().unwrap_or(0);
+            days * 86400 + m * 60 + sec
+        }
+        1 => parts[0].parse().unwrap_or(0),
+        _ => 0,
+    }
+}
+
 /// Run `runtime status` (or `runtime ps`) command.
 pub fn run_status(output: &OutputFormatter) -> Result<()> {
     let root = commands::find_project_root(
@@ -219,13 +275,45 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
         let agent_name = name.trim_end_matches(".pid").to_string();
         let pid_str = std::fs::read_to_string(entry.path()).unwrap_or_default();
         // Handle "pid:start_time" format from runtime start
-        let pid_num: u32 = pid_str.trim().split(':').next()
+        let mut parts = pid_str.trim().splitn(2, ':');
+        let pid_num: u32 = parts.next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let stored_start_time: u64 = parts.next()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
         if pid_num > 0 {
             #[cfg(unix)]
             {
                 let alive = unsafe { libc::kill(pid_num as i32, 0) } == 0;
+                // PID recycling protection: verify the process at this PID
+                // is the same one we started by comparing start times.
+                // Use `ps -o etime=` to get elapsed seconds and compare.
+                let alive = if alive && stored_start_time > 0 {
+                    let current_time = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let output = std::process::Command::new("ps")
+                        .args(["-o", "etime=", "-p", &pid_num.to_string()])
+                        .output()
+                        .ok();
+                    match output {
+                        Some(o) if o.status.success() => {
+                            let etime_str = String::from_utf8_lossy(&o.stdout);
+                            let elapsed_secs = parse_ps_elapsed(&etime_str);
+                            // stored_start_time + elapsed should roughly equal current_time
+                            // Allow 5-second tolerance for race between kill and ps
+                            elapsed_secs > 0
+                                && (stored_start_time as i64 + elapsed_secs as i64
+                                    - current_time as i64).unsigned_abs()
+                                    <= 5
+                        }
+                        _ => false, // process vanished between kill and ps
+                    }
+                } else {
+                    alive
+                };
                 running.push((agent_name, pid_num, alive));
             }
             #[cfg(not(unix))]
@@ -402,4 +490,106 @@ async fn async_exec(
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Stdio;
+
+    /// Verify that after spawning a child with piped stdio and taking the handles,
+    /// stdin/stdout/stderr on the Child are `None` — confirming FDs are not leaked.
+    ///
+    /// This mirrors the pattern in `run_start` where we `take()` + `drop()` + `forget()`.
+    #[test]
+    fn child_stdio_taken_prevents_fd_leak() {
+        let mut child = std::process::Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("cat should spawn");
+
+        // Take the handles — this moves them out of the Child, leaving `None`
+        drop(child.stdin.take());
+        drop(child.stdout.take());
+        drop(child.stderr.take());
+
+        // After take(), all handles should be None (no FDs held by Child)
+        assert!(child.stdin.is_none(), "stdin should be None after take");
+        assert!(child.stdout.is_none(), "stdout should be None after take");
+        assert!(child.stderr.is_none(), "stderr should be None after take");
+
+        // Clean up the child process
+        let _ = child.kill();
+    }
+
+    /// Verify that without taking the handles, stdin/stdout/stderr are `Some`.
+    /// This is the baseline — confirming the test above is actually validating something.
+    #[test]
+    fn child_stdio_present_before_take() {
+        let child = std::process::Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("cat should spawn");
+
+        assert!(child.stdin.is_some(), "stdin should be Some before take");
+        assert!(child.stdout.is_some(), "stdout should be Some before take");
+        assert!(child.stderr.is_some(), "stderr should be Some before take");
+
+        // Clean up
+        let mut child = child;
+        let _ = child.kill();
+    }
+
+    #[test]
+    fn resolve_python_falls_back_to_python3() {
+        // When AGENT_NEXUS_PYTHON is not set, should return "python3"
+        std::env::remove_var("AGENT_NEXUS_PYTHON");
+        let python = resolve_python();
+        assert_eq!(python, "python3");
+    }
+
+    #[test]
+    fn resolve_python_uses_env_when_set() {
+        std::env::set_var("AGENT_NEXUS_PYTHON", "/custom/python");
+        let python = resolve_python();
+        assert_eq!(python, "/custom/python");
+        std::env::remove_var("AGENT_NEXUS_PYTHON");
+    }
+
+    #[test]
+    fn resolve_python_rejects_suspicious_path() {
+        std::env::set_var("AGENT_NEXUS_PYTHON", "/some/../etc/passwd");
+        let python = resolve_python();
+        assert_eq!(python, "python3", "Should fall back when path contains '..'");
+        std::env::remove_var("AGENT_NEXUS_PYTHON");
+    }
+
+    #[test]
+    fn parse_ps_elapsed_seconds_only() {
+        assert_eq!(parse_ps_elapsed("    01"), 1);
+        assert_eq!(parse_ps_elapsed("42"), 42);
+    }
+
+    #[test]
+    fn parse_ps_elapsed_minutes_seconds() {
+        assert_eq!(parse_ps_elapsed("  45:22"), 45 * 60 + 22);
+    }
+
+    #[test]
+    fn parse_ps_elapsed_hours_minutes_seconds() {
+        assert_eq!(parse_ps_elapsed("1:23:45"), 1 * 3600 + 23 * 60 + 45);
+    }
+
+    #[test]
+    fn parse_ps_elapsed_days() {
+        assert_eq!(parse_ps_elapsed("1-03:45:22"), 86400 + 3 * 3600 + 45 * 60 + 22);
+    }
 }

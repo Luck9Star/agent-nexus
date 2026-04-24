@@ -16,6 +16,7 @@ tracing = { workspace = true }
 rstest = { workspace = true }
 tokio-test = { workspace = true }
 criterion = { workspace = true }
+libc = { workspace = true }
 
 [[bench]]
 name = "ipc_bench"

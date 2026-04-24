@@ -188,7 +188,7 @@ impl DeferredAgentRegistry {
         if slot.tools.set(tools_arc).is_err() {
             // Another caller won the race; their value is in the cell.
         }
-        Ok(slot.tools.get().unwrap().to_vec())
+        Ok(slot.tools.get().expect("tools OnceCell was just set above; race winner always populates it").to_vec())
     }
 
     /// Force-reactivate an agent: clear the cached client and tools so the next

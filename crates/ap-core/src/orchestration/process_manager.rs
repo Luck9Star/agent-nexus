@@ -600,14 +600,9 @@ impl ProcessManagerHandle {
         args: &[&str],
         env: Option<HashMap<String, String>>,
     ) -> Result<(), HandleError> {
-        // Phase 1: check capacity + extract old process (sync, under lock)
+        // Phase 1: extract old process (sync, under lock)
         let old = {
             let mut pm = self.inner.lock().await;
-            if pm.process_count() >= pm.max_concurrent_limit() {
-                return Err(HandleError::from(ProcessError::MaxConcurrent(
-                    pm.max_concurrent_limit(),
-                )));
-            }
             pm.take_process(id)
         }; // lock dropped
 
@@ -645,9 +640,17 @@ impl ProcessManagerHandle {
             child.stdout.take().ok_or_else(|| HandleError::from(ProcessError::NoStdout))?,
         );
 
-        // Phase 4: insert into map (sync, under lock)
+        // Phase 4: check capacity AND insert atomically (sync, under lock)
+        // Capacity check is co-located with insert to close TOCTOU window
+        // (previous design checked capacity in a separate lock acquisition).
         {
             let mut pm = self.inner.lock().await;
+            if pm.process_count() >= pm.max_concurrent_limit() {
+                let limit = pm.max_concurrent_limit();
+                drop(pm); // release lock before async kill
+                let _ = child.kill().await;
+                return Err(HandleError::from(ProcessError::MaxConcurrent(limit)));
+            }
             pm.insert_process(
                 id.to_string(),
                 ManagedProcess {

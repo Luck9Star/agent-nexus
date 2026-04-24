@@ -869,7 +869,156 @@ fn evolution_status_json_output() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// 25. check with missing git in a directory with config
+// 25. SECURITY: init path traversal rejection (E2E)
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn init_rejects_path_traversal_dotdot() {
+    cli()
+        .args(["init", "--dir", "../../../tmp/evil"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("path traversal"));
+}
+
+#[test]
+fn init_rejects_system_directory() {
+    cli()
+        .args(["init", "--dir", "/etc/agent-nexus"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("system directory"));
+}
+
+#[test]
+fn init_accepts_valid_subdirectory() {
+    let dir = tempfile::tempdir().unwrap();
+    let subdir = dir.path().join("valid-project");
+    // Pass the subdir path before it exists -- init should create it
+    cli()
+        .args(["init", "--dir", subdir.to_str().unwrap()])
+        .assert()
+        .success();
+
+    assert!(subdir.join("config.toml").exists());
+    assert!(subdir.join("sources.yaml").exists());
+}
+
+#[test]
+fn init_accepts_dot_for_cwd() {
+    let dir = tempfile::tempdir().unwrap();
+    cli()
+        .args(["init", "--dir", "."])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    assert!(dir.path().join("config.toml").exists());
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 26. SECURITY: install nonexistent agent (post-clone directory verification)
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn install_nonexistent_agent_reports_not_found_in_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    // Empty sources list -- agent not present
+    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+
+    cli()
+        .args(["install", "totally-fake-agent"])
+        .current_dir(dir.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found in sources"));
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 27. SECURITY: runtime status with PID file containing dead/recycled PID
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn runtime_status_dead_pid_shows_dead() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents_dir = dir.path().join(".agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+
+    // Write a PID file with a PID that is very unlikely to be running (PID 999999999)
+    // and a stale start_time in the far past to trigger PID recycling detection
+    let pid_file = agents_dir.join("test-dead-agent.pid");
+    std::fs::write(&pid_file, "999999999:1000000").unwrap();
+
+    let output = cli()
+        .args(["--json", "runtime", "status"])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout).expect("runtime status --json should produce valid JSON");
+
+    let agents = parsed.as_array().expect("Expected JSON array");
+    assert_eq!(agents.len(), 1, "Should have exactly one agent entry");
+    assert_eq!(agents[0]["name"], "test-dead-agent");
+    assert_eq!(agents[0]["status"], "dead", "Recycled/nonexistent PID should be reported as dead");
+}
+
+#[test]
+fn runtime_status_no_agents_shows_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents_dir = dir.path().join(".agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    // No PID files -- status should succeed with no agents
+
+    let output = cli()
+        .args(["--json", "runtime", "status"])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout).expect("runtime status --json should produce valid JSON");
+
+    let agents = parsed.as_array().expect("Expected JSON array");
+    assert!(agents.is_empty(), "Should have no agents when no PID files exist");
+}
+
+#[test]
+fn runtime_status_init_pid_shows_dead() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents_dir = dir.path().join(".agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+
+    // PID 1 (init/launchd) exists on all Unix systems, but with a stale start_time
+    // it should be detected as recycled (since init started at boot, not at our timestamp)
+    let pid_file = agents_dir.join("recycled-agent.pid");
+    // Use a start_time of 1 (epoch + 1 second, clearly not when PID 1 started)
+    std::fs::write(&pid_file, "1:1").unwrap();
+
+    let output = cli()
+        .args(["--json", "runtime", "status"])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout).expect("runtime status --json should produce valid JSON");
+
+    let agents = parsed.as_array().expect("Expected JSON array");
+    assert_eq!(agents.len(), 1);
+    // PID 1 is alive (init), but the start_time mismatch should mark it as dead (recycled)
+    assert_eq!(
+        agents[0]["status"], "dead",
+        "PID 1 with mismatched start_time should be detected as recycled/dead"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 28. check with missing git in a directory with config
 // ══════════════════════════════════════════════════════════════════════════
 
 #[test]

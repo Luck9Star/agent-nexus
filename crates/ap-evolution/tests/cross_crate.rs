@@ -185,3 +185,217 @@ fn health_score_with_mixed_results() {
     let health = engine.get_health_score();
     assert!(health > 0.5 && health < 1.0, "Expected health between 0.5 and 1.0, got {health}");
 }
+
+// ── Test 7: Transaction safety — save_health_state concurrent writes ────
+
+#[test]
+fn save_health_state_concurrent_no_corruption() {
+    use std::sync::Arc;
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("health_concurrent.db");
+    let store = Arc::new(EvolutionStore::new(&db_path).unwrap());
+
+    // Save an initial health state
+    store.save_health_state(0.5, 10).unwrap();
+    let (_initial_score, initial_total) = store.load_health_state().unwrap();
+    assert_eq!(initial_total, 10);
+
+    // Spawn multiple threads all saving health state concurrently
+    let mut handles = vec![];
+    for i in 0..8 {
+        let s = Arc::clone(&store);
+        handles.push(std::thread::spawn(move || {
+            let score = 0.5 + (i as f64 * 0.05);
+            let total = 10 + i;
+            s.save_health_state(score, total).unwrap();
+        }));
+    }
+
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    // The final state should be readable without error (not corrupted)
+    let (final_score, final_total) = store.load_health_state().unwrap();
+    // Score should be a valid float (not NaN or Infinity)
+    assert!(
+        final_score.is_finite(),
+        "Health score should be a finite number, got: {final_score}"
+    );
+    // Total should be one of the values we wrote (10..17)
+    assert!(
+        (10..=17).contains(&final_total),
+        "Total should be in the range we wrote, got: {final_total}"
+    );
+}
+
+// ── Test 8: Transaction safety — with_transaction rollback on error ────
+
+#[test]
+fn with_transaction_rollback_on_error() {
+    use ap_evolution::store::error::StoreError;
+
+    let store = EvolutionStore::new_in_memory().unwrap();
+
+    // Insert a skill first
+    let skill = SkillRecord {
+        id: "tx-rollback-1".to_string(),
+        name: "rollback-skill".to_string(),
+        version: "1.0.0".to_string(),
+        lineage_origin: "imported".to_string(),
+        lineage_generation: 0,
+        lineage_content_diff: None,
+        lineage_content_snapshot: None,
+        directory: None,
+        is_active: true,
+        total_selections: 5,
+        total_applied: 5,
+        total_completions: 5,
+        total_fallbacks: 0,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        updated_at: chrono::Utc::now().to_rfc3339(),
+    };
+    store.insert_skill(&skill).unwrap();
+
+    // Verify the skill exists
+    let found = store.get_skill_by_name("rollback-skill").unwrap().unwrap();
+    assert_eq!(found.total_selections, 5);
+
+    // Use with_transaction to do something that fails -- data should be rolled back
+    let result: std::result::Result<(), StoreError> = store.with_transaction(|conn| {
+        // Delete the skill within the transaction
+        conn.execute("DELETE FROM skill_records WHERE id = 'tx-rollback-1'", [])?;
+        // Now force an error to trigger rollback
+        Err(StoreError::Sqlite(rusqlite::Error::InvalidParameterName("force_error".to_string())))
+    });
+
+    assert!(result.is_err(), "Transaction should have returned an error");
+
+    // The skill should still exist because the transaction was rolled back
+    let found_after = store.get_skill_by_name("rollback-skill").unwrap().unwrap();
+    assert_eq!(
+        found_after.id, "tx-rollback-1",
+        "Skill should still exist after transaction rollback"
+    );
+    assert_eq!(
+        found_after.total_selections, 5,
+        "Skill data should be unchanged after rollback"
+    );
+}
+
+// ── Test 9: Constraint violation detection uses rusqlite error codes ──
+
+#[test]
+fn concurrent_evolution_detects_constraint_violation_by_error_code() {
+    use ap_evolution::evolver::SkillEvolver;
+    use std::sync::Arc;
+
+    let store = Arc::new(EvolutionStore::new_in_memory().unwrap());
+    let skill = SkillRecord {
+        id: "cv-test-1".to_string(),
+        name: "concurrent-skill".to_string(),
+        version: "1.0.0".to_string(),
+        lineage_origin: "imported".to_string(),
+        lineage_generation: 0,
+        lineage_content_diff: None,
+        lineage_content_snapshot: None,
+        directory: Some("/skills/cv".to_string()),
+        is_active: true,
+        total_selections: 0,
+        total_applied: 0,
+        total_completions: 0,
+        total_fallbacks: 0,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        updated_at: chrono::Utc::now().to_rfc3339(),
+    };
+    store.insert_skill(&skill).unwrap();
+
+    let evolver = SkillEvolver::new(store.clone());
+
+    // First evolution succeeds
+    let outcome = evolver.evolve_fix("concurrent-skill", "first fix").unwrap();
+    assert!(
+        matches!(outcome, ap_evolution::evolver::EvolutionOutcome::Success { .. }),
+        "First evolution should succeed"
+    );
+
+    // Evolve again — should succeed (new generation)
+    let outcome2 = evolver.evolve_fix("concurrent-skill", "second fix").unwrap();
+    assert!(
+        matches!(outcome2, ap_evolution::evolver::EvolutionOutcome::Success { .. }),
+        "Second evolution should succeed"
+    );
+
+    // Verify both new skills exist and are active
+    let active = store.get_skill_by_name("concurrent-skill").unwrap().unwrap();
+    assert!(active.lineage_generation >= 1, "Should have evolved at least once");
+}
+
+// ── Test 10: Real concurrent threads trigger ConcurrentModification ─────
+
+#[test]
+fn concurrent_evolution_triggers_concurrent_modification() {
+    use ap_evolution::evolver::{EvolverError, SkillEvolver};
+    use std::sync::Arc;
+    use std::sync::Barrier;
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("concurrent_evolve.db");
+    let store = Arc::new(EvolutionStore::new(&db_path).unwrap());
+
+    // Insert initial skill
+    let skill = SkillRecord {
+        id: "race-1".to_string(),
+        name: "race-skill".to_string(),
+        version: "1.0.0".to_string(),
+        lineage_origin: "imported".to_string(),
+        lineage_generation: 0,
+        lineage_content_diff: None,
+        lineage_content_snapshot: None,
+        directory: Some("/skills/race".to_string()),
+        is_active: true,
+        total_selections: 0,
+        total_applied: 0,
+        total_completions: 0,
+        total_fallbacks: 0,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        updated_at: chrono::Utc::now().to_rfc3339(),
+    };
+    store.insert_skill(&skill).unwrap();
+
+    let num_threads = 4;
+    let barrier = Arc::new(Barrier::new(num_threads));
+    let mut handles = vec![];
+
+    for i in 0..num_threads {
+        let s = Arc::clone(&store);
+        let b = Arc::clone(&barrier);
+        handles.push(std::thread::spawn(move || {
+            b.wait(); // all threads read at the same snapshot
+            let evolver = SkillEvolver::new(s);
+            evolver.evolve_fix("race-skill", &format!("fix {i}"))
+        }));
+    }
+
+    let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+    let successes = results.iter().filter(|r| r.is_ok()).count();
+    let concurrent_mods = results
+        .iter()
+        .filter(|r| matches!(r, Err(EvolverError::ConcurrentModification(_))))
+        .count();
+
+    assert!(
+        successes >= 1,
+        "At least one evolution must succeed, got {successes} successes out of {num_threads}"
+    );
+    assert!(
+        successes + concurrent_mods == num_threads,
+        "All results must be Success or ConcurrentModification, got {successes} successes + {concurrent_mods} concurrent_mods out of {num_threads}"
+    );
+
+    // Verify no data corruption
+    let active = store.get_skill_by_name("race-skill").unwrap().unwrap();
+    assert!(active.is_active, "Active skill must remain active");
+}

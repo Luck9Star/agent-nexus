@@ -40,6 +40,11 @@ fn validate_name(label: &str, value: &str) -> Result<(), GatewayError> {
             "{label} contains invalid characters: only alphanumeric, underscore, and hyphen are allowed"
         )));
     }
+    if value.contains("___") {
+        return Err(GatewayError::ValidationError(format!(
+            "{label} must not contain triple underscores (conflicts with agent__tool separator)"
+        )));
+    }
     Ok(())
 }
 

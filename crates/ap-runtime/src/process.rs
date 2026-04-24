@@ -10,6 +10,65 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::process::{Child, Command};
 
 // ---------------------------------------------------------------------------
+// DetachedProcess — kill-on-drop wrapper for detached child processes
+// ---------------------------------------------------------------------------
+
+/// A child process that was intentionally detached from the [`AgentProcess`]
+/// lifecycle but still gets killed on drop to prevent zombies.
+///
+/// Returned by [`AgentProcess::split`]. Callers who need to keep the process
+/// running beyond the lifetime of this handle should call
+/// [`DetachedProcess::forget`].
+pub struct DetachedProcess {
+    child: Option<Child>,
+}
+
+impl DetachedProcess {
+    /// Delegates to [`Child::try_wait`].
+    pub fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+        self.child.as_mut().map(|c| c.try_wait()).unwrap_or(Ok(None))
+    }
+
+    /// Delegates to [`Child::kill`].
+    pub async fn kill(&mut self) -> std::io::Result<()> {
+        if let Some(c) = self.child.as_mut() {
+            c.kill().await
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Returns the OS-assigned process ID, if available.
+    pub fn id(&self) -> Option<u32> {
+        self.child.as_ref().and_then(|c| c.id())
+    }
+
+    /// Consume this handle **without** killing the child process.
+    ///
+    /// Use this when the child is meant to outlive the current scope (e.g.
+    /// a long-running agent daemon).
+    pub fn forget(mut self) {
+        // Prevent Drop from killing the child.
+        // Must mem::forget the Child because the Command was created with
+        // kill_on_drop(true) — a normal drop would kill the process.
+        if let Some(child) = self.child.take() {
+            std::mem::forget(child);
+        }
+    }
+}
+
+impl Drop for DetachedProcess {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            // Best-effort kill + reap to prevent zombies.
+            if let Err(e) = child.start_kill() {
+                tracing::warn!("DetachedProcess: failed to kill child on drop: {}", e);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Error type
 // ---------------------------------------------------------------------------
 
@@ -23,6 +82,17 @@ pub enum ProcessError {
     NoStdout,
     #[error("Failed to kill process: {0}")]
     Kill(std::io::Error),
+}
+
+impl From<ap_core::orchestration::process_manager::ProcessError> for ProcessError {
+    fn from(err: ap_core::orchestration::process_manager::ProcessError) -> Self {
+        use ap_core::orchestration::process_manager::ProcessError as Core;
+        match err {
+            Core::Spawn(e) => ProcessError::Spawn(e),
+            Core::Kill(e) => ProcessError::Kill(e),
+            other => ProcessError::Spawn(std::io::Error::other(other.to_string())),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +202,7 @@ impl AgentProcess {
         String,
         Box<dyn AsyncWrite + Unpin + Send>,
         Box<dyn AsyncRead + Unpin + Send>,
-        Child,
+        DetachedProcess,
     ) {
         let id = std::mem::take(&mut self.id);
         let stdin = self
@@ -147,7 +217,7 @@ impl AgentProcess {
         // from running on the now-empty ManuallyDrop slot.
         let child = unsafe { ManuallyDrop::take(&mut self.child) };
         std::mem::forget(self);
-        (id, stdin, stdout, child)
+        (id, stdin, stdout, DetachedProcess { child: Some(child) })
     }
 }
 
@@ -222,11 +292,11 @@ mod tests {
         let proc = AgentProcess::spawn("split-test", "cat", &[])
             .await
             .unwrap();
-        let (id, _stdin, _stdout, mut child) = proc.split();
+        let (id, _stdin, _stdout, mut detached) = proc.split();
         assert_eq!(id, "split-test");
-        // Child is still alive, we own it now
-        assert!(matches!(child.try_wait(), Ok(None)));
-        child.kill().await.unwrap();
+        // DetachedProcess should still be alive
+        assert!(matches!(detached.try_wait(), Ok(None)));
+        detached.kill().await.unwrap();
     }
 
     #[tokio::test]
@@ -235,9 +305,9 @@ mod tests {
             .await
             .unwrap();
         let (_stdin, _stdout) = proc.take_io();
-        let (id, _stdin2, _stdout2, mut child) = proc.split();
+        let (id, _stdin2, _stdout2, mut detached) = proc.split();
         assert_eq!(id, "double-take");
-        child.kill().await.unwrap();
+        detached.kill().await.unwrap();
     }
 
     #[tokio::test]
@@ -248,6 +318,80 @@ mod tests {
         match err {
             ProcessError::Spawn(_) => {} // expected
             other => panic!("expected Spawn error, got: {other}"),
+        }
+    }
+
+    // --- ProcessError conversion tests ---
+
+    use ap_core::orchestration::process_manager::ProcessError as CoreProcessError;
+
+    #[test]
+    fn from_core_spawn_maps_to_spawn() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "spawn failed");
+        let core = CoreProcessError::Spawn(io_err);
+        let runtime: ProcessError = core.into();
+        match runtime {
+            ProcessError::Spawn(e) => assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied),
+            other => panic!("expected Spawn, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn from_core_kill_maps_to_kill() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "kill failed");
+        let core = CoreProcessError::Kill(io_err);
+        let runtime: ProcessError = core.into();
+        match runtime {
+            ProcessError::Kill(e) => assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe),
+            other => panic!("expected Kill, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn from_core_max_concurrent_maps_to_spawn_with_message() {
+        let core = CoreProcessError::MaxConcurrent(42);
+        let runtime: ProcessError = core.into();
+        match runtime {
+            ProcessError::Spawn(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("Max concurrent"),
+                    "Expected MaxConcurrent error message, got: {msg}"
+                );
+            }
+            other => panic!("expected Spawn (from MaxConcurrent), got: {other}"),
+        }
+    }
+
+    #[test]
+    fn from_core_not_found_maps_to_spawn_with_message() {
+        let core = CoreProcessError::NotFound("agent-xyz".to_string());
+        let runtime: ProcessError = core.into();
+        match runtime {
+            ProcessError::Spawn(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("agent-xyz"),
+                    "Expected NotFound error message containing 'agent-xyz', got: {msg}"
+                );
+            }
+            other => panic!("expected Spawn (from NotFound), got: {other}"),
+        }
+    }
+
+    #[test]
+    fn from_core_shutdown_timeout_maps_to_spawn_with_message() {
+        let core = CoreProcessError::ShutdownTimeout;
+        let runtime: ProcessError = core.into();
+        match runtime {
+            ProcessError::Spawn(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("Graceful shutdown timed out"),
+                    "Expected ShutdownTimeout error message, got: {msg}"
+                );
+            }
+            other => panic!("expected Spawn (from ShutdownTimeout), got: {other}"),
         }
     }
 }
