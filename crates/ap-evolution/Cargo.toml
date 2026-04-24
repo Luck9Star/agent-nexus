@@ -6,7 +6,6 @@ license.workspace = true
 
 [dependencies]
 ap-core = { workspace = true }
-ap-runtime = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
