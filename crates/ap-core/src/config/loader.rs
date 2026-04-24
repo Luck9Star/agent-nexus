@@ -47,9 +47,29 @@ impl ConfigLoader {
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn load_from_str(content: &str) -> Result<PlatformConfig, ConfigError> {
+        let agent_model = std::env::var("AGENT_MODEL").ok();
+        let default_model = std::env::var("DEFAULT_MODEL").ok();
+        Self::load_from_str_with_env(content, agent_model.as_deref(), default_model.as_deref())
+    }
+
+    /// Parse a TOML string with explicit environment overrides.
+    ///
+    /// Like [`load_from_str`], but takes explicit `agent_model` and `default_model`
+    /// parameters instead of reading from `std::env`. Use this in tests or contexts
+    /// where environment state should not be read implicitly.
+    ///
+    /// Priority: `agent_model` > `default_model` (both must be non-empty).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub fn load_from_str_with_env(
+        content: &str,
+        agent_model: Option<&str>,
+        default_model: Option<&str>,
+    ) -> Result<PlatformConfig, ConfigError> {
         let mut config: PlatformConfig = toml::from_str(content)?;
         apply_builtin_providers(&mut config);
-        apply_env_overrides(&mut config);
+        apply_env_overrides_explicit(&mut config, agent_model, default_model);
         Ok(config)
     }
 
@@ -135,19 +155,23 @@ fn apply_builtin_providers(config: &mut PlatformConfig) {
     }
 }
 
-/// Apply environment variable overrides for the default model.
+/// Apply explicit environment variable overrides for the default model.
 ///
-/// Priority: `AGENT_MODEL` > `DEFAULT_MODEL` (both must be non-empty).
-fn apply_env_overrides(config: &mut PlatformConfig) {
-    if let Ok(model) = std::env::var("AGENT_MODEL") {
+/// Priority: `agent_model` > `default_model` (both must be non-empty).
+fn apply_env_overrides_explicit(
+    config: &mut PlatformConfig,
+    agent_model: Option<&str>,
+    default_model: Option<&str>,
+) {
+    if let Some(model) = agent_model {
         if !model.is_empty() {
-            config.models.default = model;
+            config.models.default = model.to_string();
             return;
         }
     }
-    if let Ok(model) = std::env::var("DEFAULT_MODEL") {
+    if let Some(model) = default_model {
         if !model.is_empty() {
-            config.models.default = model;
+            config.models.default = model.to_string();
         }
     }
 }
@@ -347,9 +371,11 @@ api = "openai-compatible"
     #[test]
     fn env_override_agent_model_takes_priority() {
         with_model_env(|| {
-            std::env::set_var("AGENT_MODEL", "anthropic:claude-sonnet-4-20250514");
-            std::env::set_var("DEFAULT_MODEL", "openai:gpt-4o-mini");
-            let config = ConfigLoader::load_from_str("").unwrap();
+            let config = ConfigLoader::load_from_str_with_env(
+                "",
+                Some("anthropic:claude-sonnet-4-20250514"),
+                Some("openai:gpt-4o-mini"),
+            ).unwrap();
             assert_eq!(config.models.default, "anthropic:claude-sonnet-4-20250514");
         });
     }
@@ -357,8 +383,11 @@ api = "openai-compatible"
     #[test]
     fn env_override_default_model_fallback() {
         with_model_env(|| {
-            std::env::set_var("DEFAULT_MODEL", "ollama:qwen2.5-coder:7b");
-            let config = ConfigLoader::load_from_str("").unwrap();
+            let config = ConfigLoader::load_from_str_with_env(
+                "",
+                None,
+                Some("ollama:qwen2.5-coder:7b"),
+            ).unwrap();
             assert_eq!(config.models.default, "ollama:qwen2.5-coder:7b");
         });
     }
@@ -366,11 +395,13 @@ api = "openai-compatible"
     #[test]
     fn env_override_empty_string_ignored() {
         with_model_env(|| {
-            // Empty AGENT_MODEL should not override
-            std::env::set_var("AGENT_MODEL", "");
-            std::env::set_var("DEFAULT_MODEL", "deepseek:deepseek-chat");
-            let config = ConfigLoader::load_from_str("").unwrap();
-            // AGENT_MODEL is empty so it should fall through to DEFAULT_MODEL
+            // Empty agent_model should not override
+            let config = ConfigLoader::load_from_str_with_env(
+                "",
+                Some(""),
+                Some("deepseek:deepseek-chat"),
+            ).unwrap();
+            // agent_model is empty so it should fall through to default_model
             assert_eq!(config.models.default, "deepseek:deepseek-chat");
         });
     }

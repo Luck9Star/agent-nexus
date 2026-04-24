@@ -7,7 +7,7 @@ use std::time::Duration;
 use ap_core::models::agent::AgentManifest;
 use ap_runtime::mcp_client::{McpClient, ToolInfo};
 use thiserror::Error;
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::{Mutex, OnceCell, RwLock};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -58,7 +58,7 @@ struct AgentSlot {
 /// one MCP client is created per agent, even under concurrent activation.
 /// Slots are wrapped in `Arc` so `OnceCell` references can outlive the global lock.
 pub struct DeferredAgentRegistry {
-    agents: Arc<Mutex<HashMap<String, Arc<Mutex<AgentSlot>>>>>,
+    agents: Arc<RwLock<HashMap<String, Arc<Mutex<AgentSlot>>>>>,
     idle_timeout: Duration,
 }
 
@@ -69,7 +69,7 @@ impl DeferredAgentRegistry {
     #[must_use] 
     pub fn new() -> Self {
         Self {
-            agents: Arc::new(Mutex::new(HashMap::new())),
+            agents: Arc::new(RwLock::new(HashMap::new())),
             idle_timeout: Self::DEFAULT_IDLE_TIMEOUT,
         }
     }
@@ -78,12 +78,15 @@ impl DeferredAgentRegistry {
     #[must_use] 
     pub fn with_idle_timeout(timeout: Duration) -> Self {
         Self {
-            agents: Arc::new(Mutex::new(HashMap::new())),
+            agents: Arc::new(RwLock::new(HashMap::new())),
             idle_timeout: timeout,
         }
     }
 
     /// Register an agent manifest without starting the subprocess.
+    ///
+    /// If a manifest with the same name already exists and has an active client,
+    /// the old client is shut down before replacement (prevents resource leak).
     pub async fn register_manifest(&self, manifest: AgentManifest) {
         let name = manifest.name.clone();
         let slot = Arc::new(Mutex::new(AgentSlot {
@@ -92,18 +95,30 @@ impl DeferredAgentRegistry {
             tools: OnceCell::new(),
             last_used: std::time::Instant::now(),
         }));
-        self.agents.lock().await.insert(name, slot);
+
+        // H6 fix: if replacing an existing entry, deactivate its client first
+        let old_slot = self.agents.write().await.insert(name, slot);
+        if let Some(old) = old_slot {
+            let mut old_slot = old.lock().await;
+            if let Some(client_arc) = old_slot.client.take() {
+                old_slot.tools.take();
+                // Drop the per-slot lock before async shutdown
+                drop(old_slot);
+                let mut client = client_arc.lock().await;
+                client.shutdown().await;
+            }
+        }
     }
 
     /// Check whether an agent with the given name is registered.
     pub async fn has_agent(&self, name: &str) -> bool {
-        self.agents.lock().await.contains_key(name)
+        self.agents.read().await.contains_key(name)
     }
 
     /// List the names of all registered agents (active or not).
     pub async fn list_agents(&self) -> Vec<String> {
         self.agents
-            .lock()
+            .read()
             .await
             .keys()
             .cloned()
@@ -127,7 +142,7 @@ impl DeferredAgentRegistry {
     ) -> Result<Vec<ToolInfo>, RegistryError> {
         // Brief lock to get an Arc reference to the slot.
         let slot_arc = {
-            let agents = self.agents.lock().await;
+            let agents = self.agents.read().await;
             agents
                 .get(name)
                 .cloned()
@@ -154,19 +169,51 @@ impl DeferredAgentRegistry {
             return Ok(cached.to_vec());
         }
 
-        // Slow path: call list_tools, only write to OnceCell on success.
-        let client = client_arc.lock().await;
-        let tools = client
+        // Slow path: call list_tools outside the per-slot lock to avoid
+        // blocking other operations on this agent during the network call (H7).
+        // Clone the Arc while holding the lock, then drop the lock before I/O.
+        let client_clone = Arc::clone(client_arc);
+        drop(slot);
+
+        let tools = client_clone
+            .lock()
+            .await
             .list_tools()
             .await
             .map_err(|e| RegistryError::ActivationFailed(format!("list_tools failed: {e}")))?;
 
+        // Re-acquire per-slot lock to store the result
+        let slot = slot_arc.lock().await;
         let tools_arc = Arc::new(tools);
-        // `set` returns Err only if another caller beat us — use the cached value.
         if slot.tools.set(tools_arc).is_err() {
             // Another caller won the race; their value is in the cell.
         }
         Ok(slot.tools.get().unwrap().to_vec())
+    }
+
+    /// Force-reactivate an agent: clear the cached client and tools so the next
+    /// activation starts from scratch. This provides a recovery path when an
+    /// agent's MCP client becomes unusable (e.g. subprocess died).
+    ///
+    /// # Errors
+    /// Returns an error if the agent is not registered.
+    pub async fn force_reactivate(&self, name: &str) -> Result<(), RegistryError> {
+        let client_to_shutdown = {
+            let agents = self.agents.read().await;
+            let slot_arc = agents
+                .get(name)
+                .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
+            let mut slot = slot_arc.lock().await;
+            let client = slot.client.take();
+            slot.tools.take();
+            client
+        };
+        // Shutdown old client outside the lock
+        if let Some(client_arc) = client_to_shutdown {
+            let mut client = client_arc.lock().await;
+            client.shutdown().await;
+        }
+        Ok(())
     }
 
     /// Get the cached tool list for an active agent.
@@ -174,10 +221,15 @@ impl DeferredAgentRegistry {
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub async fn get_tools(&self, name: &str) -> Result<Arc<Vec<ToolInfo>>, RegistryError> {
-        let agents = self.agents.lock().await;
-        let slot_arc = agents
-            .get(name)
-            .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
+        // Brief lock to get an Arc reference to the slot.
+        let slot_arc = {
+            let agents = self.agents.read().await;
+            agents
+                .get(name)
+                .cloned()
+                .ok_or_else(|| RegistryError::NotFound(name.to_string()))?
+        }; // Lock released — only per-slot synchronization follows.
+
         let slot = slot_arc.lock().await;
 
         slot.tools
@@ -198,7 +250,7 @@ impl DeferredAgentRegistry {
     ) -> Result<serde_json::Value, RegistryError> {
         // Phase 1: Get client Arc and update last_used (brief lock)
         let client_arc = {
-            let agents = self.agents.lock().await;
+            let agents = self.agents.read().await;
             let slot_arc = agents
                 .get(name)
                 .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;
@@ -224,27 +276,42 @@ impl DeferredAgentRegistry {
     /// Two-phase approach: collect idle clients under the lock, then shut them
     /// down outside the lock to avoid blocking all registry operations during I/O.
     pub async fn deactivate_idle(&self) -> usize {
-        // Phase 1: Collect idle clients and remove from registry (under lock)
-        let to_shutdown: Vec<Arc<Mutex<Box<dyn McpClient>>>> = {
-            let agents = self.agents.lock().await;
+        // Phase 1: Under read lock, collect Arc references for idle candidates
+        let candidates: Vec<Arc<Mutex<AgentSlot>>> = {
+            let agents = self.agents.read().await;
             let timeout = self.idle_timeout;
-            let mut idle_clients = Vec::new();
-            for slot_arc in agents.values() {
-                let mut slot = slot_arc.lock().await;
-                if slot.client.get().is_some() && slot.last_used.elapsed() > timeout {
-                    if let Some(client_arc) = slot.client.take() {
-                        idle_clients.push(client_arc);
+            agents
+                .values()
+                .filter(|slot_arc| {
+                    // Peek at last_used without acquiring the per-agent mutex.
+                    // This is a heuristic — we recheck after acquiring the lock below.
+                    let slot = slot_arc.try_lock();
+                    if let Ok(slot) = slot {
+                        slot.client.get().is_some() && slot.last_used.elapsed() > timeout
+                    } else {
+                        false // Locked by someone else — skip for now
                     }
-                    slot.tools.take();
+                })
+                .cloned()
+                .collect()
+        }; // Global read lock released.
+
+        // Phase 2: Lock each candidate individually and deactivate if still idle
+        let mut idle_clients: Vec<Arc<Mutex<Box<dyn McpClient>>>> = Vec::new();
+        for slot_arc in candidates {
+            let mut slot = slot_arc.lock().await;
+            if slot.client.get().is_some() && slot.last_used.elapsed() > self.idle_timeout {
+                if let Some(client_arc) = slot.client.take() {
+                    idle_clients.push(client_arc);
                 }
+                slot.tools.take();
             }
-            idle_clients
-        };
+        }
 
-        let count = to_shutdown.len();
+        let count = idle_clients.len();
 
-        // Phase 2: Shutdown outside the lock
-        for client_arc in to_shutdown {
+        // Phase 3: Shutdown outside any lock
+        for client_arc in idle_clients {
             let mut client = client_arc.lock().await;
             client.shutdown().await;
         }
@@ -262,7 +329,7 @@ impl DeferredAgentRegistry {
     pub async fn deactivate(&self, name: &str) -> Result<(), RegistryError> {
         // Phase 1: Remove agent and take client Arc (under lock)
         let client_arc = {
-            let agents = self.agents.lock().await;
+            let agents = self.agents.read().await;
             let slot_arc = agents
                 .get(name)
                 .ok_or_else(|| RegistryError::NotFound(name.to_string()))?;

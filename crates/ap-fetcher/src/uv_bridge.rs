@@ -211,7 +211,7 @@ impl UvBridge {
     /// calls avoid spawning `uv --version` again.
     async fn resolved_path(&self) -> Result<String, UvError> {
         // Check cache first
-        if let Some(ref path) = *self.resolved.lock().unwrap() {
+        if let Some(ref path) = *self.resolved.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
             return Ok(path.clone());
         }
 
@@ -225,7 +225,7 @@ impl UvBridge {
                 .await
             {
                 if status.success() {
-                    let mut cache = self.resolved.lock().unwrap();
+                    let mut cache = self.resolved.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                     *cache = Some(candidate.clone());
                     return Ok(candidate.clone());
                 }

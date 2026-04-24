@@ -19,11 +19,20 @@ pub struct HealthTracker {
 
 impl HealthTracker {
     /// Create a new tracker starting at perfect health (1.0).
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             score: 1.0,
             total: 0,
+        }
+    }
+
+    /// Create a tracker restored from persisted state.
+    #[must_use]
+    pub fn from_persisted(score: f64, total: u64) -> Self {
+        Self {
+            score: score.clamp(0.0, 1.0),
+            total: total.min(1_000_000),
         }
     }
 

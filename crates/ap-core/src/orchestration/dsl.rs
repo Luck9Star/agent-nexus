@@ -163,6 +163,8 @@ impl OrchestrationDsl {
         let mut result = Vec::with_capacity(self.tasks.len());
         while let Some(task) = queue.pop_front() {
             result.push(task);
+            // Collect newly-eligible tasks, then sort by phase before enqueuing.
+            let mut newly_eligible = Vec::new();
             if let Some(deps) = adjacency.get(task.name.as_str()) {
                 for &dep_name in deps {
                     let degree = in_degree.get_mut(dep_name)
@@ -170,11 +172,13 @@ impl OrchestrationDsl {
                     *degree -= 1;
                     if *degree == 0 {
                         if let Some(t) = self.get_task(dep_name) {
-                            queue.push_back(t);
+                            newly_eligible.push(t);
                         }
                     }
                 }
             }
+            newly_eligible.sort_by_key(|t| t.phase);
+            queue.extend(newly_eligible);
         }
 
         result
@@ -377,6 +381,43 @@ depends_on = ["a", "b"]
             order.iter().position(|&n| n == "b").unwrap()
                 < order.iter().position(|&n| n == "c").unwrap()
         );
+    }
+
+    #[test]
+    fn execution_order_sorts_non_root_by_phase() {
+        // Diamond: a -> b (phase 1), a -> c (phase 2), b & c -> d (phase 3)
+        // After a completes, b (phase 1) should be scheduled before c (phase 2).
+        let toml = r#"
+[[tasks]]
+name = "a"
+agent = "x"
+phase = 0
+
+[[tasks]]
+name = "b"
+agent = "y"
+phase = 1
+depends_on = ["a"]
+
+[[tasks]]
+name = "c"
+agent = "z"
+phase = 2
+depends_on = ["a"]
+
+[[tasks]]
+name = "d"
+agent = "w"
+phase = 3
+depends_on = ["b", "c"]
+"#;
+        let dag = OrchestrationDsl::parse(toml).unwrap();
+        let order: Vec<&str> = dag
+            .get_execution_order()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(order, vec!["a", "b", "c", "d"]);
     }
 
     #[test]

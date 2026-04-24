@@ -24,3 +24,8 @@ uuid = { version = "1", features = ["v4"] }
 rstest = { workspace = true }
 tokio-test = { workspace = true }
 tempfile = "3"
+criterion = { workspace = true }
+
+[[bench]]
+name = "evolution_store_bench"
+harness = false

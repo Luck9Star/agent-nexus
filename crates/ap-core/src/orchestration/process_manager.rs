@@ -43,6 +43,22 @@ pub struct SpawnConfig {
     cmd: String,
     args: Vec<String>,
     env: HashMap<String, String>,
+    /// When true, clear all parent env vars before setting `env`, keeping only
+    /// essential vars (PATH, HOME, USER, LANG, TERM) plus what's in `env`.
+    isolated: bool,
+}
+
+impl SpawnConfig {
+    /// Builder: enable isolated environment mode.
+    ///
+    /// When isolated, the child process starts with a clean environment
+    /// containing only essential system vars (PATH, HOME, USER, LANG, TERM)
+    /// plus whatever is passed in the `env` map. This prevents accidental
+    /// leakage of parent API keys or secrets.
+    pub fn isolated(mut self) -> Self {
+        self.isolated = true;
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +120,36 @@ impl ProcessManager {
         args: &[&str],
         env: Option<HashMap<String, String>>,
     ) -> Result<(), ProcessError> {
+        self.spawn_inner(id, cmd, args, env, false).await
+    }
+
+    /// Spawn a process with isolated environment.
+    ///
+    /// Like [`spawn`](Self::spawn), but clears all parent environment variables
+    /// before setting the provided `env`. Essential system vars (PATH, HOME,
+    /// USER, LANG, TERM) are preserved.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub async fn spawn_isolated(
+        &mut self,
+        id: &str,
+        cmd: &str,
+        args: &[&str],
+        env: Option<HashMap<String, String>>,
+    ) -> Result<(), ProcessError> {
+        self.spawn_inner(id, cmd, args, env, true).await
+    }
+
+    /// Shared implementation for `spawn` and `spawn_isolated`.
+    async fn spawn_inner(
+        &mut self,
+        id: &str,
+        cmd: &str,
+        args: &[&str],
+        env: Option<HashMap<String, String>>,
+        isolated: bool,
+    ) -> Result<(), ProcessError> {
         if self.processes.len() >= self.max_concurrent {
             return Err(ProcessError::MaxConcurrent(self.max_concurrent));
         }
@@ -118,10 +164,12 @@ impl ProcessManager {
             }
         }
 
+        let env_map = env.clone().unwrap_or_default();
         let spawn_config = SpawnConfig {
             cmd: cmd.to_string(),
             args: args.iter().map(std::string::ToString::to_string).collect(),
-            env: env.clone().unwrap_or_default(),
+            env: env_map.clone(),
+            isolated,
         };
 
         let mut command = Command::new(cmd);
@@ -131,8 +179,17 @@ impl ProcessManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        if let Some(ref env_vars) = env {
-            command.envs(env_vars);
+        if isolated {
+            command.env_clear();
+            // Re-add essential system variables from the parent environment.
+            for key in ["PATH", "HOME", "USER", "LANG", "TERM"] {
+                if let Ok(val) = std::env::var(key) {
+                    command.env(key, val);
+                }
+            }
+        }
+        if !env_map.is_empty() {
+            command.envs(&env_map);
         }
 
         let mut child = command.spawn().map_err(ProcessError::Spawn)?;
@@ -219,7 +276,7 @@ impl ProcessManager {
         }
 
         // Stage 1: SIGTERM (Unix) / TerminateProcess (Windows).
-        self.send_term(&mut proc.child, id)?;
+        send_term(&mut proc.child, id)?;
 
         // Stage 2: Wait for graceful exit.
         match tokio::time::timeout(timeout, proc.child.wait()).await {
@@ -302,53 +359,20 @@ impl ProcessManager {
 
         // Re-spawn with stored configuration.
         let args_vec: Vec<&str> = config.args.iter().map(std::string::String::as_str).collect();
-        let env_opt = if config.env.is_empty() {
+        let env_opt = if config.env.is_empty() && !config.isolated {
             None
         } else {
             Some(config.env)
         };
-        self.spawn(id, &config.cmd, &args_vec, env_opt).await
-    }
-
-    // -----------------------------------------------------------------------
-    // Platform-specific signal helpers
-    // -----------------------------------------------------------------------
-
-    /// Send a termination signal (SIGTERM on Unix, no-op on Windows).
-    ///
-    /// `&self` is unused but retained for consistency with the struct's method
-    /// signatures — future platform-specific extensions may need access to state.
-    #[allow(clippy::unused_self)]
-    fn send_term(&self, child: &mut Child, id: &str) -> Result<(), ProcessError> {
-        #[cfg(unix)]
-        {
-            if let Some(pid) = child.id() {
-                // Send SIGTERM via libc::kill.
-                // Safe because: pid > 0 (child process), signal = 15 (SIGTERM).
-                // pid is u32 on Unix; casting to i32 is safe for valid PIDs.
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
-                let ret = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-                if ret == -1 {
-                    let err = std::io::Error::last_os_error();
-                    // ESRCH = process already gone -- not an error.
-                    if err.kind() != std::io::ErrorKind::NotFound {
-                        warn!(id, "send_term: SIGTERM failed: {}", err);
-                        return Err(ProcessError::Kill(err));
-                    }
-                }
-                info!(id, "send_term: SIGTERM sent (pid={})", pid);
+        let result = self.spawn(id, &config.cmd, &args_vec, env_opt).await;
+        // Restore isolated flag on the stored SpawnConfig so subsequent restarts
+        // preserve it.
+        if result.is_ok() && config.isolated {
+            if let Some(proc) = self.processes.get_mut(id) {
+                proc.spawn_config.isolated = true;
             }
-            Ok(())
         }
-
-        #[cfg(not(unix))]
-        {
-            // On non-Unix platforms there is no portable SIGTERM equivalent.
-            // The caller will fall through to SIGKILL after the timeout.
-            warn!(id, "send_term: no SIGTERM on this platform, will use kill after timeout");
-            let _ = (child, id);
-            Ok(())
-        }
+        result
     }
 
     // -----------------------------------------------------------------------
@@ -429,6 +453,40 @@ impl ProcessManager {
             .ok_or_else(|| ProcessError::NotFound(id.to_string()))?;
         Ok(&mut proc.stdout)
     }
+
+    // -----------------------------------------------------------------------
+    // Handle support: sync extract/insert helpers
+    // -----------------------------------------------------------------------
+
+    /// Returns the current number of tracked processes.
+    pub(crate) fn process_count(&self) -> usize {
+        self.processes.len()
+    }
+
+    /// Returns the configured max concurrent limit.
+    pub(crate) fn max_concurrent_limit(&self) -> usize {
+        self.max_concurrent
+    }
+
+    /// Remove and return a process by ID (sync).
+    pub(crate) fn take_process(&mut self, id: &str) -> Option<ManagedProcess> {
+        self.processes.remove(id)
+    }
+
+    /// Insert a process into the tracking map (sync).
+    pub(crate) fn insert_process(&mut self, id: String, proc: ManagedProcess) {
+        self.processes.insert(id, proc);
+    }
+
+    /// Drain all tracked processes (sync).
+    pub(crate) fn drain_processes(&mut self) -> Vec<(String, ManagedProcess)> {
+        self.processes.drain().collect()
+    }
+
+    /// Get the stored spawn config for a process, if it exists (sync).
+    pub(crate) fn get_spawn_config(&self, id: &str) -> Option<SpawnConfig> {
+        self.processes.get(id).map(|p| p.spawn_config.clone())
+    }
 }
 
 impl Default for ProcessManager {
@@ -444,6 +502,334 @@ impl Drop for ProcessManager {
         for proc in self.processes.values_mut() {
             let _ = proc.child.start_kill();
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Platform-specific signal helper (free function)
+// ---------------------------------------------------------------------------
+
+/// Send SIGTERM to a child process (Unix). No-op on Windows.
+fn send_term(child: &mut Child, id: &str) -> Result<(), ProcessError> {
+    #[cfg(unix)]
+    {
+        if let Some(pid) = child.id() {
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
+            let ret = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+            if ret == -1 {
+                let err = std::io::Error::last_os_error();
+                if err.kind() != std::io::ErrorKind::NotFound {
+                    warn!(id, "send_term: SIGTERM failed: {}", err);
+                    return Err(ProcessError::Kill(err));
+                }
+            }
+            info!(id, "send_term: SIGTERM sent (pid={})", pid);
+        }
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    {
+        warn!(id, "send_term: no SIGTERM on this platform, will use kill after timeout");
+        let _ = (child, id);
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProcessManagerHandle — async-safe shared handle
+// ---------------------------------------------------------------------------
+
+/// Error type for [`ProcessManagerHandle`] operations.
+#[derive(Debug, thiserror::Error)]
+pub enum HandleError {
+    #[error("Failed to acquire lock: {0}")]
+    Lock(String),
+    #[error("Process operation failed: {0}")]
+    Operation(#[from] ProcessError),
+}
+
+/// A clonable, async-safe handle to a [`ProcessManager`].
+///
+/// # How it works
+///
+/// `ProcessManagerHandle` wraps `Arc<tokio::sync::Mutex<ProcessManager>>`. Each
+/// method follows a **lock → extract → drop → async work** pattern so that the
+/// `MutexGuard` is never held across an `.await` boundary. This prevents
+/// head-of-line blocking: while one agent is being shut down (which involves
+/// waiting for a timeout), other callers can still lock the inner `ProcessManager`
+/// for unrelated operations like `is_running` or `list_running`.
+pub struct ProcessManagerHandle {
+    inner: std::sync::Arc<tokio::sync::Mutex<ProcessManager>>,
+}
+
+impl ProcessManagerHandle {
+    /// Create a new handle wrapping a fresh `ProcessManager`.
+    #[must_use]
+    pub fn new(pm: ProcessManager) -> Self {
+        Self {
+            inner: std::sync::Arc::new(tokio::sync::Mutex::new(pm)),
+        }
+    }
+
+    /// Create from an existing `ProcessManager`.
+    #[must_use]
+    pub fn from_manager(pm: ProcessManager) -> Self {
+        Self::new(pm)
+    }
+
+    /// Get a cloned handle (same underlying `ProcessManager`).
+    #[must_use]
+    pub fn clone_handle(&self) -> Self {
+        Self {
+            inner: std::sync::Arc::clone(&self.inner),
+        }
+    }
+
+    /// Spawn a new process.
+    ///
+    /// Lock is held only for the synchronous extract + insert phases.
+    /// The old process (if replaced) is killed *outside* the lock.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub async fn spawn(
+        &self,
+        id: &str,
+        cmd: &str,
+        args: &[&str],
+        env: Option<HashMap<String, String>>,
+    ) -> Result<(), HandleError> {
+        // Phase 1: check capacity + extract old process (sync, under lock)
+        let old = {
+            let mut pm = self.inner.lock().await;
+            if pm.process_count() >= pm.max_concurrent_limit() {
+                return Err(HandleError::from(ProcessError::MaxConcurrent(
+                    pm.max_concurrent_limit(),
+                )));
+            }
+            pm.take_process(id)
+        }; // lock dropped
+
+        // Phase 2: kill old process outside lock
+        if let Some(mut old) = old {
+            warn!(id, "spawn: killing existing process");
+            if let Err(e) = old.child.kill().await {
+                warn!("Failed to kill old process during replacement: {}", e);
+            }
+        }
+
+        // Phase 3: spawn new child (synchronous — no lock needed)
+        let spawn_config = SpawnConfig {
+            cmd: cmd.to_string(),
+            args: args.iter().map(std::string::ToString::to_string).collect(),
+            env: env.clone().unwrap_or_default(),
+            isolated: false,
+        };
+        let mut command = Command::new(cmd);
+        command
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(ref env_vars) = env {
+            command.envs(env_vars);
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|e| HandleError::from(ProcessError::Spawn(e)))?;
+        let stdin = Box::new(
+            child.stdin.take().ok_or_else(|| HandleError::from(ProcessError::NoStdin))?,
+        );
+        let stdout = Box::new(
+            child.stdout.take().ok_or_else(|| HandleError::from(ProcessError::NoStdout))?,
+        );
+
+        // Phase 4: insert into map (sync, under lock)
+        {
+            let mut pm = self.inner.lock().await;
+            pm.insert_process(
+                id.to_string(),
+                ManagedProcess {
+                    child,
+                    stdin,
+                    stdout,
+                    spawn_config,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    /// Check if a process is still running.
+    pub async fn is_running(&self, id: &str) -> bool {
+        self.inner.lock().await.is_running(id)
+    }
+
+    /// List IDs of all currently running processes.
+    pub async fn list_running(&self) -> Vec<String> {
+        self.inner.lock().await.list_running()
+    }
+
+    /// Gracefully stop a process using a 3-stage shutdown.
+    ///
+    /// The process is extracted under lock, then the lock is dropped before
+    /// any async wait/kill operations. Other callers are not blocked.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub async fn graceful_shutdown(&self, id: &str, timeout: Duration) -> Result<bool, HandleError> {
+        // Phase 1: extract process under lock
+        let mut proc = {
+            let mut pm = self.inner.lock().await;
+            pm.take_process(id)
+                .ok_or_else(|| HandleError::from(ProcessError::NotFound(id.to_string())))?
+        }; // lock dropped
+
+        // If already dead, nothing to do.
+        if !matches!(proc.child.try_wait(), Ok(None)) {
+            info!(id, "graceful_shutdown: process already exited");
+            return Ok(true);
+        }
+
+        // Stage 1: SIGTERM (Unix) / TerminateProcess (Windows).
+        send_term(&mut proc.child, id)?;
+
+        // Stage 2: Wait for graceful exit.
+        match tokio::time::timeout(timeout, proc.child.wait()).await {
+            Ok(Ok(_status)) => {
+                info!(id, "graceful_shutdown: process exited after SIGTERM");
+                return Ok(true);
+            }
+            Ok(Err(e)) => {
+                warn!(id, "graceful_shutdown: error waiting after SIGTERM: {}", e);
+                return Ok(true); // Process is gone either way.
+            }
+            Err(_) => {
+                // Timeout -- proceed to SIGKILL.
+            }
+        }
+
+        // Stage 3: SIGKILL.
+        warn!(id, "graceful_shutdown: timeout expired, sending SIGKILL");
+        if let Err(e) = proc.child.kill().await {
+            if !matches!(proc.child.try_wait(), Ok(Some(_))) {
+                return Err(HandleError::from(ProcessError::Kill(e)));
+            }
+        }
+
+        // Wait for the killed process to be reaped.
+        let _ = proc.child.wait().await;
+        Ok(false)
+    }
+
+    /// Gracefully stop all tracked processes.
+    ///
+    /// Drains all processes under lock, then shuts each down outside the lock.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub async fn graceful_shutdown_all(&self, timeout: Duration) -> Result<(), HandleError> {
+        let procs = self.inner.lock().await.drain_processes();
+        // lock dropped — all async work is on extracted processes
+
+        let mut last_err = None;
+        for (id, mut proc) in procs {
+            if !matches!(proc.child.try_wait(), Ok(None)) {
+                info!(id, "graceful_shutdown_all: process already exited");
+                continue;
+            }
+            if let Err(e) = send_term(&mut proc.child, &id) {
+                warn!("Failed to send SIGTERM to '{}': {}", id, e);
+                last_err = Some(HandleError::from(e));
+                continue;
+            }
+            match tokio::time::timeout(timeout, proc.child.wait()).await {
+                Ok(Ok(_)) => continue,
+                Ok(Err(_)) => continue,
+                Err(_) => {
+                    warn!(id, "graceful_shutdown_all: timeout, killing");
+                    if let Err(e) = proc.child.kill().await {
+                        if !matches!(proc.child.try_wait(), Ok(Some(_))) {
+                            last_err = Some(HandleError::from(ProcessError::Kill(e)));
+                        }
+                    }
+                    let _ = proc.child.wait().await;
+                }
+            }
+        }
+        last_err.map_or(Ok(()), Err)
+    }
+
+    /// Restart an agent with its original configuration.
+    ///
+    /// Extracts the spawn config under lock, then delegates to
+    /// [`graceful_shutdown`](Self::graceful_shutdown) and [`spawn`](Self::spawn).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub async fn restart_agent(&self, id: &str, timeout: Duration) -> Result<(), HandleError> {
+        // Phase 1: extract spawn_config (sync, under lock)
+        let config = {
+            let pm = self.inner.lock().await;
+            pm.get_spawn_config(id)
+                .ok_or_else(|| HandleError::from(ProcessError::NotFound(id.to_string())))?
+        }; // lock dropped
+
+        // Phase 2: graceful shutdown (takes its own lock internally)
+        let _ = self.graceful_shutdown(id, timeout).await;
+
+        // Phase 3: re-spawn (takes its own lock internally)
+        let args_vec: Vec<&str> = config.args.iter().map(std::string::String::as_str).collect();
+        let env_opt = if config.env.is_empty() && !config.isolated {
+            None
+        } else {
+            Some(config.env)
+        };
+        let result = self.spawn(id, &config.cmd, &args_vec, env_opt).await;
+        // Restore isolated flag on the stored SpawnConfig so subsequent restarts
+        // preserve it.
+        if result.is_ok() && config.isolated {
+            let mut pm = self.inner.lock().await;
+            if let Some(proc) = pm.processes.get_mut(id) {
+                proc.spawn_config.isolated = true;
+            }
+        }
+        result
+    }
+
+    /// Kill all tracked processes (force).
+    ///
+    /// Drains all processes under lock, then kills each outside the lock.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub async fn kill_all(&self) -> Result<(), HandleError> {
+        let procs = self.inner.lock().await.drain_processes();
+        // lock dropped
+
+        let mut last_err = None;
+        for (id, mut proc) in procs {
+            if let Err(e) = proc.child.kill().await {
+                warn!("Failed to kill process '{}': {}", id, e);
+                last_err = Some(HandleError::from(ProcessError::Kill(e)));
+            }
+        }
+        last_err.map_or(Ok(()), Err)
+    }
+
+    /// Extract stdin/stdout handles from a tracked process.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub async fn take_io(&self, id: &str) -> Result<IoPair, HandleError> {
+        self.inner.lock().await.take_io(id).map_err(HandleError::from)
+    }
+}
+
+impl Clone for ProcessManagerHandle {
+    fn clone(&self) -> Self {
+        self.clone_handle()
     }
 }
 
@@ -729,5 +1115,38 @@ mod tests {
         pm.graceful_shutdown("no-env", Duration::from_secs(2))
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn spawn_isolated_clears_parent_env() {
+        let mut pm = ProcessManager::new();
+        let mut env = HashMap::new();
+        env.insert("MY_SECRET".to_string(), "secret_value".to_string());
+
+        pm.spawn_isolated("iso-test", "cat", &[], Some(env))
+            .await
+            .unwrap();
+
+        // Verify the spawn_config recorded isolated=true and the env.
+        let config = &pm.processes.get("iso-test").unwrap().spawn_config;
+        assert!(config.isolated);
+        assert_eq!(config.env.get("MY_SECRET").unwrap(), "secret_value");
+
+        pm.graceful_shutdown("iso-test", Duration::from_secs(2))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn spawn_config_isolated_builder() {
+        let config = SpawnConfig {
+            cmd: "cat".to_string(),
+            args: vec![],
+            env: HashMap::new(),
+            isolated: false,
+        };
+        assert!(!config.isolated);
+        let isolated_config = config.isolated();
+        assert!(isolated_config.isolated);
     }
 }

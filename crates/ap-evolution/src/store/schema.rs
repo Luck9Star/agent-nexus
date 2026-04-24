@@ -5,6 +5,11 @@
 
 /// Complete DDL for the evolution database.
 pub const SCHEMA_SQL: &str = r"
+CREATE TABLE IF NOT EXISTS _meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS skill_records (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -89,6 +94,25 @@ CREATE TABLE IF NOT EXISTS agent_records (
 CREATE INDEX IF NOT EXISTS idx_ar_active ON agent_records(is_active);
 CREATE INDEX IF NOT EXISTS idx_ar_name ON agent_records(name);
 ";
+
+/// Current schema version. Increment when adding ALTER TABLE migrations.
+pub const SCHEMA_VERSION: &str = "1";
+
+/// SQL to set the schema version in `_meta`.
+pub const SET_SCHEMA_VERSION_SQL: &str =
+    "INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?1)";
+
+/// SQL to read the schema version from `_meta`.
+pub const GET_SCHEMA_VERSION_SQL: &str =
+    "SELECT value FROM _meta WHERE key = 'schema_version'";
+
+/// Migrations to run when upgrading from one version to the next.
+/// Each entry is (from_version, to_version, SQL).
+/// Add new entries here when the schema evolves.
+pub const MIGRATIONS: &[(&str, &str, &str)] = &[
+    // Example for future use:
+    // ("1", "2", "ALTER TABLE skill_records ADD COLUMN new_col TEXT"),
+];
 
 #[cfg(test)]
 mod tests {

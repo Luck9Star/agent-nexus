@@ -96,7 +96,10 @@ impl AgentToPlatform {
         if self.msg_type == AgentToPlatformType::Error {
             return false;
         }
-        self.status.as_ref().is_none_or(|s| s.to_lowercase() == "completed")
+        self.status
+            .as_ref()
+            .map(|s| s.to_lowercase() == "completed")
+            .unwrap_or(false)
     }
 }
 

@@ -27,6 +27,11 @@ pub enum TaskGraphError {
     DuplicateTask(String),
     #[error("Cycle detected in task dependencies")]
     CycleDetected,
+    #[error("Topological sort incomplete: {dropped_count} task(s) remain in dependency graph (possible undetected cycle): {dropped_ids:?}")]
+    IncompleteTopoSort {
+        dropped_count: usize,
+        dropped_ids: Vec<String>,
+    },
     #[error("Invalid state transition: {from} -> {to}")]
     InvalidTransition {
         from: String,
@@ -324,6 +329,20 @@ impl TaskGraph {
                     }
                 }
             }
+        }
+
+        if result.len() != tasks.len() {
+            // Collect tasks that were dropped (still have non-zero in-degree).
+            let dropped_ids: Vec<String> = in_degree
+                .iter()
+                .filter(|(_, &deg)| deg > 0)
+                .map(|(name, _)| name.clone())
+                .collect();
+            let dropped_count = dropped_ids.len();
+            return Err(TaskGraphError::IncompleteTopoSort {
+                dropped_count,
+                dropped_ids,
+            });
         }
 
         Ok(result)

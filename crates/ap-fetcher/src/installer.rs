@@ -5,6 +5,11 @@ use std::path::PathBuf;
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
+/// Return the user's home directory via the `HOME` environment variable.
+fn dirs_home() -> Option<std::path::PathBuf> {
+    std::env::var("HOME").ok().map(std::path::PathBuf::from)
+}
+
 /// Errors from git installer operations.
 #[derive(Debug, Error)]
 pub enum InstallerError {
@@ -58,6 +63,11 @@ impl GitInstaller {
             )));
         }
 
+        // Validate local paths against path traversal
+        if is_local_path {
+            Self::validate_local_source_path(url, &self.install_dir)?;
+        }
+
         // Ensure install_dir exists
         std::fs::create_dir_all(&self.install_dir)?;
 
@@ -73,7 +83,7 @@ impl GitInstaller {
 
         debug!("Cloning {} into {:?}", url, tmp_path);
 
-        let repo = self.clone_repo(url, branch, &tmp_path)?;
+        let repo = self.clone_repo(url, branch, &tmp_path, version)?;
 
         // Post-clone operations: checkout + rename. On any failure, clean up tmp_path.
         let result = (|| -> Result<PathBuf, InstallerError> {
@@ -85,11 +95,26 @@ impl GitInstaller {
             // Close the repo (releases file handles) before moving
             drop(repo);
 
-            // Atomic move: remove old install, rename temp to final
+            // Atomic move: rename old install to backup first, then rename
+            // temp to final, then delete backup. This prevents the crash window
+            // between remove_dir_all and rename where both versions are lost (M10).
+            let backup_path = final_path.with_extension("bak");
             if final_path.exists() {
-                std::fs::remove_dir_all(&final_path)?;
+                // Clean stale backup from previous crash
+                let _ = std::fs::remove_dir_all(&backup_path);
+                std::fs::rename(&final_path, &backup_path)?;
             }
-            std::fs::rename(&tmp_path, &final_path)?;
+            if let Err(e) = std::fs::rename(&tmp_path, &final_path) {
+                // Rename failed — restore backup if it exists
+                if backup_path.exists() {
+                    let _ = std::fs::rename(&backup_path, &final_path);
+                }
+                return Err(InstallerError::Io(e));
+            }
+            // Success — clean up backup
+            if backup_path.exists() {
+                let _ = std::fs::remove_dir_all(&backup_path);
+            }
             info!("Installed agent to {:?}", final_path);
 
             Ok(final_path)
@@ -143,11 +168,38 @@ impl GitInstaller {
     /// Extract a directory name from a Git URL, sanitizing unsafe characters.
     fn url_to_dirname(url: &str) -> String {
         let url = url.trim_end_matches('/');
-        let raw = url
-            .rsplit('/')
-            .next()
-            .unwrap_or("agent");
-        let raw = raw.strip_suffix(".git").unwrap_or(raw);
+
+        // Extract host and path segments for disambiguation.
+        // For "https://github.com/org-a/agent" -> ["org-a", "agent"]
+        // For "https://github.com/agent" -> ["agent"]
+        // For "git@gitlab.com:org/agent.git" -> ["org", "agent"]
+        let path_part = if url.contains("://") {
+            // HTTPS URL: everything after the host
+            url.split("://")
+                .nth(1)
+                .and_then(|s| s.split_once('/').map(|(_, p)| p))
+                .unwrap_or(url)
+        } else if url.contains(':') && !url.contains('/') {
+            // SCP-style: git@host:org/repo
+            url.rsplit_once(':').map(|(_, p)| p).unwrap_or(url)
+        } else {
+            url
+        };
+
+        // Take the last 2 path segments (org + repo) to avoid collisions
+        // Filter out "." and ".." path traversal components
+        let segments: Vec<&str> = path_part
+            .split('/')
+            .filter(|s| !s.is_empty() && *s != "." && *s != "..")
+            .collect();
+        let relevant = if segments.len() >= 2 {
+            &segments[segments.len() - 2..]
+        } else {
+            &segments[..]
+        };
+
+        let combined = relevant.join("_");
+        let raw = combined.strip_suffix(".git").unwrap_or(&combined);
         let sanitized: String = raw
             .chars()
             .map(|c| {
@@ -178,11 +230,93 @@ impl GitInstaller {
         Ok(())
     }
 
+    /// Validate that a local source path does not escape the trust boundary.
+    ///
+    /// Rejects paths that resolve to sensitive system directories. This prevents
+    /// path traversal via `/`, `.`, `~` paths pointing to locations like `/etc`,
+    /// `/System`, etc. Allowed paths include user home, temp directories, and
+    /// standard development directories.
+    fn validate_local_source_path(
+        url: &str,
+        _install_dir: &std::path::Path,
+    ) -> Result<(), InstallerError> {
+        // Expand ~ to home directory
+        let expanded = if url.starts_with('~') {
+            dirs_home().ok_or_else(|| {
+                InstallerError::Validation(
+                    "cannot expand ~ in local path: home directory not found".to_string(),
+                )
+            })?
+        } else {
+            std::path::PathBuf::from(url)
+        };
+
+        // Reject `..` components before canonicalization as a safety net.
+        for component in expanded.components() {
+            if let std::path::Component::ParentDir = component {
+                return Err(InstallerError::Validation(format!(
+                    "local source path must not contain '..' components: {}",
+                    url
+                )));
+            }
+        }
+
+        // Check against sensitive system directories even if the path doesn't exist yet.
+        // M13 fix: previously this was gated by `if expanded.exists()`, allowing
+        // non-existent paths to bypass the check.
+        const BLOCKED_PREFIXES: &[&str] = &[
+            "/etc",
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/System",
+            "/Library/System",
+            "/private/etc",
+            "/private/var/db",  // system databases; /private/var/folders (temp) is OK
+        ];
+
+        let path_str = expanded.to_string_lossy();
+        for prefix in BLOCKED_PREFIXES {
+            if path_str.starts_with(prefix) {
+                return Err(InstallerError::Validation(format!(
+                    "local source path resolves to blocked system directory: {} -> {}",
+                    url,
+                    expanded.display()
+                )));
+            }
+        }
+
+        // If the path exists, also check canonicalized form (catches symlinks)
+        if expanded.exists() {
+            let canonical = std::fs::canonicalize(&expanded).map_err(|e| {
+                InstallerError::Validation(format!(
+                    "cannot canonicalize local path '{}': {}",
+                    url, e
+                ))
+            })?;
+
+            let canonical_str = canonical.to_string_lossy();
+            for prefix in BLOCKED_PREFIXES {
+                if canonical_str.starts_with(prefix) {
+                    return Err(InstallerError::Validation(format!(
+                        "local source path resolves to blocked system directory: {} -> {}",
+                        url,
+                        canonical.display()
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Clone a repository with the given options.
     ///
-    /// Uses shallow clone (`--depth 1`) for non-local URLs to minimize
-    /// download size and clone time. Falls back to full clone for local paths
-    /// since shallow clones on local repos provide no benefit and may fail.
+    /// Uses shallow clone (`--depth 1`) for remote URLs when no specific version
+    /// is requested, to minimize download size. When a version tag is specified,
+    /// a full clone is performed so that all tags (including older versions) are
+    /// available for checkout. Falls back to full clone for local paths since
+    /// shallow clones on local repos provide no benefit and may fail.
     ///
     /// `&self` is retained for future use (e.g., configurable clone strategies).
     #[allow(clippy::unused_self)]
@@ -191,6 +325,7 @@ impl GitInstaller {
         url: &str,
         branch: Option<&str>,
         dest: &std::path::Path,
+        version: Option<&str>,
     ) -> Result<git2::Repository, InstallerError> {
         let mut remote_callbacks = git2::RemoteCallbacks::new();
         remote_callbacks.credentials(|_url, username, _allowed_types| {
@@ -208,9 +343,10 @@ impl GitInstaller {
         let mut fetch_opts = git2::FetchOptions::new();
         fetch_opts.remote_callbacks(remote_callbacks);
 
-        // Use shallow clone for remote URLs to reduce download time.
+        // Shallow clone for remote URLs when no specific version is requested.
+        // When version is Some, we need full history + all tags, so skip depth.
         let is_local = url.starts_with('/') || url.starts_with('.') || url.starts_with('~');
-        if !is_local {
+        if !is_local && version.is_none() {
             fetch_opts.depth(1);
         }
 
@@ -337,15 +473,20 @@ mod tests {
     fn url_to_dirname_extracts_name() {
         assert_eq!(
             GitInstaller::url_to_dirname("https://github.com/foo/my-agent"),
-            "my-agent"
+            "foo_my-agent"
         );
         assert_eq!(
             GitInstaller::url_to_dirname("https://github.com/foo/my-agent.git"),
-            "my-agent"
+            "foo_my-agent"
         );
         assert_eq!(
             GitInstaller::url_to_dirname("/local/path/agent-repo"),
-            "agent-repo"
+            "path_agent-repo"
+        );
+        // Single-segment path (no org)
+        assert_eq!(
+            GitInstaller::url_to_dirname("https://example.com/agent"),
+            "agent"
         );
     }
 
@@ -382,12 +523,12 @@ mod tests {
         // Path traversal "../" in URL — we only take the last segment,
         // and sanitize non-alphanumeric characters
         let dirname = GitInstaller::url_to_dirname("https://github.com/foo/../evil");
-        assert_eq!(dirname, "evil");
+        assert_eq!(dirname, "foo_evil");
         assert!(!dirname.contains('/'));
 
         // Special characters are sanitized
         let dirname2 = GitInstaller::url_to_dirname("https://github.com/foo/agent@v2");
-        assert_eq!(dirname2, "agent_v2");
+        assert_eq!(dirname2, "foo_agent_v2");
     }
 
     #[test]

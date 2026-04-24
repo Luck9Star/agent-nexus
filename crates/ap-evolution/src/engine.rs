@@ -32,7 +32,7 @@ pub enum EvolveTrigger {
     /// A specific skill failed. Evolve it immediately.
     Failure {
         skill_name: String,
-        error: String,
+        reason: String,
     },
 }
 
@@ -75,11 +75,18 @@ impl EvolutionEngine {
     pub fn new(store: EvolutionStore) -> Self {
         let store = Arc::new(store);
         let evolver = Arc::new(SkillEvolver::new(Arc::clone(&store)));
+
+        // Load persisted health state; fall back to defaults on error.
+        let health = match store.load_health_state() {
+            Ok((score, total)) => HealthTracker::from_persisted(score, total),
+            Err(_) => HealthTracker::new(),
+        };
+
         Self {
             store,
             analyzer: Analyzer::new(),
             evolver,
-            health: std::sync::Mutex::new(HealthTracker::new()),
+            health: std::sync::Mutex::new(health),
             thresholds: Thresholds::default(),
         }
     }
@@ -89,11 +96,18 @@ impl EvolutionEngine {
     pub fn with_thresholds(store: EvolutionStore, thresholds: Thresholds) -> Self {
         let store = Arc::new(store);
         let evolver = Arc::new(SkillEvolver::new(Arc::clone(&store)));
+
+        // Load persisted health state; fall back to defaults on error.
+        let health = match store.load_health_state() {
+            Ok((score, total)) => HealthTracker::from_persisted(score, total),
+            Err(_) => HealthTracker::new(),
+        };
+
         Self {
             store,
             analyzer: Analyzer::new(),
             evolver,
-            health: std::sync::Mutex::new(HealthTracker::new()),
+            health: std::sync::Mutex::new(health),
             thresholds,
         }
     }
@@ -101,6 +115,23 @@ impl EvolutionEngine {
     /// Acquire the health mutex, recovering from a poisoned lock.
     fn health_guard(&self) -> std::sync::MutexGuard<'_, HealthTracker> {
         self.health.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Record a health event and persist the updated state to SQLite.
+    fn record_health(&self, success: bool) {
+        let (score, total) = {
+            let mut health = self.health_guard();
+            if success {
+                health.record_success();
+            } else {
+                health.record_failure();
+            }
+            (health.get_health_score(), health.total())
+        };
+        // Persist outside the mutex lock to avoid holding it during I/O.
+        if let Err(e) = self.store.save_health_state(score, total) {
+            tracing::warn!("Failed to persist health state: {e}");
+        }
     }
 
     /// Unified evolve entry point — dispatches by trigger type.
@@ -123,8 +154,8 @@ impl EvolutionEngine {
             EvolveTrigger::Analysis { task_id, agent_name, success, error } => {
                 self.dispatch_analysis(task_id, agent_name, *success, error.as_ref())
             }
-            EvolveTrigger::Failure { skill_name, error } => {
-                self.dispatch_failure(skill_name, error)
+            EvolveTrigger::Failure { skill_name, reason } => {
+                self.dispatch_failure(skill_name, reason)
             }
             EvolveTrigger::ToolDegradation { skill_name, problem_description } => {
                 self.dispatch_tool_degradation(skill_name, problem_description)
@@ -156,15 +187,8 @@ impl EvolutionEngine {
             task_id: task_id.to_string(),
         };
 
-        // Update health tracker — drop guard before I/O
-        {
-            let mut health = self.health_guard();
-            if success {
-                health.record_success();
-            } else {
-                health.record_failure();
-            }
-        }
+        // Update health tracker and persist
+        self.record_health(success);
 
         // Run analysis to get suggestions
         let suggestions = self.analyzer.analyze(&result);
@@ -183,9 +207,6 @@ impl EvolutionEngine {
                     continue;
                 }
                 Err(e) => {
-                    // Record failure under a fresh guard, then propagate
-                    let mut health = self.health_guard();
-                    health.record_failure();
                     return Err(e.into());
                 }
             }
@@ -200,11 +221,8 @@ impl EvolutionEngine {
         skill_name: &str,
         error: &str,
     ) -> Result<Vec<EvolutionOutcome>, EvolveDispatchError> {
-        // Update health tracker — drop guard before I/O
-        {
-            let mut health = self.health_guard();
-            health.record_failure();
-        }
+        // Update health tracker and persist
+        self.record_health(false);
 
         let outcome = self.evolver.evolve_fix(skill_name, error)?;
         Ok(vec![outcome])
@@ -279,15 +297,8 @@ impl EvolutionEngine {
     /// Returns a list of evolution suggestions (may be empty).
     /// Updates the health tracker based on success/failure.
     pub fn post_task_evolve(&self, result: &TaskResult) -> Vec<EvolutionSuggestion> {
-        // Update health tracker — drop guard before calling analyzer
-        {
-            let mut health = self.health_guard();
-            if result.success {
-                health.record_success();
-            } else {
-                health.record_failure();
-            }
-        }
+        // Update health tracker and persist
+        self.record_health(result.success);
 
         // Run analysis (no health lock held)
         self.analyzer.analyze(result)
@@ -501,7 +512,7 @@ mod tests {
 
         let result = engine.evolve(EvolveTrigger::Failure {
             skill_name: "my-skill".to_string(),
-            error: "crashed on input".to_string(),
+            reason: "crashed on input".to_string(),
         }).unwrap();
 
         assert_eq!(result.outcomes.len(), 1);
@@ -519,7 +530,7 @@ mod tests {
 
         let result = engine.evolve(EvolveTrigger::Failure {
             skill_name: "nonexistent".to_string(),
-            error: "oops".to_string(),
+            reason: "oops".to_string(),
         });
 
         assert!(result.is_err());
@@ -587,7 +598,7 @@ mod tests {
 
         engine.evolve(EvolveTrigger::Failure {
             skill_name: "s1".to_string(),
-            error: "err".to_string(),
+            reason: "err".to_string(),
         }).unwrap();
 
         // Health should have recorded a failure
@@ -601,7 +612,7 @@ mod tests {
 
         engine.evolve(EvolveTrigger::Failure {
             skill_name: "old-skill".to_string(),
-            error: "broken".to_string(),
+            reason: "broken".to_string(),
         }).unwrap();
 
         // Old skill should be deactivated (verify by ID, not name — new skill has same name)
@@ -621,7 +632,7 @@ mod tests {
 
         let result = engine.evolve(EvolveTrigger::Failure {
             skill_name: "versioned".to_string(),
-            error: "need update".to_string(),
+            reason: "need update".to_string(),
         }).unwrap();
 
         if let EvolutionOutcome::Success { new_skill_id, .. } = &result.outcomes[0] {

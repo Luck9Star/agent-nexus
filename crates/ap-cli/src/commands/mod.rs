@@ -1,8 +1,8 @@
 pub mod check;
 pub mod config;
 pub mod create;
-pub mod evolution;
 pub mod env;
+pub mod evolution;
 pub mod init;
 pub mod install;
 pub mod run;

@@ -161,15 +161,14 @@ mod tests {
 
     #[test]
     fn resolve_unknown_provider_falls_back_to_hardcoded() {
-        // When no env vars are set, unknown provider falls back to hardcoded "openai:gpt-4o"
-        std::env::remove_var("AGENT_MODEL");
-        std::env::remove_var("DEFAULT_MODEL");
-        let mgr = ModelConfigManager::new(test_config());
-        let resolved = mgr.resolve("unknown:model").unwrap();
-        // Falls back to hardcoded openai provider with its own model name
-        assert_eq!(resolved.model_name, "gpt-4o");
-        assert_eq!(resolved.provider_name, "openai");
-        assert_eq!(resolved.base_url, "https://api.openai.com/v1");
+        with_model_env(|| {
+            let mgr = ModelConfigManager::new(test_config());
+            let resolved = mgr.resolve("unknown:model").unwrap();
+            // Falls back to hardcoded openai provider with its own model name
+            assert_eq!(resolved.model_name, "gpt-4o");
+            assert_eq!(resolved.provider_name, "openai");
+            assert_eq!(resolved.base_url, "https://api.openai.com/v1");
+        });
     }
 
     #[test]

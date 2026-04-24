@@ -1,4 +1,6 @@
 //! `agent-nexus sources` -- manage source repos (add/list/remove).
+//!
+//! Aligned with Python CLI: `sources add --name <name> --url <url> [--type <type>]`
 
 use anyhow::Result;
 use ap_core::models::distribution::SourceEntry;
@@ -13,9 +15,6 @@ fn sources_yaml_path() -> std::path::PathBuf {
 }
 
 /// Run `sources list` command.
-///
-/// Marked as returning `Result` for command-handler uniformity; this command
-/// cannot fail in practice.
 #[allow(clippy::unnecessary_wraps)]
 pub fn run_list(output: &OutputFormatter) -> Result<()> {
     let mgr = SourceManager::new(sources_yaml_path());
@@ -24,21 +23,23 @@ pub fn run_list(output: &OutputFormatter) -> Result<()> {
     if output.is_json() {
         output.data(&sources);
     } else if sources.is_empty() {
-        output.info("No sources configured. Use `agent-nexus sources add <name> <url>` to add one.");
+        output.info("No sources configured.");
     } else {
+        println!("{:<20} {:<10} URL", "Name", "Type");
+        println!("{}", "-".repeat(60));
         for src in &sources {
-            println!("  {} ({}) -- {}", src.name, src.source_type, src.url);
+            println!("{:<20} {:<10} {}", src.name, src.source_type, src.url);
         }
     }
 
     Ok(())
 }
 
-/// Run `sources add <name> <url>` command.
-pub fn run_add(name: &str, url: &str, branch: Option<&str>, output: &OutputFormatter) -> Result<()> {
+/// Run `sources add --name <name> --url <url> [--type <type>] [--branch <branch>]` command.
+pub fn run_add(name: &str, url: &str, source_type: Option<&str>, branch: Option<&str>, output: &OutputFormatter) -> Result<()> {
     let entry = SourceEntry {
         name: name.to_string(),
-        source_type: "git".to_string(),
+        source_type: source_type.unwrap_or("git").to_string(),
         url: url.to_string(),
         branch: branch.unwrap_or("main").to_string(),
     };
@@ -50,16 +51,22 @@ pub fn run_add(name: &str, url: &str, branch: Option<&str>, output: &OutputForma
     let mgr = SourceManager::new(sources_yaml_path());
     mgr.add(entry)?;
 
-    output.success(&format!("Added source '{name}' -> {url}"));
+    output.success(&format!("Source '{name}' added."));
     Ok(())
 }
 
 /// Run `sources remove <name>` command.
 pub fn run_remove(name: &str, output: &OutputFormatter) -> Result<()> {
     let mgr = SourceManager::new(sources_yaml_path());
-    mgr.remove(name)?;
 
-    output.success(&format!("Removed source '{name}'"));
+    let sources = mgr.list();
+    if !sources.iter().any(|s| s.name == name) {
+        output.error(&format!("Source '{name}' not found."));
+        return Err(anyhow::anyhow!("Source '{name}' not found."));
+    }
+
+    mgr.remove(name)?;
+    output.success(&format!("Source '{name}' removed."));
     Ok(())
 }
 

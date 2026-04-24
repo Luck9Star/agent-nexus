@@ -99,7 +99,9 @@ fn sources_add_and_list() {
         .args([
             "sources",
             "add",
+            "--name",
             "test",
+            "--url",
             "https://github.com/example/repo",
         ])
         .current_dir(dir.path())
@@ -129,7 +131,9 @@ fn sources_remove() {
         .args([
             "sources",
             "add",
+            "--name",
             "toremove",
+            "--url",
             "https://github.com/example/repo",
         ])
         .current_dir(dir.path())
@@ -210,7 +214,7 @@ fn create_agent() {
     let dir = tempfile::tempdir().unwrap();
     Command::cargo_bin("agent-nexus")
         .unwrap()
-        .args(["create", "agent", "my-test-agent"])
+        .args(["create", "agent", "my-test-agent", "--description", "A test agent"])
         .current_dir(dir.path())
         .assert()
         .success();

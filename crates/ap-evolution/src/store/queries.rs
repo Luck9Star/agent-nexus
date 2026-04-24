@@ -160,6 +160,23 @@ pub(crate) fn get_active_skills(conn: &Connection) -> Result<Vec<SkillRecord>, S
     Ok(skills)
 }
 
+/// Get all skills (active and inactive).
+pub(crate) fn get_all_skills(conn: &Connection) -> Result<Vec<SkillRecord>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, version, lineage_origin, lineage_generation,
+                lineage_content_diff, lineage_content_snapshot, directory, is_active,
+                total_selections, total_applied, total_completions, total_fallbacks,
+                created_at, updated_at
+         FROM skill_records",
+    )?;
+    let rows = stmt.query_map([], skill_record_from_row)?;
+    let mut skills = Vec::with_capacity(16);
+    for skill in rows {
+        skills.push(skill?);
+    }
+    Ok(skills)
+}
+
 /// Delete a skill record by id.
 ///
 /// Returns `Ok(true)` if a row was deleted, `Ok(false)` if no matching row was found.
@@ -588,6 +605,7 @@ pub(crate) fn count_rows(conn: &Connection, table: &str) -> Result<i64, StoreErr
         "skill_judgments",
         "context_budget_log",
         "agent_records",
+        "_meta",
     ];
     if !allowed.contains(&table) {
         return Err(StoreError::Sqlite(rusqlite::Error::InvalidParameterName(

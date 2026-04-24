@@ -4,7 +4,7 @@
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 const MAX_MESSAGE_SIZE: usize = 4 * 1024 * 1024; // 4MB
 
@@ -66,8 +66,8 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcStream<R, W> {
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub async fn receive<T: DeserializeOwned>(&mut self) -> Result<T, IpcError> {
-        let mut line = Vec::new();
-        let n = self.reader.read_until(b'\n', &mut line).await?;
+        let mut line = Vec::with_capacity(4096);
+        let n = (&mut self.reader).take(MAX_MESSAGE_SIZE as u64).read_until(b'\n', &mut line).await?;
         if n == 0 {
             return Err(IpcError::ConnectionClosed);
         }

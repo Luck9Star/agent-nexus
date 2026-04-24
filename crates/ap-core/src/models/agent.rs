@@ -70,19 +70,18 @@ impl McpServerConfig {
     /// Returns an error if the underlying operation fails.
     pub fn validate(&self) -> Result<(), String> {
         match self.transport.as_str() {
-            "stdio"
-                if self.command.as_ref().is_none_or(|c| c.trim().is_empty()) =>
-            {
-                return Err("McpServerConfig with transport='stdio' requires 'command'".into());
+            "stdio" if self.command.as_ref().is_none_or(|c| c.trim().is_empty()) => {
+                Err("McpServerConfig with transport='stdio' requires 'command'".into())
             }
-            "sse"
-                if self.url.as_ref().is_none_or(|u| u.trim().is_empty()) =>
-            {
-                return Err("McpServerConfig with transport='sse' requires 'url'".into());
+            "sse" if self.url.as_ref().is_none_or(|u| u.trim().is_empty()) => {
+                Err("McpServerConfig with transport='sse' requires 'url'".into())
             }
-            _ => {}
+            "stdio" | "sse" => Ok(()),
+            _ => Err(format!(
+                "McpServerConfig: unknown transport '{}'. Supported: 'stdio', 'sse'",
+                self.transport
+            )),
         }
-        Ok(())
     }
 }
 

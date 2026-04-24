@@ -8,6 +8,8 @@ use tracing::debug;
 
 use ap_core::models::distribution::SourceEntry;
 
+use crate::advisory_lock::FileLock;
+
 /// Errors from source management operations.
 #[derive(Debug, Error)]
 pub enum SourceError {
@@ -35,9 +37,14 @@ pub struct SourceManager {
 
 impl SourceManager {
     /// Create a new source manager pointing to the given `sources.yaml` path.
-    #[must_use] 
+    #[must_use]
     pub fn new(path: PathBuf) -> Self {
         Self { path }
+    }
+
+    /// Returns the path to the advisory lock file (sibling of the sources file).
+    fn lock_path(&self) -> PathBuf {
+        self.path.with_extension("lock")
     }
 
     /// Static: parse a YAML string into a list of `SourceEntry`.
@@ -90,10 +97,18 @@ impl SourceManager {
     }
 
     /// Atomically write sources to the YAML file (write to `.tmp`, then rename).
+    /// Acquires an advisory file lock to prevent TOCTOU races with concurrent add/remove.
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn save(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
+        let _lock = FileLock::acquire_exclusive(&self.lock_path())?;
+        self.save_unlocked(sources)
+    }
+
+    /// Internal: write sources without acquiring the advisory lock.
+    /// Callers like `add()` / `remove()` already hold the lock.
+    fn save_unlocked(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
         let wrapped = SourcesYaml {
             sources: sources.to_vec(),
         };
@@ -117,6 +132,8 @@ impl SourceManager {
     ///
     /// Validates the entry, loads existing sources, removes any existing entry
     /// with the same name (matching Python's upsert behavior), appends, and saves.
+    /// Acquires an exclusive advisory file lock for the entire read-modify-write
+    /// cycle to prevent TOCTOU races between concurrent processes.
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
@@ -125,21 +142,25 @@ impl SourceManager {
             .validate()
             .map_err(SourceError::Validation)?;
 
+        let _lock = FileLock::acquire_exclusive(&self.lock_path())?;
         let mut sources = self.load()?;
         // Upsert: remove existing entry with same name (matches Python behavior)
         sources.retain(|s| s.name != entry.name);
         debug!("Adding source: {}", entry.name);
         sources.push(entry);
-        self.save(&sources)
+        self.save_unlocked(&sources)
     }
 
     /// Remove a source by name.
     ///
     /// Returns an error if the source is not found.
+    /// Acquires an exclusive advisory file lock for the entire read-modify-write
+    /// cycle to prevent TOCTOU races between concurrent processes.
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn remove(&self, name: &str) -> Result<(), SourceError> {
+        let _lock = FileLock::acquire_exclusive(&self.lock_path())?;
         let mut sources = self.load()?;
         let original_len = sources.len();
         sources.retain(|s| s.name != name);
@@ -147,7 +168,7 @@ impl SourceManager {
             return Err(SourceError::NotFound(name.to_string()));
         }
         debug!("Removed source: {}", name);
-        self.save(&sources)
+        self.save_unlocked(&sources)
     }
 }
 

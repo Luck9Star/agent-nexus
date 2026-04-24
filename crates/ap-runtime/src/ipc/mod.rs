@@ -1,7 +1,7 @@
 //! IPC layer for agent communication.
 //!
-//! - `stream` — `AgentIpcStream`: wraps ap-core's `IpcStream` with heartbeat + typed send/receive
-//! - `protocol` — `AgentProtocol`: high-level operations (`send_chat`, `send_task`, heartbeat)
+//! - `stream` — `AgentIpcStream`: thin wire-level wrapper around ap-core's `IpcStream`
+//! - `protocol` — `AgentProtocol`: high-level operations (delegates to `IpcProtocol` + heartbeat)
 
 pub mod protocol;
 pub mod stream;

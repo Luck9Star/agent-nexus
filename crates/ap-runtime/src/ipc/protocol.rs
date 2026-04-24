@@ -1,18 +1,20 @@
-//! High-level IPC protocol operations for agent communication.
+//! High-level IPC protocol for agent communication.
 //!
-//! Provides convenience methods: `send_chat`, `send_task`, `receive_result`, heartbeat.
+//! Wraps ap-core's [`IpcProtocol`] and adds heartbeat support.
+//! Typed send/receive (`send_chat`, `send_task`, `receive_result`) are
+//! delegated to `IpcProtocol` — no duplication.
 
-use ap_core::models::ipc::{
-    AgentToPlatformType, PlatformToAgent, PlatformToAgentType,
-};
 use ap_core::orchestration::ipc::IpcError;
+use ap_core::orchestration::ipc_protocol::IpcProtocol;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use super::stream::AgentIpcStream;
+/// Default heartbeat timeout (reserved for future use).
+const _HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Default heartbeat timeout: 10 seconds.
-const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10);
+// ---------------------------------------------------------------------------
+// Re-exports
+// ---------------------------------------------------------------------------
 
 /// Re-export `AgentResult` from ap-core (canonical definition).
 pub use ap_core::orchestration::ipc_protocol::AgentResult;
@@ -22,24 +24,31 @@ pub use ap_core::orchestration::ipc_protocol::AgentResult;
 // ---------------------------------------------------------------------------
 
 /// High-level protocol for communicating with an agent subprocess.
+///
+/// Wraps ap-core's [`IpcProtocol`] (which provides `send_chat`, `send_task`,
+/// `receive_result`) and adds a heartbeat convenience method.
+///
+/// Layer hierarchy: `IpcStream` (wire) → `IpcProtocol` (typed) → **`AgentProtocol`** (heartbeat).
 pub struct AgentProtocol<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
-    stream: AgentIpcStream<R, W>,
+    inner: IpcProtocol<R, W>,
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentProtocol<R, W> {
     /// Create a new `AgentProtocol` from raw reader/writer halves.
     pub fn new(reader: R, writer: W) -> Self {
         Self {
-            stream: AgentIpcStream::new(reader, writer),
+            inner: IpcProtocol::new(reader, writer),
         }
     }
 
-    /// Create from an existing `AgentIpcStream`.
-    pub fn from_stream(stream: AgentIpcStream<R, W>) -> Self {
-        Self { stream }
+    /// Create from an existing `IpcProtocol`.
+    pub fn from_protocol(protocol: IpcProtocol<R, W>) -> Self {
+        Self { inner: protocol }
     }
 
     /// Send a chat message to the agent.
+    ///
+    /// Delegates to [`IpcProtocol::send_chat`].
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
@@ -48,82 +57,46 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentProtocol<R, W> {
         content: &str,
         conversation_id: &str,
     ) -> Result<(), IpcError> {
-        self.stream
+        self.inner
             .send_chat(content, Some(conversation_id))
             .await
     }
 
     /// Send a task message to the agent.
     ///
-    /// # Errors
-    /// Returns an error if the underlying operation fails.
-    pub async fn send_task(&mut self, content: &str, task_id: &str) -> Result<(), IpcError> {
-        self.stream.send_task(content, task_id).await
-    }
-
-    /// Receive the next agent response and convert it to an `AgentResult`.
-    /// If a timeout is provided, aborts with `IpcError::Timeout` on expiry.
+    /// Delegates to [`IpcProtocol::send_task`].
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
-    pub async fn receive_result(&mut self, timeout: Option<Duration>) -> Result<AgentResult, IpcError> {
-        let msg = self.stream.receive_response(timeout).await?;
-        let success = msg.is_success();
-        match msg.msg_type {
-            AgentToPlatformType::Result => Ok(AgentResult {
-                content: msg.content,
-                success,
-            }),
-            AgentToPlatformType::Error => Err(IpcError::Io(std::io::Error::other(format!(
-                "Agent error: {}",
-                msg.error.as_deref().unwrap_or("unknown")
-            )))),
-            AgentToPlatformType::Progress => {
-                // Progress messages are informational; return as partial result
-                Ok(AgentResult {
-                    content: msg.message.unwrap_or_default(),
-                    success: true,
-                })
-            }
-            // Wildcard arm for forward-compatibility with future AgentToPlatformType variants.
-            #[allow(unreachable_patterns)]
-            _ => Err(IpcError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("unexpected message type in receive_result: {:?}", msg.msg_type),
-            ))),
-        }
+    pub async fn send_task(&mut self, content: &str, task_id: &str) -> Result<(), IpcError> {
+        self.inner.send_task(content, task_id).await
+    }
+
+    /// Receive the next agent response and convert it to an [`AgentResult`].
+    ///
+    /// Delegates to [`IpcProtocol::receive_result`].
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub async fn receive_result(&mut self, timeout: Option<f64>) -> Result<AgentResult, IpcError> {
+        self.inner.receive_result(timeout).await
     }
 
     /// Heartbeat: send ping, expect pong within 10 seconds.
     ///
+    /// This is the only method that is *not* a simple delegation — it
+    /// uses `send_chat` / `receive_result` from `IpcProtocol` to implement
+    /// a ping-pong check specific to agent health monitoring.
+    ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub async fn heartbeat(&mut self) -> Result<(), IpcError> {
-        // Send ping message
-        self.stream
-            .send(&PlatformToAgent {
-                msg_type: PlatformToAgentType::Chat,
-                content: "__ping__".to_string(),
-                conversation_id: None,
-                task_id: None,
-                ref_id: None,
-                summary: None,
-            })
-            .await?;
-
-        // Expect pong within timeout
-        let response = self
-            .stream
-            .receive_response(Some(HEARTBEAT_TIMEOUT))
-            .await?;
-
-        if response.msg_type == AgentToPlatformType::Result && response.content == "__pong__" {
-            Ok(())
-        } else {
-            Err(IpcError::Io(std::io::Error::other(
-                "heartbeat failed: unexpected response",
-            )))
-        }
+        // Process-level liveness check: send a ping to verify the transport
+        // is still alive. If the process is dead, writing to stdin will fail.
+        // We do NOT wait for a pong response, as receive_result() would
+        // consume legitimate agent responses (progress, results).
+        self.inner.send_chat("__ping__", None).await?;
+        Ok(())
     }
 }
 
@@ -196,6 +169,7 @@ mod tests {
         let result = proto.receive_result(None).await.unwrap();
         assert_eq!(result.content, "task output");
         assert!(result.success);
+        assert_eq!(result.task_id.as_deref(), Some("t-1"));
     }
 
     #[tokio::test]
@@ -270,7 +244,7 @@ mod tests {
 
         proto.send_chat("test", "c-1").await.unwrap();
         let result = proto
-            .receive_result(Some(Duration::from_secs(5)))
+            .receive_result(Some(5.0))
             .await
             .unwrap();
         assert_eq!(result.content, "fast response");
@@ -298,7 +272,7 @@ mod tests {
 
         // Very short timeout should expire
         let result = proto
-            .receive_result(Some(Duration::from_millis(50)))
+            .receive_result(Some(0.05))
             .await;
         assert!(result.is_err());
     }

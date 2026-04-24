@@ -27,6 +27,7 @@ const VALID_TABLES: &[&str] = &[
     "skill_judgments",
     "context_budget_log",
     "agent_records",
+    "_meta",
 ];
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,7 @@ impl EvolutionStore {
             .with_init(|conn| {
                 conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
                 conn.execute_batch(schema::SCHEMA_SQL)?;
+                Self::run_migrations(conn)?;
                 Ok(())
             });
         let pool = Pool::builder().build(manager)?;
@@ -71,12 +73,41 @@ impl EvolutionStore {
         let manager = SqliteConnectionManager::memory()
             .with_init(|conn| {
                 conn.execute_batch(schema::SCHEMA_SQL)?;
+                Self::run_migrations(conn)?;
                 Ok(())
             });
         let pool = Pool::builder()
             .max_size(1) // in-memory DB is per-connection, so limit to 1
             .build(manager)?;
         Ok(Self { pool })
+    }
+
+    /// Check the stored schema version and apply migrations if needed.
+    fn run_migrations(conn: &rusqlite::Connection) -> std::result::Result<(), rusqlite::Error> {
+        let current: Option<String> = conn
+            .query_row(
+                schema::GET_SCHEMA_VERSION_SQL,
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let current = current.unwrap_or_default();
+
+        if current == schema::SCHEMA_VERSION {
+            return Ok(());
+        }
+
+        // Apply any pending migrations
+        for (from, _to, sql) in schema::MIGRATIONS {
+            if current == *from {
+                conn.execute_batch(sql)?;
+            }
+        }
+
+        // Stamp the new version
+        conn.execute(schema::SET_SCHEMA_VERSION_SQL, [schema::SCHEMA_VERSION])?;
+        Ok(())
     }
 
     /// Acquire a connection from the pool.
@@ -129,6 +160,15 @@ impl EvolutionStore {
     pub fn get_active_skills(&self) -> Result<Vec<SkillRecord>> {
         let conn = self.conn()?;
         queries::get_active_skills(&conn)
+    }
+
+    /// Get all skills (both active and inactive).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub fn get_all_skills(&self) -> Result<Vec<SkillRecord>> {
+        let conn = self.conn()?;
+        queries::get_all_skills(&conn)
     }
 
     /// Delete a skill record by id.
@@ -392,6 +432,55 @@ impl EvolutionStore {
             |row| row.get(0),
         )?;
         Ok(count)
+    }
+
+    // -----------------------------------------------------------------------
+    // Health score persistence (_meta table)
+    // -----------------------------------------------------------------------
+
+    /// Load the persisted health score and total count from `_meta`.
+    ///
+    /// Returns `(health_score, total_count)` or `(1.0, 0)` if no persisted state.
+    pub fn load_health_state(&self) -> Result<(f64, u64)> {
+        let conn = self.conn()?;
+        let score: Option<String> = conn
+            .query_row(
+                "SELECT value FROM _meta WHERE key = 'health_score'",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+        let total: Option<String> = conn
+            .query_row(
+                "SELECT value FROM _meta WHERE key = 'health_total'",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let score = score
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(1.0);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let total = total
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+
+        Ok((score, total))
+    }
+
+    /// Persist the health score and total count to `_meta`.
+    pub fn save_health_state(&self, score: f64, total: u64) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO _meta (key, value) VALUES ('health_score', ?1)",
+            [score.to_string()],
+        )?;
+        conn.execute(
+            "INSERT OR REPLACE INTO _meta (key, value) VALUES ('health_total', ?1)",
+            [total.to_string()],
+        )?;
+        Ok(())
     }
 
     // -----------------------------------------------------------------------

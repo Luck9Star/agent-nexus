@@ -15,3 +15,8 @@ tracing = { workspace = true }
 [dev-dependencies]
 rstest = { workspace = true }
 tokio-test = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "ipc_bench"
+harness = false

@@ -62,7 +62,7 @@ impl SourceEntry {
                 || url.starts_with("ssh://")
                 || url.starts_with("git@")
                 || url.starts_with('/')
-                || (url.chars().next().map_or(false, |c| c.is_alphanumeric()) && !url.starts_with('-'));
+                || (url.chars().next().is_some_and(|c| c.is_alphanumeric()) && !url.starts_with('-'));
             if !valid {
                 return Err(format!(
                     "Invalid URL scheme for git source '{}': '{url}'",

@@ -1,60 +1,56 @@
-//! IPC lock registry: per-agent Mutex with FIFO eviction.
+//! IPC lock registry: per-agent Mutex with reference-count-aware eviction.
 //!
 //! Python source: Python uses `dict[str, asyncio.Lock]` per agent.
 
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 const MAX_LOCKS: usize = 1000;
 
 pub struct IpcLockRegistry {
-    locks: dashmap::DashMap<String, Arc<Mutex<()>>>,
-    order: Mutex<VecDeque<String>>,
+    locks: Mutex<Vec<(String, Arc<Mutex<()>>)>>,
 }
 
 impl IpcLockRegistry {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
-            locks: dashmap::DashMap::new(),
-            order: Mutex::new(VecDeque::new()),
+            locks: Mutex::new(Vec::new()),
         }
     }
 
     /// Get or create a lock for the given agent.
-    /// Evicts the oldest lock if over the limit.
-    /// Uses `DashMap::entry()` to avoid TOCTOU race between `get()` and `insert()`.
+    /// Evicts entries whose Arc has no external references (strong_count == 1).
     pub fn get_or_create(&self, agent_id: &str) -> Arc<Mutex<()>> {
-        use dashmap::mapref::entry::Entry;
+        let mut locks = self.locks.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
-        match self.locks.entry(agent_id.to_string()) {
-            Entry::Occupied(e) => Arc::clone(e.get()),
-            Entry::Vacant(e) => {
-                let lock = Arc::new(Mutex::new(()));
-                let cloned = Arc::clone(&lock);
-                e.insert(lock);
+        // Fast path: find existing
+        if let Some(idx) = locks.iter().position(|(id, _)| id == agent_id) {
+            return Arc::clone(&locks[idx].1);
+        }
 
-                // Evict oldest if over limit
-                let mut order = self.order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                order.push_back(agent_id.to_string());
-                if order.len() > MAX_LOCKS {
-                    if let Some(old_id) = order.pop_front() {
-                        self.locks.remove(&old_id);
-                    }
-                }
-                cloned
+        // Enforce limit: evict oldest unreferenced entries one at a time
+        while locks.len() >= MAX_LOCKS {
+            let idx = locks.iter().position(|(_, arc)| Arc::strong_count(arc) <= 1);
+            match idx {
+                Some(i) => { locks.remove(i); }
+                None => break, // All entries are actively referenced
             }
         }
+
+        let lock = Arc::new(Mutex::new(()));
+        let cloned = Arc::clone(&lock);
+        locks.push((agent_id.to_string(), lock));
+        cloned
     }
 
     /// Returns the current number of active locks.
     pub fn len(&self) -> usize {
-        self.locks.len()
+        self.locks.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len()
     }
 
     /// Returns true if there are no active locks.
     pub fn is_empty(&self) -> bool {
-        self.locks.is_empty()
+        self.len() == 0
     }
 }
 
@@ -102,9 +98,10 @@ mod tests {
         for i in 0..=MAX_LOCKS {
             registry.get_or_create(&format!("agent-{i}"));
         }
-        // agent-0 should have been evicted
-        assert!(registry.locks.get("agent-0").is_none());
+        // agent-0 should have been evicted (no external reference held)
+        let locks = registry.locks.lock().unwrap();
+        assert!(locks.iter().all(|(id, _)| id != "agent-0"));
         // agent-1 should still exist
-        assert!(registry.locks.get("agent-1").is_some());
+        assert!(locks.iter().any(|(id, _)| id == "agent-1"));
     }
 }

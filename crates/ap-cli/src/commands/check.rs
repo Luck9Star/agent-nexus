@@ -148,6 +148,74 @@ fn check_api_key() -> bool {
         .any(|k| std::env::var(k).is_ok())
 }
 
+/// Run `check <path>` command -- validate an agent package at a specific path.
+pub fn run_check_package(path: &str, output: &OutputFormatter) -> Result<()> {
+    let pkg_path = PathBuf::from(path);
+    if !pkg_path.exists() {
+        anyhow::bail!("Path does not exist: {path}");
+    }
+    if !pkg_path.is_dir() {
+        anyhow::bail!("Path is not a directory: {path}");
+    }
+
+    let mut passed = 0usize;
+    let total = 4;
+
+    // Check 1: SKILL.md exists
+    if pkg_path.join("SKILL.md").exists() {
+        output.success("[PASS] SKILL.md: present");
+        passed += 1;
+    } else {
+        output.error("[FAIL] SKILL.md: missing (required for all agents)");
+    }
+
+    // Check 2: pyproject.toml or setup.py exists
+    if pkg_path.join("pyproject.toml").exists() || pkg_path.join("setup.py").exists() {
+        output.success("[PASS] Package manifest: present");
+        passed += 1;
+    } else {
+        output.error("[FAIL] Package manifest: missing pyproject.toml or setup.py");
+    }
+
+    // Check 3: Python source directory exists
+    let has_src = std::fs::read_dir(&pkg_path)?
+        .filter_map(|e| e.ok())
+        .any(|e| e.path().is_dir() && !e.file_name().to_string_lossy().ends_with(".py"));
+    if has_src {
+        output.success("[PASS] Source directory: present");
+        passed += 1;
+    } else {
+        output.error("[FAIL] Source directory: no source directory found");
+    }
+
+    // Check 4: No obvious security issues (world-writable)
+    let metadata = std::fs::metadata(&pkg_path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = metadata.permissions().mode();
+        if mode & 0o002 != 0 {
+            output.error("[FAIL] Security: package directory is world-writable");
+        } else {
+            output.success("[PASS] Security: package directory permissions OK");
+            passed += 1;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        output.success("[PASS] Security: platform permissions check skipped");
+        passed += 1;
+    }
+
+    if passed == total {
+        output.success(&format!("{passed}/{total} package checks passed"));
+        Ok(())
+    } else {
+        output.info(&format!("{passed}/{total} package checks passed"));
+        Err(anyhow::anyhow!("Some package checks failed"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

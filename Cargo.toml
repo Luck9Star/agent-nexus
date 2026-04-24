@@ -42,6 +42,9 @@ git2 = "0.19"
 # HTTP
 axum = "0.8"
 
+# System
+libc = "0.2"
+
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
 dashmap = "6"
@@ -54,6 +57,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rstest = "0.22"
 assert_cmd = "2"
 tokio-test = "0.4"
+criterion = { version = "0.5", features = ["html_reports"] }
 
 # Internal crates
 ap-core = { path = "crates/ap-core" }

@@ -3,9 +3,11 @@
 use std::path::PathBuf;
 
 use thiserror::Error;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use ap_core::models::distribution::{Lockfile, LockfileEntry};
+
+use crate::advisory_lock::FileLock;
 
 /// Errors from lockfile management operations.
 #[derive(Debug, Error)]
@@ -24,9 +26,14 @@ pub struct LockfileManager {
 
 impl LockfileManager {
     /// Create a new lockfile manager pointing to the given `lockfile.json` path.
-    #[must_use] 
+    #[must_use]
     pub fn new(path: PathBuf) -> Self {
         Self { path }
+    }
+
+    /// Returns the path to the advisory lock file (sibling of the lockfile).
+    fn lock_path(&self) -> PathBuf {
+        self.path.with_extension("lock")
     }
 
     /// Static: parse a JSON string into a `Lockfile`.
@@ -56,10 +63,18 @@ impl LockfileManager {
     }
 
     /// Atomically write the lockfile as pretty-printed JSON (write to `.tmp`, then rename).
+    /// Acquires an advisory file lock to prevent TOCTOU races with concurrent add/remove.
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn save(&self, lockfile: &Lockfile) -> Result<(), LockfileError> {
+        let _lock = FileLock::acquire_exclusive(&self.lock_path())?;
+        self.save_unlocked(lockfile)
+    }
+
+    /// Internal: write lockfile without acquiring the advisory lock.
+    /// Callers like `add()` / `remove()` already hold the lock.
+    fn save_unlocked(&self, lockfile: &Lockfile) -> Result<(), LockfileError> {
         let json = serde_json::to_string_pretty(lockfile)?;
 
         let tmp_path = {
@@ -82,36 +97,30 @@ impl LockfileManager {
 
     /// Add or update an agent entry in the lockfile.
     ///
-    /// // SAFETY: This read-modify-write is NOT protected by file-level locking.
-    /// // Concurrent `ap-cli` processes writing the same lockfile can silently lose
-    /// // entries (TOCTOU race). Only one `ap-cli` process should run at a time.
-    /// // TODO: Add advisory file locking (e.g. `fs4` crate) when dependency
-    /// // policy allows.
+    /// Acquires an exclusive advisory file lock for the entire read-modify-write
+    /// cycle to prevent TOCTOU races between concurrent `ap-cli` processes.
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn add(&self, name: &str, entry: LockfileEntry) -> Result<(), LockfileError> {
-        warn!("Lockfile TOCTOU: modifying lockfile without file-level locking — ensure single process");
+        let _lock = FileLock::acquire_exclusive(&self.lock_path())?;
         let mut lockfile = self.load()?;
         lockfile.agents.insert(name.to_string(), entry);
-        self.save(&lockfile)
+        self.save_unlocked(&lockfile)
     }
 
     /// Remove an agent entry from the lockfile.
     ///
-    /// // SAFETY: This read-modify-write is NOT protected by file-level locking.
-    /// // Concurrent `ap-cli` processes writing the same lockfile can silently lose
-    /// // entries (TOCTOU race). Only one `ap-cli` process should run at a time.
-    /// // TODO: Add advisory file locking (e.g. `fs4` crate) when dependency
-    /// // policy allows.
+    /// Acquires an exclusive advisory file lock for the entire read-modify-write
+    /// cycle to prevent TOCTOU races between concurrent `ap-cli` processes.
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn remove(&self, name: &str) -> Result<(), LockfileError> {
-        warn!("Lockfile TOCTOU: modifying lockfile without file-level locking — ensure single process");
+        let _lock = FileLock::acquire_exclusive(&self.lock_path())?;
         let mut lockfile = self.load()?;
         lockfile.agents.remove(name);
-        self.save(&lockfile)
+        self.save_unlocked(&lockfile)
     }
 
     /// Check if an agent exists in the lockfile.

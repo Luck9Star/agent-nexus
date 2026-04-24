@@ -198,6 +198,132 @@ fn format_toml_value(value: &toml::Value) -> String {
     }
 }
 
+/// Run `config edit` command -- open config.toml in $EDITOR.
+pub fn run_edit(output: &OutputFormatter) -> Result<()> {
+    let root = commands::find_project_root(&std::env::current_dir()?);
+    let path = root.join("config.toml");
+    if !path.exists() {
+        anyhow::bail!("config.toml not found. Run `agent-nexus init` first.");
+    }
+
+    // EDITOR is trusted input per Unix convention; basic validation only.
+    let editor = std::env::var("EDITOR")
+        .ok()
+        .filter(|e| !e.is_empty() && !e.contains('\0') && !e.contains(".."))
+        .unwrap_or_else(|| "vi".to_string());
+    let status = std::process::Command::new(&editor)
+        .arg(&path)
+        .status()
+        .with_context(|| format!("Failed to launch editor '{editor}'"))?;
+
+    if !status.success() {
+        anyhow::bail!("Editor exited with error");
+    }
+    output.success("Config edited.");
+    Ok(())
+}
+
+/// Run `config validate` command -- check config.toml is well-formed.
+pub fn run_validate(output: &OutputFormatter) -> Result<()> {
+    let root = commands::find_project_root(&std::env::current_dir()?);
+    let path = root.join("config.toml");
+    if !path.exists() {
+        anyhow::bail!("config.toml not found. Run `agent-nexus init` first.");
+    }
+
+    let content = std::fs::read_to_string(&path)?;
+    let _config: toml::Value = toml::from_str(&content).with_context(|| "Invalid config.toml")?;
+    output.success("config.toml is valid.");
+    Ok(())
+}
+
+/// Run `config providers` command -- list configured providers and API key status.
+pub fn run_providers(output: &OutputFormatter) -> Result<()> {
+    let root = commands::find_project_root(&std::env::current_dir()?);
+    let path = root.join("config.toml");
+
+    if !path.exists() {
+        output.info("No config.toml found. No providers configured.");
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(&path)?;
+    let config: toml::Value = toml::from_str(&content).with_context(|| "Invalid config.toml")?;
+
+    let providers = config
+        .get("models")
+        .and_then(|m| m.get("providers"))
+        .and_then(|v| v.as_table());
+
+    let env_keys = [
+        ("openai", "OPENAI_API_KEY"),
+        ("anthropic", "ANTHROPIC_API_KEY"),
+        ("deepseek", "DEEPSEEK_API_KEY"),
+        ("dashscope", "DASHSCOPE_API_KEY"),
+        ("ollama", "OLLAMA_HOST"),
+    ];
+
+    if output.is_json() {
+        let mut arr = Vec::new();
+        if let Some(tbl) = providers {
+            for (name, _cfg) in tbl {
+                let has_key = env_keys.iter().any(|(prefix, key)| {
+                    name.starts_with(prefix) && std::env::var(key).is_ok()
+                });
+                arr.push(serde_json::json!({
+                    "name": name,
+                    "api_key_set": has_key,
+                }));
+            }
+        }
+        // Also check env-only providers
+        for (prefix, key) in &env_keys {
+            if providers.is_none_or(|t| !t.keys().any(|k| k.starts_with(prefix))) {
+                arr.push(serde_json::json!({
+                    "name": prefix,
+                    "api_key_set": std::env::var(key).is_ok(),
+                    "source": "env",
+                }));
+            }
+        }
+        output.data(&arr);
+    } else {
+        if let Some(tbl) = providers {
+            println!("Configured providers:");
+            for (name, _cfg) in tbl {
+                let has_key = env_keys.iter().any(|(prefix, key)| {
+                    name.starts_with(prefix) && std::env::var(key).is_ok()
+                });
+                let status = if has_key { "API key set" } else { "no API key" };
+                println!("  {name}: {status}");
+            }
+        } else {
+            output.info("No providers configured in config.toml.");
+        }
+
+        // Show env-only keys
+        for (prefix, key) in &env_keys {
+            let set = std::env::var(key).is_ok();
+            if set {
+                println!("  {prefix} (env): API key set");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Run `config path` command -- print config directory path.
+pub fn run_path(output: &OutputFormatter) -> Result<()> {
+    let root = commands::find_project_root(&std::env::current_dir()?);
+    if output.is_json() {
+        output.data(&serde_json::json!({ "config_dir": root.display().to_string() }));
+    } else {
+        println!("{}", root.display());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

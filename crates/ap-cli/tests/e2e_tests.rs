@@ -337,7 +337,9 @@ fn workflow_init_sources_crud() {
         .args([
             "sources",
             "add",
+            "--name",
             "my-custom",
+            "--url",
             "https://github.com/example/custom-agents.git",
             "--branch",
             "develop",
@@ -395,7 +397,7 @@ fn workflow_init_create_agent() {
         .success();
 
     cli()
-        .args(["create", "agent", "my-workflow-agent"])
+        .args(["create", "agent", "my-workflow-agent", "--description", "A workflow test agent"])
         .current_dir(dir.path())
         .assert()
         .success();
@@ -413,10 +415,10 @@ fn workflow_init_create_agent() {
     );
     assert!(
         agent_dir
-            .join("agent_my-workflow-agent")
-            .join("main.py")
+            .join("my_workflow_agent")
+            .join("agent.py")
             .exists(),
-        "main.py should exist in agent module"
+        "agent.py should exist in agent module"
     );
 
     // Verify SKILL.md contains the agent name
@@ -684,7 +686,7 @@ fn create_agent_special_chars_name() {
     let dir = tempfile::tempdir().unwrap();
 
     cli()
-        .args(["create", "agent", "my-special-agent"])
+        .args(["create", "agent", "my-special-agent", "--description", "Special chars test"])
         .current_dir(dir.path())
         .assert()
         .success();
@@ -705,10 +707,10 @@ fn create_agent_special_chars_name() {
     );
     assert!(
         agent_dir
-            .join("agent_my-special-agent")
-            .join("main.py")
+            .join("my_special_agent")
+            .join("agent.py")
             .exists(),
-        "main.py should exist inside agent module directory"
+        "agent.py should exist inside agent module directory"
     );
 
     // SKILL.md should contain the agent name
@@ -730,21 +732,19 @@ fn sources_add_url_validation() {
 
     // Empty URL should be rejected
     cli()
-        .args(["sources", "add", "bad-url", ""])
+        .args(["sources", "add", "--name", "bad-url", "--url", ""])
         .current_dir(dir.path())
         .assert()
         .failure()
         .stderr(predicate::str::contains("url is empty"));
 
-    // NOTE: Empty name ("") is currently accepted by the CLI -- SourceEntry
-    // validation does not reject empty names. This is a potential bug but we
-    // test against current behavior: the command should not panic regardless.
+    // Empty name with valid URL -- clap rejects empty --name as missing required value
     let result = cli()
-        .args(["sources", "add", "", "https://github.com/example/repo"])
+        .args(["sources", "add", "--name", "", "--url", "https://github.com/example/repo"])
         .current_dir(dir.path())
         .assert();
 
-    // Verify it doesn't panic (empty name is accepted currently)
+    // Verify it doesn't panic regardless of outcome
     let stderr = String::from_utf8_lossy(&result.get_output().stderr);
     let stdout = String::from_utf8_lossy(&result.get_output().stdout);
     let combined = format!("{stdout}{stderr}");
@@ -778,9 +778,9 @@ fn install_with_version_flag() {
 #[test]
 fn run_with_model_flag() {
     // The run command always fails with PlatformRouter message (placeholder),
-    // but the --model flag should be accepted by clap parsing.
+    // but the --mode flag should be accepted by clap parsing.
     cli()
-        .args(["run", "test-agent", "--model", "openai:gpt-4o", "some", "task"])
+        .args(["run", "test-agent", "--mode", "mcp", "some", "task"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("PlatformRouter"));
@@ -861,15 +861,11 @@ fn evolution_status_json_output() {
         .success();
 
     let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
-    // In JSON mode, each non-empty line should be valid JSON
-    for line in stdout.lines() {
-        if !line.trim().is_empty() {
-            let _: serde_json::Value =
-                serde_json::from_str(line).unwrap_or_else(|e| {
-                    panic!("Expected valid JSON line, got: {line:?}\nError: {e}")
-                });
-        }
-    }
+    // output.data() uses pretty-print (multi-line JSON), so parse the full output
+    let _: serde_json::Value =
+        serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+            panic!("Expected valid JSON, got: {stdout:?}\nError: {e}")
+        });
 }
 
 // ══════════════════════════════════════════════════════════════════════════

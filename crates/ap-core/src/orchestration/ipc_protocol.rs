@@ -15,6 +15,9 @@ use tokio::io::{AsyncRead, AsyncWrite};
 pub struct AgentResult {
     pub content: String,
     pub success: bool,
+    /// Task ID from the agent response, if present.
+    /// Allows correlating responses with multiple in-flight tasks.
+    pub task_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +80,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
     /// Returns an error if the underlying operation fails.
     pub async fn receive_result(&mut self, timeout: Option<f64>) -> Result<AgentResult, IpcError> {
         let receive_fut = self.stream.receive::<AgentToPlatform>();
-        let msg = match timeout {
+        let mut msg = match timeout {
             Some(secs) => {
                 tokio::pin!(receive_fut);
                 match tokio::time::timeout(
@@ -93,10 +96,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
             None => receive_fut.await?,
         };
         let success = msg.is_success();
+        let task_id = msg.task_id.take();
         match msg.msg_type {
             AgentToPlatformType::Result => Ok(AgentResult {
                 content: msg.content,
                 success,
+                task_id,
             }),
             AgentToPlatformType::Error => Err(IpcError::Io(std::io::Error::other(
                 format!(
@@ -109,6 +114,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
                 Ok(AgentResult {
                     content: msg.message.unwrap_or_default(),
                     success: true,
+                    task_id,
                 })
             }
         }

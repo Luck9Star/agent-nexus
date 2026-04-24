@@ -28,6 +28,9 @@ impl McpToolAdapter {
     #[must_use] 
     pub fn parse_namespaced(&self, name: &str) -> Option<(String, String)> {
         let (agent, tool) = name.split_once(SEPARATOR)?;
+        if agent.is_empty() || tool.is_empty() {
+            return None;
+        }
         Some((agent.to_string(), tool.to_string()))
     }
 }
@@ -98,6 +101,18 @@ mod tests {
         let (agent, tool) = adapter.parse_namespaced(&namespaced).unwrap();
         assert_eq!(agent, "code-review-v2");
         assert_eq!(tool, "run-checks");
+    }
+
+    #[test]
+    fn parse_namespaced_empty_agent_returns_none() {
+        let adapter = McpToolAdapter::new();
+        assert_eq!(adapter.parse_namespaced("___tool"), None);
+    }
+
+    #[test]
+    fn parse_namespaced_empty_tool_returns_none() {
+        let adapter = McpToolAdapter::new();
+        assert_eq!(adapter.parse_namespaced("agent___"), None);
     }
 
     #[test]

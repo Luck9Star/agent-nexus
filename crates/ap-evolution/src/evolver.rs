@@ -29,6 +29,9 @@ pub enum EvolverError {
     #[error("Skill not found: {0}")]
     SkillNotFound(String),
 
+    #[error("Concurrent modification detected for skill: {0}")]
+    ConcurrentModification(String),
+
     #[error("Store error: {0}")]
     Store(#[from] crate::store::StoreError),
 }
@@ -102,12 +105,23 @@ impl SkillEvolver {
             updated_at: now,
         };
 
-        // Atomically deactivate parent and insert new skill with lineage link
-        self.store.evolve_skill(
+        // Atomically deactivate parent and insert new skill with lineage link.
+        // Catch concurrent modification (H11): if two callers evolve the same
+        // skill simultaneously, one wins and the other hits a unique constraint
+        // violation on skill name.
+        if let Err(e) = self.store.evolve_skill(
             &new_skill,
             &[&skill.id],
             true, // deactivate parent (FIX is in-place replacement)
-        )?;
+        ) {
+            let err_str = e.to_string();
+            if err_str.contains("UNIQUE constraint failed")
+                || err_str.contains("constraint violation")
+            {
+                return Err(EvolverError::ConcurrentModification(skill_name.to_string()));
+            }
+            return Err(EvolverError::Store(e));
+        }
 
         Ok(EvolutionOutcome::Success {
             new_skill_id: new_id,

@@ -19,7 +19,9 @@ fn sources_add_with_branch() {
         .args([
             "sources",
             "add",
+            "--name",
             "dev-source",
+            "--url",
             "https://github.com/example/repo",
             "--branch",
             "develop",
@@ -57,7 +59,9 @@ fn sources_add_duplicate_upserts() {
         .args([
             "sources",
             "add",
+            "--name",
             "dup",
+            "--url",
             "https://github.com/example/repo1",
         ])
         .current_dir(dir.path())
@@ -70,7 +74,9 @@ fn sources_add_duplicate_upserts() {
         .args([
             "sources",
             "add",
+            "--name",
             "dup",
+            "--url",
             "https://github.com/example/repo2",
         ])
         .current_dir(dir.path())
@@ -118,7 +124,9 @@ fn sources_list_json_output() {
         .args([
             "sources",
             "add",
+            "--name",
             "json-test",
+            "--url",
             "https://github.com/example/repo",
         ])
         .current_dir(dir.path())
@@ -148,7 +156,7 @@ fn sources_add_empty_url_rejected() {
     // Add a source with empty URL — validation should reject it
     Command::cargo_bin("agent-nexus")
         .unwrap()
-        .args(["sources", "add", "bad-url", ""])
+        .args(["sources", "add", "--name", "bad-url", "--url", ""])
         .current_dir(dir.path())
         .assert()
         .failure()
@@ -258,7 +266,7 @@ fn create_agent_duplicate_rejected() {
     // Create agent first time
     Command::cargo_bin("agent-nexus")
         .unwrap()
-        .args(["create", "agent", "dup-agent"])
+        .args(["create", "agent", "dup-agent", "--description", "test agent"])
         .current_dir(dir.path())
         .assert()
         .success();
@@ -266,7 +274,7 @@ fn create_agent_duplicate_rejected() {
     // Create same agent again — should fail
     Command::cargo_bin("agent-nexus")
         .unwrap()
-        .args(["create", "agent", "dup-agent"])
+        .args(["create", "agent", "dup-agent", "--description", "test agent"])
         .current_dir(dir.path())
         .assert()
         .failure()
@@ -369,31 +377,32 @@ fn evolution_status_json_output() {
         .assert()
         .success();
 
-    // In JSON mode, output should be valid JSON lines on stdout
+    // In JSON mode, output should be valid JSON on stdout.
+    // output.data() uses pretty-print (multi-line), so parse the full output.
     let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
-    for line in stdout.lines() {
-        if !line.trim().is_empty() {
-            let _: serde_json::Value =
-                serde_json::from_str(line).unwrap_or_else(|e| {
-                    panic!("Expected valid JSON line, got: {line:?}\nError: {e}")
-                });
-        }
-    }
+    let _: serde_json::Value =
+        serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+            panic!("Expected valid JSON, got: {stdout:?}\nError: {e}")
+        });
 }
 
 #[test]
 fn evolution_promote_placeholder() {
-    // Evolution promote is a placeholder — it always succeeds with an info message
+    // Must use tempdir isolation since promote now uses file-backed store
+    let tmp = tempfile::tempdir().unwrap();
     let output = Command::cargo_bin("agent-nexus")
         .unwrap()
         .args(["evolution", "promote", "nonexistent-skill"])
-        .assert()
-        .success();
+        .env("HOME", tmp.path())
+        .current_dir(tmp.path())
+        .assert();
 
     let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
+    let combined = format!("{stdout}{stderr}");
     assert!(
-        stdout.contains("nonexistent-skill"),
-        "Output should mention the skill name"
+        combined.contains("nonexistent-skill"),
+        "Output should mention the skill name. stdout={stdout} stderr={stderr}"
     );
 }
 
@@ -460,7 +469,7 @@ fn create_agent_very_long_name() {
     // does not impose a length limit.
     let result = Command::cargo_bin("agent-nexus")
         .unwrap()
-        .args(["create", "agent", &long_name])
+        .args(["create", "agent", &long_name, "--description", "long name test"])
         .current_dir(dir.path())
         .assert();
 
@@ -498,7 +507,9 @@ fn sources_remove_last_source() {
         .args([
             "sources",
             "add",
+            "--name",
             "only-source",
+            "--url",
             "https://github.com/example/repo",
         ])
         .current_dir(dir.path())
