@@ -35,6 +35,36 @@ fn resolve_python() -> String {
     }
 }
 
+/// Check if the agent has a local venv with a python binary.
+/// Looks in `<install_dir>/.venv/bin/python3`.
+fn resolve_venv_python(install_dir: &std::path::Path) -> Option<String> {
+    let venv_python = install_dir.join(".venv").join("bin").join("python3");
+    if venv_python.exists() {
+        Some(venv_python.to_string_lossy().to_string())
+    } else {
+        None
+    }
+}
+
+/// Resolve the agent entrypoint by checking multiple known files.
+/// Returns `(Some(path), false)` if a direct script is found,
+/// or `(None, true)` if python -m fallback should be used.
+fn resolve_entrypoint(install_dir: &std::path::Path, agent_name: &str) -> (Option<PathBuf>, bool) {
+    let candidates = ["main.py", "agent.py"];
+    for name in &candidates {
+        let path = install_dir.join(name);
+        if path.exists() {
+            return (Some(path), false);
+        }
+    }
+    // Check for mcp_adapter.py inside the package directory
+    let module_dir = install_dir.join(agent_name.replace('-', "_"));
+    if module_dir.join("mcp_adapter.py").exists() || module_dir.join("__init__.py").exists() {
+        return (None, true); // use python -m fallback
+    }
+    (None, false) // no entrypoint found
+}
+
 /// Run `runtime start [<agent>] [--all]` command.
 pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Result<()> {
     if !all && agent.is_none() {
@@ -80,21 +110,36 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
             continue;
         }
 
-        let entrypoint = install_dir.join("main.py");
-        if !entrypoint.exists() {
-            output.error(&format!("Agent '{agent_name}' has no main.py entrypoint, skipping."));
+        let (entrypoint, use_module) = resolve_entrypoint(&install_dir, agent_name);
+        if entrypoint.is_none() && !use_module {
+            output.error(&format!(
+                "Agent '{agent_name}' has no entrypoint (tried main.py, agent.py, mcp_adapter.py), skipping."
+            ));
             continue;
         }
 
-        let python = resolve_python();
-        let mut child = std::process::Command::new(&python)
-            .arg(&entrypoint)
-            .current_dir(&install_dir)
-            .env("AGENT_NEXUS_ROOT", &root)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .with_context(|| format!("Failed to start agent '{agent_name}'"))?;
+        // Resolve python: prefer venv python if available, otherwise system python3
+        let python = resolve_venv_python(&install_dir).unwrap_or_else(resolve_python);
+        let mut child = if let Some(ref ep) = entrypoint {
+            std::process::Command::new(&python)
+                .arg(ep)
+                .current_dir(&install_dir)
+                .env("AGENT_NEXUS_ROOT", &root)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .with_context(|| format!("Failed to start agent '{agent_name}'"))?
+        } else {
+            // Fallback: python -m <module_name>
+            std::process::Command::new(&python)
+                .args(["-m", &agent_name.replace('-', "_")])
+                .current_dir(&install_dir)
+                .env("AGENT_NEXUS_ROOT", &root)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .with_context(|| format!("Failed to start agent '{agent_name}'"))?
+        };
 
         let pid = child.id();
         // Store child start time to detect PID recycling
@@ -418,85 +463,236 @@ pub fn run_exec(agent: &str, args: &[String], output: &OutputFormatter) -> Resul
         bail!("Agent install directory not found at {}.", install_dir.display());
     }
 
-    let entrypoint = install_dir.join("main.py");
-    let (cmd, cmd_args) = if entrypoint.exists() {
-        let python = resolve_python();
-        let mut a = vec![entrypoint.to_string_lossy().to_string()];
-        a.extend(args.iter().cloned());
-        (python, a)
+    let (entrypoint, use_module) = resolve_entrypoint(&install_dir, agent);
+    let python = resolve_venv_python(&install_dir).unwrap_or_else(resolve_python);
+
+    // Task content comes from the user's CLI args (everything after the agent name).
+    // The MCP JSON-RPC protocol carries the task — NOT the process command line.
+    let task = if args.is_empty() {
+        "run".to_string()
+    } else if args.len() == 1 {
+        args[0].clone()
     } else {
-        let python = resolve_python();
-        let mut a = vec!["-m".to_string(), agent.replace('-', "_")];
-        a.extend(args.iter().cloned());
-        (python, a)
+        args.join(" ")
     };
 
-    output.info(&format!("Spawning agent '{agent}' via {cmd} ..."));
+    // Build process command — entrypoint only, no user args.
+    let (cmd, cmd_args) = if let Some(ref ep) = entrypoint {
+        (python, vec![ep.to_string_lossy().to_string()])
+    } else if use_module {
+        (python, vec!["-m".to_string(), agent.replace('-', "_")])
+    } else {
+        bail!("Agent '{agent}' has no entrypoint (tried main.py, agent.py, mcp_adapter.py).");
+    };
+
+    output.info(&format!("Spawning agent '{agent}' via {} ...", cmd));
 
     // Reuse existing tokio runtime if available, otherwise create one.
     // Avoids panic from Runtime::new() inside an existing runtime (M16).
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.block_on(async_exec(agent, &cmd, &cmd_args, entry.source.as_str(), output))?;
+        handle.block_on(async_exec(agent, &cmd, &cmd_args, &task, entry.source.as_str(), output))?;
     } else {
         let rt = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
-        rt.block_on(async_exec(agent, &cmd, &cmd_args, entry.source.as_str(), output))?;
+        rt.block_on(async_exec(agent, &cmd, &cmd_args, &task, entry.source.as_str(), output))?;
     }
 
     Ok(())
 }
 
-/// Async inner: spawn agent process, send task via IPC, display result.
+/// Send a JSON-RPC message (newline-delimited) to the agent's stdin.
+async fn mcp_send(
+    writer: &mut tokio::process::ChildStdin,
+    msg: &serde_json::Value,
+) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let mut payload = serde_json::to_string(msg)?;
+    payload.push('\n');
+    writer.write_all(payload.as_bytes()).await?;
+    writer.flush().await?;
+    Ok(())
+}
+
+/// Read one JSON-RPC response from the agent's stdout, skipping non-JSON lines.
+async fn mcp_read(
+    reader: &mut tokio::io::BufReader<tokio::process::ChildStdout>,
+) -> Result<serde_json::Value> {
+    use tokio::io::AsyncBufReadExt;
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let n = reader.read_line(&mut line).await?;
+        if n == 0 {
+            bail!("Agent process closed stdout (EOF)");
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            return Ok(val);
+        }
+        // Non-JSON line (FastMCP banner, debug output) — skip.
+    }
+}
+
+/// Async inner: spawn agent process, communicate via MCP JSON-RPC, display result.
+///
+/// Protocol flow:
+///   1. `initialize` request → response
+///   2. `notifications/initialized` notification
+///   3. `tools/call` with `"run"` tool → response with task result
 async fn async_exec(
     agent_id: &str,
     cmd: &str,
     args: &[String],
+    task: &str,
     _source: &str,
     output: &OutputFormatter,
 ) -> Result<()> {
-    let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
+    use std::process::Stdio;
 
-    let mut proc = ap_runtime::AgentProcess::spawn(agent_id, cmd, &arg_refs)
-        .await
+    // Spawn the agent as a subprocess with piped stdin/stdout for MCP stdio transport.
+    let mut child = tokio::process::Command::new(cmd)
+        .args(args.iter().map(String::as_str))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
         .with_context(|| format!("Failed to spawn agent process: {} {}", cmd, args.join(" ")))?;
 
-    output.info(&format!("Agent process started (id={})", proc.id()));
+    let pid = child.id().unwrap_or(0);
+    output.info(&format!("Agent process started (pid={pid})"));
 
-    let (stdin, stdout) = proc.take_io();
-    let mut proto = ap_runtime::AgentProtocol::new(stdout, stdin);
+    let stdin = child.stdin.take().context("Failed to acquire agent stdin")?;
+    let stdout = child.stdout.take().context("Failed to acquire agent stdout")?;
 
-    let task_id = format!("cli-{}-{}", std::process::id(), chrono::Utc::now().timestamp_millis());
+    let mut reader = tokio::io::BufReader::new(stdout);
+    let mut writer = stdin;
 
-    let task_content = if args.len() == 1 {
-        args[0].clone()
-    } else {
-        args.join(" ")
-    };
-    proto
-        .send_task(&task_content, &task_id)
-        .await
-        .context("Failed to send task to agent via IPC")?;
-
-    output.info(&format!("Task sent (id={task_id}), waiting for response..."));
-
-    let timeout_secs = RESPONSE_TIMEOUT_SECS as f64;
-    match proto.receive_result(Some(timeout_secs)).await {
-        Ok(result) => {
-            if result.success {
-                output.success("Agent completed successfully:");
-                output.info(&result.content);
-            } else {
-                output.error(&format!("Agent returned failure: {}", result.content));
+    // ---- Step 1: MCP initialize ----
+    let init_req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {
+                "name": "agent-nexus-cli",
+                "version": env!("CARGO_PKG_VERSION")
             }
         }
-        Err(e) => {
-            output.error(&format!("Agent communication error: {e}"));
+    });
+    mcp_send(&mut writer, &init_req).await?;
+    output.info("MCP initialize sent, waiting for response...");
+
+    let init_resp = mcp_read(&mut reader).await?;
+    if let Some(err) = init_resp.get("error") {
+        let msg = err["message"].as_str().unwrap_or("unknown");
+        let _ = child.kill().await;
+        bail!("MCP initialize error from agent: {msg}");
+    }
+
+    // ---- Step 2: notifications/initialized (no id → notification) ----
+    let initialized_notif = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+    });
+    mcp_send(&mut writer, &initialized_notif).await?;
+
+    // ---- Step 3: Discover available tools via tools/list ----
+    let list_req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {}
+    });
+    mcp_send(&mut writer, &list_req).await?;
+
+    let list_resp = mcp_read(&mut reader).await?;
+    let tool_name = if let Some(tools) = list_resp
+        .get("result")
+        .and_then(|r| r.get("tools"))
+        .and_then(|t| t.as_array())
+    {
+        // Prefer "run", then "analyze", then first available tool.
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+            .collect();
+        if names.is_empty() {
+            let _ = child.kill().await;
+            bail!("Agent '{agent_id}' exposes no MCP tools");
         }
+        if names.contains(&"run") {
+            "run"
+        } else if names.contains(&"analyze") {
+            "analyze"
+        } else {
+            names[0]
+        }
+    } else {
+        // tools/list failed — fall back to "run".
+        "run"
+    };
+    output.info(&format!("Using MCP tool '{tool_name}' for agent '{agent_id}'"));
+
+    // ---- Step 4: tools/call with the discovered tool name ----
+    let call_req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": {
+                "task": task
+            }
+        }
+    });
+    mcp_send(&mut writer, &call_req).await?;
+    output.info(&format!("Task sent to '{agent_id}' via tools/call '{tool_name}', waiting for result..."));
+
+    // Read tool call response with timeout.
+    let tool_resp = tokio::time::timeout(
+        std::time::Duration::from_secs(RESPONSE_TIMEOUT_SECS),
+        mcp_read(&mut reader),
+    )
+    .await
+    .context(format!("Timed out after {RESPONSE_TIMEOUT_SECS}s waiting for agent response"))??;
+
+    // Extract text content from MCP tool result.
+    // Format: { "result": { "content": [ { "type": "text", "text": "..." } ] } }
+    if let Some(err) = tool_resp.get("error") {
+        let msg = err["message"].as_str().unwrap_or("unknown error");
+        output.error(&format!("Agent returned MCP error: {msg}"));
+    } else if let Some(result) = tool_resp.get("result") {
+        let text = result
+            .get("content")
+            .and_then(|c| c.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        (item.get("type").and_then(|t| t.as_str()) == Some("text"))
+                            .then(|| item.get("text").and_then(|t| t.as_str()).unwrap_or(""))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
+
+        if text.is_empty() {
+            output.info("Agent returned empty result.");
+        } else {
+            output.success("Agent completed successfully:");
+            output.info(&text);
+        }
+    } else {
+        // Unexpected response shape — dump it for debugging.
+        output.info(&format!("Unexpected response: {tool_resp}"));
     }
 
-    if proc.is_alive() {
-        let _ = proc.kill().await;
-    }
-
+    let _ = child.kill().await;
     Ok(())
 }
 

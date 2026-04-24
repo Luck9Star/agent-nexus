@@ -286,6 +286,21 @@ def _gen_pkg_agent(name: str, tools: list[str]) -> str:
     )
 
 
+def _gen_main_entry(name: str) -> str:
+    """Generate main.py — the executable entry point that starts the MCP server."""
+    pkg = _agent_name_to_package(name)
+    return (
+        f'"""Entry point for running {name} as an MCP server."""\n'
+        f"\n"
+        f"from {pkg}.mcp_adapter import create_mcp_server\n"
+        f"\n"
+        f'\n'
+        f"if __name__ == '__main__':\n"
+        f"    server = create_mcp_server()\n"
+        f"    server.run()\n"
+    )
+
+
 def _gen_mcp_adapter(name: str, tools: list[str]) -> str:
     pkg = _agent_name_to_package(name)
     fn = _to_entry_fn(name)
@@ -410,6 +425,7 @@ def scaffold_agent(
         agent_dir / "agent-manifest.yaml": _gen_manifest(
             name, description, tools, recommended_model, fallback_model,
         ),
+        agent_dir / "main.py": _gen_main_entry(name),
         agent_dir / "agent.py": _gen_top_level_agent(name, tools),
         agent_dir / "SKILL.md": _gen_skill_md(name, description, tools),
         agent_dir / "pyproject.toml": _gen_pyproject(name),
