@@ -1,0 +1,36 @@
+[runtime]
+python_path = "python3"
+uv_path = "uv"
+
+[models]
+default = "openai:gpt-4o"
+
+[models.providers.anthropic]
+base_url = ""
+api_key_env = "ANTHROPIC_API_KEY"
+api = "anthropic-messages"
+
+[models.providers.minimax]
+base_url = ""
+api_key_env = "MINIMAX_API_KEY"
+api = "openai-compatible"
+
+[models.providers.openai]
+base_url = ""
+api_key_env = "OPENAI_API_KEY"
+api = "openai-compatible"
+
+[models.providers.deepseek]
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+api = "openai-compatible"
+
+[models.providers.qwen]
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key_env = "DASHSCOPE_API_KEY"
+api = "openai-compatible"
+
+[models.providers.ollama]
+base_url = "http://localhost:11434/v1"
+api_key_env = ""
+api = "ollama"

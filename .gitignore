@@ -53,3 +53,10 @@ graphify-out/
 # Claude scheduled tasks (runtime state)
 .claude/scheduled_tasks.json
 .claude/scheduled_tasks.lock
+
+# Serena (IDE tool state)
+.serena/
+
+# Claude harness state
+.claude/harness/
+.claude/harness-state.json

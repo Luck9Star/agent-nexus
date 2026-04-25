@@ -18,6 +18,7 @@ This directory contains the complete design documentation for Agent Nexus. All d
 | 8 | [08-constraints-decisions.md](08-constraints-decisions.md) | Technical constraints, design decisions, security model, Rust rewrite scope | Implemented |
 | 9 | [09-implementation-plan.md](09-implementation-plan.md) | 7-phase implementation plan, risk matrix, timeline | Phases 1-6 complete, Phase 7 (Rust rewrite) pending |
 | 10 | [10-cloud-local-architecture.md](10-cloud-local-architecture.md) | Git distribution model, local architecture, Python implementation, Rust migration path | Partially implemented (SemVer parser pending) |
+| 11 | [11-agency-agents-integration.md](11-agency-agents-integration.md) | Agency Agents content-pack integration, expert profiles, dynamic Composite Agent orchestration | Proposal |
 | A | [appendix.md](appendix.md) | OrchestrationDSL TOML schemas, Agent type comparison, model tier config, reference projects | Implemented |
 | T | [testing.md](testing.md) | Test suite overview, coverage, conventions, run instructions | Live document |
 
@@ -49,5 +50,6 @@ For new contributors, the recommended reading order is:
 8. **08-constraints-decisions.md** — Key constraints and trade-offs
 9. **10-cloud-local-architecture.md** — Local architecture deep-dive
 10. **09-implementation-plan.md** — Where we are and what's next
-11. **appendix.md** — Reference material
-12. **testing.md** — Testing conventions and coverage
+11. **11-agency-agents-integration.md** — How external expert profiles can power dynamic Composite Agents
+12. **appendix.md** — Reference material
+13. **testing.md** — Testing conventions and coverage
