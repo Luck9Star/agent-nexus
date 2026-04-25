@@ -1,0 +1,230 @@
+"""Fixed Integrator Agent — merges multi-expert artifacts into unified output."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Artifact:
+    """A single expert's output artifact."""
+
+    source_agent: str
+    artifact_type: str
+    sections: dict[str, object]
+
+
+@dataclass
+class ConflictItem:
+    """A detected conflict between two or more expert artifacts."""
+
+    field: str
+    description: str
+    agents: list[str]
+
+
+@dataclass
+class IntegratedArtifact:
+    """The unified output from merging multiple expert artifacts."""
+
+    artifact_type: str = "integrated_plan"
+    source_agents: list[str] = field(default_factory=list)
+    merged_sections: dict[str, object] = field(default_factory=dict)
+    conflicts: list[ConflictItem] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    open_questions: list[str] = field(default_factory=list)
+
+
+class Integrator:
+    """Fixed integrator that merges expert artifacts.
+
+    Follows doc §9.2 responsibilities:
+    1. Read all expert artifacts
+    2. Check output contract for missing content
+    3. Merge consistent conclusions
+    4. Flag conflicting viewpoints
+    5. Select final recommendation
+    6. Output unified plan
+    """
+
+    @staticmethod
+    def merge(
+        artifacts: list[Artifact],
+        expected_sections: list[str] | None = None,
+    ) -> IntegratedArtifact:
+        """Merge multiple expert artifacts into a single integrated output.
+
+        Parameters
+        ----------
+        artifacts:
+            List of expert artifacts to merge.
+        expected_sections:
+            Optional list of section names that should be present. Missing
+            sections are reported in ``open_questions``.
+
+        Raises:
+            ValueError: If artifacts is empty.
+        """
+        if not artifacts:
+            raise ValueError("Need at least one artifact to merge")
+
+        if len(artifacts) > 50:
+            raise ValueError("Cannot merge more than 50 artifacts at once")
+
+        source_agents = [a.source_agent for a in artifacts]
+
+        # Collect all sections, merging dicts and extending lists
+        merged_sections: dict[str, object] = {}
+        risks: list[str] = []
+
+        for artifact in artifacts:
+            if len(artifact.sections) > 100:
+                raise ValueError(
+                    f"Artifact from '{artifact.source_agent}' has too many sections "
+                    f"({len(artifact.sections)}); max 100"
+                )
+            for key, value in artifact.sections.items():
+                if key in merged_sections:
+                    existing = merged_sections[key]
+                    if isinstance(existing, list) and isinstance(value, list):
+                        merged_sections[key] = existing + value
+                    elif isinstance(existing, dict) and isinstance(value, dict):
+                        merged_sections[key] = {**existing, **value}
+                    # For scalars, last value wins (overwrites)
+                else:
+                    merged_sections[key] = value
+
+            # Extract risks from relevant sections
+            _extract_risks(artifact, risks)
+
+        # Detect conflicts (severity + recommendation viewpoints)
+        conflicts = _detect_conflicts(artifacts)
+
+        # Build final_recommendation
+        recommendations: list[str] = []
+        for artifact in artifacts:
+            rec = artifact.sections.get("recommendation")
+            if isinstance(rec, str):
+                recommendations.append(f"{artifact.source_agent}: {rec}")
+            elif isinstance(rec, list):
+                for r in rec:
+                    recommendations.append(f"{artifact.source_agent}: {r}")
+        merged_sections["final_recommendation"] = (
+            " | ".join(recommendations) if recommendations
+            else "No explicit recommendations from experts"
+        )
+
+        # Build decision summary
+        merged_sections["decision_summary"] = (
+            f"Integrated {len(artifacts)} expert artifacts from: "
+            + ", ".join(source_agents)
+        )
+
+        # Compute open_questions for missing expected sections
+        open_questions: list[str] = []
+        if expected_sections:
+            present_keys = set(merged_sections.keys())
+            for section in expected_sections:
+                if section not in present_keys:
+                    open_questions.append(
+                        f"Missing section: '{section}' — no expert provided this content"
+                    )
+
+        return IntegratedArtifact(
+            artifact_type="integrated_plan",
+            source_agents=source_agents,
+            merged_sections=merged_sections,
+            conflicts=conflicts,
+            risks=risks,
+            open_questions=open_questions,
+        )
+
+
+def _extract_risks(artifact: Artifact, risks: list[str]) -> None:
+    """Extract risk descriptions from an artifact's sections."""
+    for key, value in artifact.sections.items():
+        if "risk" in key.lower() or "severity" in key.lower():
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict) and "description" in item:
+                        risks.append(item["description"])
+                    elif isinstance(item, str):
+                        risks.append(item)
+            elif isinstance(value, str):
+                risks.append(value)
+
+
+def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
+    """Detect conflicting viewpoints across artifacts."""
+    conflicts: list[ConflictItem] = []
+    if len(artifacts) < 2:
+        return conflicts
+
+    # Check for severity conflicts between artifacts
+    severity_by_agent: dict[str, str] = {}
+    for artifact in artifacts:
+        for key, value in artifact.sections.items():
+            if key == "severity" and isinstance(value, str):
+                severity_by_agent[artifact.source_agent] = value
+
+    severity_values = set(severity_by_agent.values())
+    if len(severity_values) > 1:
+        conflicting_agents = list(severity_by_agent.keys())
+        conflicts.append(
+            ConflictItem(
+                field="severity",
+                description=f"Disagreement on severity: {dict(severity_by_agent)}",
+                agents=conflicting_agents,
+            )
+        )
+
+    # Check for risk description conflicts
+    risk_sets: dict[str, list[str]] = {}
+    for artifact in artifacts:
+        risks_found: list[str] = []
+        for key, value in artifact.sections.items():
+            if "risk" in key.lower() and isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict) and "description" in item:
+                        risks_found.append(item["description"])
+                    elif isinstance(item, str):
+                        risks_found.append(item)
+        if risks_found:
+            risk_sets[artifact.source_agent] = risks_found
+
+    # If agents have completely disjoint risk sets, that's a potential conflict
+    if len(risk_sets) >= 2:
+        all_risk_sets = [set(v) for v in risk_sets.values()]
+        # If the intersection of risk findings is empty but both have findings,
+        # agents may be overlooking each other's risks
+        intersection = all_risk_sets[0]
+        for s in all_risk_sets[1:]:
+            intersection = intersection & s
+
+        if len(intersection) == 0 and all(len(s) > 0 for s in all_risk_sets):
+            conflicting_agents = list(risk_sets.keys())
+            conflicts.append(
+                ConflictItem(
+                    field="risks",
+                    description="Experts have completely disjoint risk findings — potential blind spots",
+                    agents=conflicting_agents,
+                )
+            )
+
+    # Check for conflicting recommendations
+    rec_by_agent: dict[str, str] = {}
+    for artifact in artifacts:
+        rec = artifact.sections.get("recommendation")
+        if isinstance(rec, str):
+            rec_by_agent[artifact.source_agent] = rec
+    rec_values = set(rec_by_agent.values())
+    if len(rec_values) > 1:
+        conflicts.append(
+            ConflictItem(
+                field="recommendation",
+                description=f"Conflicting recommendations: {dict(rec_by_agent)}",
+                agents=list(rec_by_agent.keys()),
+            )
+        )
+
+    return conflicts

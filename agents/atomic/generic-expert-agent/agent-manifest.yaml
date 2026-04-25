@@ -1,0 +1,27 @@
+name: generic-expert-agent
+type: atomic
+description: Generic expert agent that loads Expert Profiles and produces structured artifacts
+version: 0.1.0
+capabilities:
+  - dynamic_profiling
+  - structured_output
+  - plan_only
+mcp:
+  tools:
+  - run
+permissions:
+  mode: plan
+  allowed_tools: []
+  denied_tools:
+  - bash
+  - file_write
+  - file_delete
+  - network
+model_config:
+  recommended: standard
+  fallback: economy
+runtime:
+  runner: nexus.generic-expert-agent
+  args:
+    - --profile
+    - "${EXPERT_PROFILE_PATH}"

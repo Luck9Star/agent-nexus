@@ -1,0 +1,104 @@
+# Agency Agents Allowlist
+# Pinned to a specific commit ref for reproducible imports.
+# Only agents listed here will be imported from the agency-agents repo.
+
+source:
+  repo: https://github.com/msitarzewski/agency-agents
+  ref: 29c2a88fad8ab6e340c7ee6b97d71ee1736920e0
+
+agents:
+  - source_path: engineering/engineering-software-architect.md
+    id: agency.software-architect
+    capabilities:
+      - system_design
+      - architecture_review
+      - tradeoff_analysis
+    output_contract: architecture_plan
+
+  - source_path: engineering/engineering-backend-architect.md
+    id: agency.backend-architect
+    capabilities:
+      - backend_design
+      - api_design
+      - database_design
+    output_contract: architecture_plan
+
+  - source_path: engineering/engineering-ai-engineer.md
+    id: agency.ai-engineer
+    capabilities:
+      - ai_engineering
+      - model_integration
+      - prompt_engineering
+    output_contract: technical_report
+
+  - source_path: engineering/engineering-code-reviewer.md
+    id: agency.code-reviewer
+    capabilities:
+      - code_review
+      - security_review
+      - maintainability_review
+    output_contract: review_report
+
+  - source_path: engineering/engineering-security-engineer.md
+    id: agency.security-engineer
+    capabilities:
+      - security_review
+      - threat_modeling
+      - vulnerability_assessment
+    output_contract: risk_report
+
+  - source_path: engineering/engineering-sre.md
+    id: agency.sre
+    capabilities:
+      - reliability_review
+      - incident_analysis
+      - observability
+    output_contract: reliability_report
+
+  - source_path: testing/testing-test-results-analyzer.md
+    id: agency.test-results-analyzer
+    capabilities:
+      - test_design
+      - test_analysis
+      - coverage_assessment
+    output_contract: test_analysis_report
+
+  - source_path: engineering/engineering-technical-writer.md
+    id: agency.technical-writer
+    capabilities:
+      - technical_writing
+      - documentation
+      - api_documentation
+    output_contract: documentation
+
+  - source_path: engineering/engineering-codebase-onboarding-engineer.md
+    id: agency.codebase-onboarding
+    capabilities:
+      - codebase_onboarding
+      - code_navigation
+      - architecture_mapping
+    output_contract: onboarding_guide
+
+  - source_path: testing/testing-tool-evaluator.md
+    id: agency.tool-evaluator
+    capabilities:
+      - tool_evaluation
+      - technology_assessment
+      - comparison_analysis
+    output_contract: evaluation_report
+
+  - source_path: specialized/lsp-index-engineer.md
+    id: agency.lsp-index-engineer
+    capabilities:
+      - lsp_indexing
+      - code_indexing
+      - semantic_analysis
+    output_contract: index_report
+
+  - source_path: specialized/agents-orchestrator.md
+    id: agency.agents-orchestrator
+    capabilities:
+      - orchestration
+      - task_decomposition
+      - agent_coordination
+    output_contract: orchestration_plan
