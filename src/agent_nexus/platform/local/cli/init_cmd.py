@@ -329,6 +329,7 @@ def _run_wizard(config_path: Path) -> None:
     }
     key_env, api_type, base_url, default_model = _preset_models[provider]
 
+    api_key: str | None = None
     if key_env:
         api_key = questionary.password(
             f"Enter {key_env} value (or leave blank to set via env later):",
@@ -338,9 +339,6 @@ def _run_wizard(config_path: Path) -> None:
         "Enter default model:",
         default=default_model,
     ).ask()
-
-    if key_env:
-        typer.echo(f"  Note: Add your API key to your shell profile: export {key_env}=...")
 
     try:
         raw = toml.loads(config_path.read_text(encoding="utf-8"))
@@ -352,6 +350,8 @@ def _run_wizard(config_path: Path) -> None:
         prov_section["base_url"] = base_url
     if key_env:
         prov_section["api_key_env"] = key_env
+    if api_key and key_env:
+        typer.echo(f"  Note: API key stored. Add to shell profile: export {key_env}={api_key[:4]}...")
     if api_type != "openai-compatible":
         prov_section["api"] = api_type
     config_path.write_text(toml.dumps(raw), encoding="utf-8")

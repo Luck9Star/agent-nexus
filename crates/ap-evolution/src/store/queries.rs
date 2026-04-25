@@ -1269,7 +1269,7 @@ mod tests {
             let mut s = make_skill();
             s.id = format!("s{i}");
             s.name = format!("skill-{i}");
-            s.lineage_generation = i as i64;
+            s.lineage_generation = i64::from(i);
             insert_skill(&conn, &s).unwrap();
             if i > 0 {
                 conn.execute(

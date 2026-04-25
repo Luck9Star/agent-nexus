@@ -37,7 +37,7 @@ fn validate_requirement(req: &str) -> Result<(), UvError> {
     // Reject URL-based requirements (package @ git+https://..., direct URLs).
     // Only check the specifier portion (before any `;`) — environment markers
     // after `;` may legitimately contain strings like URL examples.
-    let specifier = req.split_once(';').map(|(s, _)| s).unwrap_or(req);
+    let specifier = req.split_once(';').map_or(req, |(s, _)| s);
     let lower = specifier.to_ascii_lowercase();
     let url_schemes = ["http://", "https://", "git+", "ftp://", "file://"];
     if url_schemes.iter().any(|s| lower.contains(s)) {

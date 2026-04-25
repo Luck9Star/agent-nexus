@@ -245,8 +245,8 @@ class ExecutionAnalyzer:
                 evolution_type=EvolutionType.CAPTURED,
                 target_skill_ids=[],
                 direction=(
-                    f"Successful task with no skills used — "
-                    f"pattern may be worth capturing"
+                    "Successful task with no skills used — "
+                    "pattern may be worth capturing"
                 ),
                 confidence=0.6,
             ))

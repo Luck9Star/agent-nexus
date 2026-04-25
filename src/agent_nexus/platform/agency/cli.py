@@ -14,6 +14,8 @@ from .registry import ExpertRegistry
 from .selector import SelectionRequest, SpecialistSelector
 from .planner import DynamicCompositePlanner, SubtaskDef
 
+_SCHEMA_PATH = Path(__file__).resolve().parents[4] / "schemas" / "expert-profile.schema.json"
+
 
 @click.group()
 def cli() -> None:
@@ -229,6 +231,17 @@ def check_profiles(output_dir: str) -> None:
 
     errors: list[str] = []
     checked = 0
+
+    # Load JSON schema for validation if available
+    schema = None
+    try:
+        import jsonschema  # type: ignore[import-untyped]
+
+        if _SCHEMA_PATH.is_file():
+            schema = json.loads(_SCHEMA_PATH.read_text())
+    except ImportError:
+        pass
+
     for jf in json_files:
         try:
             with jf.open() as f:
@@ -239,7 +252,15 @@ def check_profiles(output_dir: str) -> None:
 
         checked += 1
 
-        # Validate required top-level keys
+        # Schema-based validation (preferred)
+        if schema is not None:
+            try:
+                jsonschema.validate(profile, schema)  # type: ignore[name-defined]
+            except jsonschema.ValidationError as exc:  # type: ignore[name-defined]
+                errors.append(f"{jf.name}: schema validation failed — {exc.message}")
+            continue
+
+        # Fallback: manual key validation (when jsonschema not installed)
         required_keys = {"id", "name", "capabilities", "permissions", "output_contract"}
         missing = required_keys - set(profile.keys())
         if missing:

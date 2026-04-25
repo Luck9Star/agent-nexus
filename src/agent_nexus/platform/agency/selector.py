@@ -42,7 +42,7 @@ def _optional_overlap(agent_caps: set[str], optional_caps: set[str]) -> float:
 def _jaccard_similarity(set_a: set[str], set_b: set[str]) -> float:
     """Jaccard similarity between two sets (0.0 .. 1.0)."""
     if not set_a and not set_b:
-        return 1.0
+        return 0.0
     union = set_a | set_b
     if not union:
         return 0.0

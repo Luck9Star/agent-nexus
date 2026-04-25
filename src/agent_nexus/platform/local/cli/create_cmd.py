@@ -512,7 +512,7 @@ def create_agent(
     typer.echo(f"Created agent: {agent_dir}")
     typer.echo(f"  Tools: {', '.join(tool_list)}")
     typer.echo(f"  Files: {len(list(agent_dir.rglob('*')))} generated")
-    typer.echo(f"\nNext steps:")
+    typer.echo("\nNext steps:")
     typer.echo(f"  1. Edit {agent_dir / _agent_name_to_package(name) / 'agent.py'} — implement logic")
     typer.echo(f"  2. Edit {agent_dir / 'SKILL.md'} — document capabilities")
     typer.echo(f"  3. Test:  cd {agent_dir} && uv run pytest")

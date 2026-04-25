@@ -188,7 +188,7 @@ impl GitInstaller {
                 .unwrap_or(url)
         } else if url.contains(':') && !url.contains('/') {
             // SCP-style: git@host:org/repo
-            url.rsplit_once(':').map(|(_, p)| p).unwrap_or(url)
+            url.rsplit_once(':').map_or(url, |(_, p)| p)
         } else {
             url
         };
@@ -596,7 +596,7 @@ mod tests {
 
     // Network tests — mark with #[ignore] so they don't run in CI
     #[test]
-    #[ignore]
+    #[ignore = "requires network access to github.com"]
     fn clone_remote_repo() {
         let dest_base = tempfile::tempdir().unwrap();
         let installer = GitInstaller::new(dest_base.path().to_path_buf());

@@ -242,7 +242,7 @@ def generate_toml(dag: CompositionDAG) -> str:
       blocked_by = ["..."]
     """
     # Validate all string fields for TOML-special characters
-    _INVALID_CHARS = {'"', "#", "\n", "\t"}
+    _INVALID_CHARS = {'"', "#", "\n", "\t", "\r", "\\"}
     for ch in _INVALID_CHARS:
         if ch in dag.name:
             raise ValueError(f"DAG name contains invalid character: {ch!r}")
@@ -253,6 +253,12 @@ def generate_toml(dag: CompositionDAG) -> str:
                 if ch in value:
                     raise ValueError(
                         f"Task {field_name} '{value}' contains invalid character: {ch!r}"
+                    )
+        for b in task.blocked_by:
+            for ch in _INVALID_CHARS:
+                if ch in b:
+                    raise ValueError(
+                        f"Task blocked_by '{b}' contains invalid character: {ch!r}"
                     )
 
     lines: list[str] = []

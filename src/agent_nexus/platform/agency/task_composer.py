@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+import re
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
+from .executor import ProfileBasedExecutor
 from .integrator import Artifact, IntegratedArtifact, Integrator
 from .planner import CompositionDAG, DynamicCompositePlanner, SubtaskDef
 from .qa_gate import QAGate, QAGateInput
@@ -19,6 +23,7 @@ class TaskComposerInput:
     task: str
     mode: str = "plan"
     max_parallel: int = 3
+    timeout_seconds: float | None = None
 
 
 @dataclass
@@ -39,7 +44,7 @@ class ExpertExecutor(Protocol):
 
 
 def _default_expert_executor(profile_id: str, task: str) -> Artifact:
-    """Default no-op executor — returns a stub artifact."""
+    """Fallback no-op executor -- returns a stub artifact."""
     return Artifact(
         source_agent=profile_id,
         artifact_type="stub",
@@ -66,7 +71,7 @@ def _infer_capabilities(task: str) -> list[str]:
     task_lower = task.lower()
     matched: list[str] = []
     for keyword, caps in _TASK_CAPABILITY_MAP.items():
-        if keyword in task_lower:
+        if re.search(rf'\b{re.escape(keyword)}\b', task_lower):
             matched.extend(caps)
     # Default fallback: broad capabilities
     if not matched:
@@ -97,7 +102,7 @@ class TaskComposer:
         expert_executor: ExpertExecutor | None = None,
     ) -> TaskComposerResult:
         """Execute the full pipeline."""
-        executor = expert_executor or _default_expert_executor
+        executor = expert_executor or ProfileBasedExecutor(self.registry)
 
         # Step 1: Infer capabilities
         required_caps = _infer_capabilities(input.task)
@@ -146,8 +151,17 @@ class TaskComposer:
 
         # Simple topological execution — tasks with no blocked_by first
         executed: set[str] = set()
+        deadline = (
+            time.monotonic() + input.timeout_seconds
+            if input.timeout_seconds is not None
+            else None
+        )
         for _ in range(len(dag.tasks)):  # iterate enough times
             for task in dag.tasks:
+                if deadline is not None and time.monotonic() > deadline:
+                    raise TimeoutError(
+                        f"TaskComposer pipeline timed out after {input.timeout_seconds}s"
+                    )
                 if task.id in executed or task.id not in specialist_ids:
                     continue
                 if all(dep in executed for dep in task.blocked_by):

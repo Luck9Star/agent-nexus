@@ -26,7 +26,7 @@ pub struct DetachedProcess {
 impl DetachedProcess {
     /// Delegates to [`Child::try_wait`].
     pub fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
-        self.child.as_mut().map(|c| c.try_wait()).unwrap_or(Ok(None))
+        self.child.as_mut().map_or(Ok(None), Child::try_wait)
     }
 
     /// Delegates to [`Child::kill`].
@@ -40,7 +40,7 @@ impl DetachedProcess {
 
     /// Returns the OS-assigned process ID, if available.
     pub fn id(&self) -> Option<u32> {
-        self.child.as_ref().and_then(|c| c.id())
+        self.child.as_ref().and_then(Child::id)
     }
 
     /// Consume this handle **without** killing the child process.

@@ -208,7 +208,7 @@ pub fn run_update(agent: Option<&str>, all: bool, output: &OutputFormatter) -> R
             .map(|lf| lf.agents.into_keys().collect())
             .unwrap_or_default()
     } else {
-        vec![agent.expect("clap requires agent name when --all is not set").to_string()]
+        vec![agent.ok_or_else(|| anyhow::anyhow!("Agent name required when --all is not set"))?.to_string()]
     };
 
     if agents_to_update.is_empty() {

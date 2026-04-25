@@ -70,6 +70,14 @@
           "minLength": 1,
           "description": "Short description of the expert's focus area"
         },
+        "body": {
+          "type": "string",
+          "description": "Full expert body/prompt content from the source markdown"
+        },
+        "vibe": {
+          "type": "string",
+          "description": "Expert's communication style and tone guidance"
+        },
         "source_md_path": {
           "type": "string",
           "description": "Relative path to the original markdown source"

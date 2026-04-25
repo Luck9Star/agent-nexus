@@ -63,4 +63,28 @@ def validate_allowlist_entry(entry: dict) -> list[str]:
         if not isinstance(sp, str) or not sp.endswith(".md"):
             errors.append("'source_path' must be a string ending with '.md'")
 
+    if "tools" in entry:
+        tools = entry["tools"]
+        if not isinstance(tools, dict):
+            errors.append("'tools' must be a mapping")
+        else:
+            allowed = tools.get("allowed")
+            denied = tools.get("denied")
+            if allowed is not None:
+                if not isinstance(allowed, list):
+                    errors.append("'tools.allowed' must be a list")
+                elif not all(isinstance(t, str) for t in allowed):
+                    errors.append("'tools.allowed' must be a list of strings")
+            if denied is not None:
+                if not isinstance(denied, list):
+                    errors.append("'tools.denied' must be a list")
+                elif not all(isinstance(t, str) for t in denied):
+                    errors.append("'tools.denied' must be a list of strings")
+            if isinstance(allowed, list) and isinstance(denied, list):
+                overlap = set(allowed) & set(denied)
+                if overlap:
+                    errors.append(
+                        f"tools cannot be in both allowed and denied: {sorted(overlap)}"
+                    )
+
     return errors

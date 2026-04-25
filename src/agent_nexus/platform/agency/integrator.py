@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 
@@ -90,7 +91,17 @@ class Integrator:
                         merged_sections[key] = existing + value
                     elif isinstance(existing, dict) and isinstance(value, dict):
                         merged_sections[key] = {**existing, **value}
-                    # For scalars, last value wins (overwrites)
+                    else:
+                        logging.warning(
+                            "Type mismatch for section '%s': existing=%s, new=%s; "
+                            "converting to list",
+                            key, type(existing).__name__, type(value).__name__,
+                        )
+                        converted: list[object] = (
+                            existing if isinstance(existing, list) else [existing]
+                        )
+                        converted.append(value)
+                        merged_sections[key] = converted
                 else:
                     merged_sections[key] = value
 
@@ -193,6 +204,7 @@ def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
             risk_sets[artifact.source_agent] = risks_found
 
     # If agents have completely disjoint risk sets, that's a potential conflict
+    # only when agents share overlapping section keys (proxy for shared capabilities)
     if len(risk_sets) >= 2:
         all_risk_sets = [set(v) for v in risk_sets.values()]
         # If the intersection of risk findings is empty but both have findings,
@@ -202,14 +214,27 @@ def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
             intersection = intersection & s
 
         if len(intersection) == 0 and all(len(s) > 0 for s in all_risk_sets):
-            conflicting_agents = list(risk_sets.keys())
-            conflicts.append(
-                ConflictItem(
-                    field="risks",
-                    description="Experts have completely disjoint risk findings — potential blind spots",
-                    agents=conflicting_agents,
-                )
-            )
+            # Only flag when agents share overlapping sections (related work)
+            agent_section_keys: dict[str, set[str]] = {}
+            for artifact in artifacts:
+                if artifact.source_agent in risk_sets:
+                    agent_section_keys[artifact.source_agent] = set(
+                        artifact.sections.keys()
+                    )
+            section_sets = list(agent_section_keys.values())
+            if section_sets:
+                shared = section_sets[0]
+                for s in section_sets[1:]:
+                    shared = shared & s
+                if shared:
+                    conflicting_agents = list(risk_sets.keys())
+                    conflicts.append(
+                        ConflictItem(
+                            field="risks",
+                            description="Experts have completely disjoint risk findings — potential blind spots",
+                            agents=conflicting_agents,
+                        )
+                    )
 
     # Check for conflicting recommendations
     rec_by_agent: dict[str, str] = {}

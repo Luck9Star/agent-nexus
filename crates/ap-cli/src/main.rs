@@ -449,14 +449,11 @@ fn run(cli: Cli, output: &OutputFormatter) -> anyhow::Result<()> {
                 RuntimeAction::Restart { agent } => {
                     commands::runtime::run_restart(&agent, output)?;
                 }
-                RuntimeAction::Status => {
+                RuntimeAction::Status | RuntimeAction::Ps => {
                     commands::runtime::run_status(output)?;
                 }
                 RuntimeAction::Logs { agent, lines, follow } => {
                     commands::runtime::run_logs(&agent, lines, follow, output)?;
-                }
-                RuntimeAction::Ps => {
-                    commands::runtime::run_status(output)?;
                 }
                 RuntimeAction::Exec { agent, args } => {
                     commands::runtime::run_exec(&agent, &args, output)?;

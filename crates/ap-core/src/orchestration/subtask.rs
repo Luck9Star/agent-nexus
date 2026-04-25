@@ -120,7 +120,7 @@ impl SubtaskController {
                 Err(e) => {
                     last_err = e.to_string();
                     if attempt < self.config.max_retries {
-                        let backoff = Duration::from_millis(100 * (attempt as u64 + 1));
+                        let backoff = Duration::from_millis(100 * (u64::from(attempt) + 1));
                         tokio::time::sleep(backoff).await;
                     }
                 }
@@ -154,7 +154,9 @@ impl SubtaskController {
             let sem = semaphore.clone();
             let timeout = Duration::from_secs(self.config.timeout_seconds);
             let handle = tokio::spawn(async move {
-                let _permit = sem.acquire().await.expect("semaphore closed");
+                let _permit = sem.acquire().await.map_err(|_| SubtaskError::Panicked {
+                    message: "semaphore closed".into(),
+                })?;
                 tokio::time::timeout(timeout, factory())
                     .await
                     .map_err(|_| SubtaskError::Timeout(timeout))?

@@ -98,8 +98,7 @@ impl AgentToPlatform {
         }
         self.status
             .as_ref()
-            .map(|s| s.to_lowercase() == "completed")
-            .unwrap_or(false)
+            .is_some_and(|s| s.to_lowercase() == "completed")
     }
 }
 

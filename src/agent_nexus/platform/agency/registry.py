@@ -1,5 +1,6 @@
 """Local expert registry with id and capability-tag indexing."""
 
+import logging
 from typing import Any
 
 
@@ -12,6 +13,13 @@ class ExpertRegistry:
 
     def add(self, profile_id: str, profile: dict[str, Any], capabilities: list[str]) -> None:
         """Register a profile indexed by id and each capability tag."""
+        if profile_id in self._by_id:
+            # Clean up old capability mappings before overwriting
+            for cap_list in self._by_capability.values():
+                if profile_id in cap_list:
+                    cap_list.remove(profile_id)
+            logging.warning("Overwriting existing profile: %s", profile_id)
+
         self._by_id[profile_id] = profile
 
         for cap in capabilities:

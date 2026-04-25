@@ -85,9 +85,12 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
         lockfile_mgr
             .load()
             .map(|lf| lf.agents.into_keys().collect())
-            .unwrap_or_default()
+            .unwrap_or_else(|e| {
+                output.info(&format!("Note: could not read lockfile: {e}"));
+                Vec::new()
+            })
     } else {
-        let name = agent.expect("clap requires agent name when --all is not set");
+        let name = agent.ok_or_else(|| anyhow::anyhow!("Agent name required when --all is not set"))?;
         if lockfile_mgr.get(name)?.is_none() {
             anyhow::bail!("Agent '{name}' is not installed.");
         }
@@ -127,7 +130,7 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
             // Check if the PID is actually alive — stale PID files from unclean
             // shutdown should not prevent restarts.
             let pid_str = std::fs::read_to_string(&pid_file).unwrap_or_default();
-            let is_stale = pid_str.split(':').next()
+            let is_alive = pid_str.split(':').next()
                 .and_then(|p| p.trim().parse::<i32>().ok())
                 .map(|pid| {
                     // Signal 0 doesn't kill the process — just checks existence.
@@ -136,17 +139,17 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
                 })
                 .unwrap_or(false);
 
-            if is_stale {
+            if is_alive {
+                // Process is still running — skip to avoid duplicate start.
+                output.info(&format!("Agent '{agent_name}' is already running (PID: {pid_str})."));
+                continue;
+            } else {
+                // Process is dead — clean stale PID/port files and restart.
                 let port_file = root.join(".agents").join(format!("{agent_name}.port"));
                 let _ = std::fs::remove_file(&pid_file);
                 let _ = std::fs::remove_file(&port_file);
                 output.info(&format!("Cleaned stale PID file for '{agent_name}' (process no longer running)."));
                 // Continue to restart the agent below.
-            } else {
-                // PID file exists and we couldn't determine staleness (parse error)
-                // or the process is still alive. Skip to be safe.
-                output.info(&format!("Agent '{agent_name}' may already be running (PID: {pid_str})."));
-                continue;
             }
         }
 
@@ -502,7 +505,7 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
             println!("{}", "-".repeat(60));
             for (name, pid, alive, port) in &running {
                 let status = if *alive { "running" } else { "dead" };
-                let port_str = port.map(|p| p.to_string()).unwrap_or("-".to_string());
+                let port_str = port.map_or("-".to_string(), |p| p.to_string());
                 println!("{:<25} {:<10} {:<10} {status}", name, pid, port_str);
             }
         }

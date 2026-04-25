@@ -299,7 +299,7 @@ sources:
         let bad_entry = SourceEntry {
             name: "bad".to_string(),
             source_type: "git".to_string(),
-            url: "".to_string(),
+            url: String::new(),
             branch: "main".to_string(),
         };
         let result = mgr.add(bad_entry);

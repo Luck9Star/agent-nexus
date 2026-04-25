@@ -122,7 +122,7 @@ impl PlatformRouter {
 
         // Overall timeout: phases × per-phase timeout. Prevents unbounded hangs.
         let composite_timeout = std::time::Duration::from_secs(
-            self.subtask.config().timeout_seconds * total as u64,
+            self.subtask.config().timeout_seconds * u64::from(total),
         );
 
         let result = tokio::time::timeout(composite_timeout, async {
@@ -296,6 +296,8 @@ impl PlatformRouter {
                 .collect()
         };
 
+        // Timeout seconds are bounded (< 1M in practice), so u64→f64 precision loss is impossible.
+        #[allow(clippy::cast_precision_loss)]
         let timeout_secs = self.subtask.config().timeout_seconds as f64;
         let pm = self.pm.clone(); // Arc clone — cheap, each factory gets its own Arc
 
@@ -392,6 +394,8 @@ impl PlatformRouter {
             .send_chat(message, Some(conversation_id))
             .await?;
 
+        // Timeout seconds are bounded (< 1M in practice), so u64→f64 precision loss is impossible.
+        #[allow(clippy::cast_precision_loss)]
         let timeout_secs = self.subtask.config().timeout_seconds as f64;
         let result = proto.receive_result(Some(timeout_secs)).await?;
 

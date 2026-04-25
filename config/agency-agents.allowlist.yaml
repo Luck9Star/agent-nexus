@@ -14,6 +14,9 @@ agents:
       - architecture_review
       - tradeoff_analysis
     output_contract: architecture_plan
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
 
   - source_path: engineering/engineering-backend-architect.md
     id: agency.backend-architect
@@ -22,6 +25,9 @@ agents:
       - api_design
       - database_design
     output_contract: architecture_plan
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
 
   - source_path: engineering/engineering-ai-engineer.md
     id: agency.ai-engineer
@@ -30,6 +36,10 @@ agents:
       - model_integration
       - prompt_engineering
     output_contract: technical_report
+    tools:
+      # network: researches models online
+      allowed: [file_read, network]
+      denied: [bash, file_write]
 
   - source_path: engineering/engineering-code-reviewer.md
     id: agency.code-reviewer
@@ -38,6 +48,9 @@ agents:
       - security_review
       - maintainability_review
     output_contract: review_report
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
 
   - source_path: engineering/engineering-security-engineer.md
     id: agency.security-engineer
@@ -46,6 +59,10 @@ agents:
       - threat_modeling
       - vulnerability_assessment
     output_contract: risk_report
+    tools:
+      # network: CVE lookups
+      allowed: [file_read, network]
+      denied: [bash, file_write]
 
   - source_path: engineering/engineering-sre.md
     id: agency.sre
@@ -54,6 +71,9 @@ agents:
       - incident_analysis
       - observability
     output_contract: reliability_report
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
 
   - source_path: testing/testing-test-results-analyzer.md
     id: agency.test-results-analyzer
@@ -62,6 +82,9 @@ agents:
       - test_analysis
       - coverage_assessment
     output_contract: test_analysis_report
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
 
   - source_path: engineering/engineering-technical-writer.md
     id: agency.technical-writer
@@ -70,6 +93,10 @@ agents:
       - documentation
       - api_documentation
     output_contract: documentation
+    tools:
+      # file_write: writes documentation output
+      allowed: [file_read, file_write]
+      denied: [bash, network]
 
   - source_path: engineering/engineering-codebase-onboarding-engineer.md
     id: agency.codebase-onboarding
@@ -78,6 +105,9 @@ agents:
       - code_navigation
       - architecture_mapping
     output_contract: onboarding_guide
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
 
   - source_path: testing/testing-tool-evaluator.md
     id: agency.tool-evaluator
@@ -86,6 +116,10 @@ agents:
       - technology_assessment
       - comparison_analysis
     output_contract: evaluation_report
+    tools:
+      # network: researches tools online
+      allowed: [file_read, network]
+      denied: [bash, file_write]
 
   - source_path: specialized/lsp-index-engineer.md
     id: agency.lsp-index-engineer
@@ -94,6 +128,9 @@ agents:
       - code_indexing
       - semantic_analysis
     output_contract: index_report
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
 
   - source_path: specialized/agents-orchestrator.md
     id: agency.agents-orchestrator
@@ -102,3 +139,7 @@ agents:
       - task_decomposition
       - agent_coordination
     output_contract: orchestration_plan
+    # Pure planning, no file access needed
+    tools:
+      allowed: []
+      denied: [bash, file_write, network]

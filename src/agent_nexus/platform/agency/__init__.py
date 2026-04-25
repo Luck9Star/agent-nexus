@@ -12,6 +12,7 @@ from .planner import (
     SubtaskDef,
     generate_toml,
 )
+from .executor import ProfileBasedExecutor
 from .integrator import Artifact, ConflictItem, IntegratedArtifact, Integrator
 from .qa_gate import QAGate, QAGateInput, QAGateResult
 from .task_composer import TaskComposer, TaskComposerInput, TaskComposerResult
@@ -30,6 +31,7 @@ __all__ = [
     "PlannerInput",
     "SubtaskDef",
     "generate_toml",
+    "ProfileBasedExecutor",
     "Artifact",
     "ConflictItem",
     "IntegratedArtifact",
