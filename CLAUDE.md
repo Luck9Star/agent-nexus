@@ -14,13 +14,13 @@ Agent Nexus is an MCP-native Agent Platform with self-built orchestration. It pr
 
 ```bash
 # Python platform
-hatch env create              # Create dev environment
-hatch run test                # Run all Python tests
-pytest tests/ -m unit         # Unit tests only
-pytest tests/ -m integration  # Integration tests only
-pytest tests/ -m e2e          # E2E tests only
-ruff check src/ agents/       # Lint
-ruff format src/ agents/      # Format
+uv sync                        # Install dependencies
+uv run pytest tests/           # Run all Python tests
+uv run pytest tests/ -m unit   # Unit tests only
+uv run pytest tests/ -m integration  # Integration tests only
+uv run pytest tests/ -m e2e    # E2E tests only
+uv run ruff check src/ agents/ # Lint
+uv run ruff format src/ agents/ # Format
 
 # Rust platform (workspace at repo root)
 cargo build                   # Build all 6 crates
@@ -80,7 +80,7 @@ Four-layer architecture (top to bottom):
 
 ```
 agent-nexus/
-├── src/agent_nexus/          # Platform core (editable install via hatch)
+├── src/agent_nexus/          # Platform core (editable install via uv)
 │   ├── platform/
 │   │   ├── router/           # Platform Router (4-Phase Workflow)
 │   │   ├── orchestration/    # TaskGraph, ProcessManager, IPC, OrchestrationDSL

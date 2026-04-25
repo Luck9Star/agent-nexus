@@ -16,6 +16,12 @@ from .executor import ProfileBasedExecutor
 from .integrator import Artifact, ConflictItem, IntegratedArtifact, Integrator
 from .qa_gate import QAGate, QAGateInput, QAGateResult
 from .task_composer import TaskComposer, TaskComposerInput, TaskComposerResult
+from .dag_dispatcher import (
+    DAGDispatcher,
+    DispatchResult,
+    dag_task_to_task_item,
+    load_dag_into_graph,
+)
 
 __all__ = [
     "AgencyImporter",
@@ -42,4 +48,8 @@ __all__ = [
     "TaskComposer",
     "TaskComposerInput",
     "TaskComposerResult",
+    "DAGDispatcher",
+    "DispatchResult",
+    "dag_task_to_task_item",
+    "load_dag_into_graph",
 ]

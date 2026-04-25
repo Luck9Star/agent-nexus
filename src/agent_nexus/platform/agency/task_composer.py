@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from .executor import ProfileBasedExecutor
 from .integrator import Artifact, IntegratedArtifact, Integrator
@@ -14,6 +13,9 @@ from .planner import CompositionDAG, DynamicCompositePlanner, SubtaskDef
 from .qa_gate import QAGate, QAGateInput
 from .registry import ExpertRegistry
 from .selector import SelectionRequest, SelectionResult, SpecialistSelector
+
+if TYPE_CHECKING:
+    from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
 
 @dataclass
@@ -41,15 +43,6 @@ class ExpertExecutor(Protocol):
     """Protocol for expert execution — pluggable for testing or real dispatch."""
 
     def __call__(self, profile_id: str, task: str) -> Artifact: ...
-
-
-def _default_expert_executor(profile_id: str, task: str) -> Artifact:
-    """Fallback no-op executor -- returns a stub artifact."""
-    return Artifact(
-        source_agent=profile_id,
-        artifact_type="stub",
-        sections={"context": task},
-    )
 
 
 # Task type → required capabilities mapping
@@ -100,8 +93,24 @@ class TaskComposer:
         self,
         input: TaskComposerInput,
         expert_executor: ExpertExecutor | None = None,
+        task_graph: TaskGraph | None = None,
     ) -> TaskComposerResult:
-        """Execute the full pipeline."""
+        """Execute the full pipeline.
+
+        Parameters
+        ----------
+        input:
+            Task description, mode, parallelism, and timeout.
+        expert_executor:
+            Override for the default executor. When *task_graph* is provided
+            and this is None, ProfileBasedExecutor is used for in-process
+            execution with TaskGraph state tracking.
+        task_graph:
+            When provided, the DAG is loaded into this TaskGraph and executed
+            through DAGDispatcher (proper dependency tracking, state
+            transitions, failure propagation). When None, the legacy
+            in-process loop is used (backward compatible).
+        """
         executor = expert_executor or ProfileBasedExecutor(self.registry)
 
         # Step 1: Infer capabilities
@@ -145,29 +154,49 @@ class TaskComposer:
             max_parallel=input.max_parallel,
         )
 
-        # Step 4: Dispatch experts (execute only specialist tasks, in topological order)
+        # Step 4: Dispatch experts
         artifacts: list[Artifact] = []
-        specialist_ids = {t.id for t in dag.specialist_tasks}
 
-        # Simple topological execution — tasks with no blocked_by first
-        executed: set[str] = set()
-        deadline = (
-            time.monotonic() + input.timeout_seconds
-            if input.timeout_seconds is not None
-            else None
-        )
-        for _ in range(len(dag.tasks)):  # iterate enough times
-            for task in dag.tasks:
-                if deadline is not None and time.monotonic() > deadline:
-                    raise TimeoutError(
-                        f"TaskComposer pipeline timed out after {input.timeout_seconds}s"
-                    )
-                if task.id in executed or task.id not in specialist_ids:
-                    continue
-                if all(dep in executed for dep in task.blocked_by):
-                    artifact = executor(task.agent, input.task)
-                    artifacts.append(artifact)
-                    executed.add(task.id)
+        if task_graph is not None:
+            # Dispatch through TaskGraph-backed DAGDispatcher (G4 bridge)
+            from .dag_dispatcher import DAGDispatcher
+
+            dispatcher = DAGDispatcher(
+                graph=task_graph,
+                executor=executor,
+                max_parallel=input.max_parallel,
+                timeout_seconds=input.timeout_seconds,
+            )
+            dispatch_result = dispatcher.dispatch(dag, input.task)
+
+            if dispatch_result.timed_out:
+                raise TimeoutError(
+                    f"TaskComposer pipeline timed out after {input.timeout_seconds}s"
+                )
+
+            # Preserve ordering: artifacts in the order they completed
+            artifacts = list(dispatch_result.artifacts.values())
+        else:
+            # Legacy in-process topological loop (backward compatible)
+            specialist_ids = {t.id for t in dag.specialist_tasks}
+            executed: set[str] = set()
+            deadline = (
+                time.monotonic() + input.timeout_seconds
+                if input.timeout_seconds is not None
+                else None
+            )
+            for _ in range(len(dag.tasks)):
+                for task in dag.tasks:
+                    if deadline is not None and time.monotonic() > deadline:
+                        raise TimeoutError(
+                            f"TaskComposer pipeline timed out after {input.timeout_seconds}s"
+                        )
+                    if task.id in executed or task.id not in specialist_ids:
+                        continue
+                    if all(dep in executed for dep in task.blocked_by):
+                        artifact = executor(task.agent, input.task)
+                        artifacts.append(artifact)
+                        executed.add(task.id)
 
         if not artifacts:
             return TaskComposerResult(
