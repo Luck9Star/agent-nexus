@@ -663,10 +663,13 @@ fn evolution_promote_invalid_skill() {
 
 #[test]
 fn runtime_exec_with_args() {
-    // Without a lockfile, runtime exec should fail with "No lockfile found".
-    // The agent name should appear in the error output.
+    // Without a lockfile or with missing agent, runtime exec should fail.
+    // Use a temp dir for clean isolation.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
     let output = cli()
         .args(["runtime", "exec", "test-agent", "arg1", "arg2"])
+        .current_dir(dir.path())
         .assert()
         .failure();
 
@@ -777,13 +780,13 @@ fn install_with_version_flag() {
 
 #[test]
 fn run_with_model_flag() {
-    // The run command always fails with PlatformRouter message (placeholder),
-    // but the --mode flag should be accepted by clap parsing.
+    // The run command fails gracefully when agent is not installed.
+    // The --mode flag should be accepted by clap parsing.
     cli()
         .args(["run", "test-agent", "--mode", "mcp", "some", "task"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("PlatformRouter"));
+        .stderr(predicate::str::contains("lockfile").or(predicate::str::contains("not installed")));
 }
 
 // ══════════════════════════════════════════════════════════════════════════

@@ -94,7 +94,26 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
         vec![name.to_string()]
     };
 
+    // Assign SSE ports from a base range. Scan existing .port files to find
+    // the next available port. This ensures `--all` doesn't collide.
+    let base_port: u16 = 9100;
+    let agents_dir = root.join(".agents");
+    let used_ports: std::collections::HashSet<u16> = std::fs::read_dir(&agents_dir)
+        .ok()
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.file_name().to_string_lossy().ends_with(".port")
+                })
+                .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+                .filter_map(|s| s.trim().parse::<u16>().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+
     let mut reaper_handles: Vec<std::thread::JoinHandle<()>> = Vec::new();
+    let mut next_port = base_port;
 
     for agent_name in &agents {
         let install_dir = root.join(".agents").join(agent_name);
@@ -120,39 +139,61 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
 
         // Resolve python: prefer venv python if available, otherwise system python3
         let python = resolve_venv_python(&install_dir).unwrap_or_else(resolve_python);
-        let mut child = if let Some(ref ep) = entrypoint {
-            std::process::Command::new(&python)
-                .arg(ep)
-                .current_dir(&install_dir)
-                .env("AGENT_NEXUS_ROOT", &root)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .with_context(|| format!("Failed to start agent '{agent_name}'"))?
+
+        // Build command args from entrypoint or module fallback.
+        let cmd_args: Vec<String> = if let Some(ref ep) = entrypoint {
+            vec![ep.to_string_lossy().to_string()]
         } else {
-            // Fallback: python -m <module_name>
-            std::process::Command::new(&python)
-                .args(["-m", &agent_name.replace('-', "_")])
-                .current_dir(&install_dir)
-                .env("AGENT_NEXUS_ROOT", &root)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .with_context(|| format!("Failed to start agent '{agent_name}'"))?
+            vec!["-m".to_string(), agent_name.replace('-', "_")]
         };
 
+        // Assign a port for SSE transport (skip ports already in use).
+        while used_ports.contains(&next_port) {
+            next_port += 1;
+        }
+        let agent_port = next_port;
+        next_port += 1;
+
+        // Redirect stdout/stderr to a log file (readable via `runtime logs`).
+        let log_path = install_dir.join("agent.log");
+        let log_file = std::fs::File::create(&log_path)
+            .with_context(|| format!("Failed to create log file at {}", log_path.display()))?;
+        let log_stdout = log_file.try_clone()
+            .context("Failed to clone log file handle for stdout")?;
+        let log_stderr = log_file.try_clone()
+            .context("Failed to clone log file handle for stderr")?;
+
+        // Daemon mode: use SSE transport so the agent runs as an HTTP server.
+        // Stdio transport doesn't work for daemons because the CLI exits and
+        // drops stdin → agent sees EOF → exits. SSE lets external clients
+        // (Platform Router, MCP clients) connect via HTTP.
+        let null_stdin = std::fs::File::open("/dev/null")
+            .context("Failed to open /dev/null for stdin")?;
+
+        let mut child = std::process::Command::new(&python)
+            .args(&cmd_args)
+            .current_dir(&install_dir)
+            .env("AGENT_NEXUS_ROOT", &root)
+            .env("MCP_TRANSPORT", "sse")
+            .env("MCP_PORT", agent_port.to_string())
+            .env("MCP_HOST", "127.0.0.1")
+            .stdin(std::process::Stdio::from(null_stdin))
+            .stdout(std::process::Stdio::from(log_stdout))
+            .stderr(std::process::Stdio::from(log_stderr))
+            .spawn()
+            .with_context(|| format!("Failed to start agent '{agent_name}'"))?;
+
         let pid = child.id();
-        // Store child start time to detect PID recycling
         let start_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        // Store both PID and start_time as "pid:start_time" for PID recycling protection
         std::fs::write(&pid_file, format!("{pid}:{start_time}"))?;
-        // Close stdio handles to release FDs — child process keeps running independently
-        drop(child.stdin.take());
-        drop(child.stdout.take());
-        drop(child.stderr.take());
+
+        // Store the SSE port for this agent.
+        let port_file = root.join(".agents").join(format!("{agent_name}.port"));
+        std::fs::write(&port_file, agent_port.to_string())?;
+
         // Spawn a background reaper thread to call wait() so the OS can
         // reap the child when it exits — prevents zombie processes.
         let agent_label = agent_name.clone();
@@ -162,7 +203,9 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
             }
         });
         reaper_handles.push(handle);
-        output.success(&format!("Agent '{agent_name}' started (PID: {pid})."));
+        output.success(&format!(
+            "Agent '{agent_name}' started (PID: {pid}, SSE: http://127.0.0.1:{agent_port}/sse)."
+        ));
     }
 
     // Check reaper threads for errors (non-blocking; threads may still be running)
@@ -227,15 +270,12 @@ pub fn run_stop(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Res
                 if signal_ret == 0 {
                     // Process exists — check start_time if available for PID recycling protection
                     let should_kill = if pid_parts.len() > 1 {
-                        if let Ok(_expected_start) = pid_parts[1].parse::<u64>() {
-                            // PID recycling protection: compare stored start_time with
-                            // the process's actual start time. On macOS / Linux, this
-                            // requires reading from /proc or using sysctl. For now,
-                            // we verify the PID exists and trust the stored timestamp.
-                            // Full implementation would compare clock ticks.
-                            true
+                        if let Ok(expected_start) = pid_parts[1].parse::<u64>() {
+                            // PID recycling protection: verify the process started
+                            // at approximately the same time we recorded.
+                            validate_pid_start_time(pid, expected_start)
                         } else {
-                            true
+                            true // Can't parse start_time, proceed
                         }
                     } else {
                         true // No start_time recorded (old format), assume it's ours
@@ -264,6 +304,9 @@ pub fn run_stop(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Res
             }
         }
         let _ = std::fs::remove_file(pid_path);
+        // Clean up the SSE port file if it exists.
+        let port_file = pid_path.with_extension("port");
+        let _ = std::fs::remove_file(port_file);
     }
 
     Ok(())
@@ -278,6 +321,38 @@ pub fn run_restart(agent: &str, output: &OutputFormatter) -> Result<()> {
 
 /// Parse elapsed time from `ps -o etime=` output (e.g. "1-03:45:22" or "  45:22" or "    01").
 /// Returns total elapsed seconds.
+/// Validate that a process with the given PID started at approximately
+/// the expected start time (epoch seconds). Returns `false` if the process
+/// start time doesn't match (PID recycling detected) or if we can't determine it.
+fn validate_pid_start_time(pid: u32, expected_start_epoch: u64) -> bool {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Get elapsed time from `ps -o etime`
+    let output = match std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "etime="])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return false, // ps not available — can't validate, fail closed
+    };
+
+    let elapsed_str = String::from_utf8_lossy(&output.stdout);
+    if elapsed_str.trim().is_empty() {
+        return false; // Process doesn't exist or ps failed
+    }
+
+    let elapsed_secs = parse_ps_elapsed(&elapsed_str);
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Allow 3-second tolerance for timing differences between our start
+    // recording and ps's elapsed time calculation.
+    let actual_start = now_secs.saturating_sub(elapsed_secs);
+    actual_start.abs_diff(expected_start_epoch) <= 3
+}
+
 fn parse_ps_elapsed(s: &str) -> u64 {
     let s = s.trim();
     let mut days: u64 = 0;
@@ -317,7 +392,7 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
         return Ok(());
     }
 
-    let mut running = Vec::new();
+    let mut running: Vec<(String, u32, bool, Option<u16>)> = Vec::new();
 
     for entry in std::fs::read_dir(&agents_dir)? {
         let entry = entry?;
@@ -335,6 +410,11 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
         let stored_start_time: u64 = parts.next()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
+        // Read SSE port if available
+        let port_file = agents_dir.join(format!("{agent_name}.port"));
+        let sse_port: Option<u16> = std::fs::read_to_string(&port_file)
+            .ok()
+            .and_then(|s| s.trim().parse().ok());
         if pid_num > 0 {
             #[cfg(unix)]
             {
@@ -367,11 +447,11 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
                 } else {
                     alive
                 };
-                running.push((agent_name, pid_num, alive));
+                running.push((agent_name, pid_num, alive, sse_port));
             }
             #[cfg(not(unix))]
             {
-                running.push((agent_name, pid_num, true));
+                running.push((agent_name, pid_num, true, sse_port));
             }
         }
     }
@@ -379,8 +459,17 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
     if output.is_json() {
         let arr: Vec<_> = running
             .iter()
-            .map(|(name, pid, alive)| {
-                serde_json::json!({"name": name, "pid": pid, "status": if *alive { "running" } else { "dead" }})
+            .map(|(name, pid, alive, port)| {
+                let mut obj = serde_json::json!({
+                    "name": name,
+                    "pid": pid,
+                    "status": if *alive { "running" } else { "dead" }
+                });
+                if let Some(p) = port {
+                    obj["port"] = serde_json::json!(p);
+                    obj["sse_url"] = serde_json::json!(format!("http://127.0.0.1:{p}/sse"));
+                }
+                obj
             })
             .collect();
         output.data(&arr);
@@ -388,11 +477,12 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
         if running.is_empty() {
             output.info("No agents running.");
         } else {
-            println!("{:<25} {:<10} Status", "Agent", "PID");
-            println!("{}", "-".repeat(45));
-            for (name, pid, alive) in &running {
+            println!("{:<25} {:<10} {:<10} Status", "Agent", "PID", "Port");
+            println!("{}", "-".repeat(60));
+            for (name, pid, alive, port) in &running {
                 let status = if *alive { "running" } else { "dead" };
-                println!("{:<25} {:<10} {status}", name, pid);
+                let port_str = port.map(|p| p.to_string()).unwrap_or("-".to_string());
+                println!("{:<25} {:<10} {:<10} {status}", name, pid, port_str);
             }
         }
     }
@@ -672,10 +762,10 @@ async fn async_exec(
             .and_then(|c| c.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|item| {
-                        (item.get("type").and_then(|t| t.as_str()) == Some("text"))
-                            .then(|| item.get("text").and_then(|t| t.as_str()).unwrap_or(""))
+                    .filter(|item| {
+                        item.get("type").and_then(|t| t.as_str()) == Some("text")
                     })
+                    .map(|item| item.get("text").and_then(|t| t.as_str()).unwrap_or(""))
                     .collect::<Vec<_>>()
                     .join("\n")
             })
@@ -704,6 +794,9 @@ async fn async_exec(
 mod tests {
     use super::*;
     use std::process::Stdio;
+
+    /// Mutex to serialize tests that modify the `AGENT_NEXUS_PYTHON` env var.
+    static PYTHON_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Verify that after spawning a child with piped stdio and taking the handles,
     /// stdin/stdout/stderr on the Child are `None` — confirming FDs are not leaked.
@@ -754,6 +847,10 @@ mod tests {
 
     #[test]
     fn resolve_python_env_set_and_fallback() {
+        let _guard = PYTHON_ENV_LOCK.lock().unwrap();
+        // Clean slate
+        std::env::remove_var("AGENT_NEXUS_PYTHON");
+
         // Test env-var path takes priority
         std::env::set_var("AGENT_NEXUS_PYTHON", "/custom/python");
         let python = resolve_python();
@@ -767,6 +864,10 @@ mod tests {
 
     #[test]
     fn resolve_python_rejects_suspicious_path() {
+        let _guard = PYTHON_ENV_LOCK.lock().unwrap();
+        // Clean slate
+        std::env::remove_var("AGENT_NEXUS_PYTHON");
+
         std::env::set_var("AGENT_NEXUS_PYTHON", "/some/../etc/passwd");
         let python = resolve_python();
         assert_eq!(python, "python3", "Should fall back when path contains '..'");

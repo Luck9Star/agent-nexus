@@ -85,6 +85,10 @@ enum Commands {
         #[arg(short, long, default_value = "stdio")]
         transport: String,
 
+        /// Chat message for router mode (reads from stdin if omitted)
+        #[arg(long)]
+        message: Option<String>,
+
         /// Extra arguments forwarded to the agent (CLI mode only)
         #[arg(trailing_var_arg = true)]
         extra: Vec<String>,
@@ -369,8 +373,9 @@ fn run(cli: Cli, output: &OutputFormatter) -> anyhow::Result<()> {
                 agent,
                 mode,
                 transport,
+                message,
                 extra,
-            } => commands::run::run(&agent, &mode, &transport, &extra, output)?,
+            } => commands::run::run(&agent, &mode, &transport, message.as_deref(), &extra, output)?,
 
             Commands::List => commands::install::run_list(output)?,
 

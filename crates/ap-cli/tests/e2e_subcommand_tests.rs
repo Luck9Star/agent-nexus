@@ -152,9 +152,12 @@ fn runtime_start_nonexistent_agent() {
 
 #[test]
 fn runtime_start_all_flag() {
-    // --all without lockfile should fail gracefully
+    // --all without lockfile should fail gracefully (use temp dir for isolation)
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
     cli()
         .args(["runtime", "start", "--all"])
+        .current_dir(dir.path())
         .assert()
         .failure();
 }

@@ -292,12 +292,21 @@ def _gen_main_entry(name: str) -> str:
     return (
         f'"""Entry point for running {name} as an MCP server."""\n'
         f"\n"
+        f"import os\n"
+        f"\n"
         f"from {pkg}.mcp_adapter import create_mcp_server\n"
         f"\n"
         f'\n'
         f"if __name__ == '__main__':\n"
         f"    server = create_mcp_server()\n"
-        f"    server.run()\n"
+        f"    transport = os.environ.get('MCP_TRANSPORT', 'stdio')\n"
+        f"    kwargs = {{'transport': transport}}\n"
+        f"    if transport == 'sse':\n"
+        f"        port = int(os.environ.get('MCP_PORT', '0')) or None\n"
+        f"        if port:\n"
+        f"            kwargs['port'] = port\n"
+        f"        kwargs['host'] = os.environ.get('MCP_HOST', '127.0.0.1')\n"
+        f"    server.run(**kwargs)\n"
     )
 
 

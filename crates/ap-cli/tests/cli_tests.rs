@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 
 #[test]
 fn help_flag() {
@@ -239,20 +240,25 @@ fn evolution_status() {
 
 #[test]
 fn run_placeholder() {
+    // Run mode requires a lockfile and installed agent; should fail gracefully.
     Command::cargo_bin("agent-nexus")
         .unwrap()
         .args(["run", "test-agent", "do", "something"])
         .assert()
         .failure()
-        .stderr(predicates::str::contains("PlatformRouter"));
+        .stderr(predicates::str::contains("lockfile").or(predicates::str::contains("not installed")));
 }
 
 #[test]
 fn runtime_exec_requires_lockfile() {
-    // Without a lockfile, runtime exec should fail with a clear error message
+    // Without a lockfile, runtime exec should fail with a clear error message.
+    // Use a temp dir with no lockfile.json to ensure clean state.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
     Command::cargo_bin("agent-nexus")
         .unwrap()
         .args(["runtime", "exec", "test-agent"])
+        .current_dir(dir.path())
         .assert()
         .failure()
         .stderr(predicates::str::contains("No lockfile found"));

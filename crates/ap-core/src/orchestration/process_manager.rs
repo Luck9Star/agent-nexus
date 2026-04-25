@@ -454,6 +454,23 @@ impl ProcessManager {
         Ok(&mut proc.stdout)
     }
 
+    /// Return an IO pair to a tracked process, restoring its stdin/stdout.
+    ///
+    /// This is the inverse of `take_io` — call it after completing an IPC round
+    /// to allow subsequent `take_io` calls for the same agent.
+    ///
+    /// # Errors
+    /// Returns `ProcessError::NotFound` if the agent is not tracked.
+    pub fn return_io(&mut self, id: &str, io: IoPair) -> Result<(), ProcessError> {
+        let proc = self
+            .processes
+            .get_mut(id)
+            .ok_or_else(|| ProcessError::NotFound(id.to_string()))?;
+        proc.stdin = io.0;
+        proc.stdout = io.1;
+        Ok(())
+    }
+
     // -----------------------------------------------------------------------
     // Handle support: sync extract/insert helpers
     // -----------------------------------------------------------------------
@@ -827,6 +844,14 @@ impl ProcessManagerHandle {
     /// Returns an error if the underlying operation fails.
     pub async fn take_io(&self, id: &str) -> Result<IoPair, HandleError> {
         self.inner.lock().await.take_io(id).map_err(HandleError::from)
+    }
+
+    /// Return an IO pair to a tracked process.
+    ///
+    /// The inverse of `take_io` — restores the process's stdin/stdout for
+    /// reuse in subsequent IPC rounds.
+    pub async fn return_io(&self, id: &str, io: IoPair) -> Result<(), HandleError> {
+        self.inner.lock().await.return_io(id, io).map_err(HandleError::from)
     }
 }
 

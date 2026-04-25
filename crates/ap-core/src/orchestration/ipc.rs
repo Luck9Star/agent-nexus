@@ -178,6 +178,16 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcStream<R, W> {
         let msg: T = serde_json::from_slice(&line)?;
         Ok(msg)
     }
+
+    /// Decompose the stream back into the underlying reader and writer.
+    ///
+    /// Call this after a complete IPC round to recover ownership of the IO
+    /// handles. Any data buffered in the reader's internal buffer is discarded
+    /// — this is safe after a complete `receive()` call which reads exactly one
+    /// JSON-line message.
+    pub fn into_parts(self) -> (R, W) {
+        (self.reader.into_inner(), self.writer)
+    }
 }
 
 // ---------------------------------------------------------------------------

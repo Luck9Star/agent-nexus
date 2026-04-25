@@ -119,6 +119,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
             }
         }
     }
+
+    /// Decompose the protocol back into the underlying reader and writer.
+    ///
+    /// Use after a complete IPC round to recover the IO handles for return
+    /// to the ProcessManager via `return_io`.
+    pub fn into_parts(self) -> (R, W) {
+        self.stream.into_parts()
+    }
 }
 
 // ---------------------------------------------------------------------------
