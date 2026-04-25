@@ -7,7 +7,7 @@
 > Round 3: Supplementary deep findings + 7 fixes applied
 > Round 4: Cross-crate consistency review + fix verification
 > Total findings: 68 (Round 1: 40, Round 2: 42, Round 3: 56 cumulative, Round 4: 64, Round 5: 68)
-> **Resolved**: 33 findings (F1, F2, F4, F5, F6, F9, F10, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F33, F34, F35, F36, F37, F38, F41, F43, S5, R2-F3, R2-F4, R2-F8)
+> **Resolved**: 36 findings (F1, F2, F4, F5, F6, F7, F9, F10, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F33, F34, F35, F36, F37, F38, F41, F43, S4, S5, R2-F3, R2-F4, R2-F7, R2-F8)
 
 ## Executive Summary
 
@@ -84,6 +84,8 @@
 - **Location**: `crates/ap-core/src/models/config.rs:36-69` and `crates/ap-core/src/config/loader.rs:77-127`
 - **Description**: Six built-in providers defined in `default_providers()` and `apply_builtin_providers()` separately. Must be kept in sync manually. No compile-time enforcement.
 - **Recommendation**: Extract into a single const/function, reference from both locations.
+
+**Resolution (2026-04-25)**: Fixed. `default_providers()` in `config.rs` is now `pub(crate)` with doc comment as single source of truth. `loader.rs` replaced its 58-line duplicate with a 9-line delegation. Unused imports (`ProviderApiType`, `ProviderConfig`) removed from loader.rs top level.
 
 ### F8: HookExecutor Allowlist Matches Only Basename — PATH Confusion Risk
 - **Severity**: Medium
@@ -460,6 +462,8 @@
 | S2 | ap-core | `execute_parallel_agents()` silently discards `return_io` errors — agent becomes permanently unusable | F4 |
 | S3 | ap-core | `ProcessManagerHandle.spawn()` race: child already spawned before capacity check, exceeds `max_concurrent` transiently | F4 |
 | S4 | ap-core | `restart_agent()` TOCTOU: config extracted under lock, shutdown runs on separate lock — concurrent caller can kill wrong process | F4 |
+
+**Resolution (2026-04-25)**: Fixed. `ProcessManagerHandle::restart_agent` simplified from 28 lines (3 separate lock acquisitions with TOCTOU gaps) to 3 lines (single lock delegation to `ProcessManager::restart_agent`). Dead code `get_spawn_config` removed.
 | S5 | ap-runtime | `AgentProcess.split()` uses `unsafe ManuallyDrop::take` + `mem::forget` — panic between them causes UB | F9 |
 
 **Resolution (2026-04-25)**: Fixed. Replaced `ManuallyDrop<Child>` with `Option<Child>`. `split()` now uses `self.child.take()` (safe Rust) instead of `unsafe ManuallyDrop::take`. `Drop` impl uses `if let Some(mut child) = self.child.take()`. No unsafe code remains in `AgentProcess`.
@@ -611,6 +615,8 @@ These are the unfixed High findings ordered by impact + fix complexity:
   `handle.kill_all`, bypassing `router.stop_all()` which does the same
   thing. Duplicated shutdown logic creates maintenance risk.
 - **Fix**: Replace direct handle shutdown with `router.stop_all()`.
+
+**Resolution (2026-04-25)**: Already resolved. Current code calls `router.stop_all()` in the shutdown path — no bypass present.
 
 #### R2-F8: Production `unwrap()` Should Use `expect()`
 - **Severity**: Low

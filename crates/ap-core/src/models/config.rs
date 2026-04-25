@@ -33,7 +33,10 @@ fn default_model() -> String {
     "openai:gpt-4o".to_string()
 }
 
-fn default_providers() -> std::collections::HashMap<String, ProviderConfig> {
+/// Built-in provider defaults shared between [`ModelConfig::default`] and [`crate::config::loader::apply_builtin_providers`].
+///
+/// Single source of truth — add new providers here only.
+pub(crate) fn default_providers() -> std::collections::HashMap<String, ProviderConfig> {
     let mut providers = std::collections::HashMap::new();
     providers.insert("openai".into(), ProviderConfig {
         base_url: String::new(),

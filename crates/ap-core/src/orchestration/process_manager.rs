@@ -510,10 +510,6 @@ impl ProcessManager {
         self.processes.drain().collect()
     }
 
-    /// Get the stored spawn config for a process, if it exists (sync).
-    pub(crate) fn get_spawn_config(&self, id: &str) -> Option<SpawnConfig> {
-        self.processes.get(id).map(|p| p.spawn_config.clone())
-    }
 }
 
 impl Default for ProcessManager {
@@ -800,33 +796,10 @@ impl ProcessManagerHandle {
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub async fn restart_agent(&self, id: &str, timeout: Duration) -> Result<(), HandleError> {
-        // Phase 1: extract spawn_config (sync, under lock)
-        let config = {
-            let pm = self.inner.lock().await;
-            pm.get_spawn_config(id)
-                .ok_or_else(|| HandleError::from(ProcessError::NotFound(id.to_string())))?
-        }; // lock dropped
-
-        // Phase 2: graceful shutdown (takes its own lock internally)
-        let _ = self.graceful_shutdown(id, timeout).await;
-
-        // Phase 3: re-spawn (takes its own lock internally)
-        let args_vec: Vec<&str> = config.args.iter().map(std::string::String::as_str).collect();
-        let env_opt = if config.env.is_empty() && !config.isolated {
-            None
-        } else {
-            Some(config.env)
-        };
-        let result = self.spawn(id, &config.cmd, &args_vec, env_opt).await;
-        // Restore isolated flag on the stored SpawnConfig so subsequent restarts
-        // preserve it.
-        if result.is_ok() && config.isolated {
-            let mut pm = self.inner.lock().await;
-            if let Some(proc) = pm.processes.get_mut(id) {
-                proc.spawn_config.isolated = true;
-            }
-        }
-        result
+        // Delegate to ProcessManager::restart_agent under a single lock to
+        // prevent TOCTOU between config extraction, shutdown, and respawn.
+        let mut pm = self.inner.lock().await;
+        pm.restart_agent(id, timeout).await.map_err(HandleError::from)
     }
 
     /// Kill all tracked processes (force).

@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use crate::models::config::{PlatformConfig, ProviderApiType, ProviderConfig};
+use crate::models::config::PlatformConfig;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -93,64 +93,13 @@ impl ConfigLoader {
 
 /// Merge built-in provider defaults for any providers not already configured.
 ///
-/// Mirrors Python's `DEFAULT_PROVIDERS`: openai, anthropic, deepseek, minimax, qwen, ollama.
+/// Uses the single source of truth from [`crate::models::config::default_providers`].
 fn apply_builtin_providers(config: &mut PlatformConfig) {
-    let defaults: [(&str, ProviderConfig); 6] = [
-        (
-            "openai",
-            ProviderConfig {
-                base_url: String::new(),
-                api_key_env: "OPENAI_API_KEY".into(),
-                api: ProviderApiType::OpenaiCompatible,
-            },
-        ),
-        (
-            "anthropic",
-            ProviderConfig {
-                base_url: String::new(),
-                api_key_env: "ANTHROPIC_API_KEY".into(),
-                api: ProviderApiType::AnthropicMessages,
-            },
-        ),
-        (
-            "deepseek",
-            ProviderConfig {
-                base_url: "https://api.deepseek.com/v1".into(),
-                api_key_env: "DEEPSEEK_API_KEY".into(),
-                api: ProviderApiType::OpenaiCompatible,
-            },
-        ),
-        (
-            "minimax",
-            ProviderConfig {
-                base_url: String::new(),
-                api_key_env: "MINIMAX_API_KEY".into(),
-                api: ProviderApiType::OpenaiCompatible,
-            },
-        ),
-        (
-            "qwen",
-            ProviderConfig {
-                base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
-                api_key_env: "DASHSCOPE_API_KEY".into(),
-                api: ProviderApiType::OpenaiCompatible,
-            },
-        ),
-        (
-            "ollama",
-            ProviderConfig {
-                base_url: "http://localhost:11434/v1".into(),
-                api_key_env: String::new(),
-                api: ProviderApiType::Ollama,
-            },
-        ),
-    ];
-
-    for (name, provider) in defaults {
+    for (name, provider) in crate::models::config::default_providers() {
         config
             .models
             .providers
-            .entry(name.to_string())
+            .entry(name)
             .or_insert(provider);
     }
 }
