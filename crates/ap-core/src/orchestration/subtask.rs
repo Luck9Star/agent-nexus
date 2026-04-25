@@ -62,6 +62,10 @@ pub enum SubtaskError {
     },
     #[error("Subtask execution error: {0}")]
     Execution(String),
+    /// A parallel task panicked. Callers can distinguish panics from other
+    /// execution errors using `matches!(err, SubtaskError::Panicked { .. })`.
+    #[error("Subtask panicked: {message}")]
+    Panicked { message: String },
 }
 
 /// Controller for executing subtasks with fault-tolerance policies.
@@ -162,7 +166,9 @@ impl SubtaskController {
         for handle in handles {
             match handle.await {
                 Ok(r) => results.push(r),
-                Err(e) => results.push(Err(SubtaskError::Execution(format!("Task panicked: {e}")))),
+                Err(e) => results.push(Err(SubtaskError::Panicked {
+                    message: e.to_string(),
+                })),
             }
         }
         results

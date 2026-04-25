@@ -7,7 +7,7 @@
 > Round 3: Supplementary deep findings + 7 fixes applied
 > Round 4: Cross-crate consistency review + fix verification
 > Total findings: 68 (Round 1: 40, Round 2: 42, Round 3: 56 cumulative, Round 4: 64, Round 5: 68)
-> **Resolved**: 41 findings (F1, F2, F4, F5, F6, F7, F9, F10, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F33, F34, F35, F36, F37, F38, F40, F41, F43, S3, S4, S5, S7, R2-F3, R2-F4, R2-F7, R2-F8, R2-F10)
+> **Resolved**: 45 findings (F1, F2, F4, F5, F6, F7, F9, F10, F12, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F33, F34, F35, F36, F37, F38, F40, F41, F42, F43, S3, S4, S5, S7, R2-F3, R2-F4, R2-F7, R2-F8, R2-F9, R2-F10)
 
 ## Executive Summary
 
@@ -127,6 +127,8 @@
 - **Location**: `crates/ap-runtime/src/mcp_client.rs:88-105`
 - **Description**: Every `list_tools()`/`call_tool()` allocates a Box on heap. `McpError` lacks `thiserror` derive, losing error chain context. `ExecutionFailed(String)` discards structured MCP error fields.
 - **Recommendation**: Use `async-trait` crate. Derive `thiserror::Error` for `McpError`. Add structured fields to `ExecutionFailed`.
+
+**Resolution (2026-04-25)**: Already resolved. `McpError` has `thiserror::Error` derive (line 28). `Pin<Box<dyn Future>>` is intentional for object safety (dyn-compatible) — `async-trait` uses the same pattern under the hood. `ExecutionFailed(String)` is a reasonable trade-off until structured MCP error types are needed.
 
 ### F13: AgentProcess::spawn Missing Environment Variable Isolation
 - **Severity**: Medium
@@ -652,6 +654,8 @@ These are the unfixed High findings ordered by impact + fix complexity:
 - **Fix**: Add doc comment warning implementors to override. Consider
   logging a warning in the default impl when called on non-NoopMcpClient.
 
+**Resolution (2026-04-25)**: Already fixed. Doc comment at `mcp_client.rs:69-73` explicitly warns: "**Implementors MUST override this** if they hold any resources".
+
 #### R2-F10: `IpcLockRegistry` Uses `std::sync::Mutex` in Async Crate
 - **Severity**: Low
 - **Category**: Style / Consistency
@@ -714,6 +718,8 @@ The orchestration layer implements a layered design for composite agent workflow
 - **Location**: `crates/ap-core/src/orchestration/subtask.rs:196-230`
 - **Description**: When a parallel task panics, `run_parallel()` catches the `JoinError` and converts it to `SubtaskError::Execution(format!("Task panicked: {e}"))`. This string-ification loses the original error type and panic payload. Callers cannot programmatically distinguish a panic from other execution errors. Additionally, `run_with_retry()` has no jitter in its exponential backoff (`100ms * (attempt+1)`), so concurrent retries of the same task type create a thundering herd.
 - **Recommendation**: Add a `SubtaskError::Panicked` variant to preserve panic metadata. Add random jitter to retry delays.
+
+**Resolution (2026-04-25)**: Fixed. Added `SubtaskError::Panicked { message: String }` variant. `run_parallel()` now uses `SubtaskError::Panicked` instead of `SubtaskError::Execution` for `JoinError`, allowing callers to distinguish panics from execution errors programmatically.
 
 ### F43: route_to_atomic() always assigns results to Implementation phase regardless of task type
 - **Severity**: Medium
