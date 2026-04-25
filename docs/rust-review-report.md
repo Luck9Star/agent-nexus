@@ -7,7 +7,7 @@
 > Round 3: Supplementary deep findings + 7 fixes applied
 > Round 4: Cross-crate consistency review + fix verification
 > Total findings: 68 (Round 1: 40, Round 2: 42, Round 3: 56 cumulative, Round 4: 64, Round 5: 68)
-> **Resolved**: 10 findings (F10, F14, F15, F16, F17, F20, F23, F25, F28 partial, F30)
+> **Resolved**: 21 findings (F1, F2, F4, F5, F9, F10, F13, F14, F15, F16, F17, F20, F21, F22, F23, F25, F28 partial, F29, F30, F34, F35)
 
 ## Executive Summary
 
@@ -45,6 +45,8 @@
 - **Location**: `crates/ap-core/src/orchestration/task_graph.rs:141-182`
 - **Description**: Every `add_task` call loads ALL tasks from SQLite, builds a full HashMap, runs DFS cycle detection, and commits. For N tasks from a parsed DSL, this is O(N^2). The DSL parser already validates cycles at parse time, making per-insert detection redundant.
 - **Recommendation**: Add `add_tasks_unchecked_batch()` or `from_dsl()` that inserts all tasks in one transaction with a single cycle check.
+
+**Resolution (2026-04-25)**: Fixed. Added `add_tasks_batch()` that inserts all tasks in a single transaction with one cycle check — O(N) instead of O(N²). Validates duplicates within batch and against DB, atomic rollback on cycle.
 
 ### F3: TaskGraph Lacks Compile-Time Send/Sync Enforcement
 - **Severity**: Medium
@@ -128,6 +130,8 @@
 - **Location**: `crates/ap-runtime/src/process.rs:49-56`
 - **Description**: `spawn(id, cmd, args)` has no `env` parameter, inheriting full parent environment. `ProcessManager::spawn` supports env overrides for per-agent isolation (a security requirement per Defense-in-Depth architecture).
 - **Recommendation**: Add `env: Option<HashMap<String, String>>` to `AgentProcess::spawn`, matching `ProcessManager::spawn`.
+
+**Resolution (2026-04-25)**: Fixed. Added `spawn_with_env(id, cmd, args, env)` with `env_clear().envs()` for full isolation. Original `spawn()` delegates to it with `None`. Test verifies parent env vars don't leak through.
 
 ---
 

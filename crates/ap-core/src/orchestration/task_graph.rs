@@ -186,6 +186,72 @@ impl TaskGraph {
         Ok(())
     }
 
+    /// Add multiple tasks in a single transaction with one cycle check.
+    ///
+    /// O(N) cycle detection instead of O(N²) from calling `add_task` in a loop.
+    /// Validates no duplicates within the batch and no duplicate against existing
+    /// tasks before inserting. All inserts succeed or all roll back.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub fn add_tasks_batch(&self, tasks: &[TaskItem]) -> Result<(), TaskGraphError> {
+        if tasks.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.unchecked_transaction()?;
+
+        // Check for duplicates within the batch
+        let mut seen = std::collections::HashSet::with_capacity(tasks.len());
+        for task in tasks {
+            if !seen.insert(&task.id) {
+                tx.rollback()?;
+                return Err(TaskGraphError::DuplicateTask(task.id.clone()));
+            }
+            // Check against existing tasks in DB
+            let existing: Option<String> = tx
+                .query_row(
+                    "SELECT task_id FROM tasks WHERE task_id = ?1",
+                    rusqlite::params![task.id],
+                    |row| row.get(0),
+                )
+                .ok();
+            if existing.is_some() {
+                tx.rollback()?;
+                return Err(TaskGraphError::DuplicateTask(task.id.clone()));
+            }
+        }
+
+        // Insert all tasks
+        for task in tasks {
+            let blocked_json = serde_json::to_string(&task.blocked_by)
+                .map_err(|e| TaskGraphError::Serialization(e.to_string()))?;
+            tx.execute(
+                "INSERT INTO tasks
+                 (task_id, agent_name, description, state, blocked_by, vars, result, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    task.id,
+                    task.agent,
+                    task.description,
+                    Self::state_to_str(task.state),
+                    blocked_json,
+                    task.vars.to_string(),
+                    task.result.as_ref().map(std::string::ToString::to_string),
+                    task.created_at.to_rfc3339(),
+                    task.updated_at.to_rfc3339(),
+                ],
+            )?;
+        }
+
+        // Single cycle check after all inserts
+        if Self::detect_cycle_with_conn(&tx)? {
+            tx.rollback()?;
+            return Err(TaskGraphError::CycleDetected);
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Retrieve a task by ID.
     ///
     /// # Errors
@@ -877,5 +943,104 @@ mod tests {
             }
             other => panic!("expected Sqlite(FromSqlConversionFailure), got {:?}", other),
         }
+    }
+
+    #[test]
+    fn add_tasks_batch_inserts_all() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        let now = chrono::Utc::now();
+        let tasks = vec![
+            TaskItem {
+                id: "batch-1".into(),
+                agent: "agent-a".into(),
+                description: "first".into(),
+                state: TaskState::Pending,
+                blocked_by: vec![],
+                vars: Default::default(),
+                result: None,
+                created_at: now,
+                updated_at: now,
+            },
+            TaskItem {
+                id: "batch-2".into(),
+                agent: "agent-b".into(),
+                description: "second".into(),
+                state: TaskState::Pending,
+                blocked_by: vec!["batch-1".into()],
+                vars: Default::default(),
+                result: None,
+                created_at: now,
+                updated_at: now,
+            },
+        ];
+        tg.add_tasks_batch(&tasks).unwrap();
+        assert!(tg.get_task("batch-1").unwrap().is_some());
+        assert!(tg.get_task("batch-2").unwrap().is_some());
+    }
+
+    #[test]
+    fn add_tasks_batch_rejects_internal_duplicate() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        let now = chrono::Utc::now();
+        let tasks = vec![
+            TaskItem {
+                id: "dup".into(),
+                agent: "a".into(),
+                description: "one".into(),
+                state: TaskState::Pending,
+                blocked_by: vec![],
+                vars: Default::default(),
+                result: None,
+                created_at: now,
+                updated_at: now,
+            },
+            TaskItem {
+                id: "dup".into(),
+                agent: "b".into(),
+                description: "two".into(),
+                state: TaskState::Pending,
+                blocked_by: vec![],
+                vars: Default::default(),
+                result: None,
+                created_at: now,
+                updated_at: now,
+            },
+        ];
+        let err = tg.add_tasks_batch(&tasks).unwrap_err();
+        assert!(matches!(err, TaskGraphError::DuplicateTask(_)));
+        assert!(tg.get_task("dup").unwrap().is_none());
+    }
+
+    #[test]
+    fn add_tasks_batch_rollback_on_cycle() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        let now = chrono::Utc::now();
+        let tasks = vec![
+            TaskItem {
+                id: "cyc-1".into(),
+                agent: "a".into(),
+                description: "first".into(),
+                state: TaskState::Pending,
+                blocked_by: vec!["cyc-2".into()],
+                vars: Default::default(),
+                result: None,
+                created_at: now,
+                updated_at: now,
+            },
+            TaskItem {
+                id: "cyc-2".into(),
+                agent: "b".into(),
+                description: "second".into(),
+                state: TaskState::Pending,
+                blocked_by: vec!["cyc-1".into()],
+                vars: Default::default(),
+                result: None,
+                created_at: now,
+                updated_at: now,
+            },
+        ];
+        let err = tg.add_tasks_batch(&tasks).unwrap_err();
+        assert!(matches!(err, TaskGraphError::CycleDetected));
+        assert!(tg.get_task("cyc-1").unwrap().is_none());
     }
 }

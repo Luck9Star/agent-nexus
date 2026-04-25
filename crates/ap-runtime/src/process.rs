@@ -4,6 +4,7 @@
 //! `ProcessManager` (which manages a map of processes). `AgentProcess` owns
 //! exactly one child process and provides lifecycle + I/O extraction.
 
+use std::collections::HashMap;
 use std::mem::ManuallyDrop;
 use std::process::Stdio;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -117,14 +118,39 @@ impl AgentProcess {
     /// Returns an error if the underlying operation fails.
     #[allow(clippy::unused_async)]
     pub async fn spawn(id: &str, cmd: &str, args: &[&str]) -> Result<Self, ProcessError> {
-        let mut child = Command::new(cmd)
+        Self::spawn_with_env(id, cmd, args, None).await
+    }
+
+    /// Spawn a subprocess with optional environment variable overrides.
+    ///
+    /// When `env` is `Some`, the child process receives only the specified
+    /// environment variables (not the parent's). This prevents accidental
+    /// leakage of secrets like `OPENAI_API_KEY` into agent subprocesses.
+    ///
+    /// When `env` is `None`, inherits the full parent environment (legacy behavior).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    #[allow(clippy::unused_async)]
+    pub async fn spawn_with_env(
+        id: &str,
+        cmd: &str,
+        args: &[&str],
+        env: Option<HashMap<String, String>>,
+    ) -> Result<Self, ProcessError> {
+        let mut command = Command::new(cmd);
+        command
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(ProcessError::Spawn)?;
+            .kill_on_drop(true);
+
+        if let Some(env_map) = env {
+            command.env_clear().envs(&env_map);
+        }
+
+        let mut child = command.spawn().map_err(ProcessError::Spawn)?;
 
         let stdin = child
             .stdin
@@ -319,6 +345,34 @@ mod tests {
             ProcessError::Spawn(_) => {} // expected
             other => panic!("expected Spawn error, got: {other}"),
         }
+    }
+
+    #[tokio::test]
+    async fn spawn_with_env_clears_parent_env() {
+        // Spawn `env` (macOS) / `printenv` with a custom env to verify isolation.
+        let env_cmd = if std::path::Path::new("/usr/bin/env").exists() {
+            "/usr/bin/env"
+        } else {
+            "/usr/bin/printenv"
+        };
+        let mut env = HashMap::new();
+        env.insert("AGENT_ISOLATED".to_string(), "yes".to_string());
+        env.insert("PATH".to_string(), std::env::var("PATH").unwrap_or_default());
+
+        let mut proc = AgentProcess::spawn_with_env("env-test", env_cmd, &[], Some(env))
+            .await
+            .unwrap();
+
+        let (stdin, stdout) = proc.take_io();
+        drop(stdin);
+        let mut output = Vec::new();
+        use tokio::io::AsyncReadExt;
+        let _ = stdout.take(4096).read_to_end(&mut output).await;
+        let output_str = String::from_utf8_lossy(&output);
+        assert!(output_str.contains("AGENT_ISOLATED=yes"), "Should see our env var");
+        // HOME should NOT be present since we cleared parent env
+        assert!(!output_str.contains("HOME="), "Parent HOME should not leak through");
+        proc.kill().await.unwrap();
     }
 
     // --- ProcessError conversion tests ---
