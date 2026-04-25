@@ -13,6 +13,10 @@ pub struct ResolvedModel {
     pub base_url: String,
     pub api_key_env: String,
     pub api_type: ProviderApiType,
+    /// Whether the resolved model matches the originally requested provider.
+    /// `false` means a fallback was used (AGENT_MODEL, DEFAULT_MODEL, or hardcoded).
+    #[serde(default)]
+    pub resolved_from_requested: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -64,6 +68,7 @@ impl ModelConfigManager {
             base_url: p.base_url.clone(),
             api_key_env: p.api_key_env.clone(),
             api_type: p.api,
+            resolved_from_requested: true,
         }) } else {
             // Levels 4-6: Try AGENT_MODEL, DEFAULT_MODEL, hardcoded fallback
             for ref fb in [
@@ -83,6 +88,7 @@ impl ModelConfigManager {
                             base_url: p.base_url.clone(),
                             api_key_env: p.api_key_env.clone(),
                             api_type: p.api,
+                            resolved_from_requested: false,
                         });
                     }
                 }
@@ -157,6 +163,7 @@ mod tests {
         assert_eq!(resolved.model_name, "gpt-4o");
         assert_eq!(resolved.base_url, "https://api.openai.com/v1");
         assert_eq!(resolved.api_key_env, "OPENAI_API_KEY");
+        assert!(resolved.resolved_from_requested);
     }
 
     #[test]
@@ -168,6 +175,7 @@ mod tests {
             assert_eq!(resolved.model_name, "gpt-4o");
             assert_eq!(resolved.provider_name, "openai");
             assert_eq!(resolved.base_url, "https://api.openai.com/v1");
+            assert!(!resolved.resolved_from_requested);
         });
     }
 

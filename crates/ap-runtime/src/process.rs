@@ -5,7 +5,6 @@
 //! exactly one child process and provides lifecycle + I/O extraction.
 
 use std::collections::HashMap;
-use std::mem::ManuallyDrop;
 use std::process::Stdio;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::process::{Child, Command};
@@ -102,7 +101,7 @@ impl From<ap_core::orchestration::process_manager::ProcessError> for ProcessErro
 
 pub struct AgentProcess {
     id: String,
-    child: ManuallyDrop<Child>,
+    child: Option<Child>,
     stdin: Option<Box<dyn AsyncWrite + Unpin + Send>>,
     stdout: Option<Box<dyn AsyncRead + Unpin + Send>>,
 }
@@ -166,7 +165,7 @@ impl AgentProcess {
 
         Ok(Self {
             id: id.to_string(),
-            child: ManuallyDrop::new(child),
+            child: Some(child),
             stdin: Some(stdin),
             stdout: Some(stdout),
         })
@@ -180,7 +179,9 @@ impl AgentProcess {
 
     /// Checks if the process is still running.
     pub fn is_alive(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+        self.child
+            .as_mut()
+            .is_some_and(|c| matches!(c.try_wait(), Ok(None)))
     }
 
     /// Kill the process.
@@ -188,7 +189,10 @@ impl AgentProcess {
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub async fn kill(&mut self) -> Result<(), ProcessError> {
-        self.child.kill().await.map_err(ProcessError::Kill)
+        match self.child.as_mut() {
+            Some(c) => c.kill().await.map_err(ProcessError::Kill),
+            None => Ok(()), // Already consumed via split()
+        }
     }
 
     /// Extract stdin and stdout as boxed trait objects, replacing them with
@@ -239,11 +243,12 @@ impl AgentProcess {
             .stdout
             .take()
             .unwrap_or_else(|| Box::new(tokio::io::empty()));
-        // SAFETY: We immediately forget(self) after this, preventing Drop
-        // from running on the now-empty ManuallyDrop slot.
-        let child = unsafe { ManuallyDrop::take(&mut self.child) };
+        let child = self.child.take();
+        // Prevent Drop from running on the now-empty struct.
+        // With Option<Child>, Drop would be a no-op anyway, but forget
+        // makes the intent explicit: the caller now owns the child via DetachedProcess.
         std::mem::forget(self);
-        (id, stdin, stdout, DetachedProcess { child: Some(child) })
+        (id, stdin, stdout, DetachedProcess { child })
     }
 }
 
@@ -251,11 +256,13 @@ impl Drop for AgentProcess {
     fn drop(&mut self) {
         // Best-effort kill child process to prevent zombies.
         // start_kill() is non-async and sends SIGKILL immediately.
-        // When split() was called, ManuallyDrop::take extracted the child
+        // When split() was called, Option::take extracted the child
         // and std::mem::forget prevented this Drop from ever running.
         // So if Drop *does* run, the child is still owned and safe to kill.
-        if let Err(e) = self.child.start_kill() {
-            tracing::warn!("Failed to kill child process during drop: {}", e);
+        if let Some(mut child) = self.child.take() {
+            if let Err(e) = child.start_kill() {
+                tracing::warn!("Failed to kill child process during drop: {}", e);
+            }
         }
     }
 }

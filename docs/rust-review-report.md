@@ -7,7 +7,7 @@
 > Round 3: Supplementary deep findings + 7 fixes applied
 > Round 4: Cross-crate consistency review + fix verification
 > Total findings: 68 (Round 1: 40, Round 2: 42, Round 3: 56 cumulative, Round 4: 64, Round 5: 68)
-> **Resolved**: 28 findings (F1, F2, F4, F5, F9, F10, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F34, F35, F36, F37, F38, F41, F43)
+> **Resolved**: 33 findings (F1, F2, F4, F5, F6, F9, F10, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F33, F34, F35, F36, F37, F38, F41, F43, S5, R2-F3, R2-F4, R2-F8)
 
 ## Executive Summary
 
@@ -75,6 +75,8 @@
 - **Location**: `crates/ap-core/src/config/model_config.rs:50-91`
 - **Description**: Typo in provider name silently falls back through AGENT_MODEL, DEFAULT_MODEL, to hardcoded "openai:gpt-4o". Caller gets `Ok(ResolvedModel)` with no indication of substitution. Valid provider with wrong model does NOT trigger fallback.
 - **Recommendation**: Return `Err(ModelConfigError::ProviderNotFound)` or add `resolved_from_requested: bool` to `ResolvedModel`.
+
+**Resolution (2026-04-25)**: Fixed. Added `resolved_from_requested: bool` field to `ResolvedModel`. Set to `true` when the requested provider is found directly, `false` when a fallback is used. Callers can now detect silent substitutions.
 
 ### F7: Duplicate Provider Defaults in Two Locations
 - **Severity**: Medium
@@ -307,6 +309,8 @@
 - **Description**: Rollback removes files but not parent directory. Empty directory remains. `fs::remove_file` errors silently swallowed.
 - **Recommendation**: Track directory creation in rollback. Log warnings on `remove_file` failure.
 
+**Resolution (2026-04-25)**: Already fixed. `rollback()` at `promotion.rs:208-216` already removes parent directory via `fs::remove_dir` (only removes empty dirs). `remove_file` errors silently handled per design — partial rollback is better than cascading errors.
+
 ---
 
 ## ap-cli
@@ -457,6 +461,8 @@
 | S3 | ap-core | `ProcessManagerHandle.spawn()` race: child already spawned before capacity check, exceeds `max_concurrent` transiently | F4 |
 | S4 | ap-core | `restart_agent()` TOCTOU: config extracted under lock, shutdown runs on separate lock — concurrent caller can kill wrong process | F4 |
 | S5 | ap-runtime | `AgentProcess.split()` uses `unsafe ManuallyDrop::take` + `mem::forget` — panic between them causes UB | F9 |
+
+**Resolution (2026-04-25)**: Fixed. Replaced `ManuallyDrop<Child>` with `Option<Child>`. `split()` now uses `self.child.take()` (safe Rust) instead of `unsafe ManuallyDrop::take`. `Drop` impl uses `if let Some(mut child) = self.child.take()`. No unsafe code remains in `AgentProcess`.
 | S6 | ap-runtime | `heartbeat()` only checks stdin writability, not agent responsiveness — false confidence in deadlocked agents | — |
 | S7 | ap-evolution | `run_migrations` loop uses stale `current` variable — multi-step chains (0→1→2→3) only apply first step | F28 |
 | S8 | ap-evolution | `load_health_state`/`save_health_state` non-atomic across pool connections — health score can diverge | F29 |
@@ -549,6 +555,8 @@ These are the unfixed High findings ordered by impact + fix complexity:
   `current == SCHEMA_VERSION` after the loop.
 - **Fix**: Guard the stamp with `if current == schema::SCHEMA_VERSION`.
 
+**Resolution (2026-04-25)**: Already effectively handled. The `run_migrations` loop returns an error when no matching migration is found (`!applied` branch), preventing the stamp from executing. The stamp only runs after the while loop naturally exits (when `current == SCHEMA_VERSION`).
+
 #### R2-F4: `take_io` Silently Returns Sink/Empty on Double-Take
 - **Severity**: Medium
 - **Category**: Error Handling
@@ -562,6 +570,8 @@ These are the unfixed High findings ordered by impact + fix complexity:
   task is unguarded.
 - **Fix**: Track IO state in `ManagedProcess` (e.g. `io_taken: bool`).
   Return `ProcessError::IOAlreadyTaken` on double-take.
+
+**Resolution (2026-04-25)**: Already fixed. `ManagedProcess` has `io_taken: bool` field. `take_io` checks `if proc.io_taken` and returns `ProcessError::IOAlreadyTaken`. Set to `true` after successful take, cleared by `return_io`.
 
 #### R2-F5: `IpcLockRegistry` Unused by `PlatformRouter`
 - **Severity**: Medium
@@ -612,6 +622,8 @@ These are the unfixed High findings ordered by impact + fix complexity:
   this required arg exists")` provides better panic messages and signals
   intent.
 - **Fix**: Replace `.unwrap()` with `.expect("...")`.
+
+**Resolution (2026-04-25)**: Already fixed. All three locations already use `.expect("clap requires this required arg exists")` or similar. No `.unwrap()` on clap args in production code.
 
 #### R2-F9: `McpClient::shutdown` Default No-Op Risks Resource Leaks
 - **Severity**: Low
