@@ -185,6 +185,8 @@
 - **Description**: Both `add` and `remove` perform non-atomic read-modify-write on lockfile. Two concurrent `ap install` processes can silently lose entries. Code includes `warn!` acknowledging this and TODO for advisory file locking. Silent data loss — `ap status` reports agents as not installed despite files existing on disk.
 - **Recommendation**: Implement advisory file locking (`fs4`/`fs2` crate) held for entire read-modify-write cycle. Or use SQLite for transactional semantics.
 
+**Resolution (2026-04-25)**: Fixed. `FileLock::acquire_exclusive()` via `flock(2)` wraps the entire read-modify-write cycle in both `add()` and `remove()`. RAII guard held from before `load()` through `save_unlocked()`.
+
 ### F21: GitInstaller Accepts Unrestricted Local Paths — Path Traversal
 - **Severity**: High
 - **Category**: Security
@@ -206,6 +208,8 @@
 - **Description**: Same non-atomic read-modify-save pattern as lockfile. Two concurrent `ap source add` can lose entries.
 - **Recommendation**: Use same file-locking solution. Extract shared `AtomicJsonFile`/`AtomicYamlFile` abstraction.
 
+**Resolution (2026-04-25)**: Fixed. `SourceManager::add/remove` now acquire `FileLock::acquire_exclusive()` before load-modify-save, same pattern as `LockfileManager`.
+
 ### F24: UvBridge Resolved Path Cache Has Race Between Check and Populate
 - **Severity**: Medium
 - **Category**: Concurrency
@@ -219,6 +223,8 @@
 - **Location**: `crates/ap-fetcher/src/lockfile.rs:62-81`
 - **Description**: Fixed temp file name `lockfile.json.tmp` shared across concurrent instances. Race: Process A writes, Process B removes and writes its own, Process A's rename moves Process B's data.
 - **Recommendation**: Use unique temp file name per write (PID, UUID) or `tempfile` crate.
+
+**Resolution (2026-04-25)**: Fixed. Temp file names now include PID + atomic counter (`lockfile.json.tmp.{pid}.{counter}`), preventing cross-process collision. Advisory lock provides additional protection.
 
 ### F26: validate_requirement Rejects Legitimate PEP 508 Requirements
 - **Severity**: Low
@@ -245,6 +251,8 @@
 - **Description**: All DDL uses `CREATE TABLE IF NOT EXISTS` — silently no-ops if table exists. Column additions/renames/type changes in future versions never take effect. No `schema_version` table, no migration path. Breaks Python wire-compatibility when schema diverges.
 - **Recommendation**: Add `schema_version` metadata table. Run explicit `ALTER TABLE` migrations on version mismatch.
 
+**Resolution (2026-04-25)**: Partially fixed. `_meta` table with `schema_version` row added. Migration chain now applies sequential migrations from current version to target. Fresh databases are stamped immediately. Stuck migration detection added.
+
 ### F29: HealthTracker State is In-Memory Only — Lost on Restart
 - **Severity**: High
 - **Category**: Architecture
@@ -258,6 +266,8 @@
 - **Location**: `crates/ap-evolution/src/store/queries.rs:255`
 - **Description**: `unchecked_transaction()` begins without busy timeout. With r2d2 pool, concurrent evolves get immediate SQLITE_BUSY. Combined with partial unique index, can result in parent deactivation without successful child insert.
 - **Recommendation**: Use `TransactionBehavior::Immediate` and set `PRAGMA busy_timeout = 5000` in connection init.
+
+**Resolution (2026-04-25)**: Fixed. `PRAGMA busy_timeout=5000` added to connection init in `EvolutionStore::new()`. Concurrent pool connections now retry on SQLITE_BUSY for up to 5 seconds.
 
 ### F31: Compaction Uses Byte-Based Truncation But Claims Token Budget
 - **Severity**: Medium

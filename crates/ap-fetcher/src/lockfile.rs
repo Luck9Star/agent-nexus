@@ -77,9 +77,13 @@ impl LockfileManager {
     fn save_unlocked(&self, lockfile: &Lockfile) -> Result<(), LockfileError> {
         let json = serde_json::to_string_pretty(lockfile)?;
 
+        // Unique temp file per write (PID + counter) prevents name collision
+        // between concurrent processes even under advisory lock.
+        static ATOMIC_WRITE_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let count = ATOMIC_WRITE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let tmp_path = {
             let mut p = self.path.clone();
-            p.set_extension("json.tmp");
+            p.set_extension(format!("json.tmp.{}.{}", std::process::id(), count));
             p
         };
 

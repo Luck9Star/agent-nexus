@@ -58,7 +58,7 @@ impl EvolutionStore {
     pub fn new(path: &Path) -> Result<Self> {
         let manager = SqliteConnectionManager::file(path)
             .with_init(|conn| {
-                conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL;")?;
+                conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;")?;
                 conn.execute_batch(schema::SCHEMA_SQL)?;
                 Self::run_migrations(conn)?;
                 Ok(())

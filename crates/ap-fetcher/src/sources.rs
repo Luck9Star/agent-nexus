@@ -114,8 +114,11 @@ impl SourceManager {
         };
         let yaml = serde_yml::to_string(&wrapped)?;
 
-        // Atomic write: write to tmp file, then rename
-        let tmp_path = self.path.with_extension("yaml.tmp");
+        // Atomic write: write to unique tmp file, then rename.
+        // PID + counter prevents name collision between concurrent processes.
+        static ATOMIC_WRITE_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let count = ATOMIC_WRITE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp_path = self.path.with_extension(format!("yaml.tmp.{}.{}", std::process::id(), count));
         std::fs::write(&tmp_path, &yaml)?;
         std::fs::rename(&tmp_path, &self.path)?;
         debug!("Saved {} sources to {:?}", sources.len(), self.path);
