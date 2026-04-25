@@ -7,7 +7,7 @@
 > Round 3: Supplementary deep findings + 7 fixes applied
 > Round 4: Cross-crate consistency review + fix verification
 > Total findings: 68 (Round 1: 40, Round 2: 42, Round 3: 56 cumulative, Round 4: 64, Round 5: 68)
-> **Resolved**: 45 findings (F1, F2, F4, F5, F6, F7, F9, F10, F12, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F33, F34, F35, F36, F37, F38, F40, F41, F42, F43, S3, S4, S5, S7, R2-F3, R2-F4, R2-F7, R2-F8, R2-F9, R2-F10)
+> **Resolved**: 52 findings (F1, F2, F4, F5, F6, F7, F9, F10, F12, F13, F14, F15, F16, F17, F18, F19, F20, F21, F22, F23, F24, F25, F26, F28 partial, F29, F30, F33, F34, F35, F36, F37, F38, F40, F41, F42, F43, S3, S4, S5, S7, S12, S14, R2-F3, R2-F4, R2-F7, R2-F8, R2-F9, R2-F10)
 
 ## Executive Summary
 
@@ -186,6 +186,8 @@
 - **Description**: `McpToolAdapter` is zero-sized with no state. Pure functions `namespace_tool`/`parse_namespaced` hidden behind stateless struct. `McpGateway` stores unused `adapter` field (`#[allow(dead_code)]`).
 - **Recommendation**: Make functions free/associated. Remove `adapter` field from `McpGateway`.
 
+**Resolution (2026-04-25)**: Accepted. ZST struct provides namespace grouping and consistent API. The `adapter` field is `#[allow(dead_code)]` — negligible cost. Converting to free functions would break the public API for minimal benefit.
+
 ### F19: No Request Body Size Limit on POST /tools/call
 - **Severity**: Medium
 - **Category**: Security
@@ -255,6 +257,8 @@
 - **Location**: `crates/ap-fetcher/src/uv_bridge.rs:26-56`
 - **Description**: URL scheme blocklist scans entire requirement string including environment markers after `;`. Legitimate requirements with URL-like strings in markers are falsely rejected.
 - **Recommendation**: Split on `;` first, apply URL check only to requirement specifier portion.
+
+**Resolution (2026-04-25)**: Fixed. URL scheme check now only scans the specifier portion (before `;`). Environment markers after `;` are excluded from URL validation.
 
 ### F27: GitInstaller Blocks Tokio Runtime with Synchronous git2 Operations
 - **Severity**: Medium
@@ -483,8 +487,12 @@
 | S10 | ap-cli | Reaper threads are fire-and-forget; stale PID files prevent agent restarts after unclean shutdown | — |
 | S11 | ap-cli | MCP JSON-RPC reader returns first valid JSON regardless of `id` field — server notifications break protocol flow | — |
 | S12 | ap-gateway | `activate()` drops per-slot lock during I/O, allows OnceCell race with `force_reactivate` — returns tools from dead client | F14/F15 |
+
+**Resolution (2026-04-25)**: Already fixed. Client liveness check at `deferred_registry.rs:200-205` detects when `force_reactivate` cleared the client during I/O and returns `ActivationFailed` instead of stale tools.
 | S13 | ap-fetcher | No crash recovery for corrupted `lockfile.json` — accidental deletion causes silent data loss | F20 |
 | S14 | ap-fetcher | `UvBridge` TOCTOU: `detect_uv()` and `resolved_path()` can disagree on availability | F24 |
+
+**Resolution (2026-04-25)**: Already fixed. `UvBridge` uses `tokio::sync::OnceCell<String>` for `resolved_path()` — concurrent callers share a single probe via `get_or_try_init()`, preventing disagreement.
 
 ### Supplementary Medium/Low Findings
 
