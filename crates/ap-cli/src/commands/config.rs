@@ -64,12 +64,11 @@ fn set_in_path(path: &Path, key: &str, value: &str, output: &OutputFormatter) ->
 
     let new_content = toml::to_string_pretty(&config)?;
 
-    // Atomic write: write to timestamped tmp then rename to prevent corruption on crash
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let tmp_path = path.with_file_name(format!("config.toml.{ts}.tmp"));
+    // Atomic write: write to PID-scoped tmp then rename to prevent corruption on crash.
+    // Hidden prefix (.config.tmp) keeps temp files invisible to casual users and VCS.
+    let tmp_path = path.with_file_name(format!(".config.tmp.{}", std::process::id()));
+    // Clean stale temp from previous crash
+    let _ = std::fs::remove_file(&tmp_path);
     std::fs::write(&tmp_path, &new_content)?;
     std::fs::rename(&tmp_path, path)?;
 

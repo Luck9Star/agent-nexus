@@ -12,19 +12,25 @@ pub mod sources;
 use std::path::{Path, PathBuf};
 
 /// Find the project root directory by walking up from `start` looking for config.toml.
-/// Falls back to `start` if no marker file is found.
+/// Falls back to `start` if no marker file is found within 10 levels.
 pub fn find_project_root(start: &Path) -> PathBuf {
+    const MAX_DEPTH: usize = 10;
     let mut dir = start;
+    let mut depth = 0;
     loop {
         if dir.join("config.toml").exists() {
             return dir.to_path_buf();
+        }
+        depth += 1;
+        if depth >= MAX_DEPTH {
+            break;
         }
         match dir.parent() {
             Some(parent) => dir = parent,
             None => break,
         }
     }
-    eprintln!("Warning: No config.toml found. Using current directory as project root.");
+    eprintln!("Warning: No config.toml found within {MAX_DEPTH} levels. Using current directory as project root.");
     start.to_path_buf()
 }
 

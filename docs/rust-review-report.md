@@ -7,7 +7,7 @@
 > Round 3: Supplementary deep findings + 7 fixes applied
 > Round 4: Cross-crate consistency review + fix verification
 > Total findings: 68 (Round 1: 40, Round 2: 42, Round 3: 56 cumulative, Round 4: 64, Round 5: 68)
-> **Resolved**: 24 findings (F1, F2, F4, F5, F9, F10, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F34, F35, F37)
+> **Resolved**: 26 findings (F1, F2, F4, F5, F9, F10, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F34, F35, F36, F37, F38)
 
 ## Executive Summary
 
@@ -332,6 +332,8 @@
 - **Description**: If process crashes between `fs::write` and `fs::rename`, temp file `config.toml.{nanos}.tmp` remains indefinitely. No cleanup on startup. Temp files visible to users and VCS.
 - **Recommendation**: Use hidden temp file (`.{uuid}.tmp`) or platform temp dir. Add startup cleanup for stale temp files.
 
+**Resolution (2026-04-25)**: Fixed. Temp file now uses hidden prefix `.config.tmp.{pid}` with stale cleanup before write. PID-scoped naming prevents collision between concurrent CLI instances.
+
 ### F37: install Leaks Cloned Directory on Lockfile Failure
 - **Severity**: Medium
 - **Category**: Error Handling / Resource Management
@@ -347,6 +349,8 @@
 - **Location**: `crates/ap-cli/src/commands/mod.rs:16-28`
 - **Description**: Walks upward to filesystem root looking for `config.toml`. From home directory, walks hundreds of directories. Unrelated `config.toml` in parent can be picked up as project root.
 - **Recommendation**: Add max walk depth (e.g., 10). Consider checking for specific marker like `.agent-nexus-root`.
+
+**Resolution (2026-04-25)**: Fixed. Added `MAX_DEPTH = 10` guard — walks at most 10 levels up before giving up. Prevents scanning from home directory to filesystem root.
 
 ### F39: Missing Top-Level `status` Command
 - **Severity**: Medium
