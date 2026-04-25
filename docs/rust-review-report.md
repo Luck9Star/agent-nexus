@@ -7,6 +7,7 @@
 > Round 3: Supplementary deep findings + 7 fixes applied
 > Round 4: Cross-crate consistency review + fix verification
 > Total findings: 68 (Round 1: 40, Round 2: 42, Round 3: 56 cumulative, Round 4: 64, Round 5: 68)
+> **Resolved**: 6 findings (F10, F20, F23, F25, F28 partial, F30)
 
 ## Executive Summary
 
