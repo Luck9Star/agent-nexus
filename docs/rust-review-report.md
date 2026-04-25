@@ -7,7 +7,7 @@
 > Round 3: Supplementary deep findings + 7 fixes applied
 > Round 4: Cross-crate consistency review + fix verification
 > Total findings: 68 (Round 1: 40, Round 2: 42, Round 3: 56 cumulative, Round 4: 64, Round 5: 68)
-> **Resolved**: 6 findings (F10, F20, F23, F25, F28 partial, F30)
+> **Resolved**: 10 findings (F10, F14, F15, F16, F17, F20, F23, F25, F28 partial, F30)
 
 ## Executive Summary
 
@@ -140,12 +140,16 @@
 - **Description**: `list_tools_handler` acquires global agents Mutex, then iterates each agent acquiring the global lock again AND per-slot lock per agent. With N agents: 2N+1 Mutex acquisitions. Under concurrent HTTP requests, all tool calls serialize through the same global Mutex.
 - **Recommendation**: Take global lock once, clone `Arc<Mutex<AgentSlot>>` refs, release global lock, then iterate. Or use `RwLock` for the agents HashMap.
 
+**Resolution (2026-04-25)**: Fixed. Global agents HashMap uses `RwLock`; methods take brief read locks, clone `Arc` refs, then release before per-slot work.
+
 ### F15: activate Silently Swallows list_tools Errors — Agent Permanently Stuck
 - **Severity**: High
 - **Category**: Error Handling
 - **Location**: `crates/ap-gateway/src/deferred_registry.rs:151-169`
 - **Description**: When `list_tools` fails, client is already cached in `OnceCell`. On retry, the cached (possibly dead) client is reused forever. No `force_reactivate` method to clear OnceCell entries. Agent stuck in half-activated state.
 - **Recommendation**: Add health-check before reusing cached client, or `force_reactivate` that clears OnceCell entries.
+
+**Resolution (2026-04-25)**: Fixed. `force_reactivate()` clears both client and tools OnceCells. `activate()` auto-recovers: when `list_tools` fails, the dead client is cleared so the next attempt creates a fresh client.
 
 ### F16: deactivate_idle Doesn't Remove Agents from HashMap — Unbounded Growth
 - **Severity**: Medium
@@ -154,12 +158,16 @@
 - **Description**: Deactivated agents remain as empty shells in HashMap. `list_agents()` returns their names, `list_tools_handler` iterates over them (logging warnings). Registry grows unboundedly.
 - **Recommendation**: Remove idle entries from HashMap, or maintain active/inactive filter. Add `prune_deactivated` method.
 
+**Resolution (2026-04-25)**: Fixed. `deactivate_idle()` now removes deactivated entries from the HashMap (Phase 4: `retain()` after shutdown). Entries that were re-activated during the gap are preserved.
+
 ### F17: deactivate_idle Holds Global Lock During Per-Slot Shutdown — Stall Cascade
 - **Severity**: Medium
 - **Category**: Concurrency
 - **Location**: `crates/ap-gateway/src/deferred_registry.rs:193-218`
 - **Description**: `deactivate_idle` holds global lock while acquiring per-slot locks for shutdown. If `call_tool` holds per-slot lock during long-running invocation, `deactivate_idle` blocks, and since it holds global lock, ALL registry operations stall.
 - **Recommendation**: Collect idle slots under global lock, release it, then acquire per-slot locks for shutdown.
+
+**Resolution (2026-04-25)**: Fixed. Two-phase shutdown: collect candidates under read lock, release, then shutdown outside any lock. Uses `try_lock()` heuristic to avoid blocking during idle scan.
 
 ### F18: Stateless McpToolAdapter — Unnecessary Coupling
 - **Severity**: Low
