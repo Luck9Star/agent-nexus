@@ -825,13 +825,19 @@ async fn async_exec(
     mcp_send(&mut writer, &call_req).await?;
     output.info(&format!("Task sent to '{agent_id}' via tools/call '{tool_name}', waiting for result..."));
 
-    // Read tool call response with timeout.
-    let tool_resp = tokio::time::timeout(
+    // Read tool call response with timeout. Kill child on timeout to prevent leaks.
+    let tool_resp = match tokio::time::timeout(
         std::time::Duration::from_secs(RESPONSE_TIMEOUT_SECS),
         mcp_read(&mut reader),
     )
     .await
-    .context(format!("Timed out after {RESPONSE_TIMEOUT_SECS}s waiting for agent response"))??;
+    {
+        Ok(result) => result.context("Failed to read agent response")?,
+        Err(_) => {
+            let _ = child.kill().await;
+            bail!("Timed out after {RESPONSE_TIMEOUT_SECS}s waiting for agent response");
+        }
+    };
 
     // Extract text content from MCP tool result.
     // Format: { "result": { "content": [ { "type": "text", "text": "..." } ] } }

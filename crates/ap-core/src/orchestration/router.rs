@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::orchestration::ipc::IpcError;
 use crate::orchestration::ipc_protocol::{AgentResult, IpcProtocol};
@@ -47,6 +48,11 @@ pub struct PlatformRouter {
     pm: ProcessManagerHandle,
     subtask: SubtaskController,
     composites: HashMap<String, CompositeDefinition>,
+    /// Per-agent locks to serialize IPC (take_io → return_io) cycles.
+    /// Uses `tokio::sync::Mutex` because the lock is held across `.await` points
+    /// (send_chat, receive_result). The outer `std::sync::Mutex` guards the
+    /// HashMap only (pure sync ops, no .await).
+    agent_locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl PlatformRouter {
@@ -55,12 +61,28 @@ impl PlatformRouter {
             pm,
             subtask: SubtaskController::new(config),
             composites: HashMap::new(),
+            agent_locks: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
     /// Register a composite agent definition.
     pub fn register_composite(&mut self, name: String, def: CompositeDefinition) {
         self.composites.insert(name, def);
+    }
+
+    /// Get or create a per-agent `tokio::sync::Mutex` for serializing IPC cycles.
+    ///
+    /// The outer `std::sync::Mutex` guards the HashMap lookup only (no `.await`).
+    /// The returned `Arc<tokio::sync::Mutex<()>>` is safe to hold across `.await`
+    /// points during `send_chat` / `receive_result`.
+    fn agent_lock(&self, name: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut map = self
+            .agent_locks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        map.entry(name.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     /// Route a chat message to the appropriate agent.
@@ -285,6 +307,7 @@ impl PlatformRouter {
                 let conv_id = conversation_id.to_string();
                 let pm = pm.clone();
                 let timeout = timeout_secs;
+                let agent_lock = self.agent_lock(&name);
 
                 Box::new(move || {
                     // Clone captured values for the async block (Fn, not FnOnce)
@@ -292,8 +315,12 @@ impl PlatformRouter {
                     let msg = msg.clone();
                     let conv_id = conv_id.clone();
                     let pm = pm.clone();
+                    let agent_lock = agent_lock.clone();
 
                     Box::pin(async move {
+                        // Serialize IPC per-agent: prevents concurrent take_io races.
+                        let _guard = agent_lock.lock().await;
+
                         // Take IO from ProcessManager (serialized via inner Mutex)
                         let (stdin, stdout) = pm.take_io(&name).await.map_err(|e| {
                             SubtaskError::Execution(format!("Failed to get IO for '{name}': {e}"))
@@ -349,6 +376,11 @@ impl PlatformRouter {
         message: &str,
         conversation_id: &str,
     ) -> Result<AgentResult, RouterError> {
+        // Serialize IPC per-agent: prevents concurrent take_io races when the
+        // router is used from multiple tasks (e.g. gateway, server mode).
+        let lock = self.agent_lock(agent_name);
+        let _guard = lock.lock().await;
+
         let (stdin, stdout) = self
             .pm
             .take_io(agent_name)

@@ -7,7 +7,7 @@
 > Round 3: Supplementary deep findings + 7 fixes applied
 > Round 4: Cross-crate consistency review + fix verification
 > Total findings: 68 (Round 1: 40, Round 2: 42, Round 3: 56 cumulative, Round 4: 64, Round 5: 68)
-> **Resolved**: 36 findings (F1, F2, F4, F5, F6, F7, F9, F10, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F33, F34, F35, F36, F37, F38, F41, F43, S4, S5, R2-F3, R2-F4, R2-F7, R2-F8)
+> **Resolved**: 41 findings (F1, F2, F4, F5, F6, F7, F9, F10, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F33, F34, F35, F36, F37, F38, F40, F41, F43, S3, S4, S5, S7, R2-F3, R2-F4, R2-F7, R2-F8, R2-F10)
 
 ## Executive Summary
 
@@ -372,6 +372,8 @@
 - **Description**: On timeout, error path doesn't kill agent process. Kill only happens if `proc.is_alive()` check passes, which occurs after error return. Mixed sync/async cleanup.
 - **Recommendation**: Move kill before error return or use scope guard. Consider `tokio::select!` with timeout.
 
+**Resolution (2026-04-25)**: Fixed. Timeout path now explicitly kills child process via `child.kill().await` before returning error, using `match` on the timeout result instead of `??` operator.
+
 ---
 
 ## Cross-Cutting Issues
@@ -461,6 +463,8 @@
 | S1 | ap-core | `receive_result()` treats Progress messages as success=true `AgentResult` — silent data corruption in IPC | F5 |
 | S2 | ap-core | `execute_parallel_agents()` silently discards `return_io` errors — agent becomes permanently unusable | F4 |
 | S3 | ap-core | `ProcessManagerHandle.spawn()` race: child already spawned before capacity check, exceeds `max_concurrent` transiently | F4 |
+
+**Resolution (2026-04-25)**: Accepted as known trade-off. Capacity check is co-located with insert (single lock acquisition at line 666-687). Alternative (check-then-spawn) has its own TOCTOU; holding lock during spawn serializes all spawns unnecessarily. Transient 1-over-capacity is acceptable — child is killed immediately on capacity overflow.
 | S4 | ap-core | `restart_agent()` TOCTOU: config extracted under lock, shutdown runs on separate lock — concurrent caller can kill wrong process | F4 |
 
 **Resolution (2026-04-25)**: Fixed. `ProcessManagerHandle::restart_agent` simplified from 28 lines (3 separate lock acquisitions with TOCTOU gaps) to 3 lines (single lock delegation to `ProcessManager::restart_agent`). Dead code `get_spawn_config` removed.
@@ -469,6 +473,9 @@
 **Resolution (2026-04-25)**: Fixed. Replaced `ManuallyDrop<Child>` with `Option<Child>`. `split()` now uses `self.child.take()` (safe Rust) instead of `unsafe ManuallyDrop::take`. `Drop` impl uses `if let Some(mut child) = self.child.take()`. No unsafe code remains in `AgentProcess`.
 | S6 | ap-runtime | `heartbeat()` only checks stdin writability, not agent responsiveness — false confidence in deadlocked agents | — |
 | S7 | ap-evolution | `run_migrations` loop uses stale `current` variable — multi-step chains (0→1→2→3) only apply first step | F28 |
+
+**Resolution (2026-04-25)**: Already fixed. Loop uses `let mut current` and updates `current = to.to_string()` each iteration. Multi-step chains (0→1→2→3) apply correctly.
+| S8 | ap-evolution | `load_health_state`/`save_health_state` non-atomic across pool connections — health score can diverge | F29 |
 | S8 | ap-evolution | `load_health_state`/`save_health_state` non-atomic across pool connections — health score can diverge | F29 |
 | S9 | ap-cli | `run_router_mode` creates `Runtime::new()` without `try_current` guard (inconsistent with `run_exec`) — panic risk if embedded | — |
 | S10 | ap-cli | Reaper threads are fire-and-forget; stale PID files prevent agent restarts after unclean shutdown | — |
@@ -591,6 +598,8 @@ These are the unfixed High findings ordered by impact + fix complexity:
 - **Fix**: Wrap `ipc_chat` and `execute_parallel_agents` IO operations
   with `IpcLockRegistry::get_or_create` per-agent locks.
 
+**Resolution (2026-04-25)**: Fixed. `PlatformRouter` now has `agent_locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>`. Both `ipc_chat` and `execute_parallel_agents` acquire the per-agent lock before `take_io` and hold it through `return_io`. Uses `tokio::sync::Mutex` (not `std::sync::Mutex`) since the lock spans `.await` points.
+
 #### R2-F6: No Production `McpClient` Implementation
 - **Severity**: Medium
 - **Category**: Architecture / Completeness
@@ -654,6 +663,8 @@ These are the unfixed High findings ordered by impact + fix complexity:
   with the crate's async-first design.
 - **Fix**: Document the intentional choice with a SAFETY comment, or
   switch to `tokio::sync::Mutex` for consistency.
+
+**Resolution (2026-04-25)**: Already documented. SAFETY comment at `ipc_lock.rs:5-7` explains the intentional choice: critical sections are pure Vec operations with no `.await` points. `std::sync::Mutex` is faster for these tiny sections and cannot deadlock the async runtime.
 
 ### Round 2 Summary
 
