@@ -182,8 +182,15 @@ impl DeferredAgentRegistry {
             .await
             .map_err(|e| RegistryError::ActivationFailed(format!("list_tools failed: {e}")))?;
 
-        // Re-acquire per-slot lock to store the result
+        // Re-acquire per-slot lock to store the result.
+        // Check client liveness — if force_reactivate cleared the client while
+        // we were doing I/O, the tools we fetched are from a dead client.
         let slot = slot_arc.lock().await;
+        if slot.client.get().is_none() {
+            return Err(RegistryError::ActivationFailed(
+                "agent was deactivated during activation (force_reactivate race)".to_string(),
+            ));
+        }
         let tools_arc = Arc::new(tools);
         if slot.tools.set(tools_arc).is_err() {
             // Another caller won the race; their value is in the cell.

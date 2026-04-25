@@ -2,6 +2,9 @@
 //!
 //! Python source: Python uses `dict[str, asyncio.Lock]` per agent.
 
+// SAFETY: Uses std::sync::Mutex instead of tokio::sync::Mutex because critical
+// sections are pure Vec operations (no .await points). std::sync::Mutex is
+// faster for these tiny sections and cannot deadlock the async runtime.
 use std::sync::{Arc, Mutex};
 
 const MAX_LOCKS: usize = 1000;

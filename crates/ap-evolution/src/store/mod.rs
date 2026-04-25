@@ -96,20 +96,40 @@ impl EvolutionStore {
             )
             .ok();
 
-        let current = current.unwrap_or_default();
+        // Fresh DB (no _meta row): schema was just created from SCHEMA_SQL,
+        // so all tables are at the latest version. Just stamp and return.
+        let current = match current {
+            Some(v) if v == schema::SCHEMA_VERSION => return Ok(()),
+            Some(v) => v,
+            None => {
+                conn.execute(schema::SET_SCHEMA_VERSION_SQL, [schema::SCHEMA_VERSION])?;
+                return Ok(());
+            }
+        };
 
-        if current == schema::SCHEMA_VERSION {
-            return Ok(());
-        }
-
-        // Apply any pending migrations
-        for (from, _to, sql) in schema::MIGRATIONS {
-            if current == *from {
-                conn.execute_batch(sql)?;
+        // Existing DB at older version — apply migration chain.
+        let mut current = current;
+        while current != schema::SCHEMA_VERSION {
+            let mut applied = false;
+            for (from, to, sql) in schema::MIGRATIONS {
+                if current == *from {
+                    conn.execute_batch(sql)?;
+                    current = to.to_string();
+                    applied = true;
+                    break;
+                }
+            }
+            if !applied {
+                return Err(rusqlite::Error::ToSqlConversionFailure(
+                    Box::from(format!(
+                        "migration stuck at version {current}: no migration from {current} to {target}",
+                        target = schema::SCHEMA_VERSION
+                    )),
+                ));
             }
         }
 
-        // Stamp the new version
+        // All migrations applied — stamp the target version.
         conn.execute(schema::SET_SCHEMA_VERSION_SQL, [schema::SCHEMA_VERSION])?;
         Ok(())
     }

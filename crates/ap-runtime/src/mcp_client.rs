@@ -69,6 +69,8 @@ pub trait McpClient: Send + Sync {
     /// Shut down the client and release any held resources (subprocesses, connections, etc.).
     ///
     /// Default implementation is a no-op so that existing implementors are not broken.
+    /// **Implementors MUST override this** if they hold any resources (subprocesses,
+    /// network connections, file handles) — failing to do so causes resource leaks.
     fn shutdown(&mut self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async {})
     }

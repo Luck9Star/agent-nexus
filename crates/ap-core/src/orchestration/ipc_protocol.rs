@@ -79,43 +79,45 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub async fn receive_result(&mut self, timeout: Option<f64>) -> Result<AgentResult, IpcError> {
-        let receive_fut = self.stream.receive::<AgentToPlatform>();
-        let mut msg = match timeout {
-            Some(secs) => {
-                tokio::pin!(receive_fut);
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs_f64(secs),
-                    &mut receive_fut,
-                )
-                .await
-                {
-                    Ok(result) => result?,
-                    Err(_) => return Err(IpcError::Timeout { timeout: secs }),
+        loop {
+            let receive_fut = self.stream.receive::<AgentToPlatform>();
+            let mut msg = match timeout {
+                Some(secs) => {
+                    tokio::pin!(receive_fut);
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs_f64(secs),
+                        &mut receive_fut,
+                    )
+                    .await
+                    {
+                        Ok(result) => result?,
+                        Err(_) => return Err(IpcError::Timeout { timeout: secs }),
+                    }
                 }
-            }
-            None => receive_fut.await?,
-        };
-        let success = msg.is_success();
-        let task_id = msg.task_id.take();
-        match msg.msg_type {
-            AgentToPlatformType::Result => Ok(AgentResult {
-                content: msg.content,
-                success,
-                task_id,
-            }),
-            AgentToPlatformType::Error => Err(IpcError::Io(std::io::Error::other(
-                format!(
-                    "Agent error: {}",
-                    msg.error.as_deref().unwrap_or("unknown")
-                ),
-            ))),
-            AgentToPlatformType::Progress => {
-                // Progress messages are informational; return partial result
-                Ok(AgentResult {
-                    content: msg.message.unwrap_or_default(),
-                    success: true,
+                None => receive_fut.await?,
+            };
+            let success = msg.is_success();
+            let task_id = msg.task_id.take();
+            match msg.msg_type {
+                AgentToPlatformType::Result => return Ok(AgentResult {
+                    content: msg.content,
+                    success,
                     task_id,
-                })
+                }),
+                AgentToPlatformType::Error => return Err(IpcError::Io(std::io::Error::other(
+                    format!(
+                        "Agent error: {}",
+                        msg.error.as_deref().unwrap_or("unknown")
+                    ),
+                ))),
+                AgentToPlatformType::Progress => {
+                    // Progress messages are informational; skip and wait for the final result.
+                    // Returning progress as a result was a bug — callers cannot distinguish
+                    // progress from completion, and the real result stays in the buffer
+                    // corrupting subsequent IPC rounds.
+                    tracing::debug!("Skipping progress message, waiting for final result");
+                    continue;
+                }
             }
         }
     }

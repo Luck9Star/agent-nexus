@@ -31,6 +31,8 @@ pub enum ProcessError {
     NoStdout,
     #[error("Graceful shutdown timed out")]
     ShutdownTimeout,
+    #[error("IO already taken for process: {0}")]
+    IOAlreadyTaken(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -70,6 +72,9 @@ pub struct ManagedProcess {
     stdin: Box<dyn AsyncWrite + Unpin + Send>,
     stdout: Box<dyn AsyncRead + Unpin + Send>,
     spawn_config: SpawnConfig,
+    /// Tracks whether IO has been taken via `take_io` and not yet returned.
+    /// Prevents silent double-take that would return non-functional sink/empty.
+    io_taken: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +207,7 @@ impl ProcessManager {
         );
 
         self.processes
-            .insert(id.to_string(), ManagedProcess { child, stdin, stdout, spawn_config });
+            .insert(id.to_string(), ManagedProcess { child, stdin, stdout, spawn_config, io_taken: false });
         Ok(())
     }
 
@@ -419,8 +424,12 @@ impl ProcessManager {
             .processes
             .get_mut(id)
             .ok_or_else(|| ProcessError::NotFound(id.to_string()))?;
+        if proc.io_taken {
+            return Err(ProcessError::IOAlreadyTaken(id.to_string()));
+        }
         let stdin = std::mem::replace(&mut proc.stdin, Box::new(tokio::io::sink()));
         let stdout = std::mem::replace(&mut proc.stdout, Box::new(tokio::io::empty()));
+        proc.io_taken = true;
         Ok((stdin, stdout))
     }
 
@@ -468,6 +477,7 @@ impl ProcessManager {
             .ok_or_else(|| ProcessError::NotFound(id.to_string()))?;
         proc.stdin = io.0;
         proc.stdout = io.1;
+        proc.io_taken = false;
         Ok(())
     }
 
@@ -675,6 +685,7 @@ impl ProcessManagerHandle {
                     stdin,
                     stdout,
                     spawn_config,
+                    io_taken: false,
                 },
             );
         }
@@ -914,6 +925,29 @@ mod tests {
         let mut pm = ProcessManager::new();
         let result = pm.take_io("nonexistent");
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn take_io_double_take_errors() {
+        let mut pm = ProcessManager::new();
+        pm.spawn("double-take", "cat", &[], None).await.unwrap();
+        let _first = pm.take_io("double-take").unwrap();
+        let second = pm.take_io("double-take");
+        assert!(matches!(second, Err(ProcessError::IOAlreadyTaken(_))));
+        #[allow(deprecated)]
+        pm.kill("double-take").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn take_io_return_then_take_again() {
+        let mut pm = ProcessManager::new();
+        pm.spawn("return-take", "cat", &[], None).await.unwrap();
+        let (stdin, stdout) = pm.take_io("return-take").unwrap();
+        pm.return_io("return-take", (stdin, stdout)).unwrap();
+        // After return_io, take_io should succeed again
+        let _again = pm.take_io("return-take").unwrap();
+        #[allow(deprecated)]
+        pm.kill("return-take").await.unwrap();
     }
 
     #[tokio::test]

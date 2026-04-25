@@ -312,7 +312,9 @@ impl PlatformRouter {
 
                         // Return IO so the agent can be reused in subsequent phases.
                         let (stdout_r, stdin_w) = proto.into_parts();
-                        let _: Result<_, _> = pm.return_io(&name, (stdin_w, stdout_r)).await;
+                        if let Err(e) = pm.return_io(&name, (stdin_w, stdout_r)).await {
+                            tracing::warn!("Failed to return IO for agent '{name}': {e}");
+                        }
 
                         Ok(result)
                     })
@@ -363,7 +365,9 @@ impl PlatformRouter {
 
         // Return IO to ProcessManager so the agent can be reused in subsequent phases.
         let (stdout_r, stdin_w) = proto.into_parts();
-        let _: Result<_, _> = self.pm.return_io(agent_name, (stdin_w, stdout_r)).await;
+        if let Err(e) = self.pm.return_io(agent_name, (stdin_w, stdout_r)).await {
+            tracing::warn!("Failed to return IO for agent '{agent_name}': {e}");
+        }
 
         Ok(result)
     }

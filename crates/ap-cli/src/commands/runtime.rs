@@ -87,7 +87,7 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
             .map(|lf| lf.agents.into_keys().collect())
             .unwrap_or_default()
     } else {
-        let name = agent.unwrap();
+        let name = agent.expect("clap requires agent name when --all is not set");
         if lockfile_mgr.get(name)?.is_none() {
             anyhow::bail!("Agent '{name}' is not installed.");
         }
@@ -124,9 +124,30 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
 
         let pid_file = root.join(".agents").join(format!("{agent_name}.pid"));
         if pid_file.exists() {
+            // Check if the PID is actually alive — stale PID files from unclean
+            // shutdown should not prevent restarts.
             let pid_str = std::fs::read_to_string(&pid_file).unwrap_or_default();
-            output.info(&format!("Agent '{agent_name}' may already be running (PID: {pid_str})."));
-            continue;
+            let is_stale = pid_str.split(':').next()
+                .and_then(|p| p.trim().parse::<i32>().ok())
+                .map(|pid| {
+                    // Signal 0 doesn't kill the process — just checks existence.
+                    // Returns 0 if the process exists, -1 with ESRCH otherwise.
+                    unsafe { libc::kill(pid, 0) == 0 }
+                })
+                .unwrap_or(false);
+
+            if is_stale {
+                let port_file = root.join(".agents").join(format!("{agent_name}.port"));
+                let _ = std::fs::remove_file(&pid_file);
+                let _ = std::fs::remove_file(&port_file);
+                output.info(&format!("Cleaned stale PID file for '{agent_name}' (process no longer running)."));
+                // Continue to restart the agent below.
+            } else {
+                // PID file exists and we couldn't determine staleness (parse error)
+                // or the process is still alive. Skip to be safe.
+                output.info(&format!("Agent '{agent_name}' may already be running (PID: {pid_str})."));
+                continue;
+            }
         }
 
         let (entrypoint, use_module) = resolve_entrypoint(&install_dir, agent_name);
@@ -247,7 +268,7 @@ pub fn run_stop(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Res
             })
             .collect()
     } else {
-        let name = agent.unwrap().to_string();
+        let name = agent.expect("clap requires agent name when --all is not set").to_string();
         let pid_path = agents_dir.join(format!("{name}.pid"));
         if !pid_path.exists() {
             output.info(&format!("Agent '{name}' is not running (no PID file)."));
@@ -513,7 +534,10 @@ pub fn run_logs(agent: &str, lines: usize, follow: bool, output: &OutputFormatte
 }
 
 /// Tail a log file, showing the last N lines.
+/// When `follow` is true, polls for new lines until Ctrl-C.
 fn tail_log(path: &std::path::Path, lines: usize, follow: bool) -> Result<()> {
+    use std::collections::VecDeque;
+
     let content = std::fs::read_to_string(path)?;
     let all_lines: Vec<&str> = content.lines().collect();
     let start = all_lines.len().saturating_sub(lines);
@@ -521,8 +545,60 @@ fn tail_log(path: &std::path::Path, lines: usize, follow: bool) -> Result<()> {
         println!("{line}");
     }
 
-    if follow {
-        eprintln!("(follow mode: use 'tail -f {}' for continuous output)", path.display());
+    if !follow {
+        return Ok(());
+    }
+
+    // Follow mode: poll for new lines every 500ms until Ctrl-C.
+    let mut last_pos = std::fs::metadata(path)?.len();
+    let mut tail_buf = VecDeque::with_capacity(64);
+
+    // Ignore SIGINT in the loop so we can break cleanly.
+    let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        r.store(false, std::sync::atomic::Ordering::Relaxed);
+    })?;
+
+    while running.load(std::sync::atomic::Ordering::Relaxed) {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let Ok(meta) = std::fs::metadata(path) else {
+            break; // file disappeared
+        };
+        let current_size = meta.len();
+        if current_size < last_pos {
+            // File was truncated / rotated — reset.
+            last_pos = 0;
+        }
+        if current_size <= last_pos {
+            continue;
+        }
+
+        // Read just the new bytes.
+        let mut f = std::fs::File::open(path)?;
+        std::io::Seek::seek(&mut f, std::io::SeekFrom::Start(last_pos))?;
+        let mut new_content = String::new();
+        std::io::Read::read_to_string(&mut f, &mut new_content)?;
+        last_pos += new_content.len() as u64;
+
+        // Print new lines. Buffer partial last line (no trailing newline yet).
+        for line in new_content.split('\n') {
+            if let Some(partial) = tail_buf.pop_front() {
+                let full = format!("{partial}{line}");
+                if full.ends_with('\n') || full.ends_with('\r') {
+                    print!("{full}");
+                } else {
+                    tail_buf.push_back(full);
+                }
+            } else if line.ends_with('\n') || line.ends_with('\r') {
+                print!("{line}");
+            } else {
+                tail_buf.push_back(line.to_string());
+            }
+        }
+        use std::io::Write;
+        std::io::stdout().flush()?;
     }
 
     Ok(())
@@ -619,6 +695,12 @@ async fn mcp_read(
             continue;
         }
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            // Skip server-initiated notifications (no "id" field per MCP JSON-RPC spec).
+            // Notifications include progress updates, log messages, etc.
+            if val.get("id").is_none() {
+                tracing::debug!("Skipping MCP notification: {}", trimmed);
+                continue;
+            }
             return Ok(val);
         }
         // Non-JSON line (FastMCP banner, debug output) — skip.

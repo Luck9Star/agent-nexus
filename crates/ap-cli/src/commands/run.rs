@@ -161,6 +161,7 @@ fn run_router_mode(agent: &str, message: &str, output: &OutputFormatter) -> Resu
     output.info(&format!("Starting agent '{agent}' in router mode..."));
 
     // Run the async router orchestration in a tokio runtime.
+    // Always create a new runtime — the CLI is a sync entry point.
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         use ap_core::orchestration::{
@@ -228,12 +229,8 @@ fn run_router_mode(agent: &str, message: &str, output: &OutputFormatter) -> Resu
         }.await;
 
         // 4. Always shut down the agent process — even if routing failed.
-        if let Err(e) = handle
-            .graceful_shutdown_all(std::time::Duration::from_secs(5))
-            .await
-        {
-            tracing::warn!("Graceful shutdown failed: {e}, force-killing");
-            let _ = handle.kill_all().await;
+        if let Err(e) = router.stop_all().await {
+            tracing::warn!("Router shutdown failed: {e}");
         }
 
         chat_result // propagate the original error

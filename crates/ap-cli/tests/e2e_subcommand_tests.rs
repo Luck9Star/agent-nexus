@@ -659,6 +659,163 @@ fn run_with_invalid_mode() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// Runtime logs --follow with real log file (GAP-4 verification)
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn runtime_logs_shows_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents_dir = dir.path().join(".agents").join("log-test-agent");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    std::fs::write(
+        agents_dir.join("agent.log"),
+        "line 1\nline 2\nline 3\nline 4\nline 5\n",
+    )
+    .unwrap();
+
+    let output = cli()
+        .args(["runtime", "logs", "log-test-agent"])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    assert!(stdout.contains("line 1"), "Should show log content");
+    assert!(stdout.contains("line 5"), "Should show last log line");
+}
+
+#[test]
+fn runtime_logs_lines_flag_limits_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents_dir = dir.path().join(".agents").join("lines-test-agent");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    std::fs::write(
+        agents_dir.join("agent.log"),
+        "line 1\nline 2\nline 3\nline 4\nline 5\n",
+    )
+    .unwrap();
+
+    let output = cli()
+        .args(["runtime", "logs", "lines-test-agent", "--lines", "2"])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    assert!(!stdout.contains("line 1"), "Should not show old lines");
+    assert!(!stdout.contains("line 2"), "Should not show old lines");
+    assert!(!stdout.contains("line 3"), "Should not show old lines");
+    assert!(stdout.contains("line 4"), "Should show tail line 4");
+    assert!(stdout.contains("line 5"), "Should show tail line 5");
+}
+
+#[test]
+fn runtime_logs_follow_outputs_initial_content() {
+    // Test that --follow mode at least outputs the initial lines before blocking.
+    // Use a timeout to prevent the test from hanging indefinitely.
+    let dir = tempfile::tempdir().unwrap();
+    let agents_dir = dir.path().join(".agents").join("follow-agent");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    std::fs::write(
+        agents_dir.join("agent.log"),
+        "initial line 1\ninitial line 2\n",
+    )
+    .unwrap();
+
+    // --follow will block; use assert_cmd timeout to kill it after 2s
+    let result = cli()
+        .args(["runtime", "logs", "follow-agent", "--follow"])
+        .current_dir(dir.path())
+        .timeout(std::time::Duration::from_secs(2))
+        .assert();
+
+    let output = result.get_output();
+    // The process was killed by timeout, so exit code may be non-zero — that's OK.
+    // What matters is that it printed the initial lines before blocking.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("initial line 1"),
+        "Follow mode should show initial content, got: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("initial line 2"),
+        "Follow mode should show initial content, got: {stdout:?}"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Search --json output validation (GAP-2 verification)
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn search_json_output_empty_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+
+    let output = cli()
+        .args(["--json", "search", "anything"])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout).expect("search --json should produce valid JSON");
+    assert!(
+        parsed.is_array(),
+        "search --json should produce a JSON array"
+    );
+    assert!(
+        parsed.as_array().unwrap().is_empty(),
+        "search with no sources should return empty array"
+    );
+}
+
+#[test]
+fn search_json_output_with_matching_source() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("sources.yaml"),
+        "sources:\n  - name: my-tools\n    url: https://github.com/example/tools\n    branch: main\n",
+    )
+    .unwrap();
+
+    let output = cli()
+        .args(["--json", "search", "my-tools"])
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout).expect("search --json should produce valid JSON");
+    let results = parsed.as_array().expect("search should return JSON array");
+    assert_eq!(results.len(), 1, "Should find one matching source");
+    assert_eq!(results[0]["name"], "my-tools");
+    // Verify the JSON has the expected fields from run_search
+    assert!(results[0].get("version").is_some(), "Result should have 'version'");
+    assert!(results[0].get("type").is_some(), "Result should have 'type'");
+    assert!(results[0].get("source").is_some(), "Result should have 'source'");
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Info --json with nonexistent agent (GAP-3 verification)
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn info_json_nonexistent_agent() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("lockfile.json"), "{}").unwrap();
+
+    cli()
+        .args(["--json", "info", "nonexistent-agent"])
+        .current_dir(dir.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not installed"));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // Global --json flag across various subcommands
 // ══════════════════════════════════════════════════════════════════════════════
 
