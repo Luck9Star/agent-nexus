@@ -7,7 +7,7 @@
 > Round 3: Supplementary deep findings + 7 fixes applied
 > Round 4: Cross-crate consistency review + fix verification
 > Total findings: 68 (Round 1: 40, Round 2: 42, Round 3: 56 cumulative, Round 4: 64, Round 5: 68)
-> **Resolved**: 26 findings (F1, F2, F4, F5, F9, F10, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F34, F35, F36, F37, F38)
+> **Resolved**: 28 findings (F1, F2, F4, F5, F9, F10, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F34, F35, F36, F37, F38, F41, F43)
 
 ## Executive Summary
 
@@ -677,6 +677,8 @@ The orchestration layer implements a layered design for composite agent workflow
 - **Description**: In `route_composite()`, the `completed` counter is incremented inside the phase loop regardless of whether the phase actually executed. When `agent_names` is empty for a phase (no agents assigned), the phase is skipped but `completed += 1` still fires. The resulting `CompositeWorkflowResult.completed_phases` includes skipped phases, misleading callers about actual execution progress. For a 4-phase workflow where 2 phases are skipped, `completed_phases` reports 4/4 instead of the accurate 2/4.
 - **Recommendation**: Only increment `completed` when the phase actually executes agents. Track `skipped_phases` separately for observability.
 
+**Resolution (2026-04-25)**: Fixed. Removed `completed += 1` from the empty-phase skip branch. Counter now only increments after actual phase execution.
+
 ### F42: SubtaskController::run_parallel() flattens JoinError to string — loses structured error info
 - **Severity**: Low
 - **Category**: API / Error Handling
@@ -690,6 +692,8 @@ The orchestration layer implements a layered design for composite agent workflow
 - **Location**: `crates/ap-core/src/orchestration/router.rs:191-240`
 - **Description**: `route_to_atomic()` creates a `CompositeWorkflowResult` where the single agent's result is always placed under `WorkflowPhase::Implementation`, regardless of the actual nature of the task. An atomic agent performing research or verification work gets mislabeled. This makes the phase field unreliable for downstream consumers that use `completed_phases` to understand which workflow stages completed.
 - **Recommendation**: Accept an optional `phase: WorkflowPhase` parameter, or derive the phase from the agent's metadata. At minimum, document that `route_to_atomic` always uses Implementation.
+
+**Resolution (2026-04-25)**: Fixed. `route_to_atomic` now accepts a `phase: WorkflowPhase` parameter. Callers can specify the correct phase; `route_chat` defaults to `Implementation` for backward compatibility.
 
 ### F44: route_composite() has no per-phase cancellation — overall timeout kills entire workflow
 - **Severity**: Medium

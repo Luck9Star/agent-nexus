@@ -77,7 +77,7 @@ impl PlatformRouter {
             self.route_composite(agent_name, def, message, conversation_id)
                 .await
         } else {
-            self.route_to_atomic(agent_name, message, conversation_id)
+            self.route_to_atomic(agent_name, message, conversation_id, WorkflowPhase::Implementation)
                 .await
         }
     }
@@ -109,8 +109,7 @@ impl PlatformRouter {
                 ctx.current_phase = Some(phase);
                 let agent_names = def.phase_agents.get(&phase).cloned().unwrap_or_default();
                 if agent_names.is_empty() {
-                    // No agents for this phase — skip gracefully.
-                    completed += 1;
+                    // No agents for this phase — skip without inflating completed count.
                     continue;
                 }
 
@@ -226,6 +225,7 @@ impl PlatformRouter {
         agent_name: &str,
         message: &str,
         conversation_id: &str,
+        phase: WorkflowPhase,
     ) -> Result<CompositeWorkflowResult, RouterError> {
         let agent_result = self
             .ipc_chat(agent_name, message, conversation_id)
@@ -237,9 +237,9 @@ impl PlatformRouter {
 
         let mut phase_results = HashMap::new();
         phase_results.insert(
-            WorkflowPhase::Implementation,
+            phase,
             PhaseResult {
-                phase: WorkflowPhase::Implementation,
+                phase,
                 success,
                 output: output.clone(),
                 error: if success { None } else { Some("Agent reported failure".into()) },
