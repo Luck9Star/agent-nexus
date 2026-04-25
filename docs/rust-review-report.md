@@ -7,7 +7,7 @@
 > Round 3: Supplementary deep findings + 7 fixes applied
 > Round 4: Cross-crate consistency review + fix verification
 > Total findings: 68 (Round 1: 40, Round 2: 42, Round 3: 56 cumulative, Round 4: 64, Round 5: 68)
-> **Resolved**: 21 findings (F1, F2, F4, F5, F9, F10, F13, F14, F15, F16, F17, F20, F21, F22, F23, F25, F28 partial, F29, F30, F34, F35)
+> **Resolved**: 24 findings (F1, F2, F4, F5, F9, F10, F13, F14, F15, F16, F17, F19, F20, F21, F22, F23, F24, F25, F28 partial, F29, F30, F34, F35, F37)
 
 ## Executive Summary
 
@@ -187,6 +187,8 @@
 - **Description**: `call_tool_handler` accepts arbitrary `serde_json::Value` with no size limit. Depends on axum default (2MB) but not explicitly configured. `arguments` passed to MCP client without validation.
 - **Recommendation**: Add explicit `DefaultBodyLimit` layer. Validate `arguments` is a JSON object.
 
+**Resolution (2026-04-25)**: Fixed. Added `DefaultBodyLimit::max(2MB)` layer to the axum router, explicitly capping request body size rather than relying on implicit defaults.
+
 ---
 
 ## ap-fetcher
@@ -229,6 +231,8 @@
 - **Location**: `crates/ap-fetcher/src/uv_bridge.rs:212-239`
 - **Description**: Cache check releases lock before population. N concurrent callers each spawn `uv --version` subprocesses. `check_available` doesn't use cache at all.
 - **Recommendation**: Use `tokio::sync::OnceCell<String>` for exactly-once initialization.
+
+**Resolution (2026-04-25)**: Fixed. Replaced `Mutex<Option<String>>` with `tokio::sync::OnceCell<String>`. `resolved_path()` now uses `get_or_try_init()` — concurrent callers share a single probe, preventing N redundant `uv --version` spawns.
 
 ### F25: LockfileManager Atomic Write Temp File Name Collision
 - **Severity**: Medium
@@ -334,6 +338,8 @@
 - **Location**: `crates/ap-cli/src/commands/install.rs:66-72`
 - **Description**: If clone succeeds but lockfile update fails, cloned agent directory remains on disk unmanaged. No rollback of cloned directory on lockfile failure.
 - **Recommendation**: Roll back cloned directory on lockfile failure. Or perform lockfile check before clone.
+
+**Resolution (2026-04-25)**: Fixed. `clone_repo` failure now cleans up partial `tmp_path` before returning error. Post-clone failures already had cleanup (lines 123-127).
 
 ### F38: find_project_root Walks to Filesystem Root
 - **Severity**: Medium

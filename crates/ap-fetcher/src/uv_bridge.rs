@@ -59,16 +59,16 @@ fn validate_requirement(req: &str) -> Result<(), UvError> {
 #[derive(Debug)]
 pub struct UvBridge {
     uv_path: String,
-    resolved: std::sync::Mutex<Option<String>>,
+    resolved: tokio::sync::OnceCell<String>,
 }
 
 impl UvBridge {
     /// Create a new `UvBridge` using the default `uv` binary name.
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             uv_path: "uv".to_string(),
-            resolved: std::sync::Mutex::new(None),
+            resolved: tokio::sync::OnceCell::new(),
         }
     }
 
@@ -77,7 +77,7 @@ impl UvBridge {
     pub fn with_path(self, path: impl Into<String>) -> Self {
         Self {
             uv_path: path.into(),
-            resolved: std::sync::Mutex::new(None),
+            resolved: tokio::sync::OnceCell::new(),
         }
     }
 
@@ -207,35 +207,32 @@ impl UvBridge {
 
     /// Resolve the path to a working `uv` binary.
     ///
-    /// Caches the result after the first successful detection so subsequent
-    /// calls avoid spawning `uv --version` again.
+    /// Uses `OnceCell` for exactly-once initialization — concurrent callers
+    /// all share the same probe, preventing N redundant `uv --version` spawns.
     async fn resolved_path(&self) -> Result<String, UvError> {
-        // Check cache first
-        if let Some(ref path) = *self.resolved.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            return Ok(path.clone());
-        }
-
-        let candidates = self.candidates();
-        for candidate in &candidates {
-            if let Ok(status) = Command::new(candidate)
-                .arg("--version")
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .status()
-                .await
-            {
-                if status.success() {
-                    let mut cache = self.resolved.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                    *cache = Some(candidate.clone());
-                    return Ok(candidate.clone());
+        self.resolved
+            .get_or_try_init(|| async {
+                let candidates = self.candidates();
+                for candidate in &candidates {
+                    if let Ok(status) = Command::new(candidate)
+                        .arg("--version")
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .status()
+                        .await
+                    {
+                        if status.success() {
+                            debug!("Resolved uv binary: {}", candidate);
+                            return Ok(candidate.clone());
+                        }
+                    }
                 }
-            }
-        }
-        // No uv binary found among candidates — return an error so callers
-        // can report the problem instead of silently proceeding.
-        Err(UvError::CommandFailed(
-            format!("uv binary not found on system (tried: {:?})", candidates),
-        ))
+                Err(UvError::CommandFailed(
+                    format!("uv binary not found on system (tried: {:?})", candidates),
+                ))
+            })
+            .await
+            .cloned()
     }
 }
 

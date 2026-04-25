@@ -83,7 +83,14 @@ impl GitInstaller {
 
         debug!("Cloning {} into {:?}", url, tmp_path);
 
-        let repo = self.clone_repo(url, branch, &tmp_path, version)?;
+        let repo = match self.clone_repo(url, branch, &tmp_path, version) {
+            Ok(r) => r,
+            Err(e) => {
+                // Clean up partial clone on failure
+                let _ = std::fs::remove_dir_all(&tmp_path);
+                return Err(e);
+            }
+        };
 
         // Post-clone operations: checkout + rename. On any failure, clean up tmp_path.
         let result = (|| -> Result<PathBuf, InstallerError> {

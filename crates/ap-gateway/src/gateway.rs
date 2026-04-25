@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use thiserror::Error;
@@ -163,6 +163,7 @@ impl McpGateway {
         let app = Router::new()
             .route("/tools", get(Self::list_tools_handler))
             .route("/tools/call", post(Self::call_tool_handler))
+            .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
             .with_state(Arc::clone(self));
 
         let listener = tokio::net::TcpListener::bind(&self.config.listen_addr).await?;
