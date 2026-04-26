@@ -119,7 +119,7 @@ def test_selector_filters_by_permission():
 # 3. Rank by capability overlap
 # ===================================================================
 def test_selector_ranks_by_capability_overlap():
-    """Expert with 3/3 required capabilities ranks higher than one with 2/3."""
+    """Agents with ALL required caps are selected; optional caps differentiate scores."""
     full_match = _make_profile(
         "agency.full-match",
         name="Full Match",
@@ -128,7 +128,7 @@ def test_selector_ranks_by_capability_overlap():
     partial_match = _make_profile(
         "agency.partial-match",
         name="Partial Match",
-        # Has 2 of 3 required caps, plus a unique extra cap to avoid dedup
+        # Has 2 of 3 required caps — should be filtered out under ALL-required mode
         capabilities=["system_design", "architecture_review", "extra_unique_cap"],
     )
     registry = _registry_with(full_match, partial_match)
@@ -144,10 +144,9 @@ def test_selector_ranks_by_capability_overlap():
         )
     )
 
-    assert len(results) == 2
+    # Only full_match has ALL required capabilities
+    assert len(results) == 1
     assert results[0].agent_id == "agency.full-match"
-    assert results[1].agent_id == "agency.partial-match"
-    assert results[0].score > results[1].score
 
 
 # ===================================================================

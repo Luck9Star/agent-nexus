@@ -120,8 +120,8 @@ class SpecialistSelector:
 
             agent_caps = set(profile.get("capabilities", []))
 
-            # Must have at least one required capability to be considered
-            if required_set and not agent_caps & required_set:
+            # Must have ALL required capabilities to be considered
+            if required_set and not required_set.issubset(agent_caps):
                 continue
 
             # Permission fit: agent's mode must not exceed requested permission level

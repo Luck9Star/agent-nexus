@@ -111,12 +111,13 @@ def load_dag_into_graph(
         item = dag_task_to_task_item(dag_task, task_description)
         items.append(item)
 
+    new_items: list[TaskItem] = []
     if items:
         # Skip tasks that already exist in the graph (idempotent for re-dispatch)
         new_items = [item for item in items if graph.get_task(item.id) is None]
         if new_items:
             graph.add_tasks(new_items)
-    return items
+    return new_items
 
 
 # ---------------------------------------------------------------------------
@@ -217,10 +218,12 @@ class DAGDispatcher:
                     if t.state == TaskState.IN_PROGRESS
                 ]
                 if in_progress:
-                    # Legitimate wait — other tasks are still executing.
-                    # In synchronous mode this shouldn't happen, but guard
-                    # against it for correctness.
-                    continue
+                    # In synchronous mode, stale IN_PROGRESS tasks from a prior
+                    # crash would cause an infinite loop. Fail them instead.
+                    for t in in_progress:
+                        self._graph.fail_task(t.id)
+                        result.failed.append(t.id)
+                    break
 
                 # Only PENDING tasks remain but none are ready → blocked by failed deps
                 for t in pending_or_in_progress:

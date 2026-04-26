@@ -70,17 +70,21 @@ def _dump_yaml(data: object, f: Any, indent: int = 0) -> None:
 
 def _yaml_quote(s: str) -> str:
     """Quote a YAML string value if it contains special characters."""
-    if not s or any(c in s for c in (":", "#", "{", "}", "[", "]", ",", "&", "*", "?", "|", "-", "<", ">", "=", "!", "%", "@", "`")):
-        escaped = s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    if not s or any(c in s for c in (":", "#", "{", "}", "[", "]", ",", "&", "*", "?", "|", "-", "<", ">", "=", "!", "%", "@", "`", "\r", "\t")):
+        escaped = (
+            s.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+        )
         return f'"{escaped}"'
     return s
 
 def _derive_category(source_path: str) -> str:
     """Extract category from the source path (first directory component)."""
     parts = Path(source_path).parts
-    if len(parts) >= 1:
-        return parts[0]
-    return "unknown"
+    return parts[0] if parts else "unknown"
 
 
 class AgencyImporter:
@@ -201,6 +205,14 @@ class AgencyImporter:
         for entry in allowlist_data["agents"]:
             source_path = entry["source_path"]
             md_file = self.vendor_path / source_path
+
+            # Prevent directory traversal via source_path (e.g. "../../etc/passwd.md")
+            try:
+                md_file.resolve().relative_to(self.vendor_path.resolve())
+            except ValueError:
+                raise ValueError(
+                    f"source_path escapes vendor directory: {source_path}"
+                )
 
             if not md_file.is_file():
                 raise FileNotFoundError(f"Vendor file not found: {md_file}")

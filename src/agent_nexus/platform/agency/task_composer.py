@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from .executor import ProfileBasedExecutor
 from .integrator import Artifact, IntegratedArtifact, Integrator
@@ -16,6 +17,8 @@ from .selector import SelectionRequest, SelectionResult, SpecialistSelector
 
 if TYPE_CHECKING:
     from agent_nexus.platform.orchestration.task_graph import TaskGraph
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -39,10 +42,7 @@ class TaskComposerResult:
     qa_passed: bool | None = None
 
 
-class ExpertExecutor(Protocol):
-    """Protocol for expert execution — pluggable for testing or real dispatch."""
-
-    def __call__(self, profile_id: str, task: str) -> Artifact: ...
+from .dag_dispatcher import ExpertExecutor
 
 
 # Task type → required capabilities mapping
@@ -194,8 +194,14 @@ class TaskComposer:
                     if task.id in executed or task.id not in specialist_ids:
                         continue
                     if all(dep in executed for dep in task.blocked_by):
-                        artifact = executor(task.agent, input.task)
-                        artifacts.append(artifact)
+                        try:
+                            artifact = executor(task.agent, input.task)
+                            artifacts.append(artifact)
+                        except Exception:
+                            logger.exception(
+                                "Executor failed for task '%s' (agent '%s') in legacy path",
+                                task.id, task.agent,
+                            )
                         executed.add(task.id)
 
         if not artifacts:

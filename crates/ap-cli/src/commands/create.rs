@@ -187,6 +187,15 @@ fn run_wizard(name: &str, output_dir: Option<&str>, output: &OutputFormatter) ->
 // Template generators (matching Python's create_cmd.py)
 // ---------------------------------------------------------------------------
 
+/// Escape a string for safe embedding inside a YAML double-quoted scalar.
+fn yaml_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
 fn gen_manifest(
     name: &str,
     description: &str,
@@ -194,6 +203,7 @@ fn gen_manifest(
     recommended_model: &str,
     fallback_model: &str,
 ) -> String {
+    let desc_escaped = yaml_escape(description);
     let tools_yaml = tools
         .iter()
         .map(|t| format!("- {t}"))
@@ -204,7 +214,7 @@ fn gen_manifest(
         r#"name: {name}
 type: atomic
 version: "0.1.0"
-description: "{description}"
+description: "{desc_escaped}"
 capabilities:
   - general-purpose
 mcp:

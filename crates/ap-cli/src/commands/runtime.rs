@@ -283,14 +283,15 @@ pub fn run_stop(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Res
     for (agent_name, pid_path) in &pid_files {
         let pid_str = std::fs::read_to_string(pid_path).unwrap_or_default();
         let pid_parts: Vec<&str> = pid_str.trim().splitn(2, ':').collect();
-        if let Ok(pid) = pid_parts[0].parse::<u32>() {
+        if let Some(pid) = pid_parts[0].parse::<i32>().ok().filter(|&p| p > 0) {
             #[cfg(unix)]
             {
                 // Verify the process exists before signaling (PID recycling protection)
                 // SAFETY: pid comes from a PID file written by this tool at start time.
                 // The start_time component in the PID file provides recycling protection.
                 // kill(pid, 0) is a standard permission/existence check — no signal sent.
-                let signal_ret = unsafe { libc::kill(pid as i32, 0) };
+                // pid is validated to be > 0 to avoid sending signals to process groups.
+                let signal_ret = unsafe { libc::kill(pid, 0) };
                 if signal_ret == 0 {
                     // Process exists — check start_time if available for PID recycling protection
                     let should_kill = if pid_parts.len() > 1 {
@@ -309,7 +310,7 @@ pub fn run_stop(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Res
                         // SAFETY: pid was validated above — signal_ret confirmed process exists.
                         // start_time in PID file guards against PID recycling.
                         // SIGTERM is the standard graceful termination signal.
-                        let ret = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+                        let ret = unsafe { libc::kill(pid, libc::SIGTERM) };
                         if ret == 0 {
                             output.success(&format!("Agent '{agent_name}' (PID: {pid}) stopped."));
                         } else {
@@ -348,7 +349,7 @@ pub fn run_restart(agent: &str, output: &OutputFormatter) -> Result<()> {
 /// Validate that a process with the given PID started at approximately
 /// the expected start time (epoch seconds). Returns `false` if the process
 /// start time doesn't match (PID recycling detected) or if we can't determine it.
-fn validate_pid_start_time(pid: u32, expected_start_epoch: u64) -> bool {
+fn validate_pid_start_time(pid: i32, expected_start_epoch: u64) -> bool {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // Get elapsed time from `ps -o etime`
@@ -416,7 +417,7 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
         return Ok(());
     }
 
-    let mut running: Vec<(String, u32, bool, Option<u16>)> = Vec::new();
+    let mut running: Vec<(String, i32, bool, Option<u16>)> = Vec::new();
 
     for entry in std::fs::read_dir(&agents_dir)? {
         let entry = entry?;
@@ -428,8 +429,9 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
         let pid_str = std::fs::read_to_string(entry.path()).unwrap_or_default();
         // Handle "pid:start_time" format from runtime start
         let mut parts = pid_str.trim().splitn(2, ':');
-        let pid_num: u32 = parts.next()
+        let pid_num: i32 = parts.next()
             .and_then(|s| s.parse().ok())
+            .filter(|&p| p > 0)
             .unwrap_or(0);
         let stored_start_time: u64 = parts.next()
             .and_then(|s| s.parse().ok())
@@ -442,7 +444,7 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
         if pid_num > 0 {
             #[cfg(unix)]
             {
-                let alive = unsafe { libc::kill(pid_num as i32, 0) } == 0;
+                let alive = unsafe { libc::kill(pid_num, 0) } == 0;
                 // PID recycling protection: verify the process at this PID
                 // is the same one we started by comparing start times.
                 // Use `ps -o etime=` to get elapsed seconds and compare.

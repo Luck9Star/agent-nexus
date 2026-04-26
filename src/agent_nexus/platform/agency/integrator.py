@@ -48,6 +48,10 @@ class Integrator:
     6. Output unified plan
     """
 
+    # Maximum size (in characters) for a single section value to prevent
+    # memory exhaustion from oversized artifacts.
+    MAX_SECTION_VALUE_SIZE: int = 500_000
+
     @staticmethod
     def merge(
         artifacts: list[Artifact],
@@ -84,6 +88,13 @@ class Integrator:
                     f"Artifact from '{artifact.source_agent}' has too many sections "
                     f"({len(artifact.sections)}); max 100"
                 )
+            # Validate section value sizes to prevent memory exhaustion
+            for key, value in artifact.sections.items():
+                if isinstance(value, str) and len(value) > Integrator.MAX_SECTION_VALUE_SIZE:
+                    raise ValueError(
+                        f"Section '{key}' in artifact from '{artifact.source_agent}' "
+                        f"exceeds max size ({len(value)} > {Integrator.MAX_SECTION_VALUE_SIZE})"
+                    )
             for key, value in artifact.sections.items():
                 if key in merged_sections:
                     existing = merged_sections[key]

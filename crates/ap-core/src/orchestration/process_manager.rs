@@ -362,22 +362,14 @@ impl ProcessManager {
         // Ignore NotFound -- a concurrent caller may have already stopped it.
         let _ = self.graceful_shutdown(id, timeout).await;
 
-        // Re-spawn with stored configuration.
+        // Re-spawn with stored configuration, preserving the isolated flag.
         let args_vec: Vec<&str> = config.args.iter().map(std::string::String::as_str).collect();
         let env_opt = if config.env.is_empty() && !config.isolated {
             None
         } else {
-            Some(config.env)
+            Some(config.env.clone())
         };
-        let result = self.spawn(id, &config.cmd, &args_vec, env_opt).await;
-        // Restore isolated flag on the stored SpawnConfig so subsequent restarts
-        // preserve it.
-        if result.is_ok() && config.isolated {
-            if let Some(proc) = self.processes.get_mut(id) {
-                proc.spawn_config.isolated = true;
-            }
-        }
-        result
+        self.spawn_inner(id, &config.cmd, &args_vec, env_opt, config.isolated).await
     }
 
     // -----------------------------------------------------------------------

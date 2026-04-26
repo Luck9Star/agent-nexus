@@ -72,7 +72,7 @@ class TestTaskComposerDAG:
     def test_dag_has_integrate_and_validate(self) -> None:
         composer = _build_composer()
         inp = TaskComposerInput(
-            task="Review code for security issues",
+            task="Review code quality",
             mode="plan",
         )
         result = composer.run(inp)

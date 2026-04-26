@@ -173,8 +173,8 @@ class TestPlannerFromSelection:
         results = selector.select(
             SelectionRequest(
                 task_type="architecture",
-                required_capabilities=["system_design", "security_review"],
-                optional_capabilities=[],
+                required_capabilities=["system_design"],
+                optional_capabilities=["security_review"],
                 max_agents=3,
                 permissions="plan",
             )
@@ -216,7 +216,7 @@ class TestPlannerFromSelection:
             import tomli as tomllib
 
         parsed = tomllib.loads(toml_str)
-        assert len(parsed["tasks"]) >= 4  # specialists + integrate + validate
+        assert len(parsed["tasks"]) >= 3  # specialists + integrate + validate
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +232,7 @@ class TestIntegratorMerge:
         results = selector.select(
             SelectionRequest(
                 task_type="architecture",
-                required_capabilities=["system_design", "security_review"],
+                required_capabilities=["security_review"],
                 optional_capabilities=[],
                 max_agents=3,
                 permissions="plan",
@@ -340,8 +340,8 @@ class TestFullPipeline:
         selected = selector.select(
             SelectionRequest(
                 task_type="plan",
-                required_capabilities=["system_design", "security_review"],
-                optional_capabilities=["reliability_review"],
+                required_capabilities=["security_review"],
+                optional_capabilities=["system_design", "reliability_review"],
                 max_agents=3,
                 permissions="plan",
             )
