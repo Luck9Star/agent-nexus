@@ -282,4 +282,11 @@ class DAGDispatcher:
                 len(dag.tasks),
             )
 
+        # Clean up any tasks left in IN_PROGRESS after loop exit (e.g. mid-batch timeout)
+        for tid in specialist_ids:
+            task = self._graph.get_task(tid)
+            if task is not None and task.state == TaskState.IN_PROGRESS:
+                self._graph.fail_task(tid)
+                result.failed.append(tid)
+
         return result

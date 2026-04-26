@@ -68,16 +68,28 @@ def _dump_yaml(data: object, f: Any, indent: int = 0) -> None:
                 f.write(f"{prefix}- {_yaml_quote(str(item))}\n")
 
 
+_YAML_KEYWORDS = frozenset({
+    "true", "false", "yes", "no", "on", "off", "null", "y", "n", "~",
+})
+
+
 def _yaml_quote(s: str) -> str:
     """Quote a YAML string value if it contains special characters."""
-    if not s or any(c in s for c in (":", "#", "{", "}", "[", "]", ",", "&", "*", "?", "|", "-", "<", ">", "=", "!", "%", "@", "`", "\r", "\t")):
-        escaped = (
-            s.replace("\\", "\\\\")
-            .replace('"', '\\"')
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t")
-        )
+    escaped = (
+        s.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+    if not s or s.lower() in _YAML_KEYWORDS:
+        return f'"{escaped}"'
+    try:
+        float(s)
+        return f'"{escaped}"'
+    except ValueError:
+        pass
+    if any(c in s for c in (":", "#", "{", "}", "[", "]", ",", "&", "*", "?", "|", "-", "<", ">", "=", "!", "%", "@", "`", "\r", "\t")):
         return f'"{escaped}"'
     return s
 

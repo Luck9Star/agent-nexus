@@ -143,7 +143,7 @@ class TaskComposer:
                 SubtaskDef(
                     id=sel.agent_id.replace("agency.", ""),
                     goal=input.task,
-                    needed_capabilities=required_caps,
+                    needed_capabilities=profile.get("capabilities", []) if profile else required_caps,
                     output_contract=artifact_type,
                     assigned_agent=sel.agent_id,
                 )
@@ -181,6 +181,7 @@ class TaskComposer:
             # Legacy in-process topological loop (backward compatible)
             specialist_ids = {t.id for t in dag.specialist_tasks}
             executed: set[str] = set()
+            failed: set[str] = set()
             deadline = (
                 time.monotonic() + input.timeout_seconds
                 if input.timeout_seconds is not None
@@ -194,7 +195,7 @@ class TaskComposer:
                         )
                     if task.id in executed or task.id not in specialist_ids:
                         continue
-                    if all(dep in executed for dep in task.blocked_by):
+                    if all(dep in executed and dep not in failed for dep in task.blocked_by):
                         try:
                             artifact = executor(task.agent, input.task)
                             artifacts.append(artifact)
@@ -203,6 +204,7 @@ class TaskComposer:
                                 "Executor failed for task '%s' (agent '%s') in legacy path",
                                 task.id, task.agent,
                             )
+                            failed.add(task.id)
                         executed.add(task.id)
 
         if not artifacts:

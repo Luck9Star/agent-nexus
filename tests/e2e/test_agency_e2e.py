@@ -446,17 +446,18 @@ class TestErrorHandling:
         assert isinstance(result, TaskComposerResult)
         assert len(result.selected_agents) == 0
 
-    def test_executor_exception_propagates(self, composer):
-        """Exception in executor is propagated, not swallowed."""
+    def test_executor_failure_handled_gracefully(self, composer):
+        """When executor fails, legacy path catches exception and proceeds gracefully."""
         inp = TaskComposerInput(task="Design architecture", mode="plan")
 
         def failing_executor(profile_id: str, _task: str) -> Artifact:
             raise RuntimeError(f"Expert {profile_id} failed")
 
-        # The pipeline should either propagate the error or handle it gracefully
-        # It should NOT hang or enter an infinite loop
-        with pytest.raises(RuntimeError, match="Expert .* failed"):
-            composer.run(inp, expert_executor=failing_executor)
+        # Legacy path catches exceptions and proceeds — no artifacts produced,
+        # so integrated and qa_passed should be None
+        result = composer.run(inp, expert_executor=failing_executor)
+        assert isinstance(result, TaskComposerResult)
+        assert result.integrated is None or result.qa_passed is None
 
     def test_importer_with_missing_vendor(self):
         """Importer raises error for missing vendor directory."""

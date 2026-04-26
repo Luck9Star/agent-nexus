@@ -167,8 +167,16 @@ impl OrchestrationDsl {
             let mut newly_eligible = Vec::new();
             if let Some(deps) = adjacency.get(task.name.as_str()) {
                 for &dep_name in deps {
-                    let degree = in_degree.get_mut(dep_name)
-                        .expect("invariant violation: node not found in in_degree map during topo sort");
+                    let degree = match in_degree.get_mut(dep_name) {
+                        Some(d) => d,
+                        None => {
+                            tracing::error!(
+                                "Topo sort invariant violation: '{}' not in in_degree map",
+                                dep_name
+                            );
+                            continue;
+                        }
+                    };
                     *degree -= 1;
                     if *degree == 0 {
                         if let Some(t) = self.get_task(dep_name) {

@@ -265,13 +265,9 @@ impl EvolutionEngine {
             };
 
             // Check if skill is underperforming
-            // Casts from i64 to u32 are safe: skill counters are small in practice.
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            let is_viable = self.thresholds.is_viable(
-                skill.total_selections as u32,
-                success_rate,
-                skill.total_applied as u32,
-            );
+            let selections: u32 = skill.total_selections.try_into().unwrap_or(u32::MAX);
+            let applied: u32 = skill.total_applied.try_into().unwrap_or(u32::MAX);
+            let is_viable = self.thresholds.is_viable(selections, success_rate, applied);
 
             if !is_viable {
                 let reason = format!(

@@ -42,7 +42,7 @@ impl HealthTracker {
     /// `score = score * (1 - ALPHA) + 1.0 * ALPHA`
     pub fn record_success(&mut self) {
         self.score = self.score * (1.0 - ALPHA) + 1.0 * ALPHA;
-        self.total += 1;
+        self.total = self.total.saturating_add(1);
     }
 
     /// Record a failed outcome.
@@ -51,7 +51,7 @@ impl HealthTracker {
     /// `score = score * (1 - ALPHA) + 0.0 * ALPHA`
     pub fn record_failure(&mut self) {
         self.score = self.score * (1.0 - ALPHA) + 0.0 * ALPHA;
-        self.total += 1;
+        self.total = self.total.saturating_add(1);
     }
 
     /// Compute the current health score (0.0 to 1.0).

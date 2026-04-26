@@ -51,6 +51,9 @@ class PlannerInput:
     max_parallel: int = 3
 
 
+_RESERVED_IDS = {"integrate", "validate"}
+
+
 class DynamicCompositePlanner:
     """Generates a temporary CompositionDAG from specialist subtasks.
 
@@ -91,6 +94,13 @@ class DynamicCompositePlanner:
             if st.id in seen_ids:
                 raise ValueError(f"Duplicate subtask id: '{st.id}'")
             seen_ids.add(st.id)
+
+        # Validate no reserved IDs
+        for st in subtasks:
+            if st.id in _RESERVED_IDS:
+                raise ValueError(
+                    f"Subtask id '{st.id}' is reserved for synthetic tasks"
+                )
 
         # Floor at 1, but allow values higher than specialist count
         effective_parallel = max(1, max_parallel)
@@ -170,6 +180,13 @@ class DynamicCompositePlanner:
             if st.id in seen_ids:
                 raise ValueError(f"Duplicate subtask id: '{st.id}'")
             seen_ids.add(st.id)
+
+        # Validate no reserved IDs
+        for st in subtasks:
+            if st.id in _RESERVED_IDS:
+                raise ValueError(
+                    f"Subtask id '{st.id}' is reserved for synthetic tasks"
+                )
 
         for ch in _INVALID_ID_CHARS:
             if ch in composition_name:

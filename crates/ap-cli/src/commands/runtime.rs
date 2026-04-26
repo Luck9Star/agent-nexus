@@ -132,6 +132,7 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
             let pid_str = std::fs::read_to_string(&pid_file).unwrap_or_default();
             let is_alive = pid_str.split(':').next()
                 .and_then(|p| p.trim().parse::<i32>().ok())
+                .filter(|&pid| pid > 0)
                 .map(|pid| {
                     // Signal 0 doesn't kill the process — just checks existence.
                     // Returns 0 if the process exists, -1 with ESRCH otherwise.

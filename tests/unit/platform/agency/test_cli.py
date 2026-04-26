@@ -32,7 +32,7 @@ class TestImportExpertsCommand:
                 ],
             )
             assert result.exit_code == 0, f"CLI error: {result.output}"
-            assert "12" in result.output or "profiles" in result.output.lower()
+            assert "12" in result.output  # Must show exactly 12 profiles loaded
 
     def test_import_experts_writes_files(self) -> None:
         runner = CliRunner()

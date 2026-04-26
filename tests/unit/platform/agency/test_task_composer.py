@@ -128,3 +128,44 @@ class TestTaskComposerNoMatch:
         assert isinstance(result, TaskComposerResult)
         # Should still succeed — may select best available or return empty
         # The key is it doesn't crash
+
+
+@pytest.mark.timeout(30)
+class TestTaskComposerWithTaskGraph:
+    """TaskComposer.run() with task_graph parameter uses DAGDispatcher path."""
+
+    def test_task_composer_with_task_graph(self) -> None:
+        """When task_graph is provided, DAGDispatcher path is used."""
+        from agent_nexus.platform.orchestration.task_graph import TaskGraph
+
+        composer = _build_composer()
+        graph = TaskGraph(":memory:")
+
+        inp = TaskComposerInput(
+            task="Design a system architecture",
+            mode="plan",
+            max_parallel=2,
+        )
+
+        # Provide mock expert executor that returns artifacts
+        def mock_executor(profile_id: str, task: str) -> Artifact:
+            return Artifact(
+                source_agent=profile_id,
+                artifact_type="report",
+                sections={
+                    "context": f"Analysis from {profile_id}",
+                    "risks": [f"Risk by {profile_id}"],
+                    "next_steps": ["Fix issues"],
+                },
+            )
+
+        result = composer.run(
+            inp, expert_executor=mock_executor, task_graph=graph
+        )
+
+        assert isinstance(result, TaskComposerResult)
+        assert result.selected_agents is not None
+        assert len(result.selected_agents) > 0
+        assert result.dag is not None
+        assert result.integrated is not None
+        assert result.qa_passed is not None
