@@ -843,13 +843,19 @@ impl ProcessManagerHandle {
             child.stdout.take().ok_or_else(|| HandleError::from(ProcessError::NoStdout))?,
         );
 
-        // Brief lock: capacity check + HashMap insert only (no async work).
-        let mut pm = self.inner.lock().await;
-        if pm.processes.len() >= pm.max_concurrent {
-            // Over capacity — kill the child we just spawned.
-            let _ = child.kill().await;
-            return Err(HandleError::from(ProcessError::MaxConcurrent(pm.max_concurrent)));
+        // Brief lock: capacity check only (no async work).
+        {
+            let pm = self.inner.lock().await;
+            if pm.processes.len() >= pm.max_concurrent {
+                // Over capacity — kill the child we just spawned OUTSIDE the lock.
+                let max = pm.max_concurrent;
+                drop(pm);
+                let _ = child.kill().await;
+                return Err(HandleError::from(ProcessError::MaxConcurrent(max)));
+            }
         }
+        // Re-acquire lock for HashMap insert.
+        let mut pm = self.inner.lock().await;
         // Remove any stale entry that reappeared between shutdown and now.
         if let Some(mut old) = pm.processes.remove(id) {
             let _ = old.child.start_kill(); // sync, no .await

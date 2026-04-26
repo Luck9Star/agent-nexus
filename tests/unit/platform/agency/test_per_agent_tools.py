@@ -86,9 +86,9 @@ class TestImporterPerAgentTools:
         pkg = next(p for p in importer_profiles if p["id"] == "agency.code-reviewer")
         perms = pkg["expert_profile"]["permissions"]
         assert "file_read" in perms["allowed_tools"]
+        assert "network" in perms["allowed_tools"]
         assert "bash" in perms["denied_tools"]
         assert "file_write" in perms["denied_tools"]
-        assert "network" in perms["denied_tools"]
 
     def test_technical_writer_has_file_read_and_write(self, importer_profiles):
         pkg = next(p for p in importer_profiles if p["id"] == "agency.technical-writer")

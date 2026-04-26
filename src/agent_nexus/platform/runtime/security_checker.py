@@ -214,7 +214,9 @@ class SecurityChecker:
         Returns:
             Tuple of SecurityViolation objects.
         """
-        cached = self._cache.get(code)
+        cache_key = hashlib.sha256(code.encode()).hexdigest()
+
+        cached = self._cache.get(cache_key)
         if cached is not None:
             return cached
 
@@ -257,10 +259,6 @@ class SecurityChecker:
                 ))
 
         result = tuple(violations)
-
-        # Use hash instead of full source as cache key to avoid
-        # O(source_size) memory per cached entry.
-        cache_key = hashlib.sha256(code.encode()).hexdigest()
 
         # Evict oldest entry if cache is full (FIFO eviction).
         if len(self._cache) >= self._cache_max:
