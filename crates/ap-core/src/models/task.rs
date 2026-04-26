@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::models::common::utc_now;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TaskState {
     #[default]
     Pending,

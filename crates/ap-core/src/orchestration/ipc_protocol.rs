@@ -79,9 +79,25 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub async fn receive_result(&mut self, timeout: Option<f64>) -> Result<AgentResult, IpcError> {
+        let deadline = timeout.map(|secs| {
+            (std::time::Instant::now(), secs)
+        });
         loop {
+            // Track cumulative elapsed time across Progress messages.
+            // Each Progress message must NOT reset the timeout clock.
+            let remaining = deadline.map(|(start, total)| {
+                let elapsed = start.elapsed().as_secs_f64();
+                total - elapsed
+            });
+            if let Some(r) = remaining {
+                if r <= 0.0 {
+                    return Err(IpcError::Timeout { timeout: deadline.unwrap().1 });
+                }
+            }
+            let per_iter_timeout = remaining.or(timeout);
+
             let receive_fut = self.stream.receive::<AgentToPlatform>();
-            let mut msg = match timeout {
+            let mut msg = match per_iter_timeout {
                 Some(secs) => {
                     tokio::pin!(receive_fut);
                     match tokio::time::timeout(
@@ -91,7 +107,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
                     .await
                     {
                         Ok(result) => result?,
-                        Err(_) => return Err(IpcError::Timeout { timeout: secs }),
+                        Err(_) => return Err(IpcError::Timeout { timeout: deadline.unwrap().1 }),
                     }
                 }
                 None => receive_fut.await?,
@@ -112,9 +128,6 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
                 ))),
                 AgentToPlatformType::Progress => {
                     // Progress messages are informational; skip and wait for the final result.
-                    // Returning progress as a result was a bug — callers cannot distinguish
-                    // progress from completion, and the real result stays in the buffer
-                    // corrupting subsequent IPC rounds.
                     tracing::debug!("Skipping progress message, waiting for final result");
                     continue;
                 }

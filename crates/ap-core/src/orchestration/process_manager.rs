@@ -525,6 +525,13 @@ impl Drop for ProcessManager {
 // ---------------------------------------------------------------------------
 
 /// Send SIGTERM to a child process (Unix). No-op on Windows.
+///
+/// # Safety
+///
+/// PID recycling is prevented by the still-open file descriptor in the
+/// `tokio::process::Child` handle. On Unix, a PID is not recycled while
+/// any process has it open via `/proc` or a pipe fd. This function MUST
+/// only be called while the `Child` is still owned (i.e., not dropped).
 fn send_term(child: &mut Child, id: &str) -> Result<(), ProcessError> {
     #[cfg(unix)]
     {

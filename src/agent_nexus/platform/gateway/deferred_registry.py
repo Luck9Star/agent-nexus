@@ -25,6 +25,7 @@ from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.orchestration.ipc import (
     _INTERNAL_CID,
     _LIST_TOOLS_MSG,
+    get_ipc_lock,
 )
 from agent_nexus.platform.orchestration.process_manager import (
     AgentHandle,
@@ -287,11 +288,13 @@ class DeferredAgentRegistry:
             )
             return []
 
+        ipc_lock = get_ipc_lock(info.name)
         try:
-            await handle.ipc.send_chat(
-                _LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID
-            )
-            response = await handle.ipc.receive_until_result(timeout=10.0)
+            async with ipc_lock:
+                await handle.ipc.send_chat(
+                    _LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID
+                )
+                response = await handle.ipc.receive_until_result(timeout=10.0)
 
             if response.type == AgentToPlatformType.ERROR:
                 logger.warning(

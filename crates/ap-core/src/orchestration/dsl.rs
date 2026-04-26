@@ -31,13 +31,14 @@ pub enum DslError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DslTask {
+    #[serde(alias = "id")]
     pub name: String,
     pub agent: String,
     #[serde(default)]
     pub phase: u32,
-    #[serde(default)]
+    #[serde(default, alias = "blocked_by")]
     pub depends_on: Vec<String>,
-    #[serde(default)]
+    #[serde(default, alias = "vars")]
     pub variables: HashMap<String, serde_json::Value>,
 }
 

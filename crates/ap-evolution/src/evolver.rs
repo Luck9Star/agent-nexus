@@ -75,11 +75,13 @@ impl SkillEvolver {
             return Err(EvolverError::SkillNotFound(skill_name.to_string()));
         };
 
-        // Generate a new skill ID: {name}__fix_{uuid8}
+        // Generate a new skill ID: {name}__fix_{uuid16}
+        // 16 hex chars (64 bits) gives ~77k skills before 50% birthday collision,
+        // far beyond realistic evolution cycles.
         let new_id = format!(
             "{}__fix_{}",
             skill.name,
-            &uuid::Uuid::new_v4().to_string()[..8]
+            &uuid::Uuid::new_v4().to_string()[..16]
         );
 
         let new_generation = skill.lineage_generation + 1;

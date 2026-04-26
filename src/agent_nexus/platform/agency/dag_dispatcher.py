@@ -268,7 +268,13 @@ class DAGDispatcher:
                         task_item.id,
                         task_item.agent,
                     )
-                    self._graph.fail_task(task_item.id)
+                    try:
+                        self._graph.fail_task(task_item.id)
+                    except (ValueError, RuntimeError):
+                        logger.warning(
+                            "Could not fail task '%s' (may already be transitioned)",
+                            task_item.id,
+                        )
                     result.failed.append(task_item.id)
 
         # If the loop was terminated by the max_iterations guard (not a normal

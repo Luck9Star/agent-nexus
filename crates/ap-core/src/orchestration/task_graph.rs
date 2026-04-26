@@ -529,19 +529,19 @@ impl TaskGraph {
 
     fn state_to_str(state: TaskState) -> &'static str {
         match state {
-            TaskState::Pending => "pending",
-            TaskState::InProgress => "in_progress",
-            TaskState::Completed => "completed",
-            TaskState::Failed => "failed",
+            TaskState::Pending => "PENDING",
+            TaskState::InProgress => "IN_PROGRESS",
+            TaskState::Completed => "COMPLETED",
+            TaskState::Failed => "FAILED",
         }
     }
 
     fn str_to_state(s: &str) -> Result<TaskState, TaskGraphError> {
         match s {
-            "pending" => Ok(TaskState::Pending),
-            "in_progress" => Ok(TaskState::InProgress),
-            "completed" => Ok(TaskState::Completed),
-            "failed" => Ok(TaskState::Failed),
+            "PENDING" => Ok(TaskState::Pending),
+            "IN_PROGRESS" => Ok(TaskState::InProgress),
+            "COMPLETED" => Ok(TaskState::Completed),
+            "FAILED" => Ok(TaskState::Failed),
             other => Err(TaskGraphError::InvalidState(other.to_string())),
         }
     }
@@ -763,8 +763,8 @@ mod tests {
         let err = tg.transition_state("t1", TaskState::InProgress).unwrap_err();
         match err {
             TaskGraphError::InvalidTransition { from, to } => {
-                assert_eq!(from, "completed");
-                assert_eq!(to, "in_progress");
+                assert_eq!(from, "COMPLETED");
+                assert_eq!(to, "IN_PROGRESS");
             }
             other => panic!("expected InvalidTransition, got {:?}", other),
         }
@@ -779,8 +779,8 @@ mod tests {
         let err = tg.transition_state("t1", TaskState::Completed).unwrap_err();
         match err {
             TaskGraphError::InvalidTransition { from, to } => {
-                assert_eq!(from, "failed");
-                assert_eq!(to, "completed");
+                assert_eq!(from, "FAILED");
+                assert_eq!(to, "COMPLETED");
             }
             other => panic!("expected InvalidTransition, got {:?}", other),
         }
@@ -795,8 +795,8 @@ mod tests {
         let err = tg.transition_state("t1", TaskState::Pending).unwrap_err();
         match err {
             TaskGraphError::InvalidTransition { from, to } => {
-                assert_eq!(from, "completed");
-                assert_eq!(to, "pending");
+                assert_eq!(from, "COMPLETED");
+                assert_eq!(to, "PENDING");
             }
             other => panic!("expected InvalidTransition, got {:?}", other),
         }
@@ -809,8 +809,8 @@ mod tests {
         let err = tg.transition_state("t1", TaskState::Completed).unwrap_err();
         match err {
             TaskGraphError::InvalidTransition { from, to } => {
-                assert_eq!(from, "pending");
-                assert_eq!(to, "completed");
+                assert_eq!(from, "PENDING");
+                assert_eq!(to, "COMPLETED");
             }
             other => panic!("expected InvalidTransition, got {:?}", other),
         }
@@ -884,7 +884,7 @@ mod tests {
         tg.conn
             .execute(
                 "INSERT INTO tasks (task_id, agent_name, description, state, blocked_by, vars, result, created_at, updated_at)
-                 VALUES ('dangling', 'a', 'dangling task', 'pending', '[\"ghost\"]', 'null', NULL, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+                 VALUES ('dangling', 'a', 'dangling task', 'PENDING', '[\"ghost\"]', 'null', NULL, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
                 [],
             )
             .unwrap();
@@ -906,7 +906,7 @@ mod tests {
         tg.conn
             .execute(
                 "INSERT INTO tasks (task_id, agent_name, description, state, blocked_by, vars, result, created_at, updated_at)
-                 VALUES ('t1', 'a', 'task 1', 'pending', '[\"nonexistent\"]', 'null', NULL, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+                 VALUES ('t1', 'a', 'task 1', 'PENDING', '[\"nonexistent\"]', 'null', NULL, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
                 [],
             )
             .unwrap();

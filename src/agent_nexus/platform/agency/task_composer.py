@@ -206,7 +206,7 @@ class TaskComposer:
                                 [d for d in task.blocked_by if d in failed],
                             )
                             skipped.add(task.id)
-                        executed.add(task.id)
+                        failed.add(task.id)  # treat as failed so dependents skip too
                         continue
                     if all(dep in executed for dep in task.blocked_by):
                         try:

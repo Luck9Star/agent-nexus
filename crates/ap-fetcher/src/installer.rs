@@ -114,7 +114,13 @@ impl GitInstaller {
             if let Err(e) = std::fs::rename(&tmp_path, &final_path) {
                 // Rename failed — restore backup if it exists
                 if backup_path.exists() {
-                    let _ = std::fs::rename(&backup_path, &final_path);
+                    if let Err(restore_err) = std::fs::rename(&backup_path, &final_path) {
+                        tracing::error!(
+                            "CRITICAL: install rename failed AND backup restore failed. \
+                             Backup at {:?}. Original: {e}. Restore: {restore_err}",
+                            backup_path
+                        );
+                    }
                 }
                 return Err(InstallerError::Io(e));
             }
