@@ -38,6 +38,7 @@ def _build_composer() -> TaskComposer:
     return TaskComposer(registry=registry)
 
 
+@pytest.mark.timeout(30)
 class TestTaskComposerInput:
     """TaskComposerInput dataclass validates fields."""
 
@@ -52,6 +53,7 @@ class TestTaskComposerInput:
         assert inp.max_parallel == 3
 
 
+@pytest.mark.timeout(30)
 class TestTaskComposerSelect:
     """TaskComposer selects specialists based on task."""
 
@@ -66,6 +68,7 @@ class TestTaskComposerSelect:
         assert len(result.selected_agents) > 0
 
 
+@pytest.mark.timeout(30)
 class TestTaskComposerDAG:
     """TaskComposer generates a valid DAG."""
 
@@ -82,6 +85,7 @@ class TestTaskComposerDAG:
         assert "validate" in task_ids
 
 
+@pytest.mark.timeout(30)
 class TestTaskComposerFullRun:
     """TaskComposer runs the full pipeline with mock expert execution."""
 
@@ -110,6 +114,7 @@ class TestTaskComposerFullRun:
         assert result.qa_passed is not None
 
 
+@pytest.mark.timeout(30)
 class TestTaskComposerNoMatch:
     """TaskComposer handles case where no specialist matches."""
 

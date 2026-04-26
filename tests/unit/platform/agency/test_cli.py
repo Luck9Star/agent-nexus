@@ -7,12 +7,14 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from agent_nexus.platform.agency.cli import cli
+import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _VENDOR_DIR = _PROJECT_ROOT / "vendor" / "agency-agents"
 _ALLOWLIST_PATH = _PROJECT_ROOT / "config" / "agency-agents.allowlist.yaml"
 
 
+@pytest.mark.timeout(30)
 class TestImportExpertsCommand:
     """import-experts command: import agency-agents from vendor repo."""
 
@@ -50,6 +52,7 @@ class TestImportExpertsCommand:
             assert len(json_files) >= 10, f"Expected >= 10 JSON files, got {len(json_files)}"
 
 
+@pytest.mark.timeout(30)
 class TestPlanCompositionCommand:
     """plan-composition command: generate DAG from a task description."""
 
@@ -69,6 +72,7 @@ class TestPlanCompositionCommand:
         assert "[composition]" in result.output or "integrate" in result.output
 
 
+@pytest.mark.timeout(30)
 class TestValidateOutputCommand:
     """validate-output command: validate an output file against a contract."""
 
@@ -139,6 +143,7 @@ class TestValidateOutputCommand:
             assert "gitnexus" in result.output.lower() or result.exit_code != 0 or "failed" in result.output.lower()
 
 
+@pytest.mark.timeout(30)
 class TestListExpertsCommand:
     """list-experts command: preview experts available for import."""
 
@@ -184,6 +189,7 @@ class TestListExpertsCommand:
         assert result.exit_code != 0
 
 
+@pytest.mark.timeout(30)
 class TestCheckProfilesCommand:
     """check-profiles command: validate imported profile JSON files."""
 

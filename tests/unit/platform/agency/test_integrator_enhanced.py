@@ -8,6 +8,7 @@ from agent_nexus.platform.agency.integrator import (
 )
 
 
+@pytest.mark.timeout(30)
 class TestFinalRecommendation:
     """Integrator outputs a final_recommendation field."""
 
@@ -40,6 +41,7 @@ class TestFinalRecommendation:
         assert len(rec) > 0
 
 
+@pytest.mark.timeout(30)
 class TestViewpointConflict:
     """Integrator detects viewpoint conflicts beyond severity."""
 
@@ -89,6 +91,7 @@ class TestViewpointConflict:
         assert any("recommendation" in f for f in conflict_fields)
 
 
+@pytest.mark.timeout(30)
 class TestOpenQuestions:
     """Integrator reports missing content in open_questions."""
 

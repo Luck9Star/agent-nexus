@@ -18,6 +18,8 @@ from .selector import SelectionRequest, SelectionResult, SpecialistSelector
 if TYPE_CHECKING:
     from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
+    from .dag_dispatcher import ExpertExecutor
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +44,6 @@ class TaskComposerResult:
     qa_passed: bool | None = None
 
 
-from .dag_dispatcher import ExpertExecutor
 
 
 # Task type → required capabilities mapping

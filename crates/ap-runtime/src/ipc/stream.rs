@@ -7,6 +7,21 @@
 //!
 //! Layer hierarchy:
 //!   `IpcStream` (wire) → `IpcProtocol` (typed) → `AgentProtocol` (heartbeat)
+//!
+//! # Message size limits
+//!
+//! The underlying `ap_core::orchestration::ipc::IpcStream` enforces a 4 MiB
+//! message size limit (`MAX_MESSAGE_SIZE`) on both send and receive paths:
+//!
+//! - **Send**: Uses a `LimitedWriter` that aborts `serde_json` serialization
+//!   as soon as the serialized size exceeds the limit, returning
+//!   `IpcError::Oversized` without allocating the full buffer.
+//! - **Receive**: Uses `tokio::io::AsyncReadExt::take()` to cap the read at
+//!   the limit, then checks the resulting length before deserialization.
+//!   Oversized messages return `IpcError::Oversized`.
+//!
+//! No silent truncation can occur — every oversized message produces an error.
+//! No additional size checks are needed in this wrapper.
 
 use ap_core::orchestration::ipc::{IpcError, IpcStream};
 use serde::de::DeserializeOwned;

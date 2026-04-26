@@ -113,8 +113,8 @@ class TestLoadDagIntoGraph:
             DAGTask(id="s1", agent="a1", output="o1"),
             DAGTask(id="s2", agent="a2", output="o2"),
             DAGTask(id="s3", agent="a3", output="o3"),
-            DAGTask(id="integrate", agent="nexus.integrator", output="merged"),
-            DAGTask(id="validate", agent="nexus.qa-gate", output="qa"),
+            DAGTask(id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"),
+            DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
         ])
         graph = TaskGraph(":memory:")
         items = load_dag_into_graph(dag, "test task", graph)
@@ -135,7 +135,7 @@ class TestLoadDagIntoGraph:
     def test_integrate_not_in_graph(self) -> None:
         dag = _build_dag([
             DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="integrate", agent="nexus.integrator", output="merged"),
+            DAGTask(id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"),
         ])
         graph = TaskGraph(":memory:")
         items = load_dag_into_graph(dag, "test", graph)
@@ -145,7 +145,7 @@ class TestLoadDagIntoGraph:
     def test_validate_not_in_graph(self) -> None:
         dag = _build_dag([
             DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="validate", agent="nexus.qa-gate", output="qa"),
+            DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
         ])
         graph = TaskGraph(":memory:")
         items = load_dag_into_graph(dag, "test", graph)
@@ -470,8 +470,8 @@ class TestEmptyDag:
     def test_only_integrate_validate(self) -> None:
         """DAG with only integrate/validate tasks -> empty specialist_tasks."""
         dag = _build_dag([
-            DAGTask(id="integrate", agent="nexus.integrator", output="merged"),
-            DAGTask(id="validate", agent="nexus.qa-gate", output="qa"),
+            DAGTask(id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"),
+            DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
         ])
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
@@ -633,7 +633,7 @@ class TestSpecialistTasksOnly:
 
         dag = _build_dag([
             DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="integrate", agent="nexus.integrator", output="merged"),
+            DAGTask(id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"),
         ])
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, tracking)
@@ -651,7 +651,7 @@ class TestSpecialistTasksOnly:
 
         dag = _build_dag([
             DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="validate", agent="nexus.qa-gate", output="qa"),
+            DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
         ])
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, tracking)
@@ -668,8 +668,8 @@ class TestSpecialistTasksOnly:
 
         dag = _build_dag([
             DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="integrate", agent="nexus.integrator", output="merged"),
-            DAGTask(id="validate", agent="nexus.qa-gate", output="qa"),
+            DAGTask(id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"),
+            DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
         ])
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, tracking)

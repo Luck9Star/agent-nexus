@@ -272,14 +272,18 @@ impl GitInstaller {
         // M13 fix: previously this was gated by `if expanded.exists()`, allowing
         // non-existent paths to bypass the check.
         const BLOCKED_PREFIXES: &[&str] = &[
-            "/etc",
-            "/usr",
+            "/Applications",            // system apps
             "/bin",
-            "/sbin",
-            "/System",
+            "/etc",
+            "/Library/LaunchAgents",    // agent launch daemons
+            "/Library/LaunchDaemons",   // system launch daemons
+            "/Library/Preferences",     // system preferences
             "/Library/System",
             "/private/etc",
-            "/private/var/db",  // system databases; /private/var/folders (temp) is OK
+            "/private/var/db",          // system databases; /private/var/folders (temp) is OK
+            "/sbin",
+            "/System",
+            "/usr",
         ];
 
         let path_str = expanded.to_string_lossy();

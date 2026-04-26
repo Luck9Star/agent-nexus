@@ -9,6 +9,16 @@ It exposes:
 - ``list_agents`` tool for agent discovery
 - ``agent_info`` tool for detailed agent information
 
+Thread-safety note
+------------------
+This module relies on **asyncio cooperative scheduling** (single-threaded
+event loop).  The shared mutable state (``_registered_tools``,
+``_deferred_registry``, etc.) is only ever accessed from coroutine functions
+that ``await`` each other.  The code is **not safe for multi-threaded use**
+without additional synchronization (e.g. ``threading.Lock``).  Do not call
+gateway methods from ``asyncio.to_thread`` or bare ``threading.Thread``
+without wrapping accesses in a lock.
+
 Reference: docs/06-mcp-communication.md Section 8.2, 8.8
 """
 

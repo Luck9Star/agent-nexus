@@ -49,6 +49,7 @@ def incomplete_output() -> dict:
 # Contract validation
 # ---------------------------------------------------------------------------
 
+@pytest.mark.timeout(30)
 class TestContractValidation:
     """QA Gate validates output contracts — missing sections should fail."""
 
@@ -94,6 +95,7 @@ class TestContractValidation:
 # GitNexus gate
 # ---------------------------------------------------------------------------
 
+@pytest.mark.timeout(30)
 class TestGitNexusGate:
     """Code-change workflows must trigger GitNexus impact_analysis."""
 
@@ -160,6 +162,7 @@ class TestGitNexusGate:
 # Full QA gate (contract + gitnexus)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.timeout(30)
 class TestFullQAGate:
     """Full QA gate runs both contract and GitNexus checks."""
 

@@ -68,6 +68,7 @@ def security_artifact_conflict() -> Artifact:
 # Merge tests
 # ---------------------------------------------------------------------------
 
+@pytest.mark.timeout(30)
 class TestIntegratorMerge:
     """Integrator merges multiple expert artifacts into unified output."""
 
@@ -114,6 +115,7 @@ class TestIntegratorMerge:
 # Conflict detection
 # ---------------------------------------------------------------------------
 
+@pytest.mark.timeout(30)
 class TestConflictDetection:
     """Integrator detects conflicting viewpoints across artifacts."""
 
@@ -165,6 +167,7 @@ class TestConflictDetection:
 # Integrated artifact structure
 # ---------------------------------------------------------------------------
 
+@pytest.mark.timeout(30)
 class TestIntegratedArtifact:
     """IntegratedArtifact has the correct output structure."""
 

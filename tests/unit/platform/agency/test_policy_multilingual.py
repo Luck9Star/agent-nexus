@@ -1,8 +1,10 @@
 """Policy multilingual tests: Chinese prompt injection detection."""
 
 from agent_nexus.platform.agency.policy import check_content_policy
+import pytest
 
 
+@pytest.mark.timeout(30)
 class TestChinesePolicyRules:
     """Chinese-language prompt injection patterns must be detected."""
 

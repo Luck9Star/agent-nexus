@@ -43,6 +43,7 @@ def importer_profiles():
 # 1. Allowlist with tools field parses correctly
 # ===================================================================
 
+@pytest.mark.timeout(30)
 class TestAllowlistToolsField:
     """Allowlist YAML tools field is well-formed for all 12 agents."""
 
@@ -77,6 +78,7 @@ class TestAllowlistToolsField:
 # 2. Importer respects per-agent tools config
 # ===================================================================
 
+@pytest.mark.timeout(30)
 class TestImporterPerAgentTools:
     """Importer._build_profile_package() reads tools from allowlist entries."""
 
@@ -130,6 +132,7 @@ class TestImporterPerAgentTools:
 # 3. Agents needing file_read get it
 # ===================================================================
 
+@pytest.mark.timeout(30)
 class TestFileReadAgents:
     """All agents that need file_read have it in allowed_tools."""
 
@@ -161,6 +164,7 @@ class TestFileReadAgents:
 # 4. Validator rejects invalid tools configs
 # ===================================================================
 
+@pytest.mark.timeout(30)
 class TestToolsValidation:
     """validate_allowlist_entry catches invalid tools fields."""
 
@@ -211,6 +215,7 @@ class TestToolsValidation:
 # 5. Backward compatibility: no tools field → defaults
 # ===================================================================
 
+@pytest.mark.timeout(30)
 class TestBackwardCompat:
     """Agents without tools field get default permissions."""
 

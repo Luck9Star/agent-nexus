@@ -10,6 +10,7 @@ from agent_nexus.platform.agency.parser import parse_frontmatter
 from agent_nexus.platform.agency.allowlist import load_allowlist, validate_allowlist_entry
 from agent_nexus.platform.agency.policy import check_content_policy
 from agent_nexus.platform.agency.registry import ExpertRegistry
+import pytest
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -22,6 +23,7 @@ _ALLOWLIST_PATH = _PROJECT_ROOT / "config" / "agency-agents.allowlist.yaml"
 # ===================================================================
 # 1. Frontmatter parser — valid document
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_parse_frontmatter():
     """Parse the Software Architect MD and extract frontmatter fields + body."""
     md_path = _VENDOR_DIR / "engineering" / "engineering-software-architect.md"
@@ -41,6 +43,7 @@ def test_parse_frontmatter():
 # ===================================================================
 # 2. Frontmatter parser — missing delimiters
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_parse_frontmatter_no_delimiter():
     """A string without --- frontmatter should raise ValueError."""
     try:
@@ -53,6 +56,7 @@ def test_parse_frontmatter_no_delimiter():
 # ===================================================================
 # 3. Allowlist loads with source and agents
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_allowlist_load():
     """Load allowlist and verify source repo/ref and 12 agent entries."""
     data = load_allowlist(str(_ALLOWLIST_PATH))
@@ -69,6 +73,7 @@ def test_allowlist_load():
 # ===================================================================
 # 4. Allowlist entry schema validation
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_allowlist_entry_schema():
     """Each allowlist entry must have source_path, id, capabilities (non-empty), output_contract."""
     data = load_allowlist(str(_ALLOWLIST_PATH))
@@ -91,6 +96,7 @@ def test_allowlist_entry_schema():
 # ===================================================================
 # 5. Content policy — clean body
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_content_policy_clean():
     """A clean MD body with no injection patterns should pass policy check."""
     clean_body = (
@@ -109,6 +115,7 @@ def test_content_policy_clean():
 # ===================================================================
 # 6. Content policy — injection patterns
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_content_policy_injection():
     """MD body with injection patterns should be flagged as high-risk."""
     injection_bodies = [
@@ -130,6 +137,7 @@ def test_content_policy_injection():
 # ===================================================================
 # 7. Profile generator output structure
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_profile_generator_output():
     """Given parsed frontmatter + allowlist entry, generate a profile package with correct keys."""
     md_path = _VENDOR_DIR / "engineering" / "engineering-software-architect.md"
@@ -188,6 +196,7 @@ def test_profile_generator_output():
 # ===================================================================
 # 8. Registry update and lookup
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_registry_update():
     """Add a profile to the registry, verify indexing by id and capability tags."""
     registry = ExpertRegistry()
@@ -227,6 +236,7 @@ def test_registry_update():
 # ===================================================================
 # 9. Importer dry-run
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_importer_dry_run():
     """Full dry-run import from vendor with allowlist — produces 12 profile packages without writing to disk."""
     import tempfile

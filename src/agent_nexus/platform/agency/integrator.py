@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class Artifact:
@@ -103,7 +105,7 @@ class Integrator:
                     elif isinstance(existing, dict) and isinstance(value, dict):
                         merged_sections[key] = {**existing, **value}
                     else:
-                        logging.warning(
+                        logger.warning(
                             "Type mismatch for section '%s': existing=%s, new=%s; "
                             "converting to list",
                             key, type(existing).__name__, type(value).__name__,

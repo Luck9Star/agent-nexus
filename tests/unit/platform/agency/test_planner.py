@@ -47,6 +47,7 @@ def sample_subtasks() -> list[SubtaskDef]:
 # 1. DAG generation with blocked_by
 # ---------------------------------------------------------------------------
 
+@pytest.mark.timeout(30)
 class TestDAGGeneration:
     """Given subtasks, generate TOML DAG with correct blocked_by relations."""
 
@@ -117,6 +118,7 @@ class TestDAGGeneration:
 # 2. max_parallel enforcement
 # ---------------------------------------------------------------------------
 
+@pytest.mark.timeout(30)
 class TestMaxParallel:
     """Verify max_parallel is respected in the generated DAG."""
 
@@ -162,6 +164,7 @@ class TestMaxParallel:
 # 3. TOML generation
 # ---------------------------------------------------------------------------
 
+@pytest.mark.timeout(30)
 class TestTOMLGeneration:
     """Verify generate_toml produces valid TOML from a DAG."""
 
@@ -211,6 +214,7 @@ class TestTOMLGeneration:
 # 4. Edge cases
 # ---------------------------------------------------------------------------
 
+@pytest.mark.timeout(30)
 class TestEdgeCases:
     """Edge cases: empty input, single subtask, duplicate agents."""
 
@@ -292,6 +296,7 @@ class TestEdgeCases:
 # 5. PlannerInput dataclass
 # ---------------------------------------------------------------------------
 
+@pytest.mark.timeout(30)
 class TestPlannerInput:
     """PlannerInput convenience wrapper validates its inputs."""
 

@@ -29,6 +29,7 @@ def _subtask(
     )
 
 
+@pytest.mark.timeout(30)
 class TestResolveDependencies:
     """resolve_dependencies analyzes capability overlap to build non-trivial DAGs."""
 

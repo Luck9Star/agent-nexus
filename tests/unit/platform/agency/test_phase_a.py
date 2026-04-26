@@ -5,6 +5,7 @@ from pathlib import Path
 
 import jsonschema
 import yaml
+import pytest
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -35,6 +36,7 @@ def _validate(schema_path: Path, instance: dict) -> None:
 # ===================================================================
 # 1. Expert Profile Schema — valid document
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_expert_profile_schema_valid():
     """A fully-populated ExpertProfile document must pass validation."""
     instance = yaml.safe_load(
@@ -95,6 +97,7 @@ quality:
 # ===================================================================
 # 2. Expert Profile Schema — missing required fields
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_expert_profile_schema_missing_required():
     """Each required top-level field must cause validation failure when absent."""
     valid_doc = yaml.safe_load(
@@ -148,6 +151,7 @@ quality:
 # ===================================================================
 # 3. Output Contract Schema — valid document
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_output_contract_schema_valid():
     """A fully-populated OutputContract document must pass validation."""
     instance = yaml.safe_load(
@@ -170,6 +174,7 @@ constraints:
 # ===================================================================
 # 4. Output Contract Schema — missing required fields
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_output_contract_schema_missing_required():
     """Missing artifact_type or required_sections must cause validation failure."""
     valid_doc = yaml.safe_load(
@@ -194,6 +199,7 @@ required_sections:
 # ===================================================================
 # 5. Allowlist loads and has enough entries
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_allowlist_loads():
     """The allowlist file must parse and contain >= 10 agent entries."""
     with open(ALLOWLIST_PATH) as f:
@@ -205,6 +211,7 @@ def test_allowlist_loads():
 # ===================================================================
 # 6. Allowlist entries have required fields
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_allowlist_entry_fields():
     """Each allowlist entry must have source_path, id, capabilities, output_contract."""
     with open(ALLOWLIST_PATH) as f:
@@ -221,6 +228,7 @@ def test_allowlist_entry_fields():
 # ===================================================================
 # 7. Allowlist source paths point to real files in vendor/
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_allowlist_source_paths_exist():
     """Each source_path in the allowlist must map to an actual file in vendor/agency-agents/."""
     with open(ALLOWLIST_PATH) as f:

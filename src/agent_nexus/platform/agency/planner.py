@@ -24,6 +24,8 @@ class DAGTask:
     agent: str
     output: str
     blocked_by: list[str] = field(default_factory=list)
+    task_type: str = "specialist"
+    """Task role: ``"specialist"`` for expert tasks, ``"synthetic"`` for integrate/validate."""
 
 
 @dataclass
@@ -36,8 +38,8 @@ class CompositionDAG:
 
     @property
     def specialist_tasks(self) -> list[DAGTask]:
-        """Return tasks that are NOT integrate or validate."""
-        return [t for t in self.tasks if t.id not in ("integrate", "validate")]
+        """Return tasks that are specialist tasks (not synthetic integrate/validate)."""
+        return [t for t in self.tasks if t.task_type == "specialist"]
 
 
 @dataclass
@@ -114,6 +116,7 @@ class DynamicCompositePlanner:
                 agent="nexus.integrator",
                 output="final_plan",
                 blocked_by=specialist_ids,
+                task_type="synthetic",
             )
         )
 
@@ -124,6 +127,7 @@ class DynamicCompositePlanner:
                 agent="nexus.qa-gate",
                 output="validated_plan",
                 blocked_by=["integrate"],
+                task_type="synthetic",
             )
         )
 
@@ -207,6 +211,7 @@ class DynamicCompositePlanner:
                 agent="nexus.integrator",
                 output="final_plan",
                 blocked_by=specialist_ids,
+                task_type="synthetic",
             )
         )
 
@@ -217,6 +222,7 @@ class DynamicCompositePlanner:
                 agent="nexus.qa-gate",
                 output="validated_plan",
                 blocked_by=["integrate"],
+                task_type="synthetic",
             )
         )
 

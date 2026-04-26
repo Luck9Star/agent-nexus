@@ -108,6 +108,11 @@ def load_dag_into_graph(
     for dag_task in dag.tasks:
         if dag_task.id not in specialist_ids:
             continue
+        # Strip blocked_by refs to non-specialist tasks (they're handled
+        # externally by Integrator / QAGate outside the dispatcher).
+        dag_task.blocked_by = [
+            dep for dep in dag_task.blocked_by if dep in specialist_ids
+        ]
         item = dag_task_to_task_item(dag_task, task_description)
         items.append(item)
 
@@ -185,9 +190,17 @@ class DAGDispatcher:
 
         specialist_ids = {t.id for t in dag.specialist_tasks}
 
+        # Safety guard: each iteration processes at least one task, so
+        # len(tasks)*3 is a generous upper bound.  If exceeded something
+        # has gone wrong (e.g. a state machine bug causing a livelock).
+        max_iterations = max(len(dag.tasks) * 3, 1)
+        iteration = 0
+
         # Execute in rounds: pick ready tasks, dispatch up to max_parallel,
         # mark complete, repeat until done or stuck.
-        while True:
+        while iteration < max_iterations:
+            iteration += 1
+
             if deadline is not None and time.monotonic() > deadline:
                 result.timed_out = True
                 logger.warning(
@@ -252,5 +265,16 @@ class DAGDispatcher:
                     )
                     self._graph.fail_task(task_item.id)
                     result.failed.append(task_item.id)
+
+        # If the loop was terminated by the max_iterations guard (not a normal
+        # break), mark the result as timed_out so callers know it didn't finish.
+        if iteration >= max_iterations:
+            result.timed_out = True
+            logger.warning(
+                "DAGDispatch exceeded max_iterations (%d) for %d tasks — "
+                "possible state machine bug",
+                max_iterations,
+                len(dag.tasks),
+            )
 
         return result

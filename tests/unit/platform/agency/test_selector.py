@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agent_nexus.platform.agency.registry import ExpertRegistry
 from agent_nexus.platform.agency.selector import SelectionRequest, SelectionResult, SpecialistSelector
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +52,7 @@ def _registry_with(*profiles: dict) -> ExpertRegistry:
 # ===================================================================
 # 1. Filter by capability
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_selector_filters_by_capability():
     """Selecting for system_design returns only the software-architect."""
     architect = _make_profile(
@@ -83,6 +85,7 @@ def test_selector_filters_by_capability():
 # ===================================================================
 # 2. Filter by permission
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_selector_filters_by_permission():
     """An expert with full_auto mode is excluded when request needs plan-only."""
     planner = _make_profile(
@@ -118,6 +121,7 @@ def test_selector_filters_by_permission():
 # ===================================================================
 # 3. Rank by capability overlap
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_selector_ranks_by_capability_overlap():
     """Agents with ALL required caps are selected; optional caps differentiate scores."""
     full_match = _make_profile(
@@ -152,6 +156,7 @@ def test_selector_ranks_by_capability_overlap():
 # ===================================================================
 # 4. Task type match boost
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_selector_task_type_match():
     """Expert whose routing.task_types includes the task_type gets a boosted score."""
     matched = _make_profile(
@@ -187,6 +192,7 @@ def test_selector_task_type_match():
 # ===================================================================
 # 5. Diversity dedup
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_selector_diversity_dedup():
     """Two experts with identical capabilities: only the higher-ranked one is kept."""
     agent_a = _make_profile(
@@ -222,6 +228,7 @@ def test_selector_diversity_dedup():
 # ===================================================================
 # 6. Max agents limit
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_selector_max_agents():
     """Request max_agents=2 with 5 candidates returns exactly 2."""
     profiles = [
@@ -251,6 +258,7 @@ def test_selector_max_agents():
 # ===================================================================
 # 7. Output includes reasons
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_selector_output_includes_reasons():
     """Each selected agent has a score (float) and reasons (list of strings)."""
     profile = _make_profile(
@@ -284,6 +292,7 @@ def test_selector_output_includes_reasons():
 # ===================================================================
 # 8. No match returns empty
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_selector_no_match_returns_empty():
     """Selecting for a capability that no expert has returns empty list."""
     profile = _make_profile(
@@ -310,6 +319,7 @@ def test_selector_no_match_returns_empty():
 # ===================================================================
 # 9. Uses registry
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_selector_uses_registry():
     """Selector loads experts from ExpertRegistry (the class in registry.py)."""
     registry = ExpertRegistry()
@@ -341,6 +351,7 @@ def test_selector_uses_registry():
 # ===================================================================
 # 10. Empty required capabilities — I1 fix
 # ===================================================================
+@pytest.mark.timeout(30)
 def test_selector_empty_required_caps_no_free_score():
     """When required_capabilities is empty, agents should not get free capability points.
 

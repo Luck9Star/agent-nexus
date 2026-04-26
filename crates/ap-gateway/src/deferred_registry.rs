@@ -96,17 +96,21 @@ impl DeferredAgentRegistry {
             last_used: std::time::Instant::now(),
         }));
 
-        // H6 fix: if replacing an existing entry, deactivate its client first
+        // H6 fix: if replacing an existing entry, extract client under the write
+        // lock, then shut it down outside the lock to avoid blocking all reads
+        // during the async I/O.
         let old_slot = self.agents.write().await.insert(name, slot);
-        if let Some(old) = old_slot {
+        let client_to_shutdown = if let Some(old) = old_slot {
             let mut old_slot = old.lock().await;
-            if let Some(client_arc) = old_slot.client.take() {
-                old_slot.tools.take();
-                // Drop the per-slot lock before async shutdown
-                drop(old_slot);
-                let mut client = client_arc.lock().await;
-                client.shutdown().await;
-            }
+            old_slot.tools.take();
+            old_slot.client.take()
+        } else {
+            None
+        };
+        // Write lock and per-slot lock both released here.
+        if let Some(client_arc) = client_to_shutdown {
+            let mut client = client_arc.lock().await;
+            client.shutdown().await;
         }
     }
 
