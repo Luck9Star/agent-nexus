@@ -25,7 +25,7 @@ fn setup_store_with_skills(n: usize) -> EvolutionStore {
                 total_selections: (i as i64) * 10,
                 total_applied: (i as i64) * 8,
                 total_completions: (i as i64) * 7,
-                total_fallbacks: (i as i64) * 1,
+                total_fallbacks: (i as i64),
                 created_at: now.clone(),
                 updated_at: now.clone(),
             })

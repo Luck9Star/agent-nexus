@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """CLI entry point for Agent Nexus.
 
 Built with Typer.  Declared in ``pyproject.toml`` as::

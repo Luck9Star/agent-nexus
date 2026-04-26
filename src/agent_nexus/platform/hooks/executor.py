@@ -101,7 +101,7 @@ class HookExecutor:
             return cls(hooks=[], allowed_commands=allowed_commands or [])
 
         try:
-            import yaml  # noqa: F811
+            import yaml
 
             raw: dict[str, Any] = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
         except Exception:

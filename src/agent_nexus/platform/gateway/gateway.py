@@ -385,7 +385,7 @@ class MCPGateway:
         if info is not None and info.handle is not None:
             try:
                 info.handle.ipc.stream.close_sync()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.debug(
                     "Failed to close IPC stream during cleanup for '%s'",
                     agent_name, exc_info=True,

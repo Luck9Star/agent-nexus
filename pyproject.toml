@@ -39,6 +39,7 @@ packages = ["src/agent_nexus"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+timeout = 120
 markers = [
     "unit: fast, isolated unit tests (no I/O, no network)",
     "integration: tests spanning multiple modules with real I/O",

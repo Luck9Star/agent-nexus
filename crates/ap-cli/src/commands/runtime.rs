@@ -919,6 +919,7 @@ mod tests {
 
         // Clean up the child process
         let _ = child.kill();
+        let _ = child.wait();
     }
 
     /// Verify that without taking the handles, stdin/stdout/stderr are `Some`.
@@ -939,6 +940,7 @@ mod tests {
         // Clean up
         let mut child = child;
         let _ = child.kill();
+        let _ = child.wait();
     }
 
     #[test]
@@ -983,7 +985,7 @@ mod tests {
 
     #[test]
     fn parse_ps_elapsed_hours_minutes_seconds() {
-        assert_eq!(parse_ps_elapsed("1:23:45"), 1 * 3600 + 23 * 60 + 45);
+        assert_eq!(parse_ps_elapsed("1:23:45"), 3600 + 23 * 60 + 45);
     }
 
     #[test]

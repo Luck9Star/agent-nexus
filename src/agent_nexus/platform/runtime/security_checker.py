@@ -11,6 +11,8 @@ from __future__ import annotations
 import ast
 import logging
 
+from typing import ClassVar
+
 from agent_nexus.models.runtime import SecurityViolation
 
 from .security_rules import (
@@ -105,7 +107,7 @@ class SecurityChecker:
                 print(f"[{v.rule_type}] {v.message}")
     """
 
-    DEFAULT_RULES: list[SecurityRule] = [
+    DEFAULT_RULES: ClassVar[list[SecurityRule]] = [
         ImportRule(forbidden=_DEFAULT_FORBIDDEN_IMPORTS),
         FunctionRule(
             forbidden=_DEFAULT_FORBIDDEN_FUNCTIONS,

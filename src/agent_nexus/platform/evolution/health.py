@@ -11,9 +11,6 @@ Rule-engine pre-filter, LLM does final confirmation (in SkillEvolver).
 from __future__ import annotations
 
 import logging
-
-logger = logging.getLogger(__name__)
-
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,6 +28,8 @@ from agent_nexus.platform.evolution.thresholds import (
     SkillRates,
     evaluate_skill_health,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def build_health_suggestions(

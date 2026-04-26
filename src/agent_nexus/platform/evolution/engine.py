@@ -34,9 +34,6 @@ Usage::
 from __future__ import annotations
 
 import logging
-
-logger = logging.getLogger(__name__)
-
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -67,6 +64,8 @@ from agent_nexus.platform.evolution.promotion import (
 
 if TYPE_CHECKING:
     from agent_nexus.models.evolution import EvolutionContext
+
+logger = logging.getLogger(__name__)
 
 
 class EvolutionEngine:

@@ -15,12 +15,10 @@ Design decisions (from docs/04):
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass
-import re
 from enum import StrEnum
-
-logger = logging.getLogger(__name__)
 
 from agent_nexus.models.evolution import (
     EvolutionType,
@@ -38,6 +36,8 @@ from agent_nexus.platform.evolution.thresholds import (
     SkillRates,
     evaluate_skill_health,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class EvolutionTrigger(StrEnum):

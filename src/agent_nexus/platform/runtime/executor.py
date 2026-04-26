@@ -138,7 +138,7 @@ class IPythonExecutor:
         if self._shell is not None:
             try:
                 self._shell.user_ns.clear()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "Failed to clear IPython user namespace during close",
                     exc_info=True,
@@ -168,7 +168,7 @@ class IPythonExecutor:
                 if self._shell is not None:
                     try:
                         self._shell.user_ns.clear()
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         pass
                     self._shell = None
                 self._pending_injects.clear()
@@ -195,7 +195,7 @@ class IPythonExecutor:
         if hasattr(self, "_shell") and self._shell is not None:
             try:
                 self._shell.user_ns.clear()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             self._shell = None
 

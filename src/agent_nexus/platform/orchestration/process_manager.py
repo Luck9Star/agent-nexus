@@ -549,7 +549,7 @@ class ProcessManager:
                 if handle is not None and handle.process.returncode is None:
                     try:
                         await handle.process.wait()
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         pass
                 async with self._lock:
                     if self._agents.get(name) is handle:
@@ -593,7 +593,7 @@ class ProcessManager:
                 # local FDs.
                 try:
                     handle.ipc.stream.close_sync()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.debug(
                         "Failed to close IPC stream for dead agent '%s'",
                         name, exc_info=True,

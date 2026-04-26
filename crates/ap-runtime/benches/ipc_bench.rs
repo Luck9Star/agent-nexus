@@ -85,7 +85,7 @@ fn bench_ipc_deserialize(c: &mut Criterion) {
 fn bench_ipc_message_roundtrip(c: &mut Criterion) {
     let msg = IPCMessage {
         direction: MessageDirection::PlatformToAgent,
-        payload: serde_json::to_value(&make_platform_to_agent()).unwrap(),
+        payload: serde_json::to_value(make_platform_to_agent()).unwrap(),
     };
 
     c.bench_function("ipc/message_roundtrip", |b| {

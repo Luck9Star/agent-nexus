@@ -96,7 +96,7 @@ class LockfileManager:
         """
         lock_path = self._path.with_suffix(".lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        fh = open(lock_path, "w")  # noqa: SIM115
+        fh = open(lock_path, "w")
         try:
             fcntl.flock(fh, fcntl.LOCK_EX)
         except BaseException:

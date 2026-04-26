@@ -12,7 +12,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 from agent_nexus.models.runtime import (
     ExecutionResult,
@@ -202,7 +202,7 @@ class PythonRuntime:
                 parts.append(f"    Python type: {t.python_type}")
         return "\n".join(parts)
 
-    _TYPE_FORMATTERS: dict[str, Any] = {
+    _TYPE_FORMATTERS: ClassVar[dict[str, Any]] = {
         "names": _format_type_names,
         "summary": _format_type_summary,
         "schema": _format_type_schema,

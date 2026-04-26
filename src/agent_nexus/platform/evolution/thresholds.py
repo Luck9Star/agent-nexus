@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from agent_nexus.models.evolution import EvolutionType, SkillRecord
+
 # Fallback rate > 0.4 triggers FIX
 _FALLBACK_THRESHOLD = 0.4
 
@@ -18,9 +20,6 @@ _LOW_COMPLETION_THRESHOLD = 0.35
 # Effective rate < 0.55 AND applied rate > 0.25 triggers DERIVED
 _MODERATE_EFFECTIVE_THRESHOLD = 0.55
 _MIN_APPLIED_FOR_DERIVED = 0.25
-
-
-from agent_nexus.models.evolution import EvolutionType, SkillRecord
 
 
 @dataclass

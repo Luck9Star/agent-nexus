@@ -54,7 +54,7 @@ class ProfileBasedExecutor:
     def _generate_sections(
         self,
         name: str,
-        body: str,  # noqa: ARG002 — used by LLM subclasses
+        body: str,
         capabilities: list[str],
         task: str,
         required_sections: list[str],
