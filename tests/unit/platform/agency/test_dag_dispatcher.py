@@ -44,8 +44,8 @@ def _fail_executor(profile_id: str, task: str) -> Artifact:
 
 
 def _slow_executor(profile_id: str, task: str) -> Artifact:
-    """Executor that sleeps 5 seconds (for timeout tests)."""
-    time.sleep(5)
+    """Executor that sleeps 0.1 seconds (for timeout tests)."""
+    time.sleep(0.1)
     return _make_artifact(profile_id)
 
 

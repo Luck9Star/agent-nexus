@@ -76,71 +76,59 @@ class TestPlanCompositionCommand:
 class TestValidateOutputCommand:
     """validate-output command: validate an output file against a contract."""
 
-    def test_validate_output_passes(self) -> None:
+    def test_validate_output_passes(self, tmp_path: Path) -> None:
         runner = CliRunner()
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
-            json.dump(
-                {
-                    "sections": {
-                        "context": "test",
-                        "assumptions": [],
-                        "proposed_design": "test",
-                        "tradeoffs": [],
-                        "risks": [],
-                        "next_steps": [],
-                    }
-                },
-                f,
-            )
-            f.flush()
-            result = runner.invoke(
-                cli,
-                [
-                    "validate-output",
-                    "--output-file", f.name,
-                    "--required-sections", "context,assumptions,proposed_design,tradeoffs,risks,next_steps",
-                ],
-            )
-            assert result.exit_code == 0, f"CLI error: {result.output}"
-            assert "passed" in result.output.lower() or "valid" in result.output.lower()
+        output_file = tmp_path / "output.json"
+        output_file.write_text(json.dumps({
+            "sections": {
+                "context": "test",
+                "assumptions": [],
+                "proposed_design": "test",
+                "tradeoffs": [],
+                "risks": [],
+                "next_steps": [],
+            }
+        }))
+        result = runner.invoke(
+            cli,
+            [
+                "validate-output",
+                "--output-file", str(output_file),
+                "--required-sections", "context,assumptions,proposed_design,tradeoffs,risks,next_steps",
+            ],
+        )
+        assert result.exit_code == 0, f"CLI error: {result.output}"
+        assert "passed" in result.output.lower() or "valid" in result.output.lower()
 
-    def test_validate_output_fails_missing_sections(self) -> None:
+    def test_validate_output_fails_missing_sections(self, tmp_path: Path) -> None:
         runner = CliRunner()
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
-            json.dump({"sections": {"context": "test"}}, f)
-            f.flush()
-            result = runner.invoke(
-                cli,
-                [
-                    "validate-output",
-                    "--output-file", f.name,
-                    "--required-sections", "context,risks,next_steps",
-                ],
-            )
-            assert result.exit_code != 0 or "missing" in result.output.lower()
+        output_file = tmp_path / "output.json"
+        output_file.write_text(json.dumps({"sections": {"context": "test"}}))
+        result = runner.invoke(
+            cli,
+            [
+                "validate-output",
+                "--output-file", str(output_file),
+                "--required-sections", "context,risks,next_steps",
+            ],
+        )
+        assert result.exit_code != 0 or "missing" in result.output.lower()
 
-    def test_validate_output_with_task_type(self) -> None:
+    def test_validate_output_with_task_type(self, tmp_path: Path) -> None:
         runner = CliRunner()
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
-            json.dump({"sections": {"summary": "test"}}, f)
-            f.flush()
-            result = runner.invoke(
-                cli,
-                [
-                    "validate-output",
-                    "--output-file", f.name,
-                    "--required-sections", "summary",
-                    "--task-type", "code_change",
-                ],
-            )
-            # code_change should trigger GitNexus gate failure
-            assert "gitnexus" in result.output.lower() or result.exit_code != 0 or "failed" in result.output.lower()
+        output_file = tmp_path / "output.json"
+        output_file.write_text(json.dumps({"sections": {"summary": "test"}}))
+        result = runner.invoke(
+            cli,
+            [
+                "validate-output",
+                "--output-file", str(output_file),
+                "--required-sections", "summary",
+                "--task-type", "code_change",
+            ],
+        )
+        # code_change should trigger GitNexus gate failure
+        assert "gitnexus" in result.output.lower() or result.exit_code != 0 or "failed" in result.output.lower()
 
 
 @pytest.mark.timeout(30)
