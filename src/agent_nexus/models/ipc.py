@@ -39,7 +39,7 @@ class PlatformToAgent(FrozenModel):
 
     Examples:
         Chat: {"type": "chat", "content": "...", "conversation_id": "..."}
-        Task: {"type": "task", "task_id": "...", "description": "..."}
+        Task: {"type": "task", "content": "...", "task_id": "..."}
         Data: {"type": "data_reference", "ref_id": "var://...", "summary": "..."}
     """
 

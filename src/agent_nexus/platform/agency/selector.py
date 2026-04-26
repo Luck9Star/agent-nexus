@@ -33,9 +33,13 @@ def _capability_overlap(agent_caps: set[str], required_caps: set[str]) -> float:
 
 
 def _optional_overlap(agent_caps: set[str], optional_caps: set[str]) -> float:
-    """Fraction of optional capabilities that the agent has (0.0 .. 1.0)."""
+    """Fraction of optional capabilities that the agent has (0.0 .. 1.0).
+
+    Returns 0.0 when optional_caps is empty — consistent with _capability_overlap:
+    an empty requirement set contributes zero rather than inflating all scores.
+    """
     if not optional_caps:
-        return 1.0
+        return 0.0
     return len(agent_caps & optional_caps) / len(optional_caps)
 
 

@@ -248,6 +248,7 @@ class TaskComposer:
                 task=input.task,
                 selected_agents=selected,
                 dag=dag,
+                qa_passed=False,  # No artifacts = execution failure, not just "no match"
                 skipped_tasks=list(skipped),
             )
 

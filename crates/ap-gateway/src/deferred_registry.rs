@@ -1,4 +1,13 @@
 //! Lazy-loading agent registry: only starts agent subprocesses when their tools are needed.
+//!
+//! # Lock Ordering Protocol (must be followed to prevent deadlock)
+//!
+//! 1. `agents` RwLock (read or write)
+//! 2. Per-slot Mutex (one at a time, never hold two simultaneously)
+//!
+//! All I/O operations (shutdown, list_tools, call_tool) must be done outside both locks.
+//! The three-phase pattern (collect under lock → I/O outside lock → update under lock) is used
+//! throughout to maintain this invariant.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -343,19 +352,10 @@ impl DeferredAgentRegistry {
             client.shutdown().await;
         }
 
-        // Phase 4: Remove deactivated entries from HashMap to prevent unbounded growth.
-        // Only remove entries that still have no client (not re-activated since Phase 2).
-        if count > 0 {
-            let mut agents = self.agents.write().await;
-            agents.retain(|_name, slot_arc| {
-                // Keep if: agent was re-activated (has client) or wasn't in our idle set.
-                let slot = slot_arc.try_lock();
-                match slot {
-                    Ok(slot) => slot.client.get().is_some(),
-                    Err(_) => true, // Locked = in use, keep it
-                }
-            });
-        }
+        // Phase 4: Slots are NOT removed from the HashMap — their client/tools
+        // were cleared in Phase 2, but the manifest remains for future re-activation
+        // via `activate()`. Removing them would make has_agent() return false and
+        // require re-registration, which is incorrect for idle deactivation.
 
         count
     }
@@ -684,10 +684,10 @@ mod tests {
         assert!(registry.list_agents().await.is_empty());
     }
 
-    /// F16 fix: deactivated idle agents are removed from the HashMap entirely,
-    /// not left as empty shells causing unbounded growth.
+    /// Idle deactivation clears the client/tools but preserves the manifest
+    /// in the registry so the agent can be re-activated later.
     #[tokio::test]
-    async fn deactivate_idle_prunes_from_hashmap() {
+    async fn deactivate_idle_preserves_manifest_for_reactivation() {
         let registry =
             DeferredAgentRegistry::with_idle_timeout(Duration::from_millis(50));
 
@@ -706,9 +706,9 @@ mod tests {
         let deactivated = registry.deactivate_idle().await;
         assert_eq!(deactivated, 1);
 
-        // Agent should be completely removed from the registry, not just deactivated
-        assert!(!registry.has_agent("pruned").await);
-        assert!(registry.list_agents().await.is_empty());
+        // Agent should still be registered (manifest preserved) for re-activation
+        assert!(registry.has_agent("pruned").await);
+        assert_eq!(registry.list_agents().await.len(), 1);
     }
 
     /// F15 fix: when list_tools fails, the dead client is cleared so the next

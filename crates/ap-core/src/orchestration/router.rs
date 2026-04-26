@@ -120,9 +120,10 @@ impl PlatformRouter {
         let total = WorkflowPhase::ordered().len() as u32;
         let mut completed = 0u32;
 
-        // Overall timeout: phases × per-phase timeout. Prevents unbounded hangs.
+        // Overall timeout: phases × per-phase timeout + margin for inter-phase overhead.
+        // The 30s margin covers context building, result aggregation, and phase transitions.
         let composite_timeout = std::time::Duration::from_secs(
-            self.subtask.config().timeout_seconds * u64::from(total),
+            self.subtask.config().timeout_seconds * u64::from(total) + 30,
         );
 
         let result = tokio::time::timeout(composite_timeout, async {

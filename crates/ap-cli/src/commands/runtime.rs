@@ -189,6 +189,7 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
             .context("Failed to clone log file handle for stdout")?;
         let log_stderr = log_file.try_clone()
             .context("Failed to clone log file handle for stderr")?;
+        drop(log_file); // Release original FD — child only needs the two clones
 
         // Daemon mode: use SSE transport so the agent runs as an HTTP server.
         // Stdio transport doesn't work for daemons because the CLI exits and
@@ -215,7 +216,17 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        std::fs::write(&pid_file, format!("{pid}:{start_time}"))?;
+        // Use create_new(true) to prevent symlink attacks — fails if file already
+        // exists (including symlinks). Stale PID files were cleaned above.
+        {
+            let f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&pid_file)
+                .with_context(|| format!("Failed to create PID file at {}", pid_file.display()))?;
+            use std::io::Write;
+            write!(&f, "{pid}:{start_time}")?;
+        }
 
         // Store the SSE port for this agent.
         let port_file = root.join(".agents").join(format!("{agent_name}.port"));

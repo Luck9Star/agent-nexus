@@ -295,4 +295,18 @@ class DAGDispatcher:
                 self._graph.fail_task(tid)
                 result.failed.append(tid)
 
+        # Clean up orphaned PENDING tasks whose dependencies have all completed/failed.
+        # Without this, tasks blocked by failed deps remain PENDING forever.
+        for tid in specialist_ids:
+            task = self._graph.get_task(tid)
+            if task is None or task.state != TaskState.PENDING:
+                continue
+            deps = task.blocked_by
+            if not deps:
+                continue
+            dep_tasks = [self._graph.get_task(d) for d in deps]
+            if all(t is not None and t.state in (TaskState.COMPLETED, TaskState.FAILED) for t in dep_tasks):
+                self._graph.fail_task(tid)
+                result.failed.append(tid)
+
         return result

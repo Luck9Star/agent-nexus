@@ -1,5 +1,7 @@
 """Markdown frontmatter parser for agency-agents vendor files."""
 
+import re
+
 import yaml
 
 
@@ -29,13 +31,15 @@ def parse_frontmatter(md_content: str) -> dict:
 
     rest = stripped[first_newline + 1:]
 
-    # Find the closing ---
-    closing_index = rest.find("\n---")
-    if closing_index == -1:
+    # Find the closing --- using regex to match only standalone delimiter lines,
+    # not horizontal rules in body content (e.g. "---" used as <hr>).
+    closing_match = re.search(r"\n---\s*$", rest, re.MULTILINE)
+    if closing_match is None:
         raise ValueError("No closing frontmatter delimiter found")
 
+    closing_index = closing_match.start()
     yaml_block = rest[:closing_index]
-    body = rest[closing_index + 4:].strip()  # skip past "\n---"
+    body = rest[closing_match.end():].strip()  # skip past the matched delimiter
 
     if not yaml_block.strip():
         raise ValueError("Empty frontmatter block")

@@ -108,6 +108,11 @@ fn validate_init_dir(dir: &str) -> Result<PathBuf, InitError> {
         "/Library/System",
         "/private/etc",
         "/private/var/db",
+        "/tmp",
+        "/opt",
+        "/srv",
+        "/boot",
+        "/lib",
     ];
 
     let resolved_str = resolved.to_string_lossy();

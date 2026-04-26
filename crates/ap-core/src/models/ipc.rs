@@ -90,15 +90,17 @@ pub struct AgentToPlatform {
 
 impl AgentToPlatform {
     /// Check if this response indicates successful completion.
-    /// Mirrors Python's `is_success` computed property.
-    #[must_use] 
+    /// Mirrors Python's `is_success` computed property:
+    /// `self.status is None or self.status.lower() == "completed"`
+    /// None status = success (agent completed without explicit status).
+    #[must_use]
     pub fn is_success(&self) -> bool {
         if self.msg_type == AgentToPlatformType::Error {
             return false;
         }
         self.status
             .as_ref()
-            .is_some_and(|s| s.to_lowercase() == "completed")
+            .is_none_or(|s| s.to_lowercase() == "completed")
     }
 }
 
@@ -290,6 +292,22 @@ mod tests {
             progress_pct: None,
             error: None,
             status: Some("completed".to_string()),
+            output: None,
+        };
+        assert!(msg.is_success());
+    }
+
+    #[test]
+    fn is_success_returns_true_when_status_none_on_result() {
+        // Python: self.status is None → True. Rust must mirror this.
+        let msg = AgentToPlatform {
+            msg_type: AgentToPlatformType::Result,
+            content: String::new(),
+            task_id: None,
+            message: None,
+            progress_pct: None,
+            error: None,
+            status: None,
             output: None,
         };
         assert!(msg.is_success());

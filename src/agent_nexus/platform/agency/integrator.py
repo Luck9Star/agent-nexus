@@ -227,13 +227,19 @@ def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
             intersection = intersection & s
 
         if len(intersection) == 0 and all(len(s) > 0 for s in all_risk_sets):
-            # Only flag when agents share overlapping sections (related work)
+            # Only flag when agents share overlapping domain-specific sections.
+            # Exclude synthetic/structural sections that Integrator.merge adds to
+            # all artifacts (final_recommendation, decision_summary) — these inflate
+            # the overlap check and cause false positives.
+            _STRUCTURAL_SECTIONS = frozenset({
+                "final_recommendation", "decision_summary", "recommendation",
+            })
             agent_section_keys: dict[str, set[str]] = {}
             for artifact in artifacts:
                 if artifact.source_agent in risk_sets:
                     agent_section_keys[artifact.source_agent] = set(
                         artifact.sections.keys()
-                    )
+                    ) - _STRUCTURAL_SECTIONS
             section_sets = list(agent_section_keys.values())
             if section_sets:
                 shared = section_sets[0]

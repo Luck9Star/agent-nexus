@@ -497,10 +497,15 @@ impl TaskGraph {
         let state = Self::str_to_state(&state_str).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
         })?;
-        let blocked_by: Vec<String> = serde_json::from_str(&blocked_json).unwrap_or_else(|e| {
-            warn!("Corrupted blocked_by JSON for task {id}: {e} — defaulting to empty");
-            Vec::new()
-        });
+        let blocked_by: Vec<String> = serde_json::from_str(&blocked_json).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                4,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::other(
+                    format!("Corrupted blocked_by JSON for task {id}: {e}"),
+                )),
+            )
+        })?;
         let vars: serde_json::Value = serde_json::from_str(&vars_str).unwrap_or_else(|e| {
             debug!("Failed to parse vars JSON for task {}: {}", id, e);
             serde_json::Value::Null
