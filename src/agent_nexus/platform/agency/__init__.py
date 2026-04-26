@@ -1,9 +1,15 @@
 """Agency platform: expert profile import, selection, and orchestration."""
-from .importer import AgencyImporter
-from .parser import parse_frontmatter
 from .allowlist import load_allowlist
-from .policy import check_content_policy
-from .selector import SelectionRequest, SelectionResult, SpecialistSelector
+from .dag_dispatcher import (
+    DAGDispatcher,
+    DispatchResult,
+    dag_task_to_task_item,
+    load_dag_into_graph,
+)
+from .executor import ProfileBasedExecutor
+from .importer import AgencyImporter
+from .integrator import Artifact, ConflictItem, IntegratedArtifact, Integrator
+from .parser import parse_frontmatter
 from .planner import (
     CompositionDAG,
     DAGTask,
@@ -12,16 +18,10 @@ from .planner import (
     SubtaskDef,
     generate_toml,
 )
-from .executor import ProfileBasedExecutor
-from .integrator import Artifact, ConflictItem, IntegratedArtifact, Integrator
+from .policy import check_content_policy
 from .qa_gate import QAGate, QAGateInput, QAGateResult
+from .selector import SelectionRequest, SelectionResult, SpecialistSelector
 from .task_composer import TaskComposer, TaskComposerInput, TaskComposerResult
-from .dag_dispatcher import (
-    DAGDispatcher,
-    DispatchResult,
-    dag_task_to_task_item,
-    load_dag_into_graph,
-)
 
 __all__ = [
     "AgencyImporter",

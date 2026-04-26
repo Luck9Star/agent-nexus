@@ -19,10 +19,11 @@ import json
 import logging
 import sqlite3
 import uuid
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Generator
+from typing import TYPE_CHECKING, Any
 
 from agent_nexus.models.evolution import (
     EvolutionMetrics,
@@ -32,9 +33,10 @@ from agent_nexus.models.evolution import (
 )
 from agent_nexus.platform.utils import (
     now_iso as _now_iso,
+)
+from agent_nexus.platform.utils import (
     sqlite_connection,
 )
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agent_nexus.platform.evolution.evolver import EvolveResult

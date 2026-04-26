@@ -11,13 +11,16 @@ Public API:
     EvolutionContextDescriber -- tiered L0/L1/L2 evolution context for LLM injection
 """
 
-from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.analyzer import ExecutionAnalyzer
-from agent_nexus.platform.evolution.evolver import SkillEvolver
 from agent_nexus.platform.evolution.compaction import (
     AgentContext,
     CompactionGuard,
 )
+from agent_nexus.platform.evolution.context_describer import (
+    EvolutionContextDescriber,
+)
+from agent_nexus.platform.evolution.engine import EvolutionEngine
+from agent_nexus.platform.evolution.evolver import SkillEvolver
 from agent_nexus.platform.evolution.health import (
     HealthChecker,
     HealthReport,
@@ -27,10 +30,7 @@ from agent_nexus.platform.evolution.promotion import (
     PromotionCandidate,
     PromotionResult,
 )
-from agent_nexus.platform.evolution.context_describer import (
-    EvolutionContextDescriber,
-)
-from agent_nexus.platform.evolution.engine import EvolutionEngine
+from agent_nexus.platform.evolution.store import EvolutionStore
 
 __all__ = [
     "EvolutionEngine",

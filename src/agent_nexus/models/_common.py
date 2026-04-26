@@ -5,8 +5,7 @@ Centralizes patterns used across all model modules to enforce DRY.
 
 from __future__ import annotations
 
-
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -17,7 +16,7 @@ def _utc_now() -> datetime:
     Used as ``Field(default_factory=...)`` for timestamp fields.
     Centralized here so all models share a single source of truth.
     """
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class FrozenModel(BaseModel):
@@ -35,9 +34,9 @@ class FrozenModel(BaseModel):
 class _MissingSentinel:
     """Singleton sentinel for missing values — preserves identity across pickle."""
 
-    _instance: "_MissingSentinel | None" = None
+    _instance: _MissingSentinel | None = None
 
-    def __new__(cls) -> "_MissingSentinel":
+    def __new__(cls) -> _MissingSentinel:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -51,7 +50,7 @@ class _MissingSentinel:
         return (_restore_missing, ())
 
 
-def _restore_missing() -> "_MissingSentinel":
+def _restore_missing() -> _MissingSentinel:
     """Pickle restore helper — returns the _MISSING singleton."""
     return _MISSING
 

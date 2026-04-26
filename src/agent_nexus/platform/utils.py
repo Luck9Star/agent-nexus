@@ -8,11 +8,11 @@ import os
 import re
 import sqlite3
 import tempfile
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 
 # Agent name pattern: starts with alphanumeric, then alphanumeric/hyphen/underscore
 AGENT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
@@ -60,7 +60,7 @@ def atomic_write(path: Path, content: str, *, prefix: str = ".write-", suffix: s
 
 def now_iso() -> str:
     """Return current UTC time as ISO format string."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # Error types indicating agent process death (IPC/connection failures).

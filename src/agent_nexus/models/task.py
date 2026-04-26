@@ -47,7 +47,7 @@ class TaskItem(FrozenModel):
     updated_at: datetime = Field(default_factory=_utc_now)
 
     @model_validator(mode='after')
-    def _no_self_reference(self) -> 'TaskItem':
+    def _no_self_reference(self) -> TaskItem:
         """Prevent a task from blocking itself (guaranteed deadlock)."""
         if self.blocked_by and self.id in self.blocked_by:
             raise ValueError(f"Task '{self.id}' cannot block itself")

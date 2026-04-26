@@ -29,21 +29,22 @@ from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.gateway.tool_adapter import (
     DEFAULT_IPC_EXECUTE_TIMEOUT,
 )
-from agent_nexus.platform.utils import make_error_result as _make_error_result
 from agent_nexus.platform.orchestration.dsl import OrchestrationDefinition
 from agent_nexus.platform.orchestration.ipc import (
+    _INTERNAL_CID,
+    _LIST_TOOLS_MSG,
     IPCConnectionError,
     IPCError,
     IPCTimeoutError,
-    _INTERNAL_CID,
-    _LIST_TOOLS_MSG,
     get_ipc_lock,
 )
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
+from agent_nexus.platform.utils import make_error_result as _make_error_result
 
 from .subtask import SubtaskController
 from .workflow import WorkflowContext, WorkflowPhase, WorkflowResult
+
 
 class AgentExecutionError(Exception):
     """Raised when an agent interaction fails with a non-IPC error.
@@ -270,7 +271,7 @@ class PlatformRouter:
                     _run_phases(),
                     timeout=_DEFAULT_COMPOSITE_TIMEOUT,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 last_error = (
                     f"Composite workflow timed out after "
                     f"{_DEFAULT_COMPOSITE_TIMEOUT:.0f}s"
@@ -386,7 +387,7 @@ class PlatformRouter:
                                 name, exc,
                             )
                 return []
-            except (IPCError, OSError, RuntimeError, asyncio.TimeoutError) as exc:
+            except (TimeoutError, IPCError, OSError, RuntimeError) as exc:
                 logger.warning("Failed to get tools from agent '%s': %s", name, exc)
                 return []
 
@@ -596,7 +597,7 @@ class PlatformRouter:
                 await handle.ipc.send_chat(message, conversation_id=conversation_id)
             except (IPCConnectionError, IPCTimeoutError, IPCError):
                 raise
-            except (OSError, RuntimeError, asyncio.TimeoutError) as exc:
+            except (TimeoutError, OSError, RuntimeError) as exc:
                 raise AgentExecutionError(
                     f"IPC send error for agent '{agent_name}': {exc}",
                     type(exc).__name__,
@@ -606,7 +607,7 @@ class PlatformRouter:
                 response = await handle.ipc.receive_until_result(timeout=timeout)
             except (IPCConnectionError, IPCTimeoutError, IPCError):
                 raise
-            except (OSError, RuntimeError, asyncio.TimeoutError) as exc:
+            except (TimeoutError, OSError, RuntimeError) as exc:
                 raise AgentExecutionError(
                     f"IPC error communicating with agent '{agent_name}': {exc}",
                     type(exc).__name__,

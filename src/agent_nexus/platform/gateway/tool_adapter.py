@@ -12,17 +12,16 @@ Reference: docs/06-mcp-communication.md Section 8.1.1
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
 import uuid
 
-from agent_nexus.models.ipc import AgentToPlatformType
-from agent_nexus.platform.utils import make_error_result as _make_error_result
-from agent_nexus.platform.orchestration.ipc import IPCError, get_ipc_lock
 import agent_nexus.platform.orchestration.ipc as _ipc_mod
+from agent_nexus.models.ipc import AgentToPlatformType
+from agent_nexus.platform.orchestration.ipc import IPCError, get_ipc_lock
 from agent_nexus.platform.orchestration.process_manager import AgentHandle
+from agent_nexus.platform.utils import make_error_result as _make_error_result
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +131,7 @@ class McpToolAdapter:
             async with lock:
                 await handle.ipc.send_chat(payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__")
                 response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
-        except (OSError, ConnectionError, asyncio.TimeoutError, IPCError) as exc:
+        except (TimeoutError, OSError, ConnectionError, IPCError) as exc:
             logger.error(
                 "IPC error executing tool '%s': %s", self.full_name, exc
             )

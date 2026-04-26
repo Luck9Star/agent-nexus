@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from enum import IntEnum, StrEnum
-import logging
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
@@ -59,7 +59,7 @@ class ContextBudget(FrozenModel):
     consecutive_compaction_alert: int = Field(default=3, ge=1)
 
     @model_validator(mode="after")
-    def _validate_thresholds(self) -> "ContextBudget":
+    def _validate_thresholds(self) -> ContextBudget:
         """Ensure all threshold values are fractions in 0.0-1.0 range
         and cross-field constraints hold."""
         for field_name in (

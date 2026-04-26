@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 # Task types that require GitNexus checks per doc §11
 _CODE_CHANGE_TASK_TYPES = {"code_change", "refactor", "symbol_edit"}
 

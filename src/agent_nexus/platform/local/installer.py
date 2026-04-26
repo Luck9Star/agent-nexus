@@ -15,10 +15,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-import toml
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
+import toml
 import yaml
 
 from agent_nexus.models.agent import AgentManifest, AgentType
@@ -209,7 +209,7 @@ class GitInstaller:
                 source=source.name,
                 commit_sha=commit_sha,
                 agent_type=agent_type,
-                installed_at=datetime.now(timezone.utc),
+                installed_at=datetime.now(UTC),
                 venv_path=str(venv_path) if venv_path else "",
                 dependencies=manifest.pip_dependencies if manifest else [],
             )
@@ -375,7 +375,7 @@ class GitInstaller:
                 source="local",
                 commit_sha=commit_sha,
                 agent_type=agent_type,
-                installed_at=datetime.now(timezone.utc),
+                installed_at=datetime.now(UTC),
                 venv_path=str(venv_path) if venv_path else "",
                 dependencies=manifest.pip_dependencies if manifest else [],
             )

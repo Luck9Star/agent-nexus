@@ -316,7 +316,7 @@ class HookExecutor:
                 duration_ms=round(duration_ms, 2),
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             duration_ms = (time.monotonic() - start) * 1000
             try:
                 if proc is not None:

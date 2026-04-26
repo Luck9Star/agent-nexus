@@ -9,7 +9,6 @@ from .allowlist import load_allowlist
 from .parser import parse_frontmatter
 from .policy import check_content_policy
 
-
 # Default output contract section mappings by artifact_type
 _CONTRACT_SECTIONS: dict[str, list[str]] = {
     "architecture_plan": ["context", "assumptions", "proposed_design", "tradeoffs", "risks", "next_steps"],

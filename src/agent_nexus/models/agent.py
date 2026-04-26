@@ -8,7 +8,6 @@ from typing import Any
 from pydantic import ConfigDict, Field, model_validator
 
 from agent_nexus.models._common import FrozenModel
-
 from agent_nexus.models.hooks import HookDefinition
 from agent_nexus.models.permission import PermissionConfig, PermissionMode
 
@@ -66,7 +65,7 @@ class McpServerConfig(FrozenModel):
     url: str | None = None
 
     @model_validator(mode="after")
-    def _validate_transport_fields(self) -> "McpServerConfig":
+    def _validate_transport_fields(self) -> McpServerConfig:
         """Ensure transport type matches the required fields.
 
         - stdio transport requires command to be set
@@ -123,7 +122,7 @@ class AgentManifest(FrozenModel):
     initial_prompt: str | None = None
 
     @model_validator(mode="after")
-    def _validate_permission_consistency(self) -> "AgentManifest":
+    def _validate_permission_consistency(self) -> AgentManifest:
         """Ensure permission_mode and permissions.mode do not diverge."""
         if (
             self.permission_mode is not None

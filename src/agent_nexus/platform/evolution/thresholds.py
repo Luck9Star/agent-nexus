@@ -42,7 +42,7 @@ class SkillRates:
     effective_rate: float
 
     @classmethod
-    def from_record(cls, record: SkillRecord) -> "SkillRates | None":
+    def from_record(cls, record: SkillRecord) -> SkillRates | None:
         """Compute rates from a SkillRecord's counters.
 
         Returns None if total_selections is 0 (no data to compute rates from).

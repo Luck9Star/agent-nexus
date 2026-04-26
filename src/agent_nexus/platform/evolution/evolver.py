@@ -26,12 +26,12 @@ from agent_nexus.models.evolution import (
     SkillOrigin,
     SkillRecord,
 )
-from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.analyzer import (
     AnalysisResult,
     EvolutionSuggestion,
 )
 from agent_nexus.platform.evolution.health import build_health_suggestions
+from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.thresholds import (
     SkillRates,
     evaluate_skill_health,

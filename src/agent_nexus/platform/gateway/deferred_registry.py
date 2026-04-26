@@ -20,8 +20,11 @@ import itertools
 import json
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
+
 from agent_nexus.models.agent import AgentManifest
 from agent_nexus.models.ipc import AgentToPlatformType
+from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
 from agent_nexus.platform.orchestration.ipc import (
     _INTERNAL_CID,
     _LIST_TOOLS_MSG,
@@ -31,9 +34,6 @@ from agent_nexus.platform.orchestration.process_manager import (
     AgentHandle,
     ProcessManager,
 )
-from pathlib import Path
-
-from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
 
 logger = logging.getLogger(__name__)
 

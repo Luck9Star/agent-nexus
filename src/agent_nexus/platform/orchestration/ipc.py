@@ -94,7 +94,7 @@ class IPCStream:
             raise IPCConnectionError(f"Agent stdin closed: {exc}") from exc
         try:
             await asyncio.wait_for(self._stdin.drain(), timeout=5.0)
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise IPCTimeoutError("Timed out draining stdin to agent") from exc
         except (BrokenPipeError, ConnectionResetError, OSError, RuntimeError) as exc:
             raise IPCConnectionError(f"Agent stdin closed during drain: {exc}") from exc
@@ -115,7 +115,7 @@ class IPCStream:
         timeout = max(timeout, 0.1)
         try:
             raw = await asyncio.wait_for(self._stdout.readline(), timeout=timeout)
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise IPCTimeoutError(
                 f"Timed out after {timeout:.1f}s waiting for agent message"
             ) from exc
@@ -376,7 +376,7 @@ class IPCProtocol:
                     return False
                 try:
                     resp = await self._stream.receive(timeout=remaining)
-                except (IPCError, asyncio.TimeoutError):
+                except (TimeoutError, IPCError):
                     return False
                 if resp.type == AgentToPlatformType.PROGRESS:
                     if resp.content and "pong" in resp.content.lower():
@@ -386,7 +386,7 @@ class IPCProtocol:
                     continue
                 # Non-progress message — buffer and keep looking for pong.
                 self._buffer_message(resp)
-        except (IPCError, asyncio.TimeoutError) as exc:
+        except (TimeoutError, IPCError) as exc:
             logger.debug(
                 "Heartbeat failed for agent: [%s] %s",
                 type(exc).__name__, exc,

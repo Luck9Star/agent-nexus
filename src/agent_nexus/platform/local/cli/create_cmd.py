@@ -17,16 +17,21 @@ Modes:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 import yaml
 
 from agent_nexus.platform.utils import (
     AGENT_NAME_RE,
+)
+from agent_nexus.platform.utils import (
     agent_name_to_package as _agent_name_to_package,
-    to_class_name as _to_class_name,
+)
+from agent_nexus.platform.utils import (
     atomic_write as _atomic_write,
+)
+from agent_nexus.platform.utils import (
+    to_class_name as _to_class_name,
 )
 
 # ---------------------------------------------------------------------------
@@ -459,7 +464,7 @@ create_app = typer.Typer(help="Create and scaffold new agents")
 @create_app.command("agent")
 def create_agent(
     name: str = typer.Argument(help="Agent name (kebab-case, e.g. my-agent)"),
-    description: Optional[str] = typer.Option(
+    description: str | None = typer.Option(
         None, "--description", "-d", help="Agent description",
     ),
     tools: str = typer.Option(
@@ -469,7 +474,7 @@ def create_agent(
     wizard: bool = typer.Option(
         False, "--wizard", "-w", help="Run interactive wizard",
     ),
-    output_dir: Optional[str] = typer.Option(
+    output_dir: str | None = typer.Option(
         None, "--output", "-o", help="Output directory (default: agents/atomic/)",
     ),
 ) -> None:

@@ -77,7 +77,7 @@ class SkillRecord(FrozenModel):
     last_updated: datetime = Field(default_factory=_utc_now)
 
     @model_validator(mode='after')
-    def _validate_counters(self) -> 'SkillRecord':
+    def _validate_counters(self) -> SkillRecord:
         if self.total_selections == 0:
             if self.total_applied != 0 or self.total_fallbacks != 0:
                 raise ValueError(
@@ -106,7 +106,7 @@ class EvolutionMetrics(FrozenModel):
     total_fallbacks: int = Field(default=0, ge=0)
 
     @model_validator(mode='after')
-    def _validate_counters(self) -> 'EvolutionMetrics':
+    def _validate_counters(self) -> EvolutionMetrics:
         if self.total_selections == 0:
             if self.total_applied != 0 or self.total_fallbacks != 0:
                 raise ValueError(

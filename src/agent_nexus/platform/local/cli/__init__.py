@@ -43,13 +43,13 @@ def _main(
 
 # --- Lifecycle commands (migrated from original cli.py) ---
 from agent_nexus.platform.local.cli._lifecycle import (
+    info,
     install_agent,
+    list_agents,
+    run_agent,
+    search,
     uninstall,
     update,
-    run_agent,
-    list_agents,
-    search,
-    info,
 )
 
 # All lifecycle commands registered as top-level commands
@@ -62,12 +62,12 @@ app.command()(search)
 app.command()(info)
 
 # --- New command modules ---
-from agent_nexus.platform.local.cli.init_cmd import init_app
-from agent_nexus.platform.local.cli.config_cmd import config_app
-from agent_nexus.platform.local.cli.runtime_cmd import runtime_app
-from agent_nexus.platform.local.cli.evolution_cmd import evolution_app
-from agent_nexus.platform.local.cli.create_cmd import create_app
 from agent_nexus.platform.local.cli.check_cmd import check_agent
+from agent_nexus.platform.local.cli.config_cmd import config_app
+from agent_nexus.platform.local.cli.create_cmd import create_app
+from agent_nexus.platform.local.cli.evolution_cmd import evolution_app
+from agent_nexus.platform.local.cli.init_cmd import init_app
+from agent_nexus.platform.local.cli.runtime_cmd import runtime_app
 from agent_nexus.platform.local.cli.sources_cmd import sources_app
 
 app.add_typer(init_app)

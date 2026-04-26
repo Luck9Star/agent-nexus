@@ -23,40 +23,11 @@ from agent_nexus.models.agent import (
     SkillDefinition,
 )
 
-# task.py — Task graph
-from agent_nexus.models.task import (
-    TaskGraphSnapshot,
-    TaskItem,
-    TaskState,
-)
-
-# ipc.py — Inter-process communication
-from agent_nexus.models.ipc import (
-    AgentToPlatform,
-    AgentToPlatformType,
-    IPCMessage,
-    MessageDirection,
-    PlatformToAgent,
-    PlatformToAgentType,
-)
-
-# runtime.py — Python Runtime
-from agent_nexus.models.runtime import (
-    ExecutionResult,
-    Function,
-    RuntimeType,
-    SecurityViolation,
-    Variable,
-)
-
-# evolution.py — Self-Evolution Engine
-from agent_nexus.models.evolution import (
-    EvolutionContext,
-    EvolutionMetrics,
-    EvolutionType,
-    SkillLineage,
-    SkillOrigin,
-    SkillRecord,
+# composition.py — Shared composition data models
+from agent_nexus.models.composition import (
+    Composition,
+    CompositionError,
+    CompositionTask,
 )
 
 # config.py — Configuration
@@ -66,6 +37,14 @@ from agent_nexus.models.config import (
     ProviderApiType,
     ProviderConfig,
     RuntimeConfig,
+)
+
+# context.py — Context budget & tiered loading
+from agent_nexus.models.context import (
+    ContextBudget,
+    ContextBudgetLogEntry,
+    ContextLevel,
+    TokenUsage,
 )
 
 # distribution.py — Git-based distribution
@@ -79,21 +58,14 @@ from agent_nexus.models.distribution import (
     SourceType,
 )
 
-# permission.py — Permission system
-from agent_nexus.models.permission import (
-    PathAccess,
-    PathRule,
-    PermissionConfig,
-    PermissionDecision,
-    PermissionMode,
-)
-
-# context.py — Context budget & tiered loading
-from agent_nexus.models.context import (
-    ContextBudget,
-    ContextBudgetLogEntry,
-    ContextLevel,
-    TokenUsage,
+# evolution.py — Self-Evolution Engine
+from agent_nexus.models.evolution import (
+    EvolutionContext,
+    EvolutionMetrics,
+    EvolutionType,
+    SkillLineage,
+    SkillOrigin,
+    SkillRecord,
 )
 
 # hooks.py — Lifecycle hooks
@@ -105,11 +77,39 @@ from agent_nexus.models.hooks import (
     HookType,
 )
 
-# composition.py — Shared composition data models
-from agent_nexus.models.composition import (
-    Composition,
-    CompositionError,
-    CompositionTask,
+# ipc.py — Inter-process communication
+from agent_nexus.models.ipc import (
+    AgentToPlatform,
+    AgentToPlatformType,
+    IPCMessage,
+    MessageDirection,
+    PlatformToAgent,
+    PlatformToAgentType,
+)
+
+# permission.py — Permission system
+from agent_nexus.models.permission import (
+    PathAccess,
+    PathRule,
+    PermissionConfig,
+    PermissionDecision,
+    PermissionMode,
+)
+
+# runtime.py — Python Runtime
+from agent_nexus.models.runtime import (
+    ExecutionResult,
+    Function,
+    RuntimeType,
+    SecurityViolation,
+    Variable,
+)
+
+# task.py — Task graph
+from agent_nexus.models.task import (
+    TaskGraphSnapshot,
+    TaskItem,
+    TaskState,
 )
 
 __all__ = [

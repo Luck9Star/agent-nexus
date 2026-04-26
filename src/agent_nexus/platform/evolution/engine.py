@@ -37,30 +37,30 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.analyzer import (
     AnalysisResult,
     EvolutionSuggestion,
     ExecutionAnalyzer,
 )
+from agent_nexus.platform.evolution.compaction import (
+    AgentContext,
+    CompactionGuard,
+)
 from agent_nexus.platform.evolution.evolver import (
-    EvolveResult,
     EvolutionTrigger,
+    EvolveResult,
     SkillEvolver,
 )
 from agent_nexus.platform.evolution.health import (
     HealthChecker,
     HealthReport,
 )
-from agent_nexus.platform.evolution.compaction import (
-    AgentContext,
-    CompactionGuard,
-)
 from agent_nexus.platform.evolution.promotion import (
     AgentPromoter,
     PromotionCandidate,
     PromotionResult,
 )
+from agent_nexus.platform.evolution.store import EvolutionStore
 
 if TYPE_CHECKING:
     from agent_nexus.models.evolution import EvolutionContext

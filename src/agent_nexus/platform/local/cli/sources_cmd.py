@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import typer
 
 from agent_nexus.models.distribution import SourceEntry
@@ -31,7 +29,7 @@ def sources_list() -> None:
 def sources_add(
     name: str = typer.Option(..., "--name", help="Source name"),
     url: str = typer.Option(..., "--url", help="Source git URL"),
-    source_type: Optional[str] = typer.Option(
+    source_type: str | None = typer.Option(
         None, "--type", help="Source type (default: git)"
     ),
 ) -> None:

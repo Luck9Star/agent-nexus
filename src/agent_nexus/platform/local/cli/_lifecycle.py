@@ -11,7 +11,6 @@ import logging
 import os
 import signal
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -29,10 +28,10 @@ logger = logging.getLogger(__name__)
 
 def install_agent(
     name: str = typer.Argument(help="Agent name to install"),
-    version: Optional[str] = typer.Option(
+    version: str | None = typer.Option(
         None, "--version", "-v", help="Specific version"
     ),
-    source: Optional[str] = typer.Option(
+    source: str | None = typer.Option(
         None, "--source", "-s", help="Git URL (direct install)"
     ),
     local: bool = typer.Option(
@@ -49,7 +48,7 @@ def uninstall(name: str = typer.Argument(help="Agent name to uninstall")) -> Non
 
 
 def update(
-    name: Optional[str] = typer.Argument(None, help="Agent name to update"),
+    name: str | None = typer.Argument(None, help="Agent name to update"),
     all_agents: bool = typer.Option(
         False, "--all", help="Update all installed agents"
     ),

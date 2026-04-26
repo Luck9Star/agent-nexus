@@ -16,7 +16,7 @@ import logging
 import os
 import signal
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -93,8 +93,8 @@ class AgentHandle:
     start_env: dict[str, str] = field(default_factory=dict)
 
     # Health metadata
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    last_heartbeat: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_heartbeat: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     # Background tasks
     drain_task: asyncio.Task | None = None
@@ -337,7 +337,7 @@ class ProcessManager:
                         self._agents.pop(name, None)
                 logger.info("Agent '%s' exited cleanly after IPC close", name)
                 return
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
             # Stage 2: SIGTERM.
@@ -357,7 +357,7 @@ class ProcessManager:
                         self._agents.pop(name, None)
                 logger.info("Agent '%s' terminated after SIGTERM", name)
                 return
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
             # Stage 3: SIGKILL.
@@ -487,7 +487,7 @@ class ProcessManager:
             # while the lock was released during IPC.
             h = self._agents.get(name)
             if h is handle:
-                handle.last_heartbeat = datetime.now(timezone.utc)
+                handle.last_heartbeat = datetime.now(UTC)
         return True
 
     # ------------------------------------------------------------------

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import typer
 
+
 def _check_path_exists(path: Path) -> list[str]:
     """Verify the path exists and is a directory."""
     errors: list[str] = []

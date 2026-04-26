@@ -12,14 +12,13 @@ Produces TaskItem list compatible with TaskGraph.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import toml
 
 from agent_nexus.models.task import TaskItem, TaskState
-
 
 # ---------------------------------------------------------------------------
 # DSL data types (immutable)
@@ -78,7 +77,7 @@ class DSLTask:
 
     def to_task_item(self) -> TaskItem:
         """Convert to TaskItem for TaskGraph.add_task()."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return TaskItem(
             id=self.id,
             description=self.description,

@@ -38,8 +38,8 @@ from agent_nexus.platform.gateway.tool_adapter import (
     remove_all_locks,
     remove_lock,
 )
-from agent_nexus.platform.orchestration.process_manager import ProcessManager
 from agent_nexus.platform.orchestration.ipc import IPCError
+from agent_nexus.platform.orchestration.process_manager import ProcessManager
 from agent_nexus.platform.utils import IPC_FATAL_ERROR_TYPES
 
 if TYPE_CHECKING:
@@ -424,7 +424,7 @@ class MCPGateway:
 
             try:
                 result = await adapter.execute(info.handle, kwargs)
-            except (OSError, ConnectionError, asyncio.TimeoutError, IPCError) as exc:
+            except (TimeoutError, OSError, ConnectionError, IPCError) as exc:
                 # Transport-level failure: process died between is_alive
                 # check and IPC send.  adapter.execute() handles IPCError
                 # internally — reaching here means a low-level OS failure.

@@ -47,7 +47,7 @@ class SourceEntry(FrozenModel):
     branch: str = "main"
 
     @model_validator(mode="after")
-    def _validate_git_url(self) -> "SourceEntry":
+    def _validate_git_url(self) -> SourceEntry:
         """Git-type sources must have a non-empty URL."""
         if self.type == "git" and not self.url.strip():
             raise ValueError(
@@ -137,7 +137,7 @@ class IndexEntry(FrozenModel):
     )
 
     @model_validator(mode="after")
-    def _reject_path_traversal(self) -> "IndexEntry":
+    def _reject_path_traversal(self) -> IndexEntry:
         """Reject path traversal sequences in the path field.
 
         Empty string is allowed (means 'use default layout'), but any

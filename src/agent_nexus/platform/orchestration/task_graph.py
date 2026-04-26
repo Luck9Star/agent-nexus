@@ -31,16 +31,19 @@ import json
 import logging
 import sqlite3
 from collections import deque
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 
 from agent_nexus.models.task import TaskGraphSnapshot, TaskItem, TaskState
 from agent_nexus.platform.utils import (
     detect_cycles_dfs,
-    now_iso as _now_iso,
     sqlite_connection,
+)
+from agent_nexus.platform.utils import (
+    now_iso as _now_iso,
 )
 
 logger = logging.getLogger(__name__)

@@ -9,7 +9,7 @@ Defines:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -47,7 +47,7 @@ class WorkflowContext:
     phase_results: dict[WorkflowPhase, Any] = field(default_factory=dict)
     current_phase: WorkflowPhase | None = None
     task_graph: TaskGraph | None = None
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def close(self) -> None:
         """Release the TaskGraph reference for GC.

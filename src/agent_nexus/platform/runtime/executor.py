@@ -99,7 +99,9 @@ class IPythonExecutor:
             if self._shell is not None:
                 return self._shell
 
-            from IPython.core.interactiveshell import InteractiveShell  # pyright: ignore[reportMissingImports]
+            from IPython.core.interactiveshell import (
+                InteractiveShell,  # pyright: ignore[reportMissingImports]
+            )
             from traitlets.config import Config  # pyright: ignore[reportMissingImports]
 
             config = Config()
@@ -265,7 +267,7 @@ class IPythonExecutor:
                     asyncio.to_thread(self._exec_done.wait, 5.0),
                     timeout=6.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 thread_done = False
             if not thread_done:
                 return ExecutionResult(
@@ -332,7 +334,7 @@ class IPythonExecutor:
                 variables_created=vars_created,
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # NOTE: The underlying thread (from asyncio.to_thread) continues
             # running after this timeout — Python cannot forcibly kill threads.
             # Only the _timed_out flag prevents new executions on this shell,

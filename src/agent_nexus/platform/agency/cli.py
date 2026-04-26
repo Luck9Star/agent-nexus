@@ -9,10 +9,10 @@ from pathlib import Path
 import click
 
 from .importer import AgencyImporter
+from .planner import DynamicCompositePlanner, SubtaskDef
 from .qa_gate import QAGate, QAGateInput
 from .registry import ExpertRegistry
 from .selector import SelectionRequest, SpecialistSelector
-from .planner import DynamicCompositePlanner, SubtaskDef
 
 _SCHEMA_PATH = Path(__file__).resolve().parents[4] / "schemas" / "expert-profile.schema.json"
 

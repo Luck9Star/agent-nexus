@@ -9,7 +9,6 @@ normalization (NFKC) as a pre-processing step. See review finding F2.
 import re
 from typing import Any
 
-
 # Pattern categories and their severity levels
 _HIGH_SEVERITY_PATTERNS: list[tuple[str, str]] = [
     (r"ignore\s+previous\s+instructions", "prompt injection: ignore previous instructions"),

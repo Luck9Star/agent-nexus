@@ -14,10 +14,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import toml
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import toml
 
 from agent_nexus.models.distribution import Lockfile, LockfileEntry
 from agent_nexus.platform.config.loader import ConfigLoader
@@ -158,7 +159,7 @@ class AgentSupervisor:
     async def start_agent(
         self,
         agent_name: str,
-        lockfile: "Lockfile | None" = None,
+        lockfile: Lockfile | None = None,
     ) -> bool:
         """Start a single agent by name.
 

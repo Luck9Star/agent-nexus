@@ -96,7 +96,7 @@ class HookExecution(FrozenModel):
     executed_at: datetime = Field(default_factory=_utc_now)
 
     @model_validator(mode='after')
-    def _validate_passed_blocked(self) -> 'HookExecution':
+    def _validate_passed_blocked(self) -> HookExecution:
         """A hook that passed cannot also be blocking."""
         if self.passed and self.blocked:
             raise ValueError("passed and blocked cannot both be True")
