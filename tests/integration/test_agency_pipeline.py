@@ -76,8 +76,8 @@ def populated_registry(importer_profiles):
 class TestImporterOutput:
     """Importer dry_run produces valid profile packages."""
 
-    def test_importer_produces_12_profiles(self, importer_profiles):
-        assert len(importer_profiles) == 12
+    def test_importer_produces_16_profiles(self, importer_profiles):
+        assert len(importer_profiles) == 16
 
     def test_each_profile_has_required_keys(self, importer_profiles):
         required = {"id", "expert_profile", "normalized_prompt", "source_md", "output_contract"}
@@ -335,7 +335,7 @@ class TestFullPipeline:
         """Chain: importer → profile_loader → selector → planner → integrator → qa_gate."""
 
         # 1. Importer already produced profiles (fixture)
-        assert len(importer_profiles) == 12
+        assert len(importer_profiles) == 16
 
         # 2. Profile loader produces non-empty prompts
         for pkg in importer_profiles:

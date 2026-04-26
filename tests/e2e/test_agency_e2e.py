@@ -509,7 +509,7 @@ class TestImportAllFileOutput:
             output_path = Path(tmpdir)
             json_files = sorted(output_path.glob("*.json"))
             json_ids = [f.stem for f in json_files]
-            assert len(json_files) == 12, f"Expected 12 JSON files, got {len(json_files)}: {json_ids}"
+            assert len(json_files) == 16, f"Expected 16 JSON files, got {len(json_files)}: {json_ids}"
 
     def test_normalized_md_files_written(self):
         """normalized/<id>.md files exist for each agent."""
@@ -524,7 +524,7 @@ class TestImportAllFileOutput:
             norm_dir = Path(tmpdir) / "normalized"
             assert norm_dir.is_dir(), "normalized/ directory not created"
             md_files = sorted(norm_dir.glob("*.md"))
-            assert len(md_files) == 12, f"Expected 12 .md files, got {len(md_files)}"
+            assert len(md_files) == 16, f"Expected 16 .md files, got {len(md_files)}"
 
     def test_source_lock_yaml_exists_and_valid(self):
         """source.lock.yaml exists and is valid YAML with correct structure."""
@@ -551,10 +551,10 @@ class TestImportAllFileOutput:
             assert "source" in lock_data
             assert "agents" in lock_data
             assert isinstance(lock_data["agents"], dict)
-            assert len(lock_data["agents"]) == 12
+            assert len(lock_data["agents"]) == 16
 
     def test_index_yaml_exists_and_valid(self):
-        """index.yaml exists and is valid YAML with agents list containing all 12 IDs."""
+        """index.yaml exists and is valid YAML with agents list containing all 16 IDs."""
         import yaml
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -575,7 +575,7 @@ class TestImportAllFileOutput:
             assert index_data["version"] == 1
             assert "agents" in index_data
             assert isinstance(index_data["agents"], list)
-            assert len(index_data["agents"]) == 12
+            assert len(index_data["agents"]) == 16
             agent_ids = [a["id"] for a in index_data["agents"]]
             # Verify all IDs start with "agency."
             for aid in agent_ids:
@@ -718,7 +718,7 @@ class TestAllowlistValidation:
         assert isinstance(data, dict)
         assert "source" in data
         assert "agents" in data
-        assert len(data["agents"]) == 12
+        assert len(data["agents"]) == 16
 
 
 # ---------------------------------------------------------------------------

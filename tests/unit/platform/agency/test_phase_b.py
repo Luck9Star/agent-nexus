@@ -67,7 +67,7 @@ def test_allowlist_load():
     assert data["source"]["repo"].startswith("https://")
 
     assert "agents" in data
-    assert len(data["agents"]) == 12
+    assert len(data["agents"]) == 16
 
 
 # ===================================================================
@@ -250,7 +250,7 @@ def test_importer_dry_run():
 
         profiles = importer.dry_run()
 
-        assert len(profiles) == 12
+        assert len(profiles) == 16
 
         # Verify each profile has required keys
         for i, pkg in enumerate(profiles):

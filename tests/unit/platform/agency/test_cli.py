@@ -32,7 +32,7 @@ class TestImportExpertsCommand:
                 ],
             )
             assert result.exit_code == 0, f"CLI error: {result.output}"
-            assert "12" in result.output  # Must show exactly 12 profiles loaded
+            assert "16" in result.output  # Must show exactly 16 profiles loaded
 
     def test_import_experts_writes_files(self) -> None:
         runner = CliRunner()
@@ -146,7 +146,7 @@ class TestListExpertsCommand:
             ],
         )
         assert result.exit_code == 0, f"CLI error: {result.output}"
-        assert "12" in result.output or "experts" in result.output.lower()
+        assert "16" in result.output or "experts" in result.output.lower()
         # Should show expert IDs
         assert "agency." in result.output
 

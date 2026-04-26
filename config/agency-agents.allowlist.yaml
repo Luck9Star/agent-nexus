@@ -15,8 +15,9 @@ agents:
       - tradeoff_analysis
     output_contract: architecture_plan
     tools:
-      allowed: [file_read]
-      denied: [bash, file_write, network]
+      # network: dependency checking
+      allowed: [file_read, network]
+      denied: [bash, file_write]
 
   - source_path: engineering/engineering-backend-architect.md
     id: agency.backend-architect
@@ -49,6 +50,40 @@ agents:
       - maintainability_review
     output_contract: review_report
     tools:
+      # network: lint APIs, security databases
+      allowed: [file_read, network]
+      denied: [bash, file_write]
+
+  - source_path: engineering/engineering-devops-automator.md
+    id: agency.devops-automator
+    capabilities:
+      - ci_cd_pipeline
+      - deployment_automation
+      - infrastructure_management
+    output_contract: automation_plan
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
+
+  - source_path: engineering/engineering-frontend-developer.md
+    id: agency.frontend-developer
+    capabilities:
+      - frontend_development
+      - ui_implementation
+      - web_performance
+    output_contract: frontend_plan
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
+
+  - source_path: engineering/engineering-git-workflow-master.md
+    id: agency.git-workflow-master
+    capabilities:
+      - git_operations
+      - branch_management
+      - merge_strategies
+    output_contract: workflow_plan
+    tools:
       allowed: [file_read]
       denied: [bash, file_write, network]
 
@@ -72,8 +107,9 @@ agents:
       - observability
     output_contract: reliability_report
     tools:
-      allowed: [file_read]
-      denied: [bash, file_write, network]
+      # network: monitoring/alerting APIs
+      allowed: [file_read, network]
+      denied: [bash, file_write]
 
   - source_path: testing/testing-test-results-analyzer.md
     id: agency.test-results-analyzer
@@ -83,8 +119,9 @@ agents:
       - coverage_assessment
     output_contract: test_analysis_report
     tools:
-      allowed: [file_read]
-      denied: [bash, file_write, network]
+      # network: CI result fetching
+      allowed: [file_read, network]
+      denied: [bash, file_write]
 
   - source_path: engineering/engineering-technical-writer.md
     id: agency.technical-writer
@@ -106,8 +143,9 @@ agents:
       - architecture_mapping
     output_contract: onboarding_guide
     tools:
-      allowed: [file_read]
-      denied: [bash, file_write, network]
+      # network: doc fetching
+      allowed: [file_read, network]
+      denied: [bash, file_write]
 
   - source_path: testing/testing-tool-evaluator.md
     id: agency.tool-evaluator
@@ -121,6 +159,17 @@ agents:
       allowed: [file_read, network]
       denied: [bash, file_write]
 
+  - source_path: specialized/specialized-mcp-builder.md
+    id: agency.mcp-builder
+    capabilities:
+      - mcp_server_construction
+      - tool_integration
+      - protocol_handling
+    output_contract: mcp_server_plan
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
+
   - source_path: specialized/lsp-index-engineer.md
     id: agency.lsp-index-engineer
     capabilities:
@@ -129,8 +178,9 @@ agents:
       - semantic_analysis
     output_contract: index_report
     tools:
-      allowed: [file_read]
-      denied: [bash, file_write, network]
+      # network+file_write: index management
+      allowed: [file_read, network, file_write]
+      denied: [bash]
 
   - source_path: specialized/agents-orchestrator.md
     id: agency.agents-orchestrator

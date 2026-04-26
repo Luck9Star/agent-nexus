@@ -10,7 +10,7 @@ Tests cover:
 7. TaskComposer with task_graph parameter: TaskGraph-backed execution path
 8. Capability inference: keyword-to-capability mapping coverage
 9. All 12 expert types selectable by primary capability
-10. AND-logic failure: impossible capability combinations return empty
+10. Multi-agent composition: set-cover composes team when no single agent covers all caps
 11. Network capability impact: tool permission verification
 12. Edge cases: timeout+task_graph, empty QA, single artifact
 13. ProfileBasedExecutor: real profile-derived artifacts through full pipeline
@@ -976,11 +976,11 @@ class TestAllExpertTypes:
 
 
 @pytest.mark.timeout(30)
-class TestANDLogicFailure:
-    """E2E: AND-logic selector fails when no single expert has all required caps."""
+class TestMultiAgentComposition:
+    """E2E: When no single expert has all required caps, set-cover composes a team."""
 
-    def test_cross_capability_combo_returns_empty(self):
-        """Requiring system_design + code_review (no expert has both) returns empty."""
+    def test_cross_capability_combo_composes_team(self):
+        """Requiring system_design + code_review composes a multi-agent team."""
         registry = _build_registry()
         selector = SpecialistSelector(registry)
 
@@ -992,21 +992,23 @@ class TestANDLogicFailure:
             permissions="plan",
         )
         results = selector.select(req)
-        assert results == [], (
-            f"Expected empty for impossible combo, got {[r.agent_id for r in results]}"
+        assert len(results) >= 2, (
+            f"Expected multi-agent team, got {[r.agent_id for r in results]}"
         )
+        # Verify the team collectively covers both capabilities
+        all_caps: set[str] = set()
+        for r in results:
+            profile = registry.get(r.agent_id)
+            if profile:
+                all_caps.update(profile.get("capabilities", []))
+        assert "system_design" in all_caps, "Team must cover system_design"
+        assert "code_review" in all_caps, "Team must cover code_review"
 
-    def test_task_composer_and_logic_graceful(self):
-        """TaskComposer with a task requiring impossible cap combo returns gracefully."""
+    def test_task_composer_multi_agent_composition(self):
+        """TaskComposer with a task requiring caps from multiple agents composes team."""
         registry = _build_registry()
         composer = TaskComposer(registry=registry)
 
-        # "design review" triggers both "design" (not a keyword) and "review"
-        # "review" -> [code_review, security_review]
-        # Only code-reviewer has both code_review AND security_review -> should work
-        # Instead test with a truly impossible combo by using a task that
-        # we know maps to caps no single agent has
-        # Override _infer_capabilities via a task that triggers "architecture" + "review"
         inp = TaskComposerInput(
             task="architecture review",  # architecture->[system_design, architecture_review], review->[code_review, security_review]
             mode="plan",
@@ -1014,13 +1016,10 @@ class TestANDLogicFailure:
         )
         result = composer.run(inp, expert_executor=_mock_executor)
 
-        # architecture + review = [system_design, architecture_review, code_review, security_review]
-        # No single agent has all 4 -> selector returns empty -> no DAG
         assert isinstance(result, TaskComposerResult)
-        assert len(result.selected_agents) == 0, (
-            f"Expected no agents for impossible AND combo, got {len(result.selected_agents)}"
+        assert len(result.selected_agents) >= 1, (
+            f"Expected agents for multi-agent composition, got {len(result.selected_agents)}"
         )
-        assert result.dag is None
 
 
 # ---------------------------------------------------------------------------
@@ -1230,16 +1229,16 @@ class TestImporterDiskWrite:
 
             # Should have JSON profile files for each agent
             json_files = list(output.glob("agency.*.json"))
-            assert len(json_files) == 12, (
-                f"Expected 12 profile JSON files, got {len(json_files)}"
+            assert len(json_files) == 16, (
+                f"Expected 16 profile JSON files, got {len(json_files)}"
             )
 
             # Should have normalized prompt files
             normalized_dir = output / "normalized"
             assert normalized_dir.is_dir()
             md_files = list(normalized_dir.glob("agency.*.md"))
-            assert len(md_files) == 12, (
-                f"Expected 12 normalized prompt files, got {len(md_files)}"
+            assert len(md_files) == 16, (
+                f"Expected 16 normalized prompt files, got {len(md_files)}"
             )
 
             # Should have source.lock.yaml and index.yaml
