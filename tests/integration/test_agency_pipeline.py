@@ -72,6 +72,7 @@ def populated_registry(importer_profiles):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestImporterOutput:
     """Importer dry_run produces valid profile packages."""
 
@@ -89,6 +90,7 @@ class TestImporterOutput:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestImporterToProfileLoader:
     """importer._build_profile_package() output must cover profile_loader.assemble_prompt() fields."""
 
@@ -126,6 +128,7 @@ class TestImporterToProfileLoader:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestSelectorFromRegistry:
     """Selector picks specialists from importer-populated registry."""
 
@@ -165,6 +168,7 @@ class TestSelectorFromRegistry:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestPlannerFromSelection:
     """Planner generates TOML from selected specialists."""
 
@@ -224,6 +228,7 @@ class TestPlannerFromSelection:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestIntegratorMerge:
     """Integrator merges artifacts from specialists into unified output."""
 
@@ -271,6 +276,7 @@ class TestIntegratorMerge:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestQAGateValidation:
     """QA Gate validates the integrated output."""
 
@@ -321,6 +327,7 @@ class TestQAGateValidation:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestFullPipeline:
     """End-to-end pipeline using real importer output, no manual fixtures."""
 

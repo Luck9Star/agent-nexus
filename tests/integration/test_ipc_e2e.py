@@ -77,6 +77,7 @@ async def echo_agent(pm: ProcessManager):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestProcessManagerRealSubprocess:
     """Verify ProcessManager with real subprocess, not mocks."""
 
@@ -206,6 +207,7 @@ class TestProcessManagerRealSubprocess:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestIPCProtocolRealPipes:
     """Verify IPC send/receive with real subprocess pipes."""
 
@@ -320,6 +322,7 @@ class TestIPCProtocolRealPipes:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestHeartbeatReal:
     """Verify heartbeat with real subprocess I/O."""
 
@@ -375,6 +378,7 @@ class TestHeartbeatReal:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestIPCErrorPathsReal:
     """Verify IPC error handling with real subprocess scenarios."""
 
@@ -428,6 +432,7 @@ class TestIPCErrorPathsReal:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestTaskGraphProcessManagerIntegration:
     """Verify TaskGraph-driven task dispatch through real IPC."""
 

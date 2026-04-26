@@ -110,10 +110,15 @@ def load_dag_into_graph(
             continue
         # Strip blocked_by refs to non-specialist tasks (they're handled
         # externally by Integrator / QAGate outside the dispatcher).
-        dag_task.blocked_by = [
-            dep for dep in dag_task.blocked_by if dep in specialist_ids
-        ]
-        item = dag_task_to_task_item(dag_task, task_description)
+        # Filter without mutating the shared DAGTask dataclass.
+        filtered_deps = [dep for dep in dag_task.blocked_by if dep in specialist_ids]
+        item = TaskItem(
+            id=dag_task.id,
+            description=task_description,
+            agent=dag_task.agent,
+            blocked_by=filtered_deps,
+            vars={"output_contract": dag_task.output},
+        )
         items.append(item)
 
     new_items: list[TaskItem] = []

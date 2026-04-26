@@ -36,6 +36,7 @@ def executor():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestTimeoutRealExecution:
     """Verify timeout handling with actual CPU-bound and I/O-bound code."""
 
@@ -87,6 +88,7 @@ class TestTimeoutRealExecution:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestConcurrentExecutionReal:
     """Verify concurrent execution with real code."""
 
@@ -147,6 +149,7 @@ class TestConcurrentExecutionReal:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestCallableInjectionReal:
     """Verify callable injection with real execution."""
 
@@ -199,6 +202,7 @@ class TestCallableInjectionReal:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestSecurityBypassRealExecution:
     """Attempt real security bypasses -- all must be blocked BEFORE execution."""
 
@@ -317,6 +321,7 @@ class TestSecurityBypassRealExecution:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(30)
 class TestLifecycleEdgeCases:
     """Verify reset/close edge cases with real execution."""
 

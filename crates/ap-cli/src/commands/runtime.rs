@@ -173,10 +173,12 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
 
         // Assign a port for SSE transport (skip ports already in use).
         while used_ports.contains(&next_port) {
-            next_port += 1;
+            next_port = next_port.checked_add(1)
+                .ok_or_else(|| anyhow::anyhow!("No available ports in u16 range"))?;
         }
         let agent_port = next_port;
-        next_port += 1;
+        next_port = next_port.checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("No available ports in u16 range"))?;
 
         // Redirect stdout/stderr to a log file (readable via `runtime logs`).
         let log_path = install_dir.join("agent.log");

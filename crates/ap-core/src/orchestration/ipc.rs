@@ -162,7 +162,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcStream<R, W> {
         if n == 0 {
             return Err(IpcError::ConnectionClosed);
         }
-        if line.len() > MAX_MESSAGE_SIZE {
+        if line.len() >= MAX_MESSAGE_SIZE {
             return Err(IpcError::Oversized {
                 size: line.len(),
                 max: MAX_MESSAGE_SIZE,
