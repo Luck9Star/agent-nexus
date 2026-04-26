@@ -120,12 +120,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
                     success,
                     task_id,
                 }),
-                AgentToPlatformType::Error => return Err(IpcError::Io(std::io::Error::other(
-                    format!(
-                        "Agent error: {}",
-                        msg.error.as_deref().unwrap_or("unknown")
-                    ),
-                ))),
+                AgentToPlatformType::Error => {
+                    let err_msg = msg.error.as_deref().filter(|s| !s.is_empty());
+                    let content_msg = Some(msg.content.as_str()).filter(|s| !s.is_empty());
+                    let detail = err_msg.or(content_msg).unwrap_or("unknown");
+                    return Err(IpcError::Io(std::io::Error::other(
+                        format!("Agent error: {detail}")
+                    )));
+                }
                 AgentToPlatformType::Progress => {
                     // Progress messages are informational; skip and wait for the final result.
                     tracing::debug!("Skipping progress message, waiting for final result");

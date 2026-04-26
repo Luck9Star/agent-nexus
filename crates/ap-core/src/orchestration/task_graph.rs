@@ -144,23 +144,31 @@ impl TaskGraph {
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn add_task(&self, task: &TaskItem) -> Result<(), TaskGraphError> {
-        // Check for duplicate
+        // Check for duplicate (outside tx — read-only, harmless if stale)
         if self.get_task(&task.id)?.is_some() {
             return Err(TaskGraphError::DuplicateTask(task.id.clone()));
         }
-        // Validate blocked_by references exist
+        let blocked_json = serde_json::to_string(&task.blocked_by)
+            .map_err(|e| TaskGraphError::Serialization(e.to_string()))?;
+        // Wrap validation + INSERT + cycle check in a single transaction to
+        // prevent TOCTOU: a concurrent insertion/deletion between the
+        // blocked_by validation and the INSERT could invalidate references.
+        let tx = self.conn.unchecked_transaction()?;
+        // Validate blocked_by references exist (inside tx for consistency)
         for dep_id in &task.blocked_by {
-            if self.get_task(dep_id)?.is_none() {
+            let exists: bool = tx
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM tasks WHERE task_id = ?1",
+                    rusqlite::params![dep_id],
+                    |row| row.get(0),
+                )?;
+            if !exists {
+                tx.rollback()?;
                 return Err(TaskGraphError::NotFound(format!(
                     "blocked_by dependency '{dep_id}' not found"
                 )));
             }
         }
-        let blocked_json = serde_json::to_string(&task.blocked_by)
-            .map_err(|e| TaskGraphError::Serialization(e.to_string()))?;
-        // Wrap INSERT + cycle check in an explicit transaction so that a crash
-        // between INSERT and DELETE never leaves a phantom row.
-        let tx = self.conn.unchecked_transaction()?;
         tx.execute(
             "INSERT INTO tasks
              (task_id, agent_name, description, state, blocked_by, vars, result, created_at, updated_at)

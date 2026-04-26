@@ -30,7 +30,7 @@ import asyncio
 import json
 import logging
 import sqlite3
-from collections import deque
+
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
@@ -777,33 +777,38 @@ class TaskGraph:
     ) -> bool:
         """Check if adding dependencies would create a cycle.
 
-        Walk from each blocked_by_id back through their dependencies.
-        If we can reach task_id, there's a cycle.
+        Uses a recursive CTE starting from each blocked_by_id and walking
+        backwards through the dependency graph.  Only traverses the subgraph
+        reachable from the starting nodes — avoids loading the entire table.
+        A depth limit prevents infinite recursion on corrupt data with
+        pre-existing cycles.
 
-        Preloads all dependencies in a single query so the BFS loop
-        does not issue per-node SQL.
+        Returns True if any path from a blocked_by_id reaches task_id.
         """
-        dep_rows = conn.execute(
-            "SELECT task_id, blocked_by_id FROM task_dependencies"
-        ).fetchall()
-        dep_map: dict[str, list[str]] = {}
-        for tid, bid in dep_rows:
-            dep_map.setdefault(tid, []).append(bid)
+        if not blocked_by_ids:
+            return False
 
-        visited: set[str] = set()
+        # Self-loop: task depends on itself.
+        if task_id in blocked_by_ids:
+            return True
 
-        # BFS from blocked_by_ids backwards through their dependencies
-        queue = deque(blocked_by_ids)
-        while queue:
-            node = queue.popleft()
-            if node == task_id:
-                return True
-            if node in visited:
-                continue
-            visited.add(node)
+        # Build parameterised placeholders for the starting set.
+        placeholders = ",".join("?" for _ in blocked_by_ids)
+        params: list[str] = list(blocked_by_ids) + [task_id]
 
-            for dep_id in dep_map.get(node, []):
-                if dep_id not in visited:
-                    queue.append(dep_id)
-
-        return False
+        row = conn.execute(
+            f"""
+            WITH RECURSIVE reach(node, depth) AS (
+                SELECT blocked_by_id, 1 FROM task_dependencies
+                WHERE task_id IN ({placeholders})
+                UNION ALL
+                SELECT td.blocked_by_id, r.depth + 1
+                FROM task_dependencies td
+                JOIN reach r ON td.task_id = r.node
+                WHERE r.depth < 256
+            )
+            SELECT COUNT(*) > 0 FROM reach WHERE node = ?
+            """,
+            params,
+        ).fetchone()
+        return bool(row and row[0])

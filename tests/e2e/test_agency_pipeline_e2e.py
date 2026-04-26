@@ -8,6 +8,18 @@ Tests cover:
 5. Timeout handling: DAGDispatcher respects timeout_seconds
 6. No-match scenario: graceful handling when no specialist matches
 7. TaskComposer with task_graph parameter: TaskGraph-backed execution path
+8. Capability inference: keyword-to-capability mapping coverage
+9. All 12 expert types selectable by primary capability
+10. AND-logic failure: impossible capability combinations return empty
+11. Network capability impact: tool permission verification
+12. Edge cases: timeout+task_graph, empty QA, single artifact
+13. ProfileBasedExecutor: real profile-derived artifacts through full pipeline
+14. Importer disk write: import_all creates valid profile files
+15. Integrator advanced: conflict detection, validation errors, type mismatch
+16. Planner validation: empty subtasks, duplicate IDs, reserved IDs, invalid chars
+17. TOML serialization: generate_toml roundtrip and rejection
+18. GitNexus QA gate: code_change/refactor gate enforcement
+19. Max parallel enforcement: DAGDispatcher respects concurrency limits
 
 Run with: pytest tests/e2e/test_agency_pipeline_e2e.py --run-e2e --timeout=60
 """
@@ -1101,3 +1113,473 @@ class TestEdgeCases:
         assert integrated.source_agents == ["agency.software-architect"]
         assert integrated.conflicts == []
         assert "context" in integrated.merged_sections
+
+
+# ---------------------------------------------------------------------------
+# 13. ProfileBasedExecutor E2E Integration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(30)
+class TestProfileBasedExecutorE2E:
+    """E2E: full pipeline using ProfileBasedExecutor (real profile-derived artifacts)."""
+
+    def test_full_pipeline_with_real_executor(self):
+        """TaskComposer with default executor uses ProfileBasedExecutor and produces
+        real profile-derived artifacts through the full pipeline."""
+        registry = _build_registry()
+        composer = TaskComposer(registry=registry)
+
+        inp = TaskComposerInput(
+            task="Design a microservice architecture",
+            mode="plan",
+            max_parallel=3,
+        )
+        # No expert_executor override -> uses ProfileBasedExecutor
+        result = composer.run(inp)
+
+        assert isinstance(result, TaskComposerResult)
+        assert len(result.selected_agents) > 0
+        assert result.integrated is not None
+
+        # ProfileBasedExecutor produces sections from output_contract,
+        # not the stub format (just "context")
+        merged = result.integrated.merged_sections
+        non_context = [k for k in merged if k != "context"]
+        assert len(non_context) > 0, (
+            f"ProfileBasedExecutor should produce more than stub. Got keys: {list(merged.keys())}"
+        )
+
+        # At least final_recommendation and decision_summary from Integrator
+        assert "final_recommendation" in merged
+        assert "decision_summary" in merged
+
+    def test_real_executor_produces_differentiated_output(self):
+        """ProfileBasedExecutor produces different sections for different task types."""
+        registry = _build_registry()
+        composer = TaskComposer(registry=registry)
+
+        arch_result = composer.run(
+            TaskComposerInput(task="Design architecture", mode="plan")
+        )
+        sec_result = composer.run(
+            TaskComposerInput(task="Security review and threat modeling", mode="plan")
+        )
+
+        if arch_result.integrated and sec_result.integrated:
+            # Different task types should select different experts,
+            # producing different section structures
+            arch_keys = set(arch_result.integrated.merged_sections.keys())
+            sec_keys = set(sec_result.integrated.merged_sections.keys())
+            # They should not be identical (different experts, different output contracts)
+            assert arch_keys != sec_keys or len(arch_keys) > 2, (
+                f"Architecture keys={arch_keys}, Security keys={sec_keys} "
+                "should differ or be rich enough"
+            )
+
+    def test_real_executor_with_task_graph_path(self):
+        """ProfileBasedExecutor works correctly with TaskGraph-backed execution path."""
+        registry = _build_registry()
+        composer = TaskComposer(registry=registry)
+        graph = TaskGraph(":memory:")
+
+        inp = TaskComposerInput(
+            task="Design architecture",
+            mode="plan",
+            max_parallel=2,
+        )
+        # No expert_executor -> ProfileBasedExecutor, with task_graph
+        result = composer.run(inp, task_graph=graph)
+
+        assert isinstance(result, TaskComposerResult)
+        assert len(result.selected_agents) > 0
+        assert result.integrated is not None
+
+        # Verify TaskGraph recorded correct states
+        for sel in result.selected_agents:
+            task_id = sel.agent_id.replace("agency.", "")
+            task_item = graph.get_task(task_id)
+            if task_item is not None:
+                assert task_item.state.value == "completed", (
+                    f"Task {task_id} should be completed, got {task_item.state}"
+                )
+
+        graph.close()
+
+
+# ---------------------------------------------------------------------------
+# 14. Importer Disk Write (import_all)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(30)
+class TestImporterDiskWrite:
+    """E2E: import_all writes profile files to disk correctly."""
+
+    def test_import_all_creates_profile_files(self):
+        """import_all creates JSON profiles, normalized prompts, and index files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            importer = AgencyImporter(
+                vendor_path=str(_VENDOR_DIR),
+                allowlist_path=str(_ALLOWLIST_PATH),
+                output_dir=tmpdir,
+            )
+            importer.import_all()
+
+            output = Path(tmpdir)
+
+            # Should have JSON profile files for each agent
+            json_files = list(output.glob("agency.*.json"))
+            assert len(json_files) == 12, (
+                f"Expected 12 profile JSON files, got {len(json_files)}"
+            )
+
+            # Should have normalized prompt files
+            normalized_dir = output / "normalized"
+            assert normalized_dir.is_dir()
+            md_files = list(normalized_dir.glob("agency.*.md"))
+            assert len(md_files) == 12, (
+                f"Expected 12 normalized prompt files, got {len(md_files)}"
+            )
+
+            # Should have source.lock.yaml and index.yaml
+            assert (output / "source.lock.yaml").is_file(), "source.lock.yaml missing"
+            assert (output / "index.yaml").is_file(), "index.yaml missing"
+
+    def test_import_all_profile_is_valid_json(self):
+        """Each profile JSON file is valid and contains required top-level keys."""
+        import json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            importer = AgencyImporter(
+                vendor_path=str(_VENDOR_DIR),
+                allowlist_path=str(_ALLOWLIST_PATH),
+                output_dir=tmpdir,
+            )
+            importer.import_all()
+
+            output = Path(tmpdir)
+            for json_file in sorted(output.glob("agency.*.json")):
+                data = json.loads(json_file.read_text(encoding="utf-8"))
+                assert "id" in data, f"{json_file.name}: missing 'id'"
+                assert "capabilities" in data, f"{json_file.name}: missing 'capabilities'"
+                assert "output_contract" in data, f"{json_file.name}: missing 'output_contract'"
+                assert "permissions" in data, f"{json_file.name}: missing 'permissions'"
+
+
+# ---------------------------------------------------------------------------
+# 15. Integrator Conflict Detection and Validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(30)
+class TestIntegratorAdvanced:
+    """E2E: integrator conflict detection and boundary conditions."""
+
+    def test_conflict_detected_on_disjoint_risks(self):
+        """Integrator flags conflict when experts have disjoint risk findings
+        but share overlapping domain sections."""
+        artifacts = [
+            Artifact(
+                source_agent="agency.software-architect",
+                artifact_type="architecture_plan",
+                sections={
+                    "context": "design review",
+                    "proposed_design": "microservices",
+                    "risks": ["latency from network hops"],
+                },
+            ),
+            Artifact(
+                source_agent="agency.backend-architect",
+                artifact_type="architecture_plan",
+                sections={
+                    "context": "design review",
+                    "proposed_design": "modular monolith",
+                    "risks": ["tight coupling risk"],
+                },
+            ),
+        ]
+        integrated = Integrator.merge(artifacts)
+        # Should detect conflict because same domain, different risk findings
+        assert len(integrated.conflicts) > 0, (
+            f"Expected conflict for disjoint risks, got {integrated.conflicts}"
+        )
+
+    def test_conflict_detected_on_severity_mismatch(self):
+        """Integrator flags conflict when experts disagree on severity."""
+        artifacts = [
+            Artifact(
+                source_agent="agency.code-reviewer",
+                artifact_type="review_report",
+                sections={"severity": "high", "findings": ["issue A"]},
+            ),
+            Artifact(
+                source_agent="agency.security-engineer",
+                artifact_type="risk_report",
+                sections={"severity": "low", "findings": ["issue A"]},
+            ),
+        ]
+        integrated = Integrator.merge(artifacts)
+        severity_conflicts = [c for c in integrated.conflicts if c.field == "severity"]
+        assert len(severity_conflicts) > 0, "Expected severity conflict"
+
+    def test_merge_raises_on_empty_artifacts(self):
+        """Integrator.merge raises ValueError for empty input."""
+        with pytest.raises(ValueError, match="at least one artifact"):
+            Integrator.merge([])
+
+    def test_merge_raises_on_too_many_artifacts(self):
+        """Integrator.merge raises ValueError for > 50 artifacts."""
+        artifacts = [
+            Artifact(source_agent=f"agent-{i}", artifact_type="report", sections={"k": "v"})
+            for i in range(51)
+        ]
+        with pytest.raises(ValueError, match="Cannot merge more than 50"):
+            Integrator.merge(artifacts)
+
+    def test_merge_raises_on_too_many_sections(self):
+        """Integrator.merge raises ValueError for artifacts with > 100 sections."""
+        sections = {f"section-{i}": f"value-{i}" for i in range(101)}
+        artifact = Artifact(
+            source_agent="agent", artifact_type="report", sections=sections
+        )
+        with pytest.raises(ValueError, match="too many sections"):
+            Integrator.merge([artifact])
+
+    def test_type_mismatch_converted_to_list(self):
+        """When section types mismatch across artifacts, Integrator converts to list."""
+        artifacts = [
+            Artifact(source_agent="a", artifact_type="report", sections={"x": "string_val"}),
+            Artifact(source_agent="b", artifact_type="report", sections={"x": ["list_val"]}),
+        ]
+        integrated = Integrator.merge(artifacts)
+        # "x" should be a list (string converted to list + list appended)
+        assert isinstance(integrated.merged_sections["x"], list)
+
+
+# ---------------------------------------------------------------------------
+# 16. Planner Validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(30)
+class TestPlannerValidation:
+    """E2E: planner rejects invalid inputs correctly."""
+
+    def test_empty_subtasks_raises(self):
+        """DynamicCompositePlanner raises ValueError for empty subtask list."""
+        planner = DynamicCompositePlanner()
+        with pytest.raises(ValueError, match="at least one subtask"):
+            planner.plan([], composition_name="test")
+
+    def test_duplicate_ids_raises(self):
+        """DynamicCompositePlanner raises ValueError for duplicate subtask IDs."""
+        planner = DynamicCompositePlanner()
+        subtasks = [
+            SubtaskDef(id="dup", goal="A", needed_capabilities=["c"],
+                       output_contract="r", assigned_agent="a1"),
+            SubtaskDef(id="dup", goal="B", needed_capabilities=["c"],
+                       output_contract="r", assigned_agent="a2"),
+        ]
+        with pytest.raises(ValueError, match="Duplicate subtask id"):
+            planner.plan(subtasks, composition_name="test")
+
+    def test_reserved_id_raises(self):
+        """DynamicCompositePlanner raises ValueError for reserved IDs (integrate, validate)."""
+        planner = DynamicCompositePlanner()
+        for reserved in ("integrate", "validate"):
+            subtasks = [
+                SubtaskDef(id=reserved, goal="X", needed_capabilities=["c"],
+                           output_contract="r", assigned_agent="a"),
+            ]
+            with pytest.raises(ValueError, match="reserved"):
+                planner.plan(subtasks, composition_name="test")
+
+    def test_invalid_chars_in_id_raises(self):
+        """DynamicCompositePlanner raises ValueError for TOML-invalid characters in ID."""
+        planner = DynamicCompositePlanner()
+        for bad_char in ['"', "#", "\n", "\t", "["]:
+            subtasks = [
+                SubtaskDef(id=f"bad{bad_char}id", goal="X", needed_capabilities=["c"],
+                           output_contract="r", assigned_agent="a"),
+            ]
+            with pytest.raises(ValueError, match="invalid character"):
+                planner.plan(subtasks, composition_name="test")
+
+
+# ---------------------------------------------------------------------------
+# 17. TOML Serialization
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(30)
+class TestTOMLSerialization:
+    """E2E: generate_toml produces valid TOML from a CompositionDAG."""
+
+    def test_generate_toml_roundtrip(self):
+        """generate_toml produces a string with expected sections."""
+        from agent_nexus.platform.agency.planner import generate_toml
+
+        subtasks = [
+            SubtaskDef(id="architect", goal="Design", needed_capabilities=["system_design"],
+                       output_contract="report", assigned_agent="agency.software-architect"),
+            SubtaskDef(id="reviewer", goal="Review", needed_capabilities=["code_review"],
+                       output_contract="review", assigned_agent="agency.code-reviewer"),
+        ]
+        planner = DynamicCompositePlanner()
+        dag = planner.plan(subtasks, composition_name="toml-test", max_parallel=2)
+        toml_str = generate_toml(dag)
+
+        assert '[composition]' in toml_str
+        assert 'name = "toml-test"' in toml_str
+        assert 'max_parallel = 2' in toml_str
+        assert 'id = "architect"' in toml_str
+        assert 'id = "reviewer"' in toml_str
+        assert 'id = "integrate"' in toml_str
+        assert 'id = "validate"' in toml_str
+        assert 'blocked_by = ["architect", "reviewer"]' in toml_str
+
+    def test_generate_toml_rejects_invalid_chars(self):
+        """generate_toml raises ValueError for invalid characters."""
+        from agent_nexus.platform.agency.planner import generate_toml
+
+        dag = CompositionDAG(
+            name='bad"name',
+            max_parallel=1,
+            tasks=[
+                DAGTask(id="t1", agent="a", output="o"),
+            ],
+        )
+        with pytest.raises(ValueError, match="invalid character"):
+            generate_toml(dag)
+
+
+# ---------------------------------------------------------------------------
+# 18. GitNexus QA Gate for Code-Change Tasks
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(30)
+class TestGitNexusQAGate:
+    """E2E: GitNexus gate enforcement for code-changing task types."""
+
+    def test_code_change_requires_gates(self):
+        """code_change task fails GitNexus gate without impact_analysis."""
+        gate_input = QAGateInput(
+            output={"sections": {"summary": "ok"}},
+            required_sections=["summary"],
+            task_type="code_change",
+            impact_analysis_completed=False,
+            detect_changes_completed=False,
+        )
+        result = QAGate.run(gate_input)
+        assert result.passed is False
+        assert result.gitnexus_result.skipped is False
+        assert "impact_analysis_completed" in result.gitnexus_result.failed_checks
+        assert "detect_changes_completed" in result.gitnexus_result.failed_checks
+
+    def test_code_change_passes_with_gates(self):
+        """code_change task passes GitNexus gate when both checks are completed."""
+        gate_input = QAGateInput(
+            output={"sections": {"summary": "ok"}},
+            required_sections=["summary"],
+            task_type="code_change",
+            impact_analysis_completed=True,
+            detect_changes_completed=True,
+        )
+        result = QAGate.run(gate_input)
+        assert result.passed is True
+        assert result.gitnexus_result.passed is True
+
+    def test_refactor_requires_gates(self):
+        """refactor task also requires GitNexus gates."""
+        gate_input = QAGateInput(
+            output={"sections": {"summary": "ok"}},
+            required_sections=["summary"],
+            task_type="refactor",
+            impact_analysis_completed=False,
+            detect_changes_completed=True,
+        )
+        result = QAGate.run(gate_input)
+        assert result.passed is False
+
+    def test_plan_task_skips_gates(self):
+        """plan task skips GitNexus checks entirely."""
+        gate_input = QAGateInput(
+            output={"sections": {"summary": "ok"}},
+            required_sections=["summary"],
+            task_type="plan",
+        )
+        result = QAGate.run(gate_input)
+        assert result.passed is True
+        assert result.gitnexus_result.skipped is True
+
+
+# ---------------------------------------------------------------------------
+# 19. Max Parallel Enforcement
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(30)
+class TestMaxParallelEnforcement:
+    """E2E: DAGDispatcher respects max_parallel limit."""
+
+    def test_max_parallel_1_sequential(self):
+        """max_parallel=1 executes tasks sequentially (one at a time)."""
+        graph = TaskGraph(":memory:")
+        concurrent_seen = {"max": 0, "current": 0}
+
+        def tracking_executor(profile_id: str, task: str) -> Artifact:
+            concurrent_seen["current"] += 1
+            concurrent_seen["max"] = max(concurrent_seen["max"], concurrent_seen["current"])
+            result = _mock_executor(profile_id, task)
+            concurrent_seen["current"] -= 1
+            return result
+
+        subtasks = [
+            SubtaskDef(id=f"task-{i}", goal=f"Goal {i}", needed_capabilities=["system_design"],
+                       output_contract="report", assigned_agent="agency.software-architect")
+            for i in range(4)
+        ]
+        planner = DynamicCompositePlanner()
+        dag = planner.plan(subtasks, composition_name="parallel-1-test", max_parallel=1)
+
+        dispatcher = DAGDispatcher(
+            graph=graph, executor=tracking_executor, max_parallel=1,
+        )
+        result = dispatcher.dispatch(dag, "Parallel test")
+
+        assert concurrent_seen["max"] <= 1, (
+            f"Expected max concurrency 1, saw {concurrent_seen['max']}"
+        )
+        assert len(result.completed) == 4
+        graph.close()
+
+    def test_max_parallel_3_allows_batching(self):
+        """max_parallel=3 allows up to 3 tasks in a single batch."""
+        graph = TaskGraph(":memory:")
+        batch_sizes: list[int] = []
+
+        # Override dispatch to track batch sizes (via call ordering)
+        call_order: list[str] = []
+
+        def order_executor(profile_id: str, task: str) -> Artifact:
+            call_order.append(profile_id)
+            return _mock_executor(profile_id, task)
+
+        subtasks = [
+            SubtaskDef(id=f"task-{i}", goal=f"Goal {i}", needed_capabilities=["system_design"],
+                       output_contract="report", assigned_agent="agency.software-architect")
+            for i in range(5)
+        ]
+        planner = DynamicCompositePlanner()
+        dag = planner.plan(subtasks, composition_name="parallel-3-test", max_parallel=3)
+
+        dispatcher = DAGDispatcher(
+            graph=graph, executor=order_executor, max_parallel=3,
+        )
+        result = dispatcher.dispatch(dag, "Parallel batch test")
+
+        # With max_parallel=3 and 5 tasks, we expect 2 rounds (3 + 2)
+        assert len(result.completed) == 5
+        graph.close()

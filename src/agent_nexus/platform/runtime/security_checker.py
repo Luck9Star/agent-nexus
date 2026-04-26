@@ -9,6 +9,7 @@ Reference: cave-agent/src/cave_agent/security/checker.py
 from __future__ import annotations
 
 import ast
+import hashlib
 import logging
 from typing import ClassVar
 
@@ -257,10 +258,14 @@ class SecurityChecker:
 
         result = tuple(violations)
 
+        # Use hash instead of full source as cache key to avoid
+        # O(source_size) memory per cached entry.
+        cache_key = hashlib.sha256(code.encode()).hexdigest()
+
         # Evict oldest entry if cache is full (FIFO eviction).
         if len(self._cache) >= self._cache_max:
             self._cache.pop(next(iter(self._cache)))
-        self._cache[code] = result
+        self._cache[cache_key] = result
         return result
 
     def clear_cache(self) -> None:

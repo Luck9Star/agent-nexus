@@ -813,17 +813,58 @@ impl ProcessManagerHandle {
         // Shutdown without holding the Handle lock (re-acquires internally).
         let _ = self.graceful_shutdown(id, timeout).await;
 
-        // Re-spawn under a brief lock.
+        // Build and spawn the new process OUTSIDE the lock to avoid
+        // holding the MutexGuard across the async kill inside spawn_inner.
+        let env_map = config.env.clone();
+        let mut command = Command::new(&config.cmd);
+        command
+            .args(&config.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if config.isolated {
+            command.env_clear();
+            for key in ["PATH", "HOME", "USER", "LANG", "TERM"] {
+                if let Ok(val) = std::env::var(key) {
+                    command.env(key, val);
+                }
+            }
+        }
+        if !env_map.is_empty() {
+            command.envs(&env_map);
+        }
+
+        let mut child = command.spawn().map_err(|e| HandleError::from(ProcessError::Spawn(e)))?;
+        let stdin = Box::new(
+            child.stdin.take().ok_or_else(|| HandleError::from(ProcessError::NoStdin))?,
+        );
+        let stdout = Box::new(
+            child.stdout.take().ok_or_else(|| HandleError::from(ProcessError::NoStdout))?,
+        );
+
+        // Brief lock: capacity check + HashMap insert only (no async work).
         let mut pm = self.inner.lock().await;
-        let args_vec: Vec<&str> = config.args.iter().map(std::string::String::as_str).collect();
-        let env_opt = if config.env.is_empty() && !config.isolated {
-            None
-        } else {
-            Some(config.env.clone())
-        };
-        pm.spawn_inner(id, &config.cmd, &args_vec, env_opt, config.isolated)
-            .await
-            .map_err(HandleError::from)
+        if pm.processes.len() >= pm.max_concurrent {
+            // Over capacity — kill the child we just spawned.
+            let _ = child.kill().await;
+            return Err(HandleError::from(ProcessError::MaxConcurrent(pm.max_concurrent)));
+        }
+        // Remove any stale entry that reappeared between shutdown and now.
+        if let Some(mut old) = pm.processes.remove(id) {
+            let _ = old.child.start_kill(); // sync, no .await
+        }
+        pm.processes.insert(
+            id.to_string(),
+            ManagedProcess {
+                child,
+                stdin,
+                stdout,
+                spawn_config: config,
+                io_taken: false,
+            },
+        );
+        Ok(())
     }
 
     /// Kill all tracked processes (force).
