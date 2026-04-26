@@ -59,8 +59,20 @@ impl EvolutionStore {
         let manager = SqliteConnectionManager::file(path)
             .with_init(|conn| {
                 conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;")?;
-                conn.execute_batch(schema::SCHEMA_SQL)?;
-                Self::run_migrations(conn)?;
+                // Only run schema creation + migrations on the first connection.
+                // Subsequent connections from the pool inherit the same WAL-mode DB
+                // and tables are already present — skip the overhead.
+                let needs_init: bool = conn
+                    .query_row(
+                        "SELECT COUNT(*) = 0 FROM sqlite_master WHERE type='table' AND name='_meta'",
+                        [],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .unwrap_or(true);
+                if needs_init {
+                    conn.execute_batch(schema::SCHEMA_SQL)?;
+                    Self::run_migrations(conn)?;
+                }
                 Ok(())
             });
         let pool = Pool::builder()

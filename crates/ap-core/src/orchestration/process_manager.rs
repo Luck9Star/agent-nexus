@@ -788,10 +788,35 @@ impl ProcessManagerHandle {
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub async fn restart_agent(&self, id: &str, timeout: Duration) -> Result<(), HandleError> {
-        // Delegate to ProcessManager::restart_agent under a single lock to
-        // prevent TOCTOU between config extraction, shutdown, and respawn.
+        // Extract spawn config under a brief lock, then release the lock
+        // before the potentially slow graceful_shutdown await.  This avoids
+        // head-of-line blocking: other agents can be spawned/stopped while
+        // this agent is shutting down.  The TOCTOU window between config
+        // extraction and respawn is acceptable — worst case a concurrent
+        // stop produces a harmless NotFound error.
+        let config = {
+            let pm = self.inner.lock().await;
+            let proc = pm
+                .processes
+                .get(id)
+                .ok_or_else(|| HandleError::from(ProcessError::NotFound(id.to_string())))?;
+            proc.spawn_config.clone()
+        };
+
+        // Shutdown without holding the Handle lock (re-acquires internally).
+        let _ = self.graceful_shutdown(id, timeout).await;
+
+        // Re-spawn under a brief lock.
         let mut pm = self.inner.lock().await;
-        pm.restart_agent(id, timeout).await.map_err(HandleError::from)
+        let args_vec: Vec<&str> = config.args.iter().map(std::string::String::as_str).collect();
+        let env_opt = if config.env.is_empty() && !config.isolated {
+            None
+        } else {
+            Some(config.env.clone())
+        };
+        pm.spawn_inner(id, &config.cmd, &args_vec, env_opt, config.isolated)
+            .await
+            .map_err(HandleError::from)
     }
 
     /// Kill all tracked processes (force).

@@ -53,17 +53,18 @@ def _dump_yaml(data: object, f: Any, indent: int = 0) -> None:
                         first = False
                     else:
                         prefix_item = f"{prefix}  "
+                    safe_key = _yaml_quote(str(key))
                     if isinstance(value, (dict, list)):
-                        f.write(f"{prefix_item}{key}:\n")
+                        f.write(f"{prefix_item}{safe_key}:\n")
                         _dump_yaml(value, f, indent + 2)
                     elif value is None:
-                        f.write(f"{prefix_item}{key}: null\n")
+                        f.write(f"{prefix_item}{safe_key}: null\n")
                     elif isinstance(value, bool):
-                        f.write(f"{prefix_item}{key}: {'true' if value else 'false'}\n")
+                        f.write(f"{prefix_item}{safe_key}: {'true' if value else 'false'}\n")
                     elif isinstance(value, (int, float)):
-                        f.write(f"{prefix_item}{key}: {value}\n")
+                        f.write(f"{prefix_item}{safe_key}: {value}\n")
                     else:
-                        f.write(f"{prefix_item}{key}: {_yaml_quote(str(value))}\n")
+                        f.write(f"{prefix_item}{safe_key}: {_yaml_quote(str(value))}\n")
             else:
                 f.write(f"{prefix}- {_yaml_quote(str(item))}\n")
 
@@ -89,7 +90,7 @@ def _yaml_quote(s: str) -> str:
         return f'"{escaped}"'
     except ValueError:
         pass
-    if any(c in s for c in (":", "#", "{", "}", "[", "]", ",", "&", "*", "?", "|", "-", "<", ">", "=", "!", "%", "@", "`", "\r", "\t")):
+    if any(c in s for c in (":", "#", "{", "}", "[", "]", ",", "&", "*", "?", "|", "-", "<", ">", "=", "!", "%", "@", "`", "\n", "\r", "\t")):
         return f'"{escaped}"'
     return s
 

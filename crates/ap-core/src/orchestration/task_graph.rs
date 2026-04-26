@@ -290,6 +290,7 @@ impl TaskGraph {
     ///
     /// Valid transitions:
     /// - Pending -> `InProgress`
+    /// - Pending -> Failed (upstream failure blocks pending tasks)
     /// - `InProgress` -> Completed
     /// - `InProgress` -> Failed
     ///
@@ -303,7 +304,7 @@ impl TaskGraph {
 
         let valid = matches!(
             (task.state, new_state),
-            (TaskState::Pending, TaskState::InProgress) |
+            (TaskState::Pending, TaskState::InProgress | TaskState::Failed) |
 (TaskState::InProgress, TaskState::Completed | TaskState::Failed)
         );
 
@@ -497,7 +498,7 @@ impl TaskGraph {
             rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
         })?;
         let blocked_by: Vec<String> = serde_json::from_str(&blocked_json).unwrap_or_else(|e| {
-            debug!("Failed to parse blocked_by JSON for task {}: {}", id, e);
+            warn!("Corrupted blocked_by JSON for task {id}: {e} — defaulting to empty");
             Vec::new()
         });
         let vars: serde_json::Value = serde_json::from_str(&vars_str).unwrap_or_else(|e| {
@@ -737,6 +738,15 @@ mod tests {
         let tg = TaskGraph::new_in_memory().unwrap();
         tg.add_task(&simple_task("t1", "a", &[])).unwrap();
         tg.transition_state("t1", TaskState::InProgress).unwrap();
+        tg.transition_state("t1", TaskState::Failed).unwrap();
+        let got = tg.get_task("t1").unwrap().unwrap();
+        assert_eq!(got.state, TaskState::Failed);
+    }
+
+    #[test]
+    fn transition_pending_to_failed() {
+        let tg = TaskGraph::new_in_memory().unwrap();
+        tg.add_task(&simple_task("t1", "a", &[])).unwrap();
         tg.transition_state("t1", TaskState::Failed).unwrap();
         let got = tg.get_task("t1").unwrap().unwrap();
         assert_eq!(got.state, TaskState::Failed);

@@ -24,6 +24,7 @@ from agent_nexus.platform.orchestration.ipc import (
     IPCError,
     IPCProtocol,
     IPCStream,
+    get_ipc_lock,
 )
 
 logger = logging.getLogger(__name__)
@@ -433,9 +434,16 @@ class ProcessManager:
         Sends a heartbeat ping via IPC and waits for a pong response.
         Updates ``last_heartbeat`` on success.
 
-        The entire check — lookup, liveness test, and heartbeat — runs
-        under ``_lock`` so the handle cannot be removed or replaced
-        between lookup and use (no TOCTOU gap).
+        Locking strategy:
+        - The agent lookup and liveness check run under ``_lock`` to
+          prevent TOCTOU issues.
+        - ``_lock`` is released before the IPC heartbeat to avoid blocking
+          all ProcessManager operations for up to ``_HEARTBEAT_TIMEOUT``
+          seconds.
+        - The per-agent IPC lock (``get_ipc_lock``) is acquired around
+          ``send_heartbeat`` to prevent message interleaving with
+          concurrent tool execution on the same agent's IPC stream.
+        - ``_lock`` is re-acquired to update ``last_heartbeat``.
 
         Returns:
             ``True`` if the agent responded, ``False`` otherwise.
@@ -458,16 +466,21 @@ class ProcessManager:
         # - If stop_agent removes it, send_heartbeat will fail (IPCError/OSError)
         #   which we catch and return False.
         # - The handle object itself is not freed until all references drop.
-        try:
-            ok = await handle.ipc.send_heartbeat()
-        except (IPCError, OSError) as exc:
-            logger.debug(
-                "Health check IPC failed for agent '%s': %s", name, exc
-            )
-            return False
+        #
+        # We acquire the per-agent IPC lock to prevent message interleaving
+        # with concurrent tool execution or other IPC operations.
+        ipc_lock = get_ipc_lock(name)
+        async with ipc_lock:
+            try:
+                ok = await handle.ipc.send_heartbeat()
+            except (IPCError, OSError) as exc:
+                logger.debug(
+                    "Health check IPC failed for agent '%s': %s", name, exc
+                )
+                return False
 
-        if not ok:
-            return False
+            if not ok:
+                return False
 
         async with self._lock:
             # Re-fetch handle — it may have been removed or replaced

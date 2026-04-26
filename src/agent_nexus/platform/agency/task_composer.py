@@ -42,6 +42,7 @@ class TaskComposerResult:
     dag: CompositionDAG | None = None
     integrated: IntegratedArtifact | None = None
     qa_passed: bool | None = None
+    skipped_tasks: list[str] = field(default_factory=list)
 
 
 
@@ -157,6 +158,7 @@ class TaskComposer:
 
         # Step 4: Dispatch experts
         artifacts: list[Artifact] = []
+        skipped: set[str] = set()
 
         if task_graph is not None:
             # Dispatch through TaskGraph-backed DAGDispatcher (G4 bridge)
@@ -195,7 +197,18 @@ class TaskComposer:
                         )
                     if task.id in executed or task.id not in specialist_ids:
                         continue
-                    if all(dep in executed and dep not in failed for dep in task.blocked_by):
+                    if any(dep in failed for dep in task.blocked_by):
+                        if task.id not in skipped:
+                            logger.warning(
+                                "Skipping task '%s' (agent '%s'): blocked by failed dependency %s",
+                                task.id,
+                                task.agent,
+                                [d for d in task.blocked_by if d in failed],
+                            )
+                            skipped.add(task.id)
+                        executed.add(task.id)
+                        continue
+                    if all(dep in executed for dep in task.blocked_by):
                         try:
                             artifact = executor(task.agent, input.task)
                             artifacts.append(artifact)
@@ -212,6 +225,7 @@ class TaskComposer:
                 task=input.task,
                 selected_agents=selected,
                 dag=dag,
+                skipped_tasks=list(skipped),
             )
 
         # Step 5: Integrate
@@ -239,4 +253,5 @@ class TaskComposer:
             dag=dag,
             integrated=integrated,
             qa_passed=qa_result.passed,
+            skipped_tasks=list(skipped),
         )

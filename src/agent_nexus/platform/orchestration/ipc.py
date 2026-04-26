@@ -423,17 +423,16 @@ def get_ipc_lock(agent_name: str) -> asyncio.Lock:
     """
     global _ipc_lock_registry, _ipc_lock_loop_id
 
-    # Check loop identity only when registry is empty (startup / test reset).
-    # A running event loop's id() does not change during normal operation.
-    if not _ipc_lock_registry:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        current_loop_id = id(loop) if loop is not None else None
-        if current_loop_id != _ipc_lock_loop_id:
-            _ipc_lock_registry.clear()
-            _ipc_lock_loop_id = current_loop_id
+    # Check loop identity unconditionally to prevent "attached to a
+    # different loop" errors after asyncio.run() in tests.
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    current_loop_id = id(loop) if loop is not None else None
+    if current_loop_id != _ipc_lock_loop_id:
+        _ipc_lock_registry.clear()
+        _ipc_lock_loop_id = current_loop_id
 
     lock = _ipc_lock_registry.get(agent_name)
     if lock is None:

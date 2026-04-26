@@ -48,10 +48,17 @@ impl DetachedProcess {
     /// Use this when the child is meant to outlive the current scope (e.g.
     /// a long-running agent daemon).
     pub fn forget(mut self) {
-        // Prevent Drop from killing the child.
-        // Must mem::forget the Child because the Command was created with
-        // kill_on_drop(true) — a normal drop would kill the process.
-        if let Some(child) = self.child.take() {
+        if let Some(mut child) = self.child.take() {
+            // Drop stdin/stdout/stderr handles before forgetting to prevent
+            // FD leaks.  These are typically already taken by AgentProcess::split(),
+            // but close them defensively in case DetachedProcess was constructed
+            // through another path.
+            drop(child.stdin.take());
+            drop(child.stdout.take());
+            drop(child.stderr.take());
+            // Prevent Drop from killing the child.
+            // Must mem::forget the Child because the Command was created with
+            // kill_on_drop(true) — a normal drop would kill the process.
             std::mem::forget(child);
         }
     }
