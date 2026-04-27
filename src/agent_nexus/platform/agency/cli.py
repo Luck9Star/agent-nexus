@@ -126,11 +126,18 @@ def plan_composition(
             if profile
             else "report"
         )
+        # Use the agent's ACTUAL capabilities (not the task-inferred ones)
+        # so resolve_dependencies can compute correct dependency edges.
+        agent_caps = (
+            profile.get("capabilities", required_caps)
+            if profile
+            else required_caps
+        )
         subtasks.append(
             SubtaskDef(
                 id=sel.agent_id.replace("agency.", ""),
                 goal=task,
-                needed_capabilities=required_caps,
+                needed_capabilities=agent_caps,
                 output_contract=artifact_type,
                 assigned_agent=sel.agent_id,
             )
@@ -298,6 +305,162 @@ def check_profiles(output_dir: str) -> None:
         sys.exit(1)
     else:
         click.echo(f"All {checked} profiles passed validation.")
+
+
+@cli.command("run-composition")
+@click.option("--task", required=True, help="Task description to plan and execute")
+@click.option("--mode", default="plan", help="Task mode (plan, review, implementation_plan)")
+@click.option("--max-parallel", default=3, type=int, help="Max concurrent expert executions")
+@click.option("--vendor-path", required=True, help="Path to the agency-agents vendor repo")
+@click.option("--allowlist", required=True, help="Path to the allowlist YAML file")
+@click.option("--model", default=None, help="Override model string (e.g. 'api:MiniMax-M2.7-highspeed')")
+@click.option("--config-dir", default=None, help="Config directory (default: ~/.agent-nexus/)")
+def run_composition(
+    task: str,
+    mode: str,
+    max_parallel: int,
+    vendor_path: str,
+    allowlist: str,
+    model: str | None,
+    config_dir: str | None,
+) -> None:
+    """Full pipeline: load experts, select, build DAG, execute, integrate, QA."""
+    # Load .env from config dir so API keys are available
+    _env_dir = config_dir or "~/.agent-nexus"
+    _env_path = Path(_env_dir).expanduser() / ".env"
+    if _env_path.is_file():
+        from dotenv import load_dotenv
+        load_dotenv(_env_path)
+
+    try:
+        # Step 1: Load experts
+        importer = AgencyImporter(
+            vendor_path=vendor_path,
+            allowlist_path=allowlist,
+            output_dir=".",
+        )
+        profiles = importer.dry_run()
+    except Exception as exc:
+        click.echo(f"Error loading experts: {exc}", err=True)
+        sys.exit(1)
+
+    registry = ExpertRegistry()
+    for pkg in profiles:
+        ep = pkg["expert_profile"]
+        registry.add(ep["id"], ep, ep["capabilities"])
+
+    # Step 2: Infer capabilities + select specialists
+    from .task_composer import infer_capabilities
+
+    required_caps = infer_capabilities(task)
+    selector = SpecialistSelector(registry)
+    request = SelectionRequest(
+        task_type=mode,
+        required_capabilities=required_caps,
+        optional_capabilities=[],
+        max_agents=5,
+        permissions="plan",
+    )
+    selected = selector.select(request)
+
+    if not selected:
+        click.echo("No matching specialists found for the task.")
+        return
+
+    # Step 3: Build subtasks with real agent capabilities
+    subtasks: list[SubtaskDef] = []
+    for sel in selected:
+        profile = registry.get(sel.agent_id)
+        agent_caps = (
+            profile.get("capabilities", required_caps)
+            if profile
+            else required_caps
+        )
+        artifact_type = (
+            profile.get("output_contract", {}).get("artifact_type", "report")
+            if profile
+            else "report"
+        )
+        subtasks.append(
+            SubtaskDef(
+                id=sel.agent_id.replace("agency.", ""),
+                goal=task,
+                needed_capabilities=agent_caps,
+                output_contract=artifact_type,
+                assigned_agent=sel.agent_id,
+            )
+        )
+
+    # Step 4: Generate DAG
+    planner = DynamicCompositePlanner()
+    dag = planner.resolve_dependencies(
+        subtasks,
+        composition_name=f"composition-{mode}",
+        max_parallel=max_parallel,
+    )
+
+    # Step 5: Execute with LLMExecutor (falls back to ProfileBasedExecutor if no config)
+    from .dag_dispatcher import DAGDispatcher
+    from .executor import LLMExecutor, ProfileBasedExecutor
+    from agent_nexus.platform.orchestration.task_graph import TaskGraph
+
+    try:
+        executor = LLMExecutor(
+            registry=registry,
+            model_string=model,
+            config_dir=Path(config_dir) if config_dir else None,
+        )
+        click.echo(f"Using LLM executor (model: {executor._model_name})")
+    except Exception as exc:
+        click.echo(f"LLM config unavailable ({exc}), falling back to profile-based executor", err=True)
+        executor = ProfileBasedExecutor(registry=registry)
+
+    graph = TaskGraph(":memory:")
+    dispatcher = DAGDispatcher(
+        graph=graph,
+        executor=executor,
+        max_batch_size=max_parallel,
+        concurrent=True,
+    )
+    dispatch_result = dispatcher.dispatch(dag, task)
+    graph.close()
+
+    # Step 6: Integrate + QA
+    if dispatch_result.artifacts:
+        from .integrator import Integrator
+        from .qa_gate import QAGate, QAGateInput
+
+        artifacts = list(dispatch_result.artifacts.values())
+        integrated = Integrator.merge(artifacts)
+
+        # QA validation
+        first_profile = registry.get(selected[0].agent_id)
+        required_sections = (
+            first_profile.get("output_contract", {}).get("required_sections", [])
+            if first_profile
+            else []
+        )
+        gate_input = QAGateInput(
+            output={"sections": integrated.merged_sections},
+            required_sections=required_sections,
+            task_type=mode,
+        )
+        qa_result = QAGate.run(gate_input)
+
+        # Output results
+        click.echo("\n=== Composition Result ===")
+        click.echo(f"Selected: {len(selected)} experts")
+        click.echo(f"Completed: {len(dispatch_result.completed)}")
+        click.echo(f"Failed: {len(dispatch_result.failed)}")
+        click.echo(f"QA passed: {qa_result.passed}")
+        click.echo(f"\n--- Merged Output ---")
+        for key, value in integrated.merged_sections.items():
+            click.echo(f"\n## {key}")
+            click.echo(str(value))
+    else:
+        click.echo("No artifacts produced — all experts failed.")
+        for tid, err in dispatch_result.errors.items():
+            click.echo(f"  {tid}: {err}")
 
 
 if __name__ == "__main__":

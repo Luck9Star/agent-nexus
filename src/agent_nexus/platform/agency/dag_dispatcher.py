@@ -11,6 +11,7 @@ runtime (TaskGraph + ProcessManager).
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import logging
 import time
@@ -164,16 +165,39 @@ class DAGDispatcher:
         executor: ExpertExecutor,
         max_batch_size: int = 3,
         timeout_seconds: float | None = None,
+        concurrent: bool = False,
     ) -> None:
         self._graph = graph
         self._executor = executor
         self._max_batch_size = max(1, max_batch_size)
         self._timeout_seconds = timeout_seconds
+        self._concurrent = concurrent
 
     @property
     def graph(self) -> TaskGraph:
         """The underlying TaskGraph for inspection."""
         return self._graph
+
+    def _run_executor(
+        self,
+        task_item: TaskItem,
+        task_description: str,
+    ) -> tuple[Artifact | None, str | None]:
+        """Execute a single task and return (artifact, error). Thread-safe.
+
+        Does NOT touch the graph — state mutations are the caller's
+        responsibility so they always happen on the main thread.
+        """
+        try:
+            artifact = self._executor(task_item.agent, task_description)
+            return artifact, None
+        except Exception as exc:
+            logger.exception(
+                "Executor failed for task '%s' (agent '%s')",
+                task_item.id,
+                task_item.agent,
+            )
+            return None, str(exc)
 
     def dispatch(self, dag: CompositionDAG, task_description: str) -> DispatchResult:
         """Execute specialist tasks from *dag* in topological order.
@@ -258,43 +282,79 @@ class DAGDispatcher:
                     result.failed.append(t.id)
                 break
 
-            # Dispatch up to max_batch_size tasks per round (synchronous within batch)
+            # Dispatch up to max_batch_size tasks per round
             batch = ready_specialists[: self._max_batch_size]
-            started_in_batch: list[str] = []
-            for task_item in batch:
-                if deadline is not None and time.monotonic() > deadline:
-                    result.timed_out = True
-                    # Fail any tasks we started in this batch but didn't complete
-                    for tid in started_in_batch:
-                        task = self._graph.get_task(tid)
-                        if task is not None and task.state == TaskState.IN_PROGRESS:
-                            with contextlib.suppress(ValueError, RuntimeError):
-                                self._graph.fail_task(tid)
-                            result.failed.append(tid)
-                    break
 
-                self._graph.start_task(task_item.id)
-                started_in_batch.append(task_item.id)
-                try:
-                    artifact = self._executor(task_item.agent, task_description)
-                    self._graph.complete_task(task_item.id)
-                    result.artifacts[task_item.id] = artifact
-                    result.completed.append(task_item.id)
-                except Exception as exc:
-                    logger.exception(
-                        "Executor failed for task '%s' (agent '%s')",
-                        task_item.id,
-                        task_item.agent,
-                    )
-                    result.errors[task_item.id] = str(exc)
-                    try:
-                        self._graph.fail_task(task_item.id)
-                    except (ValueError, RuntimeError):
-                        logger.warning(
-                            "Could not fail task '%s' (may already be transitioned)",
-                            task_item.id,
+            if self._concurrent and len(batch) > 1:
+                # Concurrent execution within batch
+                per_task_timeout = (
+                    self._timeout_seconds if self._timeout_seconds is not None else None
+                )
+                with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=self._max_batch_size,
+                ) as pool:
+                    futures: dict[
+                        concurrent.futures.Future[tuple[Artifact | None, str | None]],
+                        TaskItem,
+                    ] = {}
+                    for task_item in batch:
+                        if deadline is not None and time.monotonic() > deadline:
+                            result.timed_out = True
+                            break
+                        self._graph.start_task(task_item.id)
+                        future = pool.submit(
+                            self._run_executor, task_item, task_description
                         )
-                    result.failed.append(task_item.id)
+                        futures[future] = task_item
+
+                    # Collect results and do graph mutations on the main thread
+                    for future in concurrent.futures.as_completed(
+                        futures, timeout=per_task_timeout
+                    ):
+                        task_item = futures[future]
+                        try:
+                            artifact, error = future.result()
+                        except Exception as exc:
+                            # Executor itself threw something unexpected
+                            error = str(exc)
+                            artifact = None
+
+                        if error is None and artifact is not None:
+                            self._graph.complete_task(task_item.id)
+                            result.artifacts[task_item.id] = artifact
+                            result.completed.append(task_item.id)
+                        else:
+                            with contextlib.suppress(ValueError, RuntimeError):
+                                self._graph.fail_task(task_item.id)
+                            result.errors[task_item.id] = error or "unknown error"
+                            result.failed.append(task_item.id)
+            else:
+                # Sequential execution (backward compatible)
+                started_in_batch: list[str] = []
+                for task_item in batch:
+                    if deadline is not None and time.monotonic() > deadline:
+                        result.timed_out = True
+                        # Fail any tasks we started in this batch but didn't complete
+                        for tid in started_in_batch:
+                            task = self._graph.get_task(tid)
+                            if task is not None and task.state == TaskState.IN_PROGRESS:
+                                with contextlib.suppress(ValueError, RuntimeError):
+                                    self._graph.fail_task(tid)
+                                result.failed.append(tid)
+                        break
+
+                    self._graph.start_task(task_item.id)
+                    started_in_batch.append(task_item.id)
+                    artifact, error = self._run_executor(task_item, task_description)
+                    if error is None and artifact is not None:
+                        self._graph.complete_task(task_item.id)
+                        result.artifacts[task_item.id] = artifact
+                        result.completed.append(task_item.id)
+                    else:
+                        with contextlib.suppress(ValueError, RuntimeError):
+                            self._graph.fail_task(task_item.id)
+                        result.errors[task_item.id] = error or "unknown error"
+                        result.failed.append(task_item.id)
 
         # If the loop was terminated by the max_iterations guard (not a normal
         # break), mark the result as timed_out so callers know it didn't finish.
