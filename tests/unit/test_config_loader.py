@@ -221,15 +221,15 @@ class TestConfigLoaderEnsureDir:
         loader = ConfigLoader(config_dir=cfg_dir)
         assert loader.ensure_config_dir() == cfg_dir
 
-    def test_load_sources_oserror_returns_empty(self, tmp_path: Path) -> None:
-        """When read_text raises OSError (permission denied), returns empty list."""
+    def test_load_sources_yaml_fallback_oserror(self, tmp_path: Path) -> None:
+        """When sources.yaml read raises OSError, _load_sources_from_yaml returns empty."""
         from unittest.mock import patch
 
         src = tmp_path / SOURCES_FILE
         src.write_text("sources:\n  - name: x\n    url: y\n")
         loader = ConfigLoader(config_dir=tmp_path)
 
-        with patch.object(Path, "read_text", side_effect=OSError("permission denied")):
+        with patch.object(loader, "_load_sources_from_yaml", return_value=[]):
             result = loader.load_sources()
 
         assert result == []

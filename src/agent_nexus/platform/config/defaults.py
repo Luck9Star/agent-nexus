@@ -27,6 +27,7 @@ Overridable via the ``AGENT_NEXUS_HOME`` environment variable.
 CONFIG_FILE: str = "config.toml"
 SOURCES_FILE: str = "sources.yaml"
 LOCKFILE: str = "lockfile.json"
+PROJECT_CONFIG_FILE: str = "agent-nexus.toml"
 
 # ---------------------------------------------------------------------------
 # Built-in provider definitions

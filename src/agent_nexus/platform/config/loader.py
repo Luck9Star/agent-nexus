@@ -29,6 +29,7 @@ from .defaults import (
     DEFAULT_CONFIG_DIR,
     DEFAULT_MODEL_STRING,
     DEFAULT_PROVIDERS,
+    PROJECT_CONFIG_FILE,
     SOURCES_FILE,
 )
 
@@ -91,6 +92,9 @@ class ConfigLoader:
             logger.error("Failed to parse config file %s: %s", config_path, exc)
             raise
 
+        # --- Schema version ---
+        schema_version = raw.get("schema_version", "1.0")
+
         # --- Runtime section ---
         runtime_raw = raw.get("runtime", {})
         runtime = RuntimeConfig(
@@ -115,26 +119,175 @@ class ConfigLoader:
             providers_raw = {}
         providers = self._build_providers(providers_raw)
 
-        models = ModelConfig(default=default_model, providers=providers)
+        # Parse stages
+        stages_raw = models_raw.get("stages", {})
+        if not isinstance(stages_raw, dict):
+            logger.warning("config.toml [models].stages is not a mapping, ignoring it")
+            stages_raw = {}
+        stages: dict[str, str] = {str(k): str(v) for k, v in stages_raw.items()}
 
-        config = PlatformConfig(runtime=runtime, models=models)
+        models = ModelConfig(
+            default=default_model,
+            providers=providers,
+            stages=stages,
+        )
+
+        # --- Sources section ---
+        sources = self._parse_sources_from_raw(raw)
+
+        config = PlatformConfig(
+            schema_version=schema_version,
+            runtime=runtime,
+            models=models,
+            sources=sources,
+        )
 
         logger.info(
-            "Config loaded: default_model=%s, providers=%s",
+            "Config loaded: default_model=%s, providers=%s, sources=%d",
             config.models.default,
             list(config.models.providers.keys()),
+            len(config.sources),
         )
         self._config_cache = config
         self._config_cache_mtime = mtime
         return config
 
     def load_sources(self) -> list[SourceEntry]:
-        """Load ``sources.yaml`` and return validated source entries.
+        """Load source entries from config.toml ``[sources]``.
+
+        Falls back to ``sources.yaml`` for backward compatibility.
+
+        Returns an empty list when neither has entries.
+        """
+        config = self.load_config()
+        if config.sources:
+            return list(config.sources)
+        return self._load_sources_from_yaml()
+
+    def load_project_config(
+        self, project_dir: Path | None = None
+    ) -> PlatformConfig | None:
+        """Load optional project-level ``agent-nexus.toml``.
+
+        Searches *project_dir* (defaults to cwd) for ``agent-nexus.toml``.
+        Returns ``None`` when the file is missing.
+        """
+        search_dir = (project_dir or Path.cwd()).resolve()
+        project_config_path = search_dir / PROJECT_CONFIG_FILE
+
+        if not project_config_path.exists():
+            logger.debug("No project config at %s", project_config_path)
+            return None
+
+        try:
+            raw = toml.loads(project_config_path.read_text(encoding="utf-8"))
+        except (toml.TomlDecodeError, OSError) as exc:
+            logger.warning("Failed to load project config: %s", exc)
+            return None
+
+        models_raw = raw.get("models", {})
+        providers_raw = models_raw.get("providers", {})
+        if not isinstance(providers_raw, dict):
+            providers_raw = {}
+
+        default_model = models_raw.get("default", "")
+
+        stages_raw = models_raw.get("stages", {})
+        if not isinstance(stages_raw, dict):
+            stages_raw = {}
+        stages: dict[str, str] = {str(k): str(v) for k, v in stages_raw.items()}
+
+        return PlatformConfig(
+            schema_version=raw.get("schema_version", "1.0"),
+            runtime=RuntimeConfig(),
+            models=ModelConfig(
+                default=default_model,
+                providers=self._build_providers(providers_raw),
+                stages=stages,
+            ),
+        )
+
+    def load_merged_config(
+        self, project_dir: Path | None = None
+    ) -> PlatformConfig:
+        """Load global config merged with optional project-level overrides.
+
+        Project config values win where non-empty. Priority:
+        env vars > project ``agent-nexus.toml`` > global ``config.toml``
+        > built-in defaults.
+        """
+        global_config = self.load_config()
+        project_config = self.load_project_config(project_dir)
+
+        if project_config is None:
+            return global_config
+
+        merged_default = project_config.models.default or global_config.models.default
+
+        merged_providers = dict(global_config.models.providers)
+        merged_providers.update(project_config.models.providers)
+
+        merged_stages = dict(global_config.models.stages)
+        merged_stages.update(project_config.models.stages)
+
+        return PlatformConfig(
+            schema_version=global_config.schema_version,
+            runtime=global_config.runtime,
+            models=ModelConfig(
+                default=merged_default,
+                providers=merged_providers,
+                stages=merged_stages,
+            ),
+            sources=global_config.sources,
+        )
+
+    def ensure_config_dir(self) -> Path:
+        """Create the config directory tree if it does not exist.
+
+        Returns the created (or existing) config directory path.
+        """
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+
+        # Ensure standard subdirectories exist
+        for subdir in ("agents", "venvs", "cache/repos", "runtimes", "logs"):
+            (self.config_dir / subdir).mkdir(parents=True, exist_ok=True)
+
+        logger.debug("Config dir ensured: %s", self.config_dir)
+        return self.config_dir
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_sources_from_raw(raw: dict[str, Any]) -> list[SourceEntry]:
+        """Extract source entries from ``[sources]`` section of config.toml."""
+        sources_list = raw.get("sources", [])
+        if not isinstance(sources_list, list):
+            return []
+        entries: list[SourceEntry] = []
+        for item in sources_list:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            try:
+                entry = SourceEntry(
+                    name=name,
+                    type=item.get("type", "git"),
+                    url=item.get("url", ""),
+                    branch=item.get("branch", "main"),
+                )
+                entries.append(entry)
+            except Exception:
+                logger.warning("Skipping invalid source entry: %s", item)
+        return entries
+
+    def _load_sources_from_yaml(self) -> list[SourceEntry]:
+        """Load ``sources.yaml`` for backward compatibility.
 
         Returns an empty list when the file does not exist.
-
-        Results are cached based on the file's mtime -- repeated calls
-        return the same list until the file is modified.
         """
         sources_path = self.config_dir / SOURCES_FILE
 
@@ -194,28 +347,10 @@ class ConfigLoader:
             except Exception as exc:
                 logger.warning("Skipping invalid source entry %s: %s", item, exc)
 
-        logger.info("Loaded %d source(s)", len(entries))
+        logger.info("Loaded %d source(s) from sources.yaml", len(entries))
         self._sources_cache = entries
         self._sources_cache_mtime = mtime
         return entries
-
-    def ensure_config_dir(self) -> Path:
-        """Create the config directory tree if it does not exist.
-
-        Returns the created (or existing) config directory path.
-        """
-        self.config_dir.mkdir(parents=True, exist_ok=True)
-
-        # Ensure standard subdirectories exist
-        for subdir in ("agents", "venvs", "cache/repos", "runtimes", "logs"):
-            (self.config_dir / subdir).mkdir(parents=True, exist_ok=True)
-
-        logger.debug("Config dir ensured: %s", self.config_dir)
-        return self.config_dir
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _build_providers(

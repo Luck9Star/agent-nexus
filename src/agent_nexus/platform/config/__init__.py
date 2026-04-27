@@ -18,6 +18,7 @@ from .defaults import (
     ENV_VAR_OVERRIDES,
     LOCKFILE,
     MODEL_TIER_MAP,
+    PROJECT_CONFIG_FILE,
     SOURCES_FILE,
 )
 from .loader import ConfigLoader
@@ -36,5 +37,6 @@ __all__ = [
     "ENV_VAR_OVERRIDES",
     "LOCKFILE",
     "MODEL_TIER_MAP",
+    "PROJECT_CONFIG_FILE",
     "SOURCES_FILE",
 ]
