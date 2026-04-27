@@ -1,160 +1,183 @@
 # Agent Nexus
 
-<p align="center">
-  <strong>MCP-native Agent 平台 | 自建多 Agent 编排 | Git-based 分发</strong>
-</p>
-
----
-
-Agent Nexus 是一个 MCP-native 的 Agent 平台，提供自建的多 Agent 编排基础设施、Python Runtime 执行层和自进化引擎。Agent 通过 Git 仓库分发（类 Homebrew Tap 模型），本地运行，使用用户自配模型。
-
-## 核心特性
-
-- **自建编排层** — 参考 ClawTeam 验证过的模式（TaskStore、Mailbox、SpawnBackend），按需精简自建。TaskGraph（SQLite + DAG + 环检测）、IPC（JSON-lines）、ProcessManager（async subprocess + 健康检查）
-- **MCP-native** — 每个 Agent 自带 FastMCP Server，MCP Gateway 统一路由与发现。MCP 协议边界 = 语言边界
-- **Git-based 分发** — 官方 monorepo + 私有仓库 + 直连 URL，无需云端基础设施。类似 Homebrew Tap 模式
-- **双语言实现** — Python 平台已完成（Phases 1-6），Rust 平台重写进行中（6 crates, ~18K LOC）
-- **自进化引擎** — 基于 OpenSpace 设计，三层递进：Atomic Skill Evolution → Composite Orchestration Evolution → Agent Promotion
-- **用户自配模型** — 支持 OpenAI、Anthropic、Ollama 等多后端，免费使用（用户自备 API Key）
+MCP 原生 Agent 平台，自建编排引擎，Git 分发体系。提供 Agent 生命周期管理、专家能力编排、Python Runtime 执行层和自演化引擎。
 
 ## 架构概览
 
-四层架构（自顶向下）：
+四层架构（自上而下）：
 
 ```
-┌─────────────────────────────────────────────────┐
-│  Layer 1: MCP Exposure (FastMCP per Agent)       │
-│  MCP Gateway → 路由、发现、工具聚合               │
-├─────────────────────────────────────────────────┤
-│  Layer 2: Orchestration (自建)                    │
-│  TaskGraph (SQLite DAG) + IPC (JSON-lines)        │
-│  ProcessManager + OrchestrationDSL (TOML)         │
-├─────────────────────────────────────────────────┤
-│  Layer 3: Python Runtime (CaveAgent-based)        │
-│  IPythonRuntime + SecurityChecker (AST)           │
-├─────────────────────────────────────────────────┤
-│  Layer 4: Self-Evolution Engine (OpenSpace-based) │
-│  Skill → Orchestration → Agent Promotion          │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│           MCP Exposure Layer                │  FastMCP Server + Gateway 路由
+├─────────────────────────────────────────────┤
+│           Orchestration Layer               │  TaskGraph · IPC · ProcessManager · DSL
+├─────────────────────────────────────────────┤
+│           Runtime Layer                     │  Python Runtime (CaveAgent IPython)
+├─────────────────────────────────────────────┤
+│           Evolution Engine                  │  Atomic Skill → Composite → Agent Promotion
+└─────────────────────────────────────────────┘
 ```
 
-## Agent 体系
+- **Agent 类型**：Atomic（11 个）+ Composite（5 个）
+- **运行模式**：MCP 独立 / Platform Router / CLI 独立
+- **双重实现**：Python 平台（生产）+ Rust 平台重写（6 crate，进行中）
 
-| 类型 | 数量 | 示例 |
-|------|------|------|
-| **Atomic Agent** | 11 | doc-filler, code-reviewer, security-scanner, test-suite-generator |
-| **Composite Agent** | 5 | feature-delivery-pipeline, product-documentation-suite |
+## Agency 专家编排
 
-三种运行模式：**MCP 独立运行** / **Platform Router 调度** / **CLI 独立运行**
+Agent Nexus 集成 [agency-agents](https://github.com/nicepkg/agency-agents) 专家池，支持动态能力拆解、专家选择、并发执行：
 
-## 快速开始
+```
+用户任务 → 能力推断 → 专家选择 → DAG 构建 → LLM 并发执行 → 结果整合 → QA 门禁
+```
 
-### 前置要求
+### 快速开始
 
-- Python 3.11+
-- [hatch](https://hatch.pypa.io/) (`pip install hatch`)
-- 可选：Rust toolchain（用于 Rust 平台开发）
+**1. 配置 LLM API**
 
-### 安装与运行
+编辑 `~/.agent-nexus/config.toml`：
+
+```toml
+[models]
+default = "api:MiniMax-M2.7-highspeed"
+
+[models.providers.api]
+base_url = "http://your-api-endpoint:3006"
+api_key_env = "API_API_KEY"
+api = "anthropic-messages"   # 或 "openai-compatible"
+```
+
+在 `~/.agent-nexus/.env` 中设置 API Key：
+
+```
+API_API_KEY="sk-your-api-key"
+```
+
+**2. 准备专家仓库**
 
 ```bash
-# 克隆仓库
-git clone https://github.com/user/agent-nexus.git
-cd agent-nexus
+# agency-agents 作为 vendor 引入
+git submodule add https://github.com/nicepkg/agency-agents.git vendor/agency-agents
+```
 
+**3. 执行专家编排**
+
+```bash
+# 查看可用专家
+uv run python -m agent_nexus.platform.agency.cli list-experts \
+  --vendor-path vendor/agency-agents \
+  --allowlist config/agency-agents.allowlist.yaml
+
+# 规划 DAG（不执行 LLM）
+uv run python -m agent_nexus.platform.agency.cli plan-composition \
+  --task "评审支付系统的安全性和架构设计" \
+  --vendor-path vendor/agency-agents \
+  --allowlist config/agency-agents.allowlist.yaml
+
+# 完整执行：编排 → LLM 调用 → 整合 → QA
+uv run python -m agent_nexus.platform.agency.cli run-composition \
+  --task "评审支付系统的安全性和架构设计" \
+  --vendor-path vendor/agency-agents \
+  --allowlist config/agency-agents.allowlist.yaml \
+  --max-parallel 3
+```
+
+### 编排流水线
+
+| 阶段 | 模块 | 说明 |
+|------|------|------|
+| 导入 | `AgencyImporter` | 从 vendor 仓库导入专家 profile，支持 allowlist 过滤 |
+| 注册 | `ExpertRegistry` | 专家能力索引，支持 set-cover 选择 |
+| 推断 | `infer_capabilities()` | 自然语言 → 能力标签（中英文） |
+| 选择 | `SpecialistSelector` | 贪心集合覆盖，选出最优专家组合 |
+| 规划 | `DynamicCompositePlanner` | 基于能力子集关系构建 DAG |
+| 执行 | `LLMExecutor` + `DAGDispatcher` | 并发 LLM 调用，ThreadPoolExecutor |
+| 整合 | `Integrator` | 多专家结果合并 |
+| 验证 | `QAGate` | 输出合规性检查 |
+
+### CLI 命令
+
+| 命令 | 说明 |
+|------|------|
+| `import-experts` | 导入专家 profile（支持 dry-run） |
+| `list-experts` | 预览可用专家 |
+| `plan-composition` | 规划编排 DAG（不执行） |
+| `run-composition` | 完整编排执行（LLM + 并发 + QA） |
+| `check-profiles` | 校验已导入的 profile |
+| `validate-output` | 校验专家输出合规性 |
+
+## 安装
+
+```bash
 # Python 平台
-hatch env create          # 创建开发环境
-hatch run test            # 运行测试
+git clone https://github.com/Luck9Star/agent-nexus.git
+cd agent-nexus
+uv sync
 
 # Rust 平台（可选）
-cargo build               # 构建所有 crates
-cargo test                # 运行 Rust 测试
-
-# CLI 使用
-agent-nexus init          # 初始化配置
-agent-nexus install <agent>  # 安装 Agent
-agent-nexus run <agent>   # 运行 Agent
-agent-nexus status        # 查看状态
+cargo build --workspace
+cargo test --workspace
 ```
 
-### 环境变量
+## 开发
 
 ```bash
-# 模型配置（按优先级：env > agent config > defaults）
-export AGENT_MODEL=gpt-4o           # 默认 Agent 模型
-export DEFAULT_MODEL=gpt-4o         # 全局默认模型
-export OPENAI_API_KEY=sk-...        # OpenAI
-export ANTHROPIC_API_KEY=sk-ant-... # Anthropic
-export OLLAMA_BASE_URL=http://...   # Ollama 本地模型
+# 测试
+uv run pytest tests/               # 全部
+uv run pytest tests/ -m unit       # 单元测试
+uv run pytest tests/ -m e2e        # E2E 测试
+
+# Lint & 格式化
+uv run ruff check src/ agents/
+uv run ruff format src/ agents/
+
+# Rust
+cargo test          # 全部 crate
+cargo clippy        # Lint
 ```
 
 ## 项目结构
 
 ```
 agent-nexus/
-├── src/agent_nexus/              # Python 平台核心 (hatch editable install)
+├── src/agent_nexus/          # 平台核心
 │   ├── platform/
-│   │   ├── orchestration/        # TaskGraph, ProcessManager, IPC, DSL
-│   │   ├── router/               # Platform Router (4-Phase Workflow)
-│   │   ├── gateway/              # MCP Gateway
-│   │   ├── config/               # 模型配置 + Provider 注册
-│   │   ├── local/                # CLI + Git Installer + Supervisor
-│   │   ├── skills/               # Skill Loader
-│   │   ├── evolution/            # 自进化引擎
-│   │   └── runtime/              # Python Runtime
-│   └── models/                   # 共享数据模型
-├── agents/                       # 官方 Agent 包（每个独立 pyproject.toml）
-│   ├── atomic/                   # 11 Atomic Agents
-│   └── composite/                # 5 Composite Agents
-├── crates/                       # Rust 平台重写（进行中）
-│   ├── ap-core/                  # 核心: TaskGraph, StateMachine, IPC, Hooks
-│   ├── ap-cli/                   # CLI: clap, 9 命令
-│   ├── ap-gateway/               # MCP Gateway
-│   ├── ap-fetcher/               # Git-based Agent 分发
-│   ├── ap-evolution/             # 自进化引擎 (SQLite)
-│   └── ap-runtime/               # Python 子进程桥接
-├── tests/                        # 测试
-│   ├── unit/                     # 单元测试
-│   ├── integration/              # 集成测试
-│   └── e2e/                      # 端到端测试
-├── templates/                    # OrchestrationDSL TOML 模板
-├── docs/                         # 设计文档
-├── Cargo.toml                    # Rust workspace
-└── pyproject.toml                # Python 包配置
+│   │   ├── agency/           # 专家编排流水线
+│   │   ├── orchestration/    # TaskGraph · ProcessManager · IPC · DSL
+│   │   ├── gateway/          # MCP Gateway
+│   │   ├── config/           # 模型配置 + Provider 注册
+│   │   ├── runtime/          # Python Runtime
+│   │   └── evolution/        # 自演化引擎
+│   └── models/               # 共享数据模型
+├── agents/                   # Agent 包（每个独立 pyproject.toml）
+│   ├── atomic/               # 11 个 Atomic Agent
+│   └── composite/            # 5 个 Composite Agent
+├── crates/                   # Rust 平台重写
+│   ├── ap-core/              # TaskGraph · ProcessManager · StateMachine · DSL
+│   ├── ap-cli/               # CLI（clap derive）
+│   ├── ap-gateway/           # MCP Gateway
+│   ├── ap-fetcher/           # Git Agent 分发
+│   ├── ap-evolution/         # 自演化引擎
+│   └── ap-runtime/           # Python 子进程桥接
+├── tests/                    # 测试
+├── docs/                     # 设计文档
+├── config/                   # 配置样例
+└── vendor/agency-agents/     # 专家仓库（submodule）
 ```
 
-## 技术栈
+## 配置
 
-| 层 | 技术 |
-|----|------|
-| Python 平台 | Python 3.11+, Pydantic, FastMCP, Typer, asyncio |
-| Rust 平台 | Rust 2021, Tokio, Axum, Rusqlite, Clap, Git2 |
-| 协议 | MCP (stdio/SSE), JSON-lines IPC, TOML DSL |
-| 存储 | SQLite (TaskGraph + Evolution), TOML (配置) |
-| 分发 | Git (Homebrew Tap 模型) |
+- **模型优先级**：环境变量 > Agent 配置 > 默认值
+- **环境变量**：`AGENT_MODEL`、`DEFAULT_MODEL`、`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`OLLAMA_BASE_URL`
+- **配置文件**：`~/.agent-nexus/config.toml`
+- **支持 API 格式**：`anthropic-messages`、`openai-compatible`、`ollama`
 
-## 安全架构（纵深防御）
+## 关键设计决策
 
-1. **进程边界** — Agent 以独立子进程运行
-2. **PermissionChecker** — 执行前权限检查（DEFAULT / PLAN / FULL_AUTO）
-3. **SecurityChecker** — 运行时 AST 级别代码安全分析
+- **自建编排**：参考 ClawTeam 验证过的模式（TaskStore、MailboxManager、SpawnBackend），无外部 pip 依赖
+- **MCP 边界 = 语言边界**：Rust 平台通过 MCP stdio/SSE 与 Python Agent 子进程通信
+- **Git 分发**：Homebrew tap 模型，无需云端基础设施
+- **Rust 重写范围**：仅上层（Gateway、Fetcher、Evolution、CLI），Agent Runtime 保持 Python
 
-## 文档
+## License
 
-完整设计文档位于 `docs/` 目录，详见 `docs/README.md`。
-
-| 文档 | 位置 |
-|------|------|
-| 产品定位与核心架构 | `docs/01-overview.md` |
-| 编排层设计 | `docs/02-clawteam-integration.md` |
-| Python Runtime | `docs/03-python-runtime.md` |
-| 自进化引擎 | `docs/04-self-evolution.md` |
-| Agent 体系 | `docs/05-agent-system.md` |
-| MCP 通信矩阵 | `docs/06-mcp-communication.md` |
-| Git 分发与质量门禁 | `docs/07-marketplace.md` |
-| 约束与决策 | `docs/08-constraints-decisions.md` |
-| 实施计划 | `docs/09-implementation-plan.md` |
-
-## 许可证
-
-MIT License
+MIT
