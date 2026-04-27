@@ -15,9 +15,11 @@ from typing import Any
 
 import httpx
 
+from agent_nexus.models.capability import ModelCapability, ModelCapabilityRegistry
 from agent_nexus.models.config import ProviderApiType
 from agent_nexus.platform.config.loader import ConfigLoader
 from agent_nexus.platform.config.model_config import ModelConfigManager
+from agent_nexus.platform.config.model_db import ModelDBClient
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +55,13 @@ class LLMClient:
     """
 
     _TIMEOUT = 120.0
-    _MAX_TOKENS = 4096
 
     def __init__(
         self,
         model_string: str | None = None,
         stage: str | None = None,
         config_dir: Path | None = None,
+        capability_registry: ModelCapabilityRegistry | None = None,
     ) -> None:
         """Initialise the client.
 
@@ -98,13 +100,75 @@ class LLMClient:
                 f"Set the environment variable referenced in config.toml."
             )
 
-        # Lazy-initialised persistent httpx.Client for connection reuse
-        self._http_client: httpx.Client | None = None
+        # Load model capability data (replaces hardcoded 4096 max_tokens)
+        if capability_registry is not None:
+            self._capability_registry = capability_registry
+        else:
+            self._capability_registry = ModelCapabilityRegistry()
+        self._capability = self._capability_registry.get(self._model_name)
 
         logger.info(
-            "LLMClient initialized: provider=%s model=%s api=%s",
+            "LLMClient initialized: provider=%s model=%s api=%s max_output_tokens=%d",
             self._provider_name, self._model_name, self._provider_config.api,
+            self._capability.max_output_tokens,
         )
+
+        # Enrich from models.dev — when a shared registry is in use, update it
+        # in-place so other clients see the enriched data without re-fetching.
+        if self._capability_registry.is_enriched(self._model_name):
+            logger.debug(
+                "Model '%s' already enriched in shared registry, skipping fetch",
+                self._model_name,
+            )
+            self._capability = self._capability_registry.get(self._model_name)
+        else:
+            db_client = ModelDBClient()
+            try:
+                remote_data = db_client.fetch_model(self._model_name)
+                if remote_data is not None:
+                    cap = self._capability
+                    enriched_cap = ModelCapability(
+                        model_id=remote_data.get("id", cap.model_id),
+                        provider=remote_data.get("provider", cap.provider),
+                        max_output_tokens=remote_data.get(
+                            "max_output_tokens", cap.max_output_tokens
+                        ),
+                        context_window=remote_data.get(
+                            "context_window", cap.context_window
+                        ),
+                        supports_vision=remote_data.get(
+                            "supports_vision", cap.supports_vision
+                        ),
+                        supports_tool_use=remote_data.get(
+                            "supports_tool_use", cap.supports_tool_use
+                        ),
+                        supports_temperature=remote_data.get(
+                            "supports_temperature", cap.supports_temperature
+                        ),
+                        temperature_min=remote_data.get(
+                            "temperature_min", cap.temperature_min
+                        ),
+                        temperature_max=remote_data.get(
+                            "temperature_max", cap.temperature_max
+                        ),
+                        knowledge_cutoff=remote_data.get(
+                            "knowledge_cutoff", cap.knowledge_cutoff
+                        ),
+                    )
+                    self._capability_registry.set_override(
+                        self._model_name, enriched_cap,
+                    )
+                    self._capability = enriched_cap
+            except Exception:
+                logger.debug(
+                    "ModelDB enrichment failed, using built-in capability data",
+                    exc_info=True,
+                )
+            finally:
+                db_client.close()
+
+        # Lazy-initialised persistent httpx.Client for connection reuse
+        self._http_client: httpx.Client | None = None
 
     def _get_http_client(self, timeout: float | None = None) -> httpx.Client:
         """Return the persistent httpx.Client, creating it on first use."""
@@ -135,6 +199,16 @@ class LLMClient:
     @property
     def provider_name(self) -> str:
         return self._provider_name
+
+    @property
+    def capability(self) -> ModelCapability:
+        """Return the capability record for the resolved model."""
+        return self._capability
+
+    @property
+    def supports_vision(self) -> bool:
+        """Whether the resolved model supports vision/image inputs."""
+        return self._capability.supports_vision
 
     @staticmethod
     def _is_retryable(status_code: int) -> bool:
@@ -181,6 +255,8 @@ class LLMClient:
         system_prompt: str,
         user_message: str,
         max_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
         timeout: float | None = None,
     ) -> LLMResponse:
         """Call the LLM and return a structured response.
@@ -192,7 +268,12 @@ class LLMClient:
         user_message:
             The user's message / task.
         max_tokens:
-            Override max output tokens.
+            Override max output tokens.  Defaults to the model's
+            ``max_output_tokens`` from capability data.
+        temperature:
+            Sampling temperature.  When ``None`` the model's default is used.
+        top_p:
+            Nucleus sampling threshold.  When ``None`` the model's default is used.
         timeout:
             Override request timeout in seconds.
 
@@ -201,23 +282,82 @@ class LLMClient:
         LLMResponse
         """
         if self._provider_config.api == ProviderApiType.ANTHROPIC_MESSAGES:
-            text = self._call_anthropic(system_prompt, user_message, max_tokens, timeout)
+            text, actual_model = self._call_anthropic(
+                system_prompt, user_message,
+                max_tokens, temperature, top_p, timeout,
+            )
         else:
-            text = self._call_openai(system_prompt, user_message, max_tokens, timeout)
+            text, actual_model = self._call_openai(
+                system_prompt, user_message,
+                max_tokens, temperature, top_p, timeout,
+            )
+
+        self._update_capability_from_response(actual_model)
 
         return LLMResponse(
             text=text,
-            model=self._model_name,
+            model=actual_model,
             provider=self._provider_name,
         )
+
+    def _apply_sampling_params(
+        self,
+        payload: dict[str, Any],
+        temperature: float | None,
+        top_p: float | None,
+    ) -> None:
+        """Apply temperature and top_p to *payload* in-place."""
+        if temperature is not None:
+            if self._capability.supports_temperature:
+                payload["temperature"] = max(
+                    self._capability.temperature_min,
+                    min(self._capability.temperature_max, temperature),
+                )
+            else:
+                logger.warning(
+                    "Model '%s' does not support temperature — ignoring",
+                    self._model_name,
+                )
+        if top_p is not None:
+            if self._capability.supports_temperature:
+                payload["top_p"] = max(0.0, min(1.0, top_p))
+            else:
+                logger.warning(
+                    "Model '%s' does not support top_p — ignoring",
+                    self._model_name,
+                )
+
+    def _update_capability_from_response(self, actual_model: str) -> None:
+        """Enrich capability data when the API returns a different model name."""
+        if actual_model == self._model_name:
+            return
+        if self._capability_registry.is_enriched(actual_model):
+            return
+        try:
+            real_cap = self._capability_registry.get(actual_model)
+            if real_cap.model_id.startswith("__"):
+                return  # provider default, not a real match
+            self._capability_registry.set_override(self._model_name, real_cap)
+            self._capability = real_cap
+            logger.info(
+                "Capability updated: '%s' → real model '%s' (max_output_tokens=%d)",
+                self._model_name, actual_model, real_cap.max_output_tokens,
+            )
+        except Exception:
+            logger.debug(
+                "Failed to update capability from response model '%s'",
+                actual_model, exc_info=True,
+            )
 
     def _call_anthropic(
         self,
         system_prompt: str,
         user_message: str,
         max_tokens: int | None,
+        temperature: float | None,
+        top_p: float | None,
         timeout: float | None,
-    ) -> str:
+    ) -> tuple[str, str]:
         base_url = self._provider_config.base_url.rstrip("/")
         url = f"{base_url}/v1/messages"
 
@@ -229,26 +369,31 @@ class LLMClient:
 
         payload: dict[str, Any] = {
             "model": self._model_name,
-            "max_tokens": max_tokens or self._MAX_TOKENS,
+            "max_tokens": max_tokens or self._capability.max_output_tokens,
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_message}],
         }
+        self._apply_sampling_params(payload, temperature, top_p)
 
         resp = self._call_with_retry(url, headers, payload, timeout, "Anthropic")
 
         data = resp.json()
+        actual_model: str = data.get("model", self._model_name)
         content_blocks = data.get("content", [])
-        return "".join(
+        text = "".join(
             block.get("text", "") for block in content_blocks if block.get("type") == "text"
         )
+        return text, actual_model
 
     def _call_openai(
         self,
         system_prompt: str,
         user_message: str,
         max_tokens: int | None,
+        temperature: float | None,
+        top_p: float | None,
         timeout: float | None,
-    ) -> str:
+    ) -> tuple[str, str]:
         base_url = self._provider_config.base_url.rstrip("/")
         url = f"{base_url}/v1/chat/completions"
 
@@ -263,13 +408,15 @@ class LLMClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
-            "max_tokens": max_tokens or self._MAX_TOKENS,
+            "max_tokens": max_tokens or self._capability.max_output_tokens,
         }
+        self._apply_sampling_params(payload, temperature, top_p)
 
         resp = self._call_with_retry(url, headers, payload, timeout, "OpenAI")
 
         data = resp.json()
+        actual_model: str = data.get("model", self._model_name)
         choices = data.get("choices", [])
         if choices:
-            return choices[0].get("message", {}).get("content", "")
-        return ""
+            return choices[0].get("message", {}).get("content", ""), actual_model
+        return "", actual_model

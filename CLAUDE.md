@@ -16,11 +16,19 @@ Agent Nexus is an MCP-native Agent Platform with self-built orchestration. It pr
 # Python platform
 uv sync                        # Install dependencies
 uv run pytest tests/           # Run all Python tests
+uv run pytest tests/ -x        # Stop on first failure
 uv run pytest tests/ -m unit   # Unit tests only
 uv run pytest tests/ -m integration  # Integration tests only
 uv run pytest tests/ -m e2e    # E2E tests only
 uv run ruff check src/ agents/ # Lint
+uv run ruff check --fix src/   # Auto-fix lint issues
 uv run ruff format src/ agents/ # Format
+uv run ty check src/           # Type check (ty, installed separately)
+
+# Agency pipeline (LLM-powered expert orchestration)
+uv run python -m agent_nexus.platform.agency.cli run-composition \
+  --task "..." --vendor-path <path> --allowlist <path> \
+  --use-llm --temperature 0.7 --max-parallel 3
 
 # Rust platform (workspace at repo root)
 cargo build                   # Build all 6 crates
@@ -59,6 +67,10 @@ Four-layer architecture (top to bottom):
 
 **Agent types**: Atomic (11, e.g. doc-filler, code-reviewer) and Composite (5, e.g. feature-delivery-pipeline). Three run modes: MCP standalone / Platform Router / CLI standalone.
 
+**Agency Pipeline** — LLM-powered expert orchestration: LLMPlanner (task decomposition) → LLMExecutor (per-expert LLM calls) → LLMIntegrator (semantic synthesis) → LLMQualityGate (quality evaluation). All stages share a ModelCapabilityRegistry that provides per-model max_tokens, temperature range, and vision support data.
+
+**Model Capability System** — Three-layer: built-in data (17 models in `models/capability.py`) → optional models.dev enrichment (`config/model_db.py`) → consumption in LLMClient (dynamic max_tokens, temperature clamping, supports_temperature gate). Model string format: `provider:model_name` (e.g. `anthropic:claude-sonnet-4-20250514`).
+
 ## Key Design Decisions
 
 - **Self-built orchestration** — Reference ClawTeam's proven patterns (TaskStore, MailboxManager, SpawnBackend), build simplified versions. No external pip dependency.
@@ -82,15 +94,16 @@ Four-layer architecture (top to bottom):
 agent-nexus/
 ├── src/agent_nexus/          # Platform core (editable install via uv)
 │   ├── platform/
+│   │   ├── agency/           # Agency pipeline (LLMPlanner → Executor → Integrator → QAGate)
 │   │   ├── router/           # Platform Router (4-Phase Workflow)
 │   │   ├── orchestration/    # TaskGraph, ProcessManager, IPC, OrchestrationDSL
 │   │   ├── gateway/          # MCP Gateway aggregation
-│   │   ├── config/           # Model Config + Provider Registry
+│   │   ├── config/           # Model Config + Provider Registry + models.dev client
 │   │   ├── local/            # CLI + Git Installer + Supervisor
 │   │   ├── skills/           # Skill Loader
 │   │   ├── evolution/        # Self-Evolution Engine
 │   │   └── runtime/          # Python Runtime (CaveAgent-based)
-│   └── models/               # Shared data models
+│   └── models/               # Shared data models + ModelCapability registry
 ├── agents/                   # Official Agent packages (independent pyproject.toml each)
 │   ├── atomic/               # 11 Atomic Agents
 │   └── composite/            # 5 Composite Agents
@@ -128,6 +141,10 @@ See `docs/09-implementation-plan.md` for full phase details and risk matrix.
 - All Agents must have SKILL.md before implementation code
 - Model config priority: env vars > Agent config > defaults
 - Environment variables: `AGENT_MODEL`, `DEFAULT_MODEL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_BASE_URL`
-- Config file: `config.toml` (TOML format)
+- Config file: `config.toml` (TOML format) — supports per-stage model config (`[models.stages]`) and per-provider API keys
 - Lock file: `lockfile.json` (JSON format)
+- Model string format: `provider:model_name` (e.g. `anthropic:claude-sonnet-4-20250514`, `api:MiniMax-M2.7-highspeed`)
+- LLMClient lifecycle: use as context manager or call `.close()` to release the httpx connection pool
+- Shared ModelCapabilityRegistry: pass `capability_registry=` to LLMClient to avoid duplicate models.dev fetches across pipeline stages
+- Type checking: `ty check src/` (ty v0.0.32+, installed via Homebrew) — run before committing alongside ruff
 - All reference project licenses are MIT or Apache-2.0 — preserve original copyright notices

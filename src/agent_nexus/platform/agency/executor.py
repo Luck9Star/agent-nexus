@@ -10,6 +10,8 @@ from .integrator import Artifact
 from .llm_client import LLMClient
 
 if TYPE_CHECKING:
+    from agent_nexus.models.capability import ModelCapabilityRegistry
+
     from .registry import ExpertRegistry
 
 logger = logging.getLogger(__name__)
@@ -127,15 +129,19 @@ class LLMExecutor:
         registry: ExpertRegistry,
         model_string: str | None = None,
         config_dir: Path | None = None,
+        default_temperature: float | None = None,
+        capability_registry: ModelCapabilityRegistry | None = None,
     ) -> None:
         self._registry = registry
         self._config_dir = config_dir
         self._default_model_string = model_string
+        self._default_temperature = default_temperature
 
         # Create default client (used when expert has no model override)
         self._default_client = LLMClient(
             model_string=model_string,
             config_dir=config_dir,
+            capability_registry=capability_registry,
         )
 
         # Cache per-expert clients (keyed by model string)
@@ -188,7 +194,13 @@ class LLMExecutor:
 
         # Use per-expert client if available
         client = self._get_client(profile)
-        response = client.call(system_prompt=system_prompt, user_message=task)
+        expert_temp = profile.get("temperature")
+        expert_temperature = expert_temp if expert_temp is not None else self._default_temperature
+        response = client.call(
+            system_prompt=system_prompt,
+            user_message=task,
+            temperature=expert_temperature,
+        )
         sections = self._parse_sections(response.text, required_sections)
 
         return Artifact(

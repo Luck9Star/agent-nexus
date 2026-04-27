@@ -22,6 +22,20 @@ Four-layer architecture (top to bottom):
 - **Run modes**: MCP standalone / Platform Router / CLI standalone
 - **Dual implementation**: Python platform (production) + Rust platform rewrite (6 crates, in progress)
 
+## Model Capability System
+
+Three-layer model capability resolution:
+
+```
+Built-in Data (17 models)  →  optional models.dev enrichment  →  LLMClient consumption
+```
+
+- **Dynamic max_tokens**: Reads from capability data instead of hardcoded 4096
+- **Temperature clamping**: Clamps to model's `[temperature_min, temperature_max]` range
+- **`supports_temperature` gate**: Skips temperature/top_p for models that don't support them
+- **models.dev enrichment**: Auto-fetched on init, silent fallback to built-in data on failure
+- **Auto model inference**: Extracts real model name from API response to self-correct capability data
+
 ## Agency Expert Orchestration
 
 Agent Nexus integrates the [agency-agents](https://github.com/nicepkg/agency-agents) expert pool with dynamic capability decomposition, specialist selection, and concurrent execution:
@@ -39,6 +53,11 @@ Edit `~/.agent-nexus/config.toml`:
 ```toml
 [models]
 default = "api:MiniMax-M2.7-highspeed"
+
+[models.stages]
+planning = "api:MiniMax-M2.7-highspeed"
+integration = "api:MiniMax-M2.7-highspeed"
+qa = "api:MiniMax-M2.7-highspeed"
 
 [models.providers.api]
 base_url = "http://your-api-endpoint:3006"
@@ -78,6 +97,7 @@ uv run python -m agent_nexus.platform.agency.cli run-composition \
   --task "Review payment system security and architecture design" \
   --vendor-path vendor/agency-agents \
   --allowlist config/agency-agents.allowlist.yaml \
+  --use-llm --temperature 0.7 \
   --max-parallel 3
 ```
 
@@ -87,12 +107,13 @@ uv run python -m agent_nexus.platform.agency.cli run-composition \
 |-------|--------|-------------|
 | Import | `AgencyImporter` | Import expert profiles from vendor repo with allowlist filtering |
 | Registry | `ExpertRegistry` | Capability-indexed expert registry with set-cover selection |
-| Inference | `infer_capabilities()` | Natural language → capability labels (EN + CN) |
+| Inference | `LLMPlanner` / `infer_capabilities()` | Natural language → capability labels (LLM + keyword fallback) |
 | Selection | `SpecialistSelector` | Greedy set-cover for optimal expert team composition |
 | Planning | `DynamicCompositePlanner` | DAG construction based on capability subset relationships |
 | Execution | `LLMExecutor` + `DAGDispatcher` | Concurrent LLM calls via ThreadPoolExecutor |
-| Integration | `Integrator` | Multi-expert result merging |
-| Validation | `QAGate` | Output compliance checking |
+| Integration | `LLMIntegrator` / `Integrator` | Multi-expert result synthesis (LLM + rule-based fallback) |
+| Validation | `LLMQualityGate` / `QAGate` | Semantic quality evaluation + structural compliance |
+| Capability | `ModelCapabilityRegistry` | Dynamic max_tokens/temperature/vision from built-in data + models.dev |
 
 ### CLI Commands
 
@@ -128,7 +149,11 @@ uv run pytest tests/ -m e2e        # E2E tests
 
 # Lint & Format
 uv run ruff check src/ agents/
+uv run ruff check --fix src/ agents/
 uv run ruff format src/ agents/
+
+# Type Check
+uv run ty check src/              # ty v0.0.32+ (brew install ty)
 
 # Rust
 cargo test          # All crates
@@ -166,10 +191,11 @@ agent-nexus/
 
 ## Configuration
 
-- **Model priority**: env vars > agent config > defaults
-- **Environment variables**: `AGENT_MODEL`, `DEFAULT_MODEL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_BASE_URL`
-- **Config file**: `~/.agent-nexus/config.toml`
+- **Config file**: `~/.agent-nexus/config.toml` — supports per-stage model config (`[models.stages]`)
+- **Model string format**: `provider:model_name` (e.g. `anthropic:claude-sonnet-4-20250514`)
 - **Supported API formats**: `anthropic-messages`, `openai-compatible`, `ollama`
+- **Model priority** (highest to lowest): Expert profile `model` field → CLI `--model` → `[models.stages]` → `AGENT_MODEL` env → `[models].default`
+- **Environment variables**: `AGENT_MODEL`, `DEFAULT_MODEL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_BASE_URL`
 
 ## Key Design Decisions
 

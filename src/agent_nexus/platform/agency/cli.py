@@ -332,6 +332,10 @@ def check_profiles(output_dir: str) -> None:
     "--use-llm", is_flag=True, default=False,
     help="Use LLM for planning, integration, and QA (requires API config)",
 )
+@click.option(
+    "--temperature", default=None, type=float,
+    help="LLM sampling temperature (default: provider default)",
+)
 def run_composition(
     task: str,
     mode: str,
@@ -341,6 +345,7 @@ def run_composition(
     model: str | None,
     config_dir: str | None,
     use_llm: bool,
+    temperature: float | None,
 ) -> None:
     """Full pipeline: load experts, select, build DAG, execute, integrate, QA."""
     # Load .env from config dir so API keys are available
@@ -352,8 +357,8 @@ def run_composition(
 
     try:
         # Step 1: Load experts
-        import tempfile
         import shutil
+        import tempfile
 
         tmpdir = tempfile.mkdtemp(prefix="agency-run-")
         importer = AgencyImporter(
@@ -381,27 +386,36 @@ def run_composition(
     llm_planner = None
     llm_integrator = None
     llm_qa_gate = None
+    shared_registry = None
 
     if use_llm:
         try:
+            from agent_nexus.models.capability import ModelCapabilityRegistry
+
             from .llm_client import LLMClient
             from .llm_integrator import LLMIntegrator
             from .llm_planner import LLMPlanner
             from .llm_qa_gate import LLMQualityGate
 
             config_path = Path(config_dir) if config_dir else None
+            shared_registry = ModelCapabilityRegistry()
             planner_client = LLMClient(
                 model_string=model, stage="planning", config_dir=config_path,
+                capability_registry=shared_registry,
             )
             integrator_client = LLMClient(
                 model_string=model, stage="integration", config_dir=config_path,
+                capability_registry=shared_registry,
             )
             qa_client = LLMClient(
                 model_string=model, stage="qa", config_dir=config_path,
+                capability_registry=shared_registry,
             )
-            llm_planner = LLMPlanner(registry=registry, client=planner_client)
-            llm_integrator = LLMIntegrator(client=integrator_client)
-            llm_qa_gate = LLMQualityGate(client=qa_client)
+            llm_planner = LLMPlanner(
+                registry=registry, client=planner_client, temperature=temperature,
+            )
+            llm_integrator = LLMIntegrator(client=integrator_client, temperature=temperature)
+            llm_qa_gate = LLMQualityGate(client=qa_client, temperature=temperature)
             click.echo("LLM-powered planning, integration, and QA enabled")
         except Exception as exc:
             click.echo(
@@ -418,6 +432,8 @@ def run_composition(
             registry=registry,
             model_string=model,
             config_dir=Path(config_dir) if config_dir else None,
+            default_temperature=temperature,
+            capability_registry=shared_registry if use_llm else None,
         )
         click.echo(f"Using LLM executor (model: {executor.model_name})")
     except Exception as exc:

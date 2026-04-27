@@ -39,9 +39,11 @@ class LLMQualityGate:
         self,
         client: LLMClient | None = None,
         pass_threshold: float = _PASS_THRESHOLD,
+        temperature: float | None = None,
     ) -> None:
         self._client = client
         self._pass_threshold = pass_threshold
+        self._temperature = temperature
 
     @classmethod
     def fallback_count(cls) -> int:
@@ -137,6 +139,7 @@ class LLMQualityGate:
         response = self._client.call(
             system_prompt=system_prompt,
             user_message=user_message,
+            temperature=self._temperature,
         )
         return self._parse_evaluation(response.text, structural_result)
 

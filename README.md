@@ -55,6 +55,21 @@ Four-layer architecture (top-down) | 四层架构（自上而下）：
 Three run modes: **MCP standalone** / **Platform Router** / **CLI standalone**
 三种运行模式：**MCP 独立运行** / **Platform Router 调度** / **CLI 独立运行**
 
+### Model Capability System | 模型能力系统
+
+Three-layer model capability resolution | 三层模型能力解析：
+
+```
+Built-in Data (17 models)  →  optional models.dev enrichment  →  LLMClient consumption
+内置数据（17 个模型）        →  可选 models.dev 增强            →  LLMClient 消费
+```
+
+- **Dynamic max_tokens**: Reads from capability data instead of hardcoded 4096 | 从能力数据动态获取，不再硬编码 4096
+- **Temperature clamping**: Clamps to model's `[temperature_min, temperature_max]` range | 钳位到模型支持的温度范围
+- **`supports_temperature` gate**: Skips temperature/top_p for models that don't support them | 对不支持温度的模型自动跳过
+- **models.dev enrichment**: Auto-fetched on init, silent fallback to built-in data on failure | 初始化时自动拉取，失败静默回退
+- **Auto model inference**: Extracts real model name from API response to self-correct capability data | 从 API 返回中提取真实模型名，自校正能力数据
+
 ---
 
 ## Agency Expert Orchestration | Agency 专家编排
@@ -74,12 +89,13 @@ User Task → Capability Inference → Expert Selection → DAG Build → LLM Co
 |-------|--------|-------------|------|
 | Import | `AgencyImporter` | Import expert profiles from vendor repo, with allowlist filtering | 从 vendor 仓库导入专家 profile，支持 allowlist 过滤 |
 | Register | `ExpertRegistry` | Expert capability indexing, set-cover selection | 专家能力索引，支持 set-cover 选择 |
-| Infer | `LLMPlanner` / `infer_capabilities()` | Semantic task decomposition → capabilities (LLM with keyword fallback) | 语义任务拆解 → 能力标签（LLM + 关键词回退） |
+| Infer | `LLMPlanner` / `infer_capabilities()` | Semantic task decomposition → capabilities (LLM + 关键词回退) | 语义任务拆解 → 能力标签（LLM + 关键词回退） |
 | Select | `SpecialistSelector` | Greedy set-cover, optimal expert combination | 贪心集合覆盖，选出最优专家组合 |
 | Plan | `DynamicCompositePlanner` | Build DAG based on capability subset relations | 基于能力子集关系构建 DAG |
 | Execute | `LLMExecutor` + `DAGDispatcher` | Concurrent LLM calls via ThreadPoolExecutor, per-expert model override | 并发 LLM 调用，支持按专家覆盖模型 |
-| Integrate | `LLMIntegrator` / `Integrator` | Semantic multi-expert synthesis (LLM with rule-based fallback) | 多专家结果语义合成（LLM + 规则回退） |
-| Validate | `LLMQualityGate` / `QAGate` | Semantic quality evaluation + structural compliance (LLM dual-layer) | 语义质量评估 + 结构合规（LLM 双层门禁） |
+| Integrate | `LLMIntegrator` / `Integrator` | Semantic multi-expert synthesis (LLM + 规则回退) | 多专家结果语义合成（LLM + 规则回退） |
+| Validate | `LLMQualityGate` / `QAGate` | Semantic quality evaluation + structural compliance (LLM 双层门禁) | 语义质量评估 + 结构合规（LLM 双层门禁） |
+| **Capability** | `ModelCapabilityRegistry` | Dynamic max_tokens / temperature / vision from built-in data + models.dev enrichment | 动态模型能力数据（内置17模型 + models.dev 增强） |
 
 ### CLI Commands | CLI 命令
 
@@ -180,6 +196,7 @@ uv run python -m agent_nexus.platform.agency.cli run-composition \
   --allowlist config/agency-agents.allowlist.yaml \
   --model "api:MiniMax-M2.7-highspeed" \
   --use-llm \
+  --temperature 0.7 \
   --max-parallel 3
 ```
 
@@ -195,6 +212,8 @@ Model config priority (5 levels) | 模型配置优先级（5 级）：
 | 4 | `AGENT_MODEL` env var | Global override | 全局覆盖 |
 | 5 | `[models].default` | Fallback | 兜底 |
 
+Model string format | 模型字符串格式：`provider:model_name`（例如 `anthropic:claude-sonnet-4-20250514`、`api:MiniMax-M2.7-highspeed`）
+
 ```bash
 export AGENT_MODEL=gpt-4o           # Default agent model | 默认 Agent 模型
 export DEFAULT_MODEL=gpt-4o         # Global default model | 全局默认模型
@@ -204,6 +223,7 @@ export OLLAMA_BASE_URL=http://...   # Ollama local models
 ```
 
 Supported API formats | 支持的 API 格式：`anthropic-messages`, `openai-compatible`, `ollama`
+Lint & Format | 代码检查与格式化：`ruff check --fix src/` · `ruff format src/` · Type Check | 类型检查：`ty check src/`
 
 ---
 
@@ -289,7 +309,11 @@ uv run pytest tests/ -m e2e        # E2E tests only | E2E 测试
 
 # Lint & Format | 代码检查与格式化
 uv run ruff check src/ agents/
+uv run ruff check --fix src/ agents/
 uv run ruff format src/ agents/
+
+# Type Check | 类型检查
+uv run ty check src/              # ty v0.0.32+ (brew install ty)
 
 # Rust
 cargo test --workspace             # All crates | 全部 crate

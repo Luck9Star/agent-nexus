@@ -1,11 +1,19 @@
-"""Agent Nexus Foundation Layer: shared Pydantic data models.
+"""Agent Nexus Foundation Layer: shared data models.
 
 Every other module in the platform depends on the types defined here.
-All models are pure data (Pydantic BaseModel) with no business logic.
+All models are pure data (Pydantic BaseModel or frozen dataclass) with no
+business logic.
 
 Usage:
     from agent_nexus.models import AgentManifest, TaskItem, SkillRecord
 """
+
+# capability.py — Model capability registry
+from agent_nexus.models.capability import (
+    PROVIDER_DEFAULTS,
+    ModelCapability,
+    ModelCapabilityRegistry,
+)
 
 # agent.py — Agent system
 from agent_nexus.models.agent import (
@@ -113,6 +121,10 @@ from agent_nexus.models.task import (
 )
 
 __all__ = [
+    # capability.py
+    "PROVIDER_DEFAULTS",
+    "ModelCapability",
+    "ModelCapabilityRegistry",
     # agent.py
     "AgentDefinition",
     "AgentManifest",

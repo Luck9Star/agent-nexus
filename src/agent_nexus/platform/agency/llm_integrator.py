@@ -36,8 +36,9 @@ class LLMIntegrator:
     _fallback_count = 0
     _fallback_lock = threading.Lock()
 
-    def __init__(self, client: LLMClient | None = None) -> None:
+    def __init__(self, client: LLMClient | None = None, temperature: float | None = None) -> None:
         self._client = client
+        self._temperature = temperature
 
     @classmethod
     def fallback_count(cls) -> int:
@@ -104,6 +105,7 @@ class LLMIntegrator:
         response = self._client.call(
             system_prompt=system_prompt,
             user_message=user_message,
+            temperature=self._temperature,
         )
         return self._parse_synthesis(response.text, artifacts)
 

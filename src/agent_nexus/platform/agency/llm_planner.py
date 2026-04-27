@@ -68,9 +68,11 @@ class LLMPlanner:
         self,
         registry: ExpertRegistry,
         client: LLMClient | None = None,
+        temperature: float | None = None,
     ) -> None:
         self._registry = registry
         self._client = client
+        self._temperature = temperature
 
     @classmethod
     def fallback_count(cls) -> int:
@@ -111,6 +113,7 @@ class LLMPlanner:
         response = self._client.call(
             system_prompt=system_prompt,
             user_message=task,
+            temperature=self._temperature,
         )
         return PlannerOutput.from_json(response.text)
 
