@@ -99,118 +99,15 @@ User Task → Capability Inference → Expert Selection → DAG Build → LLM Co
 
 ### CLI Commands | CLI 命令
 
-| Command | Description | 说明 |
-|---------|-------------|------|
-| `import-experts` | Import expert profiles (supports dry-run) | 导入专家 profile |
-| `list-experts` | Preview available experts | 预览可用专家 |
-| `plan-composition` | Plan orchestration DAG (no LLM execution) | 规划编排 DAG（不执行） |
-| `run-composition` | Full pipeline: orchestrate → LLM → integrate → QA | 完整编排执行 |
-| `check-profiles` | Validate imported profiles | 校验已导入 profile |
-| `validate-output` | Validate expert output compliance | 校验专家输出合规性 |
+See [CLI Reference](docs/cli.md) for the complete command documentation (17 commands). | 完整命令行文档（17 个命令）见 [CLI 参考](docs/cli.md)。
 
 ---
 
 ## Quick Start | 快速开始
 
-### Prerequisites | 前置要求
+See the [Quick Start Guide](docs/quick-start.md) for a 5-minute setup walkthrough. | 5 分钟上手指南见 [快速开始](docs/quick-start.md)。
 
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) (or [hatch](https://hatch.pypa.io/))
-- Optional: Rust toolchain (for Rust platform development)
-
-### Setup | 安装
-
-```bash
-# Clone | 克隆
-git clone https://github.com/Luck9Star/agent-nexus.git
-cd agent-nexus
-
-# Python platform | Python 平台
-uv sync                        # Install dependencies | 安装依赖
-uv run pytest tests/           # Run tests | 运行测试
-
-# Rust platform (optional) | Rust 平台（可选）
-cargo build --workspace        # Build all crates | 构建所有 crates
-cargo test --workspace         # Run Rust tests | 运行 Rust 测试
-```
-
-### Agency Pipeline Setup | Agency 编排设置
-
-**1. Configure LLM API | 配置 LLM API**
-
-Edit `~/.agent-nexus/config.toml`:
-
-```toml
-[models]
-default = "api:MiniMax-M2.7-highspeed"
-
-[models.stages]
-planning = "api:MiniMax-M2.7-highspeed"
-integration = "api:MiniMax-M2.7-highspeed"
-qa = "api:MiniMax-M2.7-highspeed"
-
-[models.providers.api]
-base_url = "http://your-api-endpoint:3006"
-api_key_env = "API_API_KEY"
-api = "anthropic-messages"   # or "openai-compatible"
-```
-
-Set API Key in `~/.agent-nexus/.env`:
-
-```
-API_API_KEY="sk-your-api-key"
-```
-
-**2. Prepare Expert Repository | 准备专家仓库**
-
-```bash
-# Add agency-agents as vendor submodule
-git submodule add https://github.com/nicepkg/agency-agents.git vendor/agency-agents
-```
-
-**3. Run Expert Composition | 执行专家编排**
-
-```bash
-# List available experts | 查看可用专家
-uv run python -m agent_nexus.platform.agency.cli list-experts \
-  --vendor-path vendor/agency-agents \
-  --allowlist config/agency-agents.allowlist.yaml
-
-# Plan DAG (no LLM) | 规划 DAG（不执行 LLM）
-uv run python -m agent_nexus.platform.agency.cli plan-composition \
-  --task "Review the security and architecture of the payment system" \
-  --vendor-path vendor/agency-agents \
-  --allowlist config/agency-agents.allowlist.yaml
-
-# Full execution (rule-based) | 完整执行（规则模式）
-uv run python -m agent_nexus.platform.agency.cli run-composition \
-  --task "Review the security and architecture of the payment system" \
-  --vendor-path vendor/agency-agents \
-  --allowlist config/agency-agents.allowlist.yaml \
-  --max-parallel 3
-
-# Full execution (LLM-powered) | 完整执行（LLM 模式）
-uv run python -m agent_nexus.platform.agency.cli run-composition \
-  --task "Review the security and architecture of the payment system" \
-  --vendor-path vendor/agency-agents \
-  --allowlist config/agency-agents.allowlist.yaml \
-  --model "api:MiniMax-M2.7-highspeed" \
-  --use-llm \
-  --temperature 0.7 \
-  --max-parallel 3
-```
-
-### Environment Variables | 环境变量
-
-Model config priority (5 levels) | 模型配置优先级（5 级）：
-
-| Priority | Source | Scope | 范围 |
-|----------|--------|-------|------|
-| 1 (highest) | Expert profile `model` field | Per-expert override | 按专家覆盖 |
-| 2 | Explicit `model_string` / `--model` | Per-client constructor / CLI flag | 按客户端构造 |
-| 3 | `[models.stages].<stage>` | Per-pipeline-stage (planning/integration/qa/execution) | 按流水线阶段 |
-| 4 | `AGENT_MODEL` env var | Global override | 全局覆盖 |
-| 5 | `[models].default` | Fallback | 兜底 |
+For full configuration options, see [Configuration Reference](docs/configuration.md). | 完整配置选项见 [配置参考](docs/configuration.md)。
 
 Model string format | 模型字符串格式：`provider:model_name`（例如 `anthropic:claude-sonnet-4-20250514`、`api:MiniMax-M2.7-highspeed`）
 

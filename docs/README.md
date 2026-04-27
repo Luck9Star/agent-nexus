@@ -21,6 +21,9 @@ This directory contains the complete design documentation for Agent Nexus. All d
 | 11 | [11-agency-agents-integration.md](11-agency-agents-integration.md) | Agency Agents content-pack integration, expert profiles, dynamic Composite Agent orchestration | Proposal |
 | A | [appendix.md](appendix.md) | OrchestrationDSL TOML schemas, Agent type comparison, model tier config, reference projects | Implemented |
 | T | [testing.md](testing.md) | Test suite overview, coverage, conventions, run instructions | Live document |
+|   | [configuration.md](configuration.md) | Full config schema, environment variables, priority chain, migration | Live document |
+|   | [cli.md](cli.md) | Complete CLI reference — 17 commands with usage examples | Live document |
+|   | [quick-start.md](quick-start.md) | 5-minute setup guide: install → init → config → run | Live document |
 
 ## Architecture at a Glance
 
@@ -40,9 +43,12 @@ This directory contains the complete design documentation for Agent Nexus. All d
 
 For new contributors, the recommended reading order is:
 
-1. **01-overview.md** — Understand what Agent Nexus is and why
-2. **05-agent-system.md** — Learn the Agent type system
-3. **02-clawteam-integration.md** — Understand orchestration internals
+1. **quick-start.md** — 5-minute setup and first agent run
+2. **01-overview.md** — Understand what Agent Nexus is and why
+3. **configuration.md** — How config works (env vars, providers, priority chain)
+4. **cli.md** — All CLI commands and how to use them
+5. **05-agent-system.md** — Learn the Agent type system
+6. **02-clawteam-integration.md** — Understand orchestration internals
 4. **03-python-runtime.md** — How Agents execute
 5. **06-mcp-communication.md** — How Agents communicate externally
 6. **04-self-evolution.md** — How the system evolves itself

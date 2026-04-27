@@ -46,60 +46,7 @@ User Task → Capability Inference → Specialist Selection → DAG Build → Co
 
 ### Quick Start
 
-**1. Configure LLM API**
-
-Edit `~/.agent-nexus/config.toml`:
-
-```toml
-[models]
-default = "api:MiniMax-M2.7-highspeed"
-
-[models.stages]
-planning = "api:MiniMax-M2.7-highspeed"
-integration = "api:MiniMax-M2.7-highspeed"
-qa = "api:MiniMax-M2.7-highspeed"
-
-[models.providers.api]
-base_url = "http://your-api-endpoint:3006"
-api_key_env = "API_API_KEY"
-api = "anthropic-messages"   # or "openai-compatible"
-```
-
-Set API key in `~/.agent-nexus/.env`:
-
-```
-API_API_KEY="sk-your-api-key"
-```
-
-**2. Prepare expert repository**
-
-```bash
-# agency-agents as vendor dependency
-git submodule add https://github.com/nicepkg/agency-agents.git vendor/agency-agents
-```
-
-**3. Run expert orchestration**
-
-```bash
-# List available experts
-uv run python -m agent_nexus.platform.agency.cli list-experts \
-  --vendor-path vendor/agency-agents \
-  --allowlist config/agency-agents.allowlist.yaml
-
-# Plan DAG (no LLM execution)
-uv run python -m agent_nexus.platform.agency.cli plan-composition \
-  --task "Review payment system security and architecture design" \
-  --vendor-path vendor/agency-agents \
-  --allowlist config/agency-agents.allowlist.yaml
-
-# Full execution: orchestrate → LLM calls → integration → QA
-uv run python -m agent_nexus.platform.agency.cli run-composition \
-  --task "Review payment system security and architecture design" \
-  --vendor-path vendor/agency-agents \
-  --allowlist config/agency-agents.allowlist.yaml \
-  --use-llm --temperature 0.7 \
-  --max-parallel 3
-```
+See the [Quick Start Guide](docs/quick-start.md) for a 5-minute setup walkthrough. For full configuration options, see [Configuration Reference](docs/configuration.md).
 
 ### Pipeline Stages
 
@@ -117,14 +64,7 @@ uv run python -m agent_nexus.platform.agency.cli run-composition \
 
 ### CLI Commands
 
-| Command | Description |
-|---------|-------------|
-| `import-experts` | Import expert profiles (supports dry-run) |
-| `list-experts` | Preview available experts |
-| `plan-composition` | Plan orchestration DAG (no execution) |
-| `run-composition` | Full orchestration execution (LLM + concurrent + QA) |
-| `check-profiles` | Validate imported profiles |
-| `validate-output` | Validate expert output compliance |
+See [CLI Reference](docs/cli.md) for the complete command documentation (17 commands).
 
 ## Installation
 
