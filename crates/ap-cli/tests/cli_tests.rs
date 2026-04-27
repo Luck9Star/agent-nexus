@@ -41,11 +41,12 @@ fn init_command_creates_valid_config() {
         .assert()
         .success();
 
-    // Verify config.toml is valid TOML
+    // Verify config.toml is valid TOML with sources included
     let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
-    let _: toml::Value = toml::from_str(&content).expect("config.toml should be valid TOML");
+    let config: toml::Value = toml::from_str(&content).expect("config.toml should be valid TOML");
+    assert!(config.get("sources").is_some(), "config.toml should contain [sources]");
 
-    // Verify sources.yaml is valid YAML
+    // Verify sources.yaml is valid YAML (backward compat)
     let content = std::fs::read_to_string(dir.path().join("sources.yaml")).unwrap();
     let _: serde_yml::Value =
         serde_yml::from_str(&content).expect("sources.yaml should be valid YAML");

@@ -53,17 +53,23 @@ impl From<std::io::Error> for InitError {
     }
 }
 
-/// Default config.toml content.
-fn default_config_toml() -> String {
-    let config = ap_core::config::default_config();
-    toml::to_string_pretty(&config).unwrap_or_else(|_| {
-        "[runtime]\npython_path = \"python3\"\nuv_path = \"uv\"\n\n[models]\ndefault = \"openai:gpt-4o\"\n".to_string()
-    })
-}
-
 /// Default sources.yaml content with official source.
 fn default_sources_yaml() -> String {
     "sources:\n  - name: official\n    type: git\n    url: https://github.com/anthropics/agent-nexus-packages.git\n    branch: main\n".to_string()
+}
+
+/// Default config.toml content with official source included.
+fn default_config_toml() -> String {
+    let mut config = ap_core::config::default_config();
+    config.sources = vec![ap_core::models::config::SourceEntry {
+        name: "official".to_string(),
+        r#type: "git".to_string(),
+        url: "https://github.com/anthropics/agent-nexus-packages.git".to_string(),
+        branch: "main".to_string(),
+    }];
+    toml::to_string_pretty(&config).unwrap_or_else(|_| {
+        "[runtime]\npython_path = \"python3\"\nuv_path = \"uv\"\n\n[models]\ndefault = \"openai:gpt-4o\"\n".to_string()
+    })
 }
 
 /// Validate that the init directory is safe to write into.
@@ -125,7 +131,7 @@ fn validate_init_dir(dir: &str) -> Result<PathBuf, InitError> {
     Ok(resolved)
 }
 
-/// Run `init` command: create config.toml and sources.yaml in the target directory.
+/// Run `init` command: create config.toml (with sources) and sources.yaml in the target directory.
 pub fn run(dir: &str, output: &OutputFormatter) -> Result<()> {
     let target = validate_init_dir(dir).map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -143,6 +149,8 @@ pub fn run(dir: &str, output: &OutputFormatter) -> Result<()> {
         output.success(&format!("Created config.toml in {dir}"));
     }
 
+    // Write sources.yaml for backward compatibility with Rust sources command.
+    // sources are also included in config.toml [sources].
     if sources_path.exists() {
         output.info("sources.yaml already exists, skipping");
     } else {
@@ -190,10 +198,11 @@ mod tests {
         assert!(dir.path().join("config.toml").exists());
         assert!(dir.path().join("sources.yaml").exists());
 
-        // Verify config.toml is valid TOML
+        // Verify config.toml is valid TOML with sources included
         let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
         let config: toml::Value = toml::from_str(&content).unwrap();
         assert!(config.get("runtime").is_some() || config.get("models").is_some());
+        assert!(config.get("sources").is_some(), "config.toml should contain [sources]");
     }
 
     #[test]
