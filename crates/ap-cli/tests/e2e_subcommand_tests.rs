@@ -15,10 +15,9 @@ fn tmpdir_with_config() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("config.toml"),
-        "[models]\ndefault = \"openai:gpt-4o\"\n\n[models.providers]\nopenai_base = \"https://api.openai.com/v1\"\n",
+        "[models]\ndefault = \"openai:gpt-4o\"\n\n[models.providers]\nopenai_base = \"https://api.openai.com/v1\"\n\n[[sources]]\nname = \"official\"\nurl = \"https://github.com/example/agents\"\n",
     )
     .unwrap();
-    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
     dir
 }
 

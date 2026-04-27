@@ -146,10 +146,10 @@ fn sources_remove() {
 #[test]
 fn check_command() {
     let dir = tempfile::tempdir().unwrap();
-    // Create valid config.toml
+    // Create valid config.toml with a source entry
     std::fs::write(
         dir.path().join("config.toml"),
-        "[models]\ndefault = \"openai:gpt-4o\"\n",
+        "[models]\ndefault = \"openai:gpt-4o\"\n\n[[sources]]\nname = \"official\"\nurl = \"https://github.com/example/agents\"\n",
     )
     .unwrap();
 

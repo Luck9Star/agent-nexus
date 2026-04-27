@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use ap_fetcher::sources::SourceManager;
 
 use crate::output::OutputFormatter;
 
@@ -141,6 +142,27 @@ pub fn run(dir: &str, output: &OutputFormatter) -> Result<()> {
     } else {
         std::fs::write(&config_path, default_config_toml())?;
         output.success(&format!("Created config.toml in {dir}"));
+    }
+
+    // Migrate sources.yaml → config.toml if needed.
+    // Users who ran `init` before this change have sources.yaml but no [[sources]] in config.toml.
+    let sources_yaml = target.join("sources.yaml");
+    if sources_yaml.exists() && config_path.exists() {
+        let config_toml_mgr = SourceManager::new_toml(config_path.clone());
+        let has_sources = !config_toml_mgr.list().is_empty();
+        if !has_sources {
+            let yaml_mgr = SourceManager::new(sources_yaml);
+            match yaml_mgr.list() {
+                yaml_sources if !yaml_sources.is_empty() => {
+                    if let Err(e) = config_toml_mgr.save(&yaml_sources) {
+                        output.info(&format!("Warning: failed to migrate sources from sources.yaml: {e}"));
+                    } else {
+                        output.info("Migrated sources from sources.yaml to config.toml (legacy file preserved)");
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     // API key detection

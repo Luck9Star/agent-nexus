@@ -25,7 +25,7 @@ pub enum InstallationStatus {
     Failed,
 }
 
-/// A package source entry from sources.yaml.
+/// A package source entry from config.toml [[sources]] or legacy sources.yaml.
 ///
 /// Python source: models/distribution.py:33-57
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

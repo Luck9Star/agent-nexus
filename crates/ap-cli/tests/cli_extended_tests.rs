@@ -340,10 +340,9 @@ fn check_json_output() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("config.toml"),
-        "[models]\ndefault = \"openai:gpt-4o\"\n",
+        "[models]\ndefault = \"openai:gpt-4o\"\n\n[[sources]]\nname = \"official\"\nurl = \"https://github.com/example/agents\"\n",
     )
     .unwrap();
-    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     let output = Command::cargo_bin("agent-nexus")
         .unwrap()

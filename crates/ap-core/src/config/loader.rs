@@ -89,6 +89,11 @@ impl ConfigLoader {
     /// Load an optional project-level `agent-nexus.toml` from `project_dir`.
     ///
     /// Returns `None` when the file is missing or unreadable.
+    ///
+    /// TODO: Wire into CLI commands that load config (install, run, status, env).
+    ///       Each command uses `find_project_root` + `root.join("config.toml")`;
+    ///       replacing that with `load_merged_config(global_path, project_dir)`
+    ///       would pick up project-level overrides automatically.
     pub fn load_project_config(project_dir: &Path) -> Option<PlatformConfig> {
         let project_config_path = project_dir.join("agent-nexus.toml");
         if !project_config_path.exists() {
@@ -107,6 +112,11 @@ impl ConfigLoader {
     ///
     /// Project config values win where non-empty. Priority:
     /// env vars > project `agent-nexus.toml` > global `config.toml` > defaults.
+    ///
+    /// TODO: Wire into CLI commands that load config (install, run, status, env).
+    ///       Each command uses `find_project_root` + `root.join("config.toml")`;
+    ///       replacing that with `load_merged_config(global_path, project_dir)`
+    ///       would pick up project-level overrides automatically.
     pub fn load_merged_config(global_path: &Path, project_dir: &Path) -> PlatformConfig {
         let global = Self::load_or_default(global_path);
         let Some(project) = Self::load_project_config(project_dir) else {
@@ -126,15 +136,27 @@ impl ConfigLoader {
         let mut merged_stages = global.models.stages.clone();
         merged_stages.extend(project.models.stages);
 
+        // Merge sources: start with global, add project sources that don't exist yet
+        let mut merged_sources = global.sources.clone();
+        for ps in &project.sources {
+            if let Some(existing) = merged_sources.iter_mut().find(|s| s.name == ps.name) {
+                // Project overrides global source with same name
+                *existing = ps.clone();
+            } else {
+                merged_sources.push(ps.clone());
+            }
+        }
+
         PlatformConfig {
             schema_version: global.schema_version.clone(),
+            // Runtime config is global-only (python_path/uv_path don't vary per project)
             runtime: global.runtime.clone(),
             models: crate::models::config::ModelConfig {
                 default: merged_default,
                 providers: merged_providers,
                 stages: merged_stages,
             },
-            sources: global.sources.clone(),
+            sources: merged_sources,
         }
     }
 }

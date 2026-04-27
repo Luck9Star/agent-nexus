@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use ap_core::models::distribution::SourceEntry;
 
@@ -144,7 +144,7 @@ impl SourceManager {
         for item in sources {
             let item_str = toml::to_string(&item).unwrap_or_default();
             let entry: SourceEntry = toml::from_str(&item_str).unwrap_or_else(|e| {
-                debug!("Skipping invalid source entry: {e}");
+                warn!("Skipping invalid source entry: {e}");
                 SourceEntry {
                     name: String::new(),
                     source_type: "git".to_string(),
@@ -174,6 +174,7 @@ impl SourceManager {
         }
     }
 
+    /// Save sources to sources.yaml. Caller must hold the file lock if concurrent access is possible.
     fn save_to_yaml(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
         let wrapped = SourcesYaml {
             sources: sources.to_vec(),
@@ -182,6 +183,7 @@ impl SourceManager {
         atomic_write(&self.path, &yaml)
     }
 
+    /// Save sources to config.toml. Caller must hold the file lock if concurrent access is possible.
     fn save_to_toml(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
         // Read existing config.toml, update [sources], write back
         let mut config: toml::Value = if self.path.exists() {
@@ -215,6 +217,9 @@ impl SourceManager {
 
     /// Add or update a source entry (upsert semantics).
     ///
+    /// Lock is acquired here; `save_to_toml`/`save_to_yaml` is called directly
+    /// (not via `save()`) to avoid double-locking.
+    ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn add(&self, entry: SourceEntry) -> Result<(), SourceError> {
@@ -232,6 +237,9 @@ impl SourceManager {
     }
 
     /// Remove a source by name.
+    ///
+    /// Lock is acquired here; `save_to_toml`/`save_to_yaml` is called directly
+    /// (not via `save()`) to avoid double-locking.
     ///
     /// # Errors
     /// Returns an error if the source is not found.

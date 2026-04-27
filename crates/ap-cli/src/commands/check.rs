@@ -1,6 +1,6 @@
 //! `agent-nexus check` -- verify environment health.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::Result;
@@ -24,21 +24,28 @@ pub fn run(output: &OutputFormatter) -> Result<()> {
         output.error("[FAIL] python3 >= 3.11: not found or version < 3.11");
     }
 
+    // Parse config.toml once (used by checks 2 and 3)
+    let config_value = {
+        let path = root.join("config.toml");
+        if path.exists() {
+            std::fs::read_to_string(&path).ok().and_then(|c| toml::from_str(&c).ok())
+        } else {
+            None
+        }
+    };
+
     // Check 2: config.toml valid
-    match check_config(&root) {
-        Ok(()) => {
-            output.success("[PASS] config.toml: valid");
-            passed += 1;
-        }
-        Err(e) => {
-            output.error(&format!("[FAIL] config.toml: {e}"));
-        }
+    if config_value.is_some() {
+        output.success("[PASS] config.toml: valid");
+        passed += 1;
+    } else {
+        output.error("[FAIL] config.toml: not found or invalid TOML (run `agent-nexus init` to create)");
     }
 
     // Check 3: sources in config.toml
-    match check_sources(&root) {
+    match check_sources(config_value.as_ref()) {
         Ok(()) => {
-            output.success("[PASS] config.toml [sources]: readable");
+            output.success("[PASS] config.toml [sources]: has valid entries");
             passed += 1;
         }
         Err(e) => {
@@ -110,26 +117,27 @@ fn parse_python_version(s: &str) -> Option<(u32, u32)> {
     Some((major, minor))
 }
 
-fn check_config(root: &Path) -> Result<()> {
-    let path = root.join("config.toml");
-    if !path.exists() {
-        return Err(anyhow::anyhow!("not found (run `agent-nexus init` to create)"));
-    }
-    let content = std::fs::read_to_string(path)?;
-    let _config: toml::Value = toml::from_str(&content)?;
-    Ok(())
-}
+fn check_sources(config: Option<&toml::Value>) -> Result<()> {
+    let config = match config {
+        Some(c) => c,
+        None => return Err(anyhow::anyhow!("config.toml not found or invalid (run `agent-nexus init` to create)")),
+    };
 
-fn check_sources(root: &Path) -> Result<()> {
-    let path = root.join("config.toml");
-    if !path.exists() {
-        return Err(anyhow::anyhow!("config.toml not found (run `agent-nexus init` to create)"));
+    match config.get("sources").and_then(|s| s.as_array()) {
+        Some(sources) if !sources.is_empty() => {
+            let valid_count = sources.iter().filter(|s| {
+                s.get("name").and_then(|n| n.as_str()).is_some_and(|n| !n.is_empty())
+                    && s.get("url").and_then(|u| u.as_str()).is_some_and(|u| !u.is_empty())
+            }).count();
+            if valid_count > 0 {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!("[[sources]] exists but no entry has both 'name' and 'url'"))
+            }
+        }
+        Some(_) => Err(anyhow::anyhow!("[[sources]] is empty — add a source with `agent-nexus sources add`")),
+        None => Err(anyhow::anyhow!("no [[sources]] section in config.toml (run `agent-nexus init` to add defaults)")),
     }
-    let content = std::fs::read_to_string(path)?;
-    let config: toml::Value = toml::from_str(&content)?;
-    // sources section is optional — just verify config.toml is readable
-    let _ = config.get("sources");
-    Ok(())
 }
 
 /// Check that a command exists on PATH.
