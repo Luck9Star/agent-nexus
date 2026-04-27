@@ -95,7 +95,7 @@ def _init_managers(
     loader.ensure_config_dir()
 
     lockfile = LockfileManager(_config_dir / "lockfile.json")
-    sources = SourceManager(_config_dir / "sources.yaml")
+    sources = SourceManager.from_loader(loader)
 
     return loader, lockfile, sources, _config_dir
 
@@ -190,6 +190,26 @@ class ConfigMigrator:
                     "anthropic": {
                         "api_key_env": "ANTHROPIC_API_KEY",
                         "api": "anthropic-messages",
+                    },
+                    "deepseek": {
+                        "base_url": "https://api.deepseek.com/v1",
+                        "api_key_env": "DEEPSEEK_API_KEY",
+                        "api": "openai-compatible",
+                    },
+                    "minimax": {
+                        "base_url": "https://api.minimax.chat/v1",
+                        "api_key_env": "MINIMAX_API_KEY",
+                        "api": "openai-compatible",
+                    },
+                    "qwen": {
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "api_key_env": "DASHSCOPE_API_KEY",
+                        "api": "openai-compatible",
+                    },
+                    "ollama": {
+                        "base_url": "http://localhost:11434/v1",
+                        "api_key_env": "",
+                        "api": "ollama",
                     },
                 },
             },

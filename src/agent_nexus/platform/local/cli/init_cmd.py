@@ -152,7 +152,6 @@ def init(
     Use --wizard for interactive setup with API key configuration.
     """
     from agent_nexus.platform.config.loader import ConfigLoader
-    from agent_nexus.platform.local.sources import SourceManager
 
     config_dir = _get_config_dir()
 
@@ -171,20 +170,20 @@ def init(
         if ConfigMigrator.merge_if_needed(config_path):
             typer.echo("Config migrated to latest schema version.")
 
-    # Step 3: Register official source
-    sources = SourceManager(config_dir / "sources.yaml")
-    official = sources.get_official_source()
-    if official is None:
-        from agent_nexus.models.distribution import SourceEntry
-
-        sources.add_source(
-            SourceEntry(
-                name="official",
-                type="git",
-                url="https://github.com/anthropics/agent-nexus-packages.git",
-                branch="main",
-            )
-        )
+    # Step 3: Register official source in config.toml [sources]
+    config = loader.load_config()
+    has_official = any(s.name == "official" for s in config.sources)
+    if not has_official:
+        import toml
+        raw = toml.loads(config_path.read_text(encoding="utf-8"))
+        raw.setdefault("sources", [])
+        raw["sources"].append({
+            "name": "official",
+            "type": "git",
+            "url": "https://github.com/anthropics/agent-nexus-packages.git",
+            "branch": "main",
+        })
+        config_path.write_text(toml.dumps(raw), encoding="utf-8")
         typer.echo("Registered official source.")
     else:
         typer.echo("Official source already registered.")
@@ -384,4 +383,23 @@ api = "openai-compatible"
 [models.providers.anthropic]
 api_key_env = "ANTHROPIC_API_KEY"
 api = "anthropic-messages"
+
+[models.providers.deepseek]
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+api = "openai-compatible"
+
+[models.providers.minimax]
+base_url = "https://api.minimax.chat/v1"
+api_key_env = "MINIMAX_API_KEY"
+api = "openai-compatible"
+
+[models.providers.qwen]
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key_env = "DASHSCOPE_API_KEY"
+api = "openai-compatible"
+
+[models.providers.ollama]
+base_url = "http://localhost:11434/v1"
+api = "ollama"
 """

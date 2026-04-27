@@ -1,8 +1,8 @@
-"""SourceManager: manage sources.yaml and resolve agent locations.
+"""SourceManager: manage package sources via config.toml [sources].
 
 Three source types are supported:
 - **official**: built-in monorepo with ``index.yaml`` + ``packages/`` directory
-- **private**: user/team repos registered in ``sources.yaml``
+- **private**: user/team repos registered in config.toml ``[sources]``
 - **direct**: ephemeral ``--git-url`` CLI parameter
 
 Sources are searched by priority (official first, then by order in the file).
@@ -14,11 +14,14 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import yaml
 
 from agent_nexus.models.distribution import IndexEntry, SourceEntry
+
+if TYPE_CHECKING:
+    from agent_nexus.platform.config.loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -32,28 +35,45 @@ _OFFICIAL_SOURCE = SourceEntry(
 
 
 class SourceManager:
-    """Manage package sources (``sources.yaml``) and resolve agent locations.
+    """Manage package sources and resolve agent locations.
 
-    Parameters
-    ----------
-    sources_path:
-        Absolute path to ``sources.yaml`` (typically
-        ``~/.agent-nexus/sources.yaml``).
+    Two construction modes:
+
+    - **Path mode** (deprecated): ``SourceManager(sources_path)`` —
+      reads/writes standalone ``sources.yaml``.
+    - **Loader mode** (recommended): ``SourceManager.from_loader(loader)`` —
+      reads/writes ``[sources]`` section in ``config.toml``.
     """
 
     def __init__(self, sources_path: Path) -> None:
         self._path = sources_path
+        self._loader: ConfigLoader | None = None
         self._sources: list[SourceEntry] = []
         self._loaded = False
         # mtime-based cache to avoid re-parsing unchanged files
         self._cache_mtime: float = 0.0
+
+    @classmethod
+    def from_loader(cls, loader: ConfigLoader) -> SourceManager:
+        """Create a SourceManager backed by ``[sources]`` in config.toml."""
+        mgr = cls.__new__(cls)
+        mgr._path = loader.config_dir / "config.toml"
+        mgr._loader = loader
+        mgr._sources = []
+        mgr._loaded = False
+        mgr._cache_mtime = 0.0
+        return mgr
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def _ensure_loaded(self) -> None:
-        """Lazily load sources.yaml on first use, or when file mtime changes."""
+        """Lazily load sources on first use, or when file mtime changes."""
+        if self._loader is not None:
+            self._load_from_config()
+            return
+
         try:
             current_mtime = os.path.getmtime(self._path)
         except OSError:
@@ -69,7 +89,6 @@ class SourceManager:
     def add_source(self, entry: SourceEntry) -> None:
         """Add or update a source entry and save."""
         self._ensure_loaded()
-        # Remove existing entry with same name
         self._sources = [s for s in self._sources if s.name != entry.name]
         self._sources.append(entry)
         self.save()
@@ -95,54 +114,16 @@ class SourceManager:
         return sorted(self._sources, key=self._source_priority)
 
     def save(self) -> None:
-        """Persist sources to ``sources.yaml`` atomically.
+        """Persist sources atomically.
 
-        Writes to a temporary file first, then uses ``os.replace`` to
-        atomically swap it into place.  This avoids corruption if the
-        process crashes mid-write.
+        In loader mode, writes to config.toml ``[sources]``.
+        In path mode, writes to sources.yaml.
         """
         self._ensure_loaded()
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-
-        payload: dict[str, Any] = {
-            "sources": [
-                {
-                    "name": s.name,
-                    "type": s.type,
-                    "url": s.url,
-                    "branch": s.branch,
-                }
-                for s in self._sources
-            ],
-        }
-
-        content = yaml.dump(payload, default_flow_style=False, allow_unicode=True)
-
-        # Atomic write: tempfile in same directory so os.replace is atomic.
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(self._path.parent),
-            prefix=".sources-",
-            suffix=".yaml.tmp",
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, str(self._path))
-        except BaseException:
-            # Clean up the temp file on any failure.
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-        # Update cache mtime so _ensure_loaded() sees the file as current
-        try:
-            self._cache_mtime = os.path.getmtime(self._path)
-        except OSError:
-            self._cache_mtime = 0.0
-        logger.debug("Sources saved to %s", self._path)
+        if self._loader is not None:
+            self._save_to_config()
+            return
+        self._save_to_yaml()
 
     def search_agents(self, query: str) -> list[tuple[SourceEntry, IndexEntry]]:
         """Search all source indexes for agents matching *query*.
@@ -197,7 +178,78 @@ class SourceManager:
         return None
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # Internal: config.toml mode
+    # ------------------------------------------------------------------
+
+    def _load_from_config(self) -> None:
+        """Load sources from config.toml ``[sources]``."""
+        assert self._loader is not None
+        try:
+            current_mtime = os.path.getmtime(self._path)
+        except OSError:
+            current_mtime = 0.0
+
+        if self._loaded and current_mtime == self._cache_mtime:
+            return
+
+        config = self._loader.load_config()
+        self._sources = list(config.sources)
+        self._loaded = True
+        self._cache_mtime = current_mtime
+
+    def _save_to_config(self) -> None:
+        """Write sources to config.toml ``[sources]`` atomically."""
+        import toml
+
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            raw = toml.loads(self._path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, toml.TomlDecodeError):
+            raw = {}
+
+        raw["sources"] = [
+            {
+                "name": s.name,
+                "type": s.type,
+                "url": s.url,
+                "branch": s.branch,
+            }
+            for s in self._sources
+        ]
+
+        content = toml.dumps(raw)
+
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(self._path.parent),
+            prefix=".config-",
+            suffix=".toml.tmp",
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, str(self._path))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+        # Invalidate the loader's config cache so it picks up the changes
+        if self._loader is not None:
+            self._loader._config_cache = None
+
+        try:
+            self._cache_mtime = os.path.getmtime(self._path)
+        except OSError:
+            self._cache_mtime = 0.0
+        logger.debug("Sources saved to %s [sources]", self._path)
+
+    # ------------------------------------------------------------------
+    # Internal: sources.yaml mode (backward compat)
     # ------------------------------------------------------------------
 
     def _load(self) -> None:
@@ -244,14 +296,57 @@ class SourceManager:
             except Exception as exc:
                 logger.warning("Skipping invalid source entry %s: %s", item, exc)
 
-        # If the YAML list was non-empty but all entries failed validation,
-        # the file is likely corrupt — fall back to defaults.
-        # An explicitly empty list (sources: []) is preserved as-is.
         if sources_list and not entries:
             logger.warning("All source entries invalid, using defaults")
             self._sources = [_OFFICIAL_SOURCE]
         else:
             self._sources = entries
+
+    def _save_to_yaml(self) -> None:
+        """Persist sources to ``sources.yaml`` atomically."""
+        self._ensure_loaded()
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+
+        payload: dict[str, Any] = {
+            "sources": [
+                {
+                    "name": s.name,
+                    "type": s.type,
+                    "url": s.url,
+                    "branch": s.branch,
+                }
+                for s in self._sources
+            ],
+        }
+
+        content = yaml.dump(payload, default_flow_style=False, allow_unicode=True)
+
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(self._path.parent),
+            prefix=".sources-",
+            suffix=".yaml.tmp",
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, str(self._path))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+        try:
+            self._cache_mtime = os.path.getmtime(self._path)
+        except OSError:
+            self._cache_mtime = 0.0
+        logger.debug("Sources saved to %s", self._path)
+
+    # ------------------------------------------------------------------
+    # Internal: index loading
+    # ------------------------------------------------------------------
 
     def _get_cache_path(self, source: SourceEntry) -> Path:
         """Compute cache path matching GitInstaller._get_cache_path."""
