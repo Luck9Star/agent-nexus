@@ -11,7 +11,7 @@ use assert_cmd::Command;
 #[test]
 fn sources_add_with_branch() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     // Add a source with --branch develop
     Command::cargo_bin("agent-nexus")
@@ -51,7 +51,7 @@ fn sources_add_with_branch() {
 #[test]
 fn sources_add_duplicate_upserts() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     // Add source first time
     Command::cargo_bin("agent-nexus")
@@ -101,7 +101,7 @@ fn sources_add_duplicate_upserts() {
 #[test]
 fn sources_remove_nonexistent() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     // Remove a source that doesn't exist — should fail
     Command::cargo_bin("agent-nexus")
@@ -116,7 +116,7 @@ fn sources_remove_nonexistent() {
 #[test]
 fn sources_list_json_output() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     // Add a source so we have data
     Command::cargo_bin("agent-nexus")
@@ -151,7 +151,7 @@ fn sources_list_json_output() {
 #[test]
 fn sources_add_empty_url_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     // Add a source with empty URL — validation should reject it
     Command::cargo_bin("agent-nexus")
@@ -325,7 +325,7 @@ fn create_agent_invalid_name() {
 #[test]
 fn check_with_missing_config() {
     let dir = tempfile::tempdir().unwrap();
-    // No config.toml, no sources.yaml — check should fail
+    // No config.toml — check should fail
 
     Command::cargo_bin("agent-nexus")
         .unwrap()
@@ -343,7 +343,7 @@ fn check_json_output() {
         "[models]\ndefault = \"openai:gpt-4o\"\n",
     )
     .unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     let output = Command::cargo_bin("agent-nexus")
         .unwrap()
@@ -499,7 +499,7 @@ fn create_agent_very_long_name() {
 #[test]
 fn sources_remove_last_source() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     // Add a single source
     Command::cargo_bin("agent-nexus")

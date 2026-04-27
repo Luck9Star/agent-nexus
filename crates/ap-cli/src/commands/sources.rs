@@ -9,15 +9,15 @@ use ap_fetcher::sources::SourceManager;
 use crate::commands;
 use crate::output::OutputFormatter;
 
-fn sources_yaml_path() -> std::path::PathBuf {
+fn config_toml_path() -> std::path::PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    commands::find_project_root(&cwd).join("sources.yaml")
+    commands::find_project_root(&cwd).join("config.toml")
 }
 
 /// Run `sources list` command.
 #[allow(clippy::unnecessary_wraps)]
 pub fn run_list(output: &OutputFormatter) -> Result<()> {
-    let mgr = SourceManager::new(sources_yaml_path());
+    let mgr = SourceManager::new_toml(config_toml_path());
     let sources = mgr.list();
 
     if output.is_json() {
@@ -48,7 +48,7 @@ pub fn run_add(name: &str, url: &str, source_type: Option<&str>, branch: Option<
         .validate()
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    let mgr = SourceManager::new(sources_yaml_path());
+    let mgr = SourceManager::new_toml(config_toml_path());
     mgr.add(entry)?;
 
     output.success(&format!("Source '{name}' added."));
@@ -57,7 +57,7 @@ pub fn run_add(name: &str, url: &str, source_type: Option<&str>, branch: Option<
 
 /// Run `sources remove <name>` command.
 pub fn run_remove(name: &str, output: &OutputFormatter) -> Result<()> {
-    let mgr = SourceManager::new(sources_yaml_path());
+    let mgr = SourceManager::new_toml(config_toml_path());
 
     let sources = mgr.list();
     if !sources.iter().any(|s| s.name == name) {
@@ -75,26 +75,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn list_empty_sources() {
+    fn list_empty_sources_from_toml() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sources.yaml");
-        std::fs::write(&path, "sources: []\n").unwrap();
+        let config_path = dir.path().join("config.toml");
+        std::fs::write(&config_path, "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
         let root = commands::find_project_root(dir.path());
         assert_eq!(root, dir.path());
 
-        let mgr = SourceManager::new(root.join("sources.yaml"));
+        let mgr = SourceManager::new_toml(root.join("config.toml"));
         let sources = mgr.list();
         assert!(sources.is_empty());
     }
 
     #[test]
-    fn add_and_remove_source() {
+    fn add_and_remove_source_from_toml() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sources.yaml");
-        std::fs::write(&path, "sources: []\n").unwrap();
+        let config_path = dir.path().join("config.toml");
+        std::fs::write(&config_path, "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
-        let mgr = SourceManager::new(path);
+        let mgr = SourceManager::new_toml(config_path);
 
         let entry = SourceEntry {
             name: "test".to_string(),

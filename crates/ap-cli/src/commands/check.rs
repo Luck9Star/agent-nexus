@@ -9,7 +9,7 @@ use crate::output::OutputFormatter;
 
 /// Run `check` command.
 ///
-/// Checks 7 items: python3 >= 3.11, config.toml, sources.yaml, git, uv, API key, connectivity.
+/// Checks 7 items: python3 >= 3.11, config.toml, sources in config.toml, git, uv, API key, connectivity.
 /// Prints [PASS]/[FAIL] status for each check. Returns error if any check fails.
 pub fn run(output: &OutputFormatter) -> Result<()> {
     let mut passed = 0usize;
@@ -35,14 +35,14 @@ pub fn run(output: &OutputFormatter) -> Result<()> {
         }
     }
 
-    // Check 3: sources.yaml readable
+    // Check 3: sources in config.toml
     match check_sources(&root) {
         Ok(()) => {
-            output.success("[PASS] sources.yaml: readable");
+            output.success("[PASS] config.toml [sources]: readable");
             passed += 1;
         }
         Err(e) => {
-            output.error(&format!("[FAIL] sources.yaml: {e}"));
+            output.error(&format!("[FAIL] sources: {e}"));
         }
     }
 
@@ -121,12 +121,14 @@ fn check_config(root: &Path) -> Result<()> {
 }
 
 fn check_sources(root: &Path) -> Result<()> {
-    let path = root.join("sources.yaml");
+    let path = root.join("config.toml");
     if !path.exists() {
-        return Err(anyhow::anyhow!("not found (run `agent-nexus init` to create)"));
+        return Err(anyhow::anyhow!("config.toml not found (run `agent-nexus init` to create)"));
     }
     let content = std::fs::read_to_string(path)?;
-    let _sources: serde_yml::Value = serde_yml::from_str(&content)?;
+    let config: toml::Value = toml::from_str(&content)?;
+    // sources section is optional — just verify config.toml is readable
+    let _ = config.get("sources");
     Ok(())
 }
 

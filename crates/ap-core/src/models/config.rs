@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::distribution::SourceEntry;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderApiType {
@@ -19,25 +21,6 @@ pub struct ProviderConfig {
     pub api_key_env: String,
     #[serde(default)]
     pub api: ProviderApiType,
-}
-
-/// A source entry for agent package distribution.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SourceEntry {
-    pub name: String,
-    #[serde(default = "default_source_type")]
-    pub r#type: String,
-    #[serde(default)]
-    pub url: String,
-    #[serde(default = "default_branch")]
-    pub branch: String,
-}
-
-fn default_source_type() -> String {
-    "git".to_string()
-}
-fn default_branch() -> String {
-    "main".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

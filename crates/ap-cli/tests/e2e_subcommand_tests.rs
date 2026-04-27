@@ -18,7 +18,7 @@ fn tmpdir_with_config() -> tempfile::TempDir {
         "[models]\ndefault = \"openai:gpt-4o\"\n\n[models.providers]\nopenai_base = \"https://api.openai.com/v1\"\n",
     )
     .unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
     dir
 }
 
@@ -154,7 +154,7 @@ fn runtime_start_nonexistent_agent() {
 fn runtime_start_all_flag() {
     // --all without lockfile should fail gracefully (use temp dir for isolation)
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
     cli()
         .args(["runtime", "start", "--all"])
         .current_dir(dir.path())
@@ -306,7 +306,7 @@ fn info_nonexistent_agent() {
 fn search_query() {
     // search should succeed even with no results
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     cli()
         .args(["search", "test-query"])
@@ -547,7 +547,7 @@ fn doctor_json_output() {
 #[test]
 fn sources_add_with_branch_and_list_json() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     cli()
         .args([
@@ -576,7 +576,7 @@ fn sources_add_with_branch_and_list_json() {
 #[test]
 fn sources_add_without_branch_defaults_main() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     cli()
         .args([
@@ -750,7 +750,7 @@ fn runtime_logs_follow_outputs_initial_content() {
 #[test]
 fn search_json_output_empty_sources() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     let output = cli()
         .args(["--json", "search", "anything"])
@@ -775,8 +775,8 @@ fn search_json_output_empty_sources() {
 fn search_json_output_with_matching_source() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
-        dir.path().join("sources.yaml"),
-        "sources:\n  - name: my-tools\n    url: https://github.com/example/tools\n    branch: main\n",
+        dir.path().join("config.toml"),
+        "[models]\ndefault = \"openai:gpt-4o\"\n\n[[sources]]\nname = \"my-tools\"\ntype = \"git\"\nurl = \"https://github.com/example/tools\"\nbranch = \"main\"\n",
     )
     .unwrap();
 

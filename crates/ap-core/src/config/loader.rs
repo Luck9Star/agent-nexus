@@ -85,6 +85,58 @@ impl ConfigLoader {
             }
         }
     }
+
+    /// Load an optional project-level `agent-nexus.toml` from `project_dir`.
+    ///
+    /// Returns `None` when the file is missing or unreadable.
+    pub fn load_project_config(project_dir: &Path) -> Option<PlatformConfig> {
+        let project_config_path = project_dir.join("agent-nexus.toml");
+        if !project_config_path.exists() {
+            return None;
+        }
+        match Self::load_from_path(&project_config_path) {
+            Ok(config) => Some(config),
+            Err(e) => {
+                tracing::warn!("Failed to load project config from {}: {e}", project_config_path.display());
+                None
+            }
+        }
+    }
+
+    /// Load global config merged with optional project-level overrides.
+    ///
+    /// Project config values win where non-empty. Priority:
+    /// env vars > project `agent-nexus.toml` > global `config.toml` > defaults.
+    pub fn load_merged_config(global_path: &Path, project_dir: &Path) -> PlatformConfig {
+        let global = Self::load_or_default(global_path);
+        let Some(project) = Self::load_project_config(project_dir) else {
+            return global;
+        };
+
+        // Merge: project wins where non-empty
+        let merged_default = if project.models.default.is_empty() {
+            global.models.default.clone()
+        } else {
+            project.models.default.clone()
+        };
+
+        let mut merged_providers = global.models.providers.clone();
+        merged_providers.extend(project.models.providers);
+
+        let mut merged_stages = global.models.stages.clone();
+        merged_stages.extend(project.models.stages);
+
+        PlatformConfig {
+            schema_version: global.schema_version.clone(),
+            runtime: global.runtime.clone(),
+            models: crate::models::config::ModelConfig {
+                default: merged_default,
+                providers: merged_providers,
+                stages: merged_stages,
+            },
+            sources: global.sources.clone(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

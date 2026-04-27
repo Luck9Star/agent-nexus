@@ -30,13 +30,13 @@ pub fn run(
         return run_install_local(agent, version, &root, output);
     }
 
-    // Resolve source URL: explicit --source flag, or look up in sources.yaml
+    // Resolve source URL: explicit --source flag, or look up in config.toml
     let git_url = if let Some(url) = source_url {
         validate_git_url(url)?;
         url.to_string()
     } else {
-        let sources_path = root.join("sources.yaml");
-        let sources = ap_fetcher::sources::SourceManager::new(sources_path).list();
+        let sources_path = root.join("config.toml");
+        let sources = ap_fetcher::sources::SourceManager::new_toml(sources_path).list();
         let source = sources
             .iter()
             .find(|s| s.name == agent)
@@ -56,7 +56,7 @@ pub fn run(
     let installer = GitInstaller::new(install_dir);
 
     // TODO(RS-CLI-005): The branch name "main" is hardcoded here and in do_update_agent.
-    // This should be configurable per-agent via the lockfile or sources.yaml entry.
+    // This should be configurable per-agent via the lockfile or config.toml [[sources]] entry.
     // Currently all installs assume the remote's default branch is "main".
     let installed_path = installer
         .install(&git_url, Some("main"), version)
@@ -347,8 +347,8 @@ pub fn run_search(query: &str, output: &OutputFormatter) -> Result<()> {
         &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
     );
 
-    let sources_path = root.join("sources.yaml");
-    let mgr = ap_fetcher::sources::SourceManager::new(sources_path);
+    let sources_path = root.join("config.toml");
+    let mgr = ap_fetcher::sources::SourceManager::new_toml(sources_path);
     let sources = mgr.list();
 
     let query_lower = query.to_lowercase();

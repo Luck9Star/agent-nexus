@@ -1,4 +1,4 @@
-//! `agent-nexus init` — create config.toml with defaults and sources.yaml.
+//! `agent-nexus init` — create config.toml with defaults.
 
 use std::path::{Path, PathBuf};
 
@@ -53,17 +53,12 @@ impl From<std::io::Error> for InitError {
     }
 }
 
-/// Default sources.yaml content with official source.
-fn default_sources_yaml() -> String {
-    "sources:\n  - name: official\n    type: git\n    url: https://github.com/anthropics/agent-nexus-packages.git\n    branch: main\n".to_string()
-}
-
 /// Default config.toml content with official source included.
 fn default_config_toml() -> String {
     let mut config = ap_core::config::default_config();
-    config.sources = vec![ap_core::models::config::SourceEntry {
+    config.sources = vec![ap_core::models::distribution::SourceEntry {
         name: "official".to_string(),
-        r#type: "git".to_string(),
+        source_type: "git".to_string(),
         url: "https://github.com/anthropics/agent-nexus-packages.git".to_string(),
         branch: "main".to_string(),
     }];
@@ -131,7 +126,7 @@ fn validate_init_dir(dir: &str) -> Result<PathBuf, InitError> {
     Ok(resolved)
 }
 
-/// Run `init` command: create config.toml (with sources) and sources.yaml in the target directory.
+/// Run `init` command: create config.toml (with sources) in the target directory.
 pub fn run(dir: &str, output: &OutputFormatter) -> Result<()> {
     let target = validate_init_dir(dir).map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -140,22 +135,12 @@ pub fn run(dir: &str, output: &OutputFormatter) -> Result<()> {
     }
 
     let config_path = target.join("config.toml");
-    let sources_path = target.join("sources.yaml");
 
     if config_path.exists() {
         output.info("config.toml already exists, skipping");
     } else {
         std::fs::write(&config_path, default_config_toml())?;
         output.success(&format!("Created config.toml in {dir}"));
-    }
-
-    // Write sources.yaml for backward compatibility with Rust sources command.
-    // sources are also included in config.toml [sources].
-    if sources_path.exists() {
-        output.info("sources.yaml already exists, skipping");
-    } else {
-        std::fs::write(&sources_path, default_sources_yaml())?;
-        output.success(&format!("Created sources.yaml in {dir}"));
     }
 
     // API key detection
@@ -196,7 +181,6 @@ mod tests {
         run(path, &output).unwrap();
 
         assert!(dir.path().join("config.toml").exists());
-        assert!(dir.path().join("sources.yaml").exists());
 
         // Verify config.toml is valid TOML with sources included
         let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();

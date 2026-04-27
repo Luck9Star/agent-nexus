@@ -1,4 +1,8 @@
-//! Source manager for `sources.yaml` — manages the list of Git repos providing agents.
+//! Source manager for agent package sources.
+//!
+//! Supports two storage backends:
+//! - **YAML** (`sources.yaml`) — legacy, deprecated
+//! - **TOML** (`config.toml [sources]`) — primary, aligns with Python platform
 
 use std::path::PathBuf;
 
@@ -17,6 +21,10 @@ pub enum SourceError {
     Io(#[from] std::io::Error),
     #[error("YAML parse error: {0}")]
     Yaml(#[from] serde_yml::Error),
+    #[error("TOML parse error: {0}")]
+    TomlDe(#[from] toml::de::Error),
+    #[error("TOML serialize error: {0}")]
+    TomlSer(#[from] toml::ser::Error),
     #[error("source not found: {0}")]
     NotFound(String),
     #[error("validation error: {0}")]
@@ -29,20 +37,39 @@ struct SourcesYaml {
     sources: Vec<SourceEntry>,
 }
 
-/// Manages `sources.yaml` — the list of Git repos that provide agents.
+/// Storage backend for source entries.
+#[derive(Debug, Clone, PartialEq)]
+enum StorageMode {
+    /// Read/write from `config.toml` `[sources]` section.
+    Toml,
+    /// Legacy: read/write from `sources.yaml`.
+    Yaml,
+}
+
+/// Manages agent package sources — supports config.toml and legacy sources.yaml.
 #[derive(Debug)]
 pub struct SourceManager {
     path: PathBuf,
+    mode: StorageMode,
 }
 
 impl SourceManager {
-    /// Create a new source manager pointing to the given `sources.yaml` path.
+    /// Create a new source manager pointing to a `sources.yaml` path (legacy mode).
     #[must_use]
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self { path, mode: StorageMode::Yaml }
     }
 
-    /// Returns the path to the advisory lock file (sibling of the sources file).
+    /// Create a new source manager pointing to a `config.toml` path.
+    ///
+    /// Sources are read from and written to the `[sources]` section of the
+    /// TOML file. Other sections (runtime, models, etc.) are preserved.
+    #[must_use]
+    pub fn new_toml(config_path: PathBuf) -> Self {
+        Self { path: config_path, mode: StorageMode::Toml }
+    }
+
+    /// Returns the path to the advisory lock file (sibling of the storage file).
     fn lock_path(&self) -> PathBuf {
         self.path.with_extension("lock")
     }
@@ -76,92 +103,138 @@ impl SourceManager {
         Ok(entries)
     }
 
-    /// Load sources from file. Returns empty vec if the file doesn't exist.
+    /// Load sources from the configured backend. Returns empty vec if not found.
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn load(&self) -> Result<Vec<SourceEntry>, SourceError> {
+        match self.mode {
+            StorageMode::Toml => self.load_from_toml(),
+            StorageMode::Yaml => self.load_from_yaml(),
+        }
+    }
+
+    fn load_from_yaml(&self) -> Result<Vec<SourceEntry>, SourceError> {
         if !self.path.exists() {
             debug!("Sources file not found, returning empty: {:?}", self.path);
             return Ok(vec![]);
         }
         let contents = std::fs::read_to_string(&self.path)?;
         let entries = Self::parse(&contents)?;
-        // Validate each entry
         for entry in &entries {
-            entry
-                .validate()
-                .map_err(SourceError::Validation)?;
+            entry.validate().map_err(SourceError::Validation)?;
         }
         Ok(entries)
     }
 
-    /// Atomically write sources to the YAML file (write to `.tmp`, then rename).
+    fn load_from_toml(&self) -> Result<Vec<SourceEntry>, SourceError> {
+        if !self.path.exists() {
+            debug!("Config file not found, returning empty: {:?}", self.path);
+            return Ok(vec![]);
+        }
+        let contents = std::fs::read_to_string(&self.path)?;
+        let value: toml::Value = toml::from_str(&contents)?;
+        let sources = value
+            .get("sources")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let mut entries = Vec::new();
+        for item in sources {
+            let item_str = toml::to_string(&item).unwrap_or_default();
+            let entry: SourceEntry = toml::from_str(&item_str).unwrap_or_else(|e| {
+                debug!("Skipping invalid source entry: {e}");
+                SourceEntry {
+                    name: String::new(),
+                    source_type: "git".to_string(),
+                    url: String::new(),
+                    branch: "main".to_string(),
+                }
+            });
+            if entry.name.is_empty() {
+                continue;
+            }
+            entry.validate().map_err(SourceError::Validation)?;
+            entries.push(entry);
+        }
+        Ok(entries)
+    }
+
+    /// Atomically write sources to the configured backend.
     /// Acquires an advisory file lock to prevent TOCTOU races with concurrent add/remove.
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn save(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
         let _lock = FileLock::acquire_exclusive(&self.lock_path())?;
-        self.save_unlocked(sources)
+        match self.mode {
+            StorageMode::Toml => self.save_to_toml(sources),
+            StorageMode::Yaml => self.save_to_yaml(sources),
+        }
     }
 
-    /// Internal: write sources without acquiring the advisory lock.
-    /// Callers like `add()` / `remove()` already hold the lock.
-    fn save_unlocked(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
+    fn save_to_yaml(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
         let wrapped = SourcesYaml {
             sources: sources.to_vec(),
         };
         let yaml = serde_yml::to_string(&wrapped)?;
+        atomic_write(&self.path, &yaml)
+    }
 
-        // Atomic write: write to unique tmp file, then rename.
-        // PID + counter prevents name collision between concurrent processes.
-        static ATOMIC_WRITE_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let count = ATOMIC_WRITE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp_path = self.path.with_extension(format!("yaml.tmp.{}.{}", std::process::id(), count));
-        std::fs::write(&tmp_path, &yaml)?;
-        std::fs::rename(&tmp_path, &self.path)?;
-        debug!("Saved {} sources to {:?}", sources.len(), self.path);
-        Ok(())
+    fn save_to_toml(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
+        // Read existing config.toml, update [sources], write back
+        let mut config: toml::Value = if self.path.exists() {
+            let contents = std::fs::read_to_string(&self.path)?;
+            toml::from_str(&contents).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()))
+        } else {
+            toml::Value::Table(toml::map::Map::new())
+        };
+
+        // Serialize sources as TOML array of inline tables
+        let sources_array: toml::Value = toml::Value::Array(
+            sources.iter().map(|s| {
+                let toml_str = toml::to_string(s).unwrap_or_default();
+                toml::from_str::<toml::Value>(&toml_str).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+            }).collect()
+        );
+
+        if let Some(table) = config.as_table_mut() {
+            table.insert("sources".to_string(), sources_array);
+        }
+
+        let new_content = toml::to_string_pretty(&config)?;
+        atomic_write(&self.path, &new_content)
     }
 
     /// Convenience: load sources, or return empty vec on any error.
-    #[must_use] 
+    #[must_use]
     pub fn list(&self) -> Vec<SourceEntry> {
         self.load().unwrap_or_default()
     }
 
     /// Add or update a source entry (upsert semantics).
     ///
-    /// Validates the entry, loads existing sources, removes any existing entry
-    /// with the same name (matching Python's upsert behavior), appends, and saves.
-    /// Acquires an exclusive advisory file lock for the entire read-modify-write
-    /// cycle to prevent TOCTOU races between concurrent processes.
-    ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn add(&self, entry: SourceEntry) -> Result<(), SourceError> {
-        entry
-            .validate()
-            .map_err(SourceError::Validation)?;
+        entry.validate().map_err(SourceError::Validation)?;
 
         let _lock = FileLock::acquire_exclusive(&self.lock_path())?;
         let mut sources = self.load()?;
-        // Upsert: remove existing entry with same name (matches Python behavior)
         sources.retain(|s| s.name != entry.name);
         debug!("Adding source: {}", entry.name);
         sources.push(entry);
-        self.save_unlocked(&sources)
+        match self.mode {
+            StorageMode::Toml => self.save_to_toml(&sources),
+            StorageMode::Yaml => self.save_to_yaml(&sources),
+        }
     }
 
     /// Remove a source by name.
     ///
-    /// Returns an error if the source is not found.
-    /// Acquires an exclusive advisory file lock for the entire read-modify-write
-    /// cycle to prevent TOCTOU races between concurrent processes.
-    ///
     /// # Errors
-    /// Returns an error if the underlying operation fails.
+    /// Returns an error if the source is not found.
     pub fn remove(&self, name: &str) -> Result<(), SourceError> {
         let _lock = FileLock::acquire_exclusive(&self.lock_path())?;
         let mut sources = self.load()?;
@@ -171,8 +244,23 @@ impl SourceManager {
             return Err(SourceError::NotFound(name.to_string()));
         }
         debug!("Removed source: {}", name);
-        self.save_unlocked(&sources)
+        match self.mode {
+            StorageMode::Toml => self.save_to_toml(&sources),
+            StorageMode::Yaml => self.save_to_yaml(&sources),
+        }
     }
+}
+
+/// Atomic write: write to a unique tmp file, then rename.
+fn atomic_write(path: &PathBuf, content: &str) -> Result<(), SourceError> {
+    static ATOMIC_WRITE_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let count = ATOMIC_WRITE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("tmp");
+    let tmp_path = path.with_extension(format!("{ext}.tmp.{}.{}", std::process::id(), count));
+    std::fs::write(&tmp_path, content)?;
+    std::fs::rename(&tmp_path, path)?;
+    debug!("Atomic write to {:?}", path);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -187,6 +275,8 @@ mod tests {
             branch: "main".to_string(),
         }
     }
+
+    // --- YAML mode tests (legacy) ---
 
     #[test]
     fn parse_wrapped_format() {
@@ -227,7 +317,7 @@ sources:
     }
 
     #[test]
-    fn load_missing_file_returns_empty() {
+    fn yaml_load_missing_file_returns_empty() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sources.yaml");
         let mgr = SourceManager::new(path);
@@ -236,7 +326,7 @@ sources:
     }
 
     #[test]
-    fn add_and_list_roundtrip() {
+    fn yaml_add_and_list_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sources.yaml");
         let mgr = SourceManager::new(path);
@@ -251,13 +341,12 @@ sources:
     }
 
     #[test]
-    fn add_upserts_existing_name() {
+    fn yaml_add_upserts_existing_name() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sources.yaml");
         let mgr = SourceManager::new(path);
 
         mgr.add(make_entry("official", "https://github.com/example/agents")).unwrap();
-        // Upsert: adding same name replaces the entry
         mgr.add(make_entry("official", "https://github.com/other/repo")).unwrap();
 
         let entries = mgr.list();
@@ -266,7 +355,7 @@ sources:
     }
 
     #[test]
-    fn remove_existing_source() {
+    fn yaml_remove_existing_source() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sources.yaml");
         let mgr = SourceManager::new(path);
@@ -279,7 +368,7 @@ sources:
     }
 
     #[test]
-    fn remove_nonexistent_source_errors() {
+    fn yaml_remove_nonexistent_source_errors() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sources.yaml");
         let mgr = SourceManager::new(path);
@@ -291,7 +380,7 @@ sources:
     }
 
     #[test]
-    fn add_validates_git_url() {
+    fn yaml_add_validates_git_url() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sources.yaml");
         let mgr = SourceManager::new(path);
@@ -308,11 +397,10 @@ sources:
     }
 
     #[test]
-    fn load_validates_entries() {
+    fn yaml_load_validates_entries() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sources.yaml");
 
-        // Write a YAML with an invalid entry (git type but empty url)
         let yaml = r#"
 sources:
   - name: bad
@@ -329,7 +417,7 @@ sources:
     }
 
     #[test]
-    fn save_produces_wrapped_format() {
+    fn yaml_save_produces_wrapped_format() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sources.yaml");
         let mgr = SourceManager::new(path.clone());
@@ -339,5 +427,74 @@ sources:
         let contents = std::fs::read_to_string(&path).unwrap();
         assert!(contents.contains("sources:"));
         assert!(contents.contains("name: official"));
+    }
+
+    // --- TOML mode tests (primary) ---
+
+    #[test]
+    fn toml_load_missing_file_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mgr = SourceManager::new_toml(path);
+        let entries = mgr.load().unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn toml_load_reads_sources_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, r#"
+[runtime]
+python_path = "python3"
+
+[models]
+default = "openai:gpt-4o"
+
+[[sources]]
+name = "official"
+type = "git"
+url = "https://github.com/example/agents"
+branch = "main"
+"#).unwrap();
+
+        let mgr = SourceManager::new_toml(path);
+        let entries = mgr.list();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "official");
+        assert_eq!(entries[0].url, "https://github.com/example/agents");
+    }
+
+    #[test]
+    fn toml_add_and_list_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
+
+        let mgr = SourceManager::new_toml(path);
+        mgr.add(make_entry("official", "https://github.com/example/agents")).unwrap();
+        mgr.add(make_entry("private", "https://gitlab.com/example/agents")).unwrap();
+
+        let entries = mgr.list();
+        assert_eq!(entries.len(), 2);
+
+        // Verify other sections preserved
+        let content = std::fs::read_to_string(&dir.path().join("config.toml")).unwrap();
+        assert!(content.contains("[models]"));
+        assert!(content.contains("openai:gpt-4o"));
+    }
+
+    #[test]
+    fn toml_remove_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
+
+        let mgr = SourceManager::new_toml(path);
+        mgr.add(make_entry("official", "https://github.com/example/agents")).unwrap();
+        mgr.remove("official").unwrap();
+
+        let entries = mgr.list();
+        assert!(entries.is_empty());
     }
 }

@@ -313,7 +313,7 @@ fn workflow_init_config_get_set_get() {
 fn workflow_init_sources_crud() {
     let dir = tempfile::tempdir().unwrap();
 
-    // Init creates sources.yaml with the official source
+    // Init creates config.toml with the official source
     cli()
         .args(["init", "--dir", dir.path().to_str().unwrap()])
         .assert()
@@ -437,7 +437,7 @@ fn workflow_init_create_agent() {
 fn workflow_init_check() {
     let dir = tempfile::tempdir().unwrap();
 
-    // Init creates both config.toml and sources.yaml
+    // Init creates config.toml
     cli()
         .args(["init", "--dir", dir.path().to_str().unwrap()])
         .assert()
@@ -451,7 +451,7 @@ fn workflow_init_check() {
         .assert();
 
     // Check may pass or fail depending on env (python3 version, uv, etc.)
-    // but it should NOT crash. Verify config.toml and sources.yaml checks pass.
+    // but it should NOT crash. Verify config.toml checks pass.
     let result = output.get_output();
     let stderr = String::from_utf8_lossy(&result.stderr);
     let stdout = String::from_utf8_lossy(&result.stdout);
@@ -496,7 +496,7 @@ fn init_creates_config_with_expected_keys() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// 11. init creates valid YAML sources with official source
+// 11. init creates config.toml with official source in [sources]
 // ══════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -507,14 +507,14 @@ fn init_creates_sources_with_official() {
         .assert()
         .success();
 
-    let content = std::fs::read_to_string(dir.path().join("sources.yaml")).unwrap();
-    let sources: serde_yml::Value =
-        serde_yml::from_str(&content).expect("sources.yaml should be valid YAML");
+    let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    let config: toml::Value =
+        toml::from_str(&content).expect("config.toml should be valid TOML");
 
-    let sources_list = sources
+    let sources_list = config
         .get("sources")
-        .and_then(|s| s.as_sequence())
-        .expect("should have 'sources' array");
+        .and_then(|s| s.as_array())
+        .expect("config.toml should have [[sources]] array");
 
     assert!(
         !sources_list.is_empty(),
@@ -571,8 +571,8 @@ fn config_set_without_init_fails() {
 fn install_nonexistent_agent_fails() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
-        dir.path().join("sources.yaml"),
-        "sources: []\n",
+        dir.path().join("config.toml"),
+        "[models]\ndefault = \"openai:gpt-4o\"\n",
     )
     .unwrap();
 
@@ -581,7 +581,7 @@ fn install_nonexistent_agent_fails() {
         .current_dir(dir.path())
         .assert()
         .failure()
-        .stderr(predicate::str::contains("not found in sources"));
+        .stderr(predicate::str::contains("not found in sources").or(predicate::str::contains("No sources")));
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -666,7 +666,7 @@ fn runtime_exec_with_args() {
     // Without a lockfile or with missing agent, runtime exec should fail.
     // Use a temp dir for clean isolation.
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
     let output = cli()
         .args(["runtime", "exec", "test-agent", "arg1", "arg2"])
         .current_dir(dir.path())
@@ -731,7 +731,7 @@ fn create_agent_special_chars_name() {
 #[test]
 fn sources_add_url_validation() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     // Empty URL should be rejected
     cli()
@@ -764,7 +764,7 @@ fn sources_add_url_validation() {
 #[test]
 fn install_with_version_flag() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     cli()
         .args(["install", "some-agent", "--version", "v1.0.0"])
@@ -838,17 +838,11 @@ fn init_idempotent_with_existing_files() {
         .assert()
         .success();
 
-    // config.toml should NOT have been overwritten
+    // config.toml should NOT have been overwritten (init is idempotent)
     let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
     assert_eq!(
         content, preexisting_content,
         "init should not overwrite pre-existing config.toml"
-    );
-
-    // sources.yaml should have been created (it did not exist before)
-    assert!(
-        dir.path().join("sources.yaml").exists(),
-        "init should create sources.yaml when it does not exist"
     );
 }
 
@@ -904,7 +898,6 @@ fn init_accepts_valid_subdirectory() {
         .success();
 
     assert!(subdir.join("config.toml").exists());
-    assert!(subdir.join("sources.yaml").exists());
 }
 
 #[test]
@@ -927,7 +920,7 @@ fn init_accepts_dot_for_cwd() {
 fn install_nonexistent_agent_reports_not_found_in_sources() {
     let dir = tempfile::tempdir().unwrap();
     // Empty sources list -- agent not present
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     cli()
         .args(["install", "totally-fake-agent"])
@@ -1033,7 +1026,7 @@ fn check_with_missing_git() {
         "[models]\ndefault = \"openai:gpt-4o\"\n",
     )
     .unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     // Run check -- it will likely fail (no API key, etc.) but must not panic
     let result = cli()

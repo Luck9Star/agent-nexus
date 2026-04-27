@@ -29,7 +29,6 @@ fn init_command() {
         .assert()
         .success();
     assert!(dir.path().join("config.toml").exists());
-    assert!(dir.path().join("sources.yaml").exists());
 }
 
 #[test]
@@ -45,11 +44,6 @@ fn init_command_creates_valid_config() {
     let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
     let config: toml::Value = toml::from_str(&content).expect("config.toml should be valid TOML");
     assert!(config.get("sources").is_some(), "config.toml should contain [sources]");
-
-    // Verify sources.yaml is valid YAML (backward compat)
-    let content = std::fs::read_to_string(dir.path().join("sources.yaml")).unwrap();
-    let _: serde_yml::Value =
-        serde_yml::from_str(&content).expect("sources.yaml should be valid YAML");
 }
 
 #[test]
@@ -70,16 +64,15 @@ fn init_idempotent() {
         .assert()
         .success();
 
-    // Files should still exist and be valid
+    // config.toml should still exist and be valid
     assert!(dir.path().join("config.toml").exists());
-    assert!(dir.path().join("sources.yaml").exists());
 }
 
 #[test]
 fn sources_list_empty() {
     let dir = tempfile::tempdir().unwrap();
-    // Create sources.yaml with empty list
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    // Create config.toml with no sources
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     Command::cargo_bin("agent-nexus")
         .unwrap()
@@ -93,7 +86,7 @@ fn sources_list_empty() {
 #[test]
 fn sources_add_and_list() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     // Add a source
     Command::cargo_bin("agent-nexus")
@@ -125,7 +118,7 @@ fn sources_add_and_list() {
 #[test]
 fn sources_remove() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     // Add then remove
     Command::cargo_bin("agent-nexus")
@@ -153,13 +146,12 @@ fn sources_remove() {
 #[test]
 fn check_command() {
     let dir = tempfile::tempdir().unwrap();
-    // Create valid config.toml and sources.yaml
+    // Create valid config.toml
     std::fs::write(
         dir.path().join("config.toml"),
         "[models]\ndefault = \"openai:gpt-4o\"\n",
     )
     .unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
 
     Command::cargo_bin("agent-nexus")
         .unwrap()
@@ -252,10 +244,8 @@ fn run_placeholder() {
 
 #[test]
 fn runtime_exec_requires_lockfile() {
-    // Without a lockfile, runtime exec should fail with a clear error message.
-    // Use a temp dir with no lockfile.json to ensure clean state.
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
     Command::cargo_bin("agent-nexus")
         .unwrap()
         .args(["runtime", "exec", "test-agent"])
@@ -268,7 +258,7 @@ fn runtime_exec_requires_lockfile() {
 #[test]
 fn json_flag_produces_json() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("sources.yaml"), "sources: []\n").unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[models]\ndefault = \"openai:gpt-4o\"\n").unwrap();
 
     let output = Command::cargo_bin("agent-nexus")
         .unwrap()
@@ -278,7 +268,6 @@ fn json_flag_produces_json() {
         .success();
 
     let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
-    // Should be valid JSON (empty array)
     let _: serde_json::Value = serde_json::from_str(stdout).expect("Expected valid JSON output");
 }
 
