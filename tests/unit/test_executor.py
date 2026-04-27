@@ -905,3 +905,39 @@ class TestExecDoneTiming:
             assert executor._exec_done.is_set()
         finally:
             executor.close()
+
+
+# ---------------------------------------------------------------------------
+# C1 fix: stderr capture
+# ---------------------------------------------------------------------------
+
+
+class TestStderrCapture:
+    """Verify that stderr output is captured in ExecutionResult."""
+
+    @pytest.mark.asyncio
+    async def test_stderr_included_in_output_on_success(self, shared_executor) -> None:
+        """Successful code writing to stderr has it included in result.output.
+
+        We inject sys into the namespace beforehand to avoid the security
+        checker blocking the import.
+        """
+        import sys as _sys
+        shared_executor.inject("_test_sys", _sys)
+        result = await shared_executor.execute(
+            '_test_sys.stderr.write("error msg\\n")'
+        )
+        assert result.success is True
+        assert "error msg" in result.output
+
+    @pytest.mark.asyncio
+    async def test_stderr_included_in_error_on_failure(self, shared_executor) -> None:
+        """Code that errors after writing to stderr includes stderr in result.error."""
+        import sys as _sys
+        shared_executor.inject("_test_sys", _sys)
+        result = await shared_executor.execute(
+            '_test_sys.stderr.write("before crash\\n"); raise RuntimeError("boom")'
+        )
+        assert result.success is False
+        assert "boom" in result.error
+        assert "before crash" in result.error

@@ -27,8 +27,10 @@ class ProfileBasedExecutor:
     def __call__(self, profile_id: str, task: str) -> Artifact:
         profile = self._registry.get(profile_id)
         if profile is None:
-            logger.warning("Profile '%s' not found in registry, using stub", profile_id)
-            return Artifact(source_agent=profile_id, artifact_type="stub", sections={"context": task})
+            raise ValueError(
+                f"Profile '{profile_id}' not found in registry "
+                "— cannot produce artifact"
+            )
 
         name = profile.get("name", profile_id)
         body = profile.get("profile", {}).get("body", "")
@@ -49,6 +51,7 @@ class ProfileBasedExecutor:
             source_agent=profile_id,
             artifact_type=artifact_type,
             sections=sections,
+            metadata={"synthetic": True},
         )
 
     def _generate_sections(
@@ -69,25 +72,41 @@ class ProfileBasedExecutor:
             elif section == "recommendations":
                 sections["recommendations"] = [f"Apply {name} expertise to: {task}"]
             elif section == "findings":
-                sections["findings"] = [f"{cap} perspective on: {task}" for cap in capabilities[:3]]
+                sections["findings"] = [
+                    f"{cap} perspective on: {task}" for cap in capabilities[:3]
+                ]
             elif section == "proposed_design":
                 sections["proposed_design"] = f"[{name}] Design for: {task}"
             elif section == "tradeoffs":
-                sections["tradeoffs"] = [f"Trade-off from {cap} perspective" for cap in capabilities[:2]]
+                sections["tradeoffs"] = [
+                    f"Trade-off from {cap} perspective"
+                    for cap in capabilities[:2]
+                ]
             elif section == "risks":
-                sections["risks"] = [f"Risk identified via {cap}" for cap in capabilities[:2]]
+                sections["risks"] = [
+                    f"Risk identified via {cap}" for cap in capabilities[:2]
+                ]
             elif section == "next_steps":
-                sections["next_steps"] = [f"Follow up with {cap} analysis" for cap in capabilities[:2]]
+                sections["next_steps"] = [
+                    f"Follow up with {cap} analysis" for cap in capabilities[:2]
+                ]
             elif section == "assumptions":
-                sections["assumptions"] = [f"Assumed: {task} relates to {cap}" for cap in capabilities[:2]]
+                sections["assumptions"] = [
+                    f"Assumed: {task} relates to {cap}" for cap in capabilities[:2]
+                ]
             elif section == "objective":
                 sections["objective"] = f"[{name}] Orchestration plan for: {task}"
             elif section == "task_decomposition":
                 sections["task_decomposition"] = [f"Subtask: apply {cap}" for cap in capabilities]
             elif section == "agent_assignments":
-                sections["agent_assignments"] = {cap: f"Assigned to {name}" for cap in capabilities[:2]}
+                sections["agent_assignments"] = {
+                    cap: f"Assigned to {name}" for cap in capabilities[:2]
+                }
             elif section == "execution_order":
-                sections["execution_order"] = [f"Step {i+1}: {cap}" for i, cap in enumerate(capabilities)]
+                sections["execution_order"] = [
+                    f"Step {i+1}: {cap}" for i, cap in enumerate(capabilities)
+                ]
             else:
+                logger.warning("Unmapped section '%s' in output contract for '%s'", section, name)
                 sections[section] = f"[{name}] {section} for: {task}"
         return sections

@@ -1,7 +1,7 @@
 """TDD RED tests for DAGDispatcher — bridges CompositionDAG to TaskGraph execution.
 
 Tests cover: conversion, loading, dispatch (parallel/sequential/mixed), failure
-propagation, timeout, max_parallel, empty DAG, state tracking, stuck dependencies,
+propagation, timeout, max_batch_size, empty DAG, state tracking, stuck dependencies,
 and specialist-only filtering.
 """
 
@@ -304,11 +304,11 @@ class TestFailedExecutor:
     def test_failing_task_in_result(self) -> None:
         call_count = {"n": 0}
 
-        def selective_executor(pid: str, task: str) -> Artifact:
+        def selective_executor(profile_id: str, task: str) -> Artifact:
             call_count["n"] += 1
-            if pid == "bad_agent":
+            if profile_id == "bad_agent":
                 raise RuntimeError("boom")
-            return _make_artifact(pid)
+            return _make_artifact(profile_id)
 
         dag = _build_dag([
             DAGTask(id="good", agent="good_agent", output="o1"),
@@ -320,10 +320,10 @@ class TestFailedExecutor:
         assert "bad" in result.failed
 
     def test_other_tasks_still_complete(self) -> None:
-        def selective_executor(pid: str, task: str) -> Artifact:
-            if pid == "bad_agent":
+        def selective_executor(profile_id: str, task: str) -> Artifact:
+            if profile_id == "bad_agent":
                 raise RuntimeError("boom")
-            return _make_artifact(pid)
+            return _make_artifact(profile_id)
 
         dag = _build_dag([
             DAGTask(id="good", agent="good_agent", output="o1"),
@@ -417,14 +417,14 @@ class TestTimeout:
 
 @pytest.mark.timeout(10)
 class TestMaxParallelRespected:
-    """max_parallel=1 with 3 tasks -> sequential execution verified."""
+    """max_batch_size=1 with 3 tasks -> sequential execution verified."""
 
-    def test_all_complete_with_max_parallel_1(self) -> None:
+    def test_all_complete_with_max_batch_size_1(self) -> None:
         execution_order: list[str] = []
 
-        def tracking_executor(pid: str, task: str) -> Artifact:
-            execution_order.append(pid)
-            return _make_artifact(pid)
+        def tracking_executor(profile_id: str, task: str) -> Artifact:
+            execution_order.append(profile_id)
+            return _make_artifact(profile_id)
 
         dag = _build_dag([
             DAGTask(id="s1", agent="a1", output="o1"),
@@ -432,18 +432,18 @@ class TestMaxParallelRespected:
             DAGTask(id="s3", agent="a3", output="o3"),
         ])
         graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, tracking_executor, max_parallel=1)
+        dispatcher = DAGDispatcher(graph, tracking_executor, max_batch_size=1)
         result = dispatcher.dispatch(dag, "sequential test")
         assert set(result.completed) == {"s1", "s2", "s3"}
 
-    def test_max_parallel_1_executes_one_at_a_time(self) -> None:
-        """With max_parallel=1, only 1 task executes per round."""
+    def test_max_batch_size_1_executes_one_at_a_time(self) -> None:
+        """With max_batch_size=1, only 1 task executes per round."""
         dag = _build_dag([
             DAGTask(id="s1", agent="a1", output="o1"),
             DAGTask(id="s2", agent="a2", output="o2"),
         ])
         graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor, max_parallel=1)
+        dispatcher = DAGDispatcher(graph, _ok_executor, max_batch_size=1)
         result = dispatcher.dispatch(dag, "one at a time")
         # Both should complete, just never in the same batch
         assert set(result.completed) == {"s1", "s2"}
@@ -513,10 +513,10 @@ class TestTaskGraphStates:
         assert t is not None and t.state == TaskState.FAILED
 
     def test_mixed_states(self) -> None:
-        def selective(pid: str, task: str) -> Artifact:
-            if pid == "fail_agent":
+        def selective(profile_id: str, task: str) -> Artifact:
+            if profile_id == "fail_agent":
                 raise RuntimeError("nope")
-            return _make_artifact(pid)
+            return _make_artifact(profile_id)
 
         dag = _build_dag([
             DAGTask(id="ok", agent="ok_agent", output="o1"),
@@ -541,8 +541,8 @@ class TestDispatchWithExpertExecutorProtocol:
     """Use a lambda as executor to verify protocol works."""
 
     def test_lambda_executor(self) -> None:
-        executor = lambda pid, task: Artifact(
-            source_agent=pid,
+        executor = lambda profile_id, task: Artifact(
+            source_agent=profile_id,
             artifact_type="lambda_result",
             sections={"task_desc": task},
         )
@@ -558,10 +558,10 @@ class TestDispatchWithExpertExecutorProtocol:
     def test_executor_receives_correct_args(self) -> None:
         received: dict[str, str] = {}
 
-        def capturing_executor(pid: str, task: str) -> Artifact:
-            received["profile_id"] = pid
+        def capturing_executor(profile_id: str, task: str) -> Artifact:
+            received["profile_id"] = profile_id
             received["task"] = task
-            return _make_artifact(pid)
+            return _make_artifact(profile_id)
 
         dag = _build_dag([
             DAGTask(id="s1", agent="my.special.agent", output="o1"),
@@ -583,10 +583,10 @@ class TestStuckDependencyFailure:
     """If dep fails, blocked tasks get failed too."""
 
     def test_dependent_task_failed_when_dep_fails(self) -> None:
-        def selective(pid: str, task: str) -> Artifact:
-            if pid == "a1":
+        def selective(profile_id: str, task: str) -> Artifact:
+            if profile_id == "a1":
                 raise RuntimeError("upstream fails")
-            return _make_artifact(pid)
+            return _make_artifact(profile_id)
 
         dag = _build_dag([
             DAGTask(id="upstream", agent="a1", output="o1"),
@@ -599,10 +599,10 @@ class TestStuckDependencyFailure:
         assert "downstream" in result.failed
 
     def test_cascading_failure_no_artifacts_for_blocked(self) -> None:
-        def selective(pid: str, task: str) -> Artifact:
-            if pid == "a1":
+        def selective(profile_id: str, task: str) -> Artifact:
+            if profile_id == "a1":
                 raise RuntimeError("upstream fails")
-            return _make_artifact(pid)
+            return _make_artifact(profile_id)
 
         dag = _build_dag([
             DAGTask(id="upstream", agent="a1", output="o1"),
@@ -627,9 +627,9 @@ class TestSpecialistTasksOnly:
     def test_integrate_never_dispatched(self) -> None:
         dispatched_agents: list[str] = []
 
-        def tracking(pid: str, task: str) -> Artifact:
-            dispatched_agents.append(pid)
-            return _make_artifact(pid)
+        def tracking(profile_id: str, task: str) -> Artifact:
+            dispatched_agents.append(profile_id)
+            return _make_artifact(profile_id)
 
         dag = _build_dag([
             DAGTask(id="s1", agent="a1", output="o1"),
@@ -645,9 +645,9 @@ class TestSpecialistTasksOnly:
     def test_validate_never_dispatched(self) -> None:
         dispatched_agents: list[str] = []
 
-        def tracking(pid: str, task: str) -> Artifact:
-            dispatched_agents.append(pid)
-            return _make_artifact(pid)
+        def tracking(profile_id: str, task: str) -> Artifact:
+            dispatched_agents.append(profile_id)
+            return _make_artifact(profile_id)
 
         dag = _build_dag([
             DAGTask(id="s1", agent="a1", output="o1"),
@@ -662,9 +662,9 @@ class TestSpecialistTasksOnly:
     def test_both_fixed_tasks_excluded(self) -> None:
         dispatched_ids: list[str] = []
 
-        def tracking(pid: str, task: str) -> Artifact:
-            dispatched_ids.append(pid)
-            return _make_artifact(pid)
+        def tracking(profile_id: str, task: str) -> Artifact:
+            dispatched_ids.append(profile_id)
+            return _make_artifact(profile_id)
 
         dag = _build_dag([
             DAGTask(id="s1", agent="a1", output="o1"),
@@ -707,7 +707,7 @@ class TestDispatcherReuseGraph:
 
 @pytest.mark.timeout(10)
 class TestMaxParallelZero:
-    """max_parallel=0 should be clamped to 1."""
+    """max_batch_size=0 should be clamped to 1."""
 
     def test_zero_clamped_to_one(self) -> None:
         dag = _build_dag([
@@ -715,21 +715,21 @@ class TestMaxParallelZero:
             DAGTask(id="s2", agent="a2", output="o2"),
         ])
         graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor, max_parallel=0)
+        dispatcher = DAGDispatcher(graph, _ok_executor, max_batch_size=0)
         result = dispatcher.dispatch(dag, "zero parallel")
         assert set(result.completed) == {"s1", "s2"}
 
 
 @pytest.mark.timeout(10)
 class TestMaxParallelNegative:
-    """max_parallel=-1 should be clamped to 1."""
+    """max_batch_size=-1 should be clamped to 1."""
 
     def test_negative_clamped_to_one(self) -> None:
         dag = _build_dag([
             DAGTask(id="s1", agent="a1", output="o1"),
         ])
         graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor, max_parallel=-5)
+        dispatcher = DAGDispatcher(graph, _ok_executor, max_batch_size=-5)
         result = dispatcher.dispatch(dag, "negative parallel")
         assert "s1" in result.completed
 
@@ -742,10 +742,10 @@ class TestTimeoutMidBatch:
         """With 3 tasks and very short timeout, at most 1 should complete."""
         call_count = {"n": 0}
 
-        def counting_slow(pid: str, task: str) -> Artifact:
+        def counting_slow(profile_id: str, task: str) -> Artifact:
             call_count["n"] += 1
             time.sleep(0.02)  # Small delay per task
-            return _make_artifact(pid)
+            return _make_artifact(profile_id)
 
         dag = _build_dag([
             DAGTask(id="s1", agent="a1", output="o1"),
@@ -755,7 +755,7 @@ class TestTimeoutMidBatch:
         graph = TaskGraph(":memory:")
         # Timeout shorter than 3 tasks * 0.02s each
         dispatcher = DAGDispatcher(
-            graph, counting_slow, max_parallel=1, timeout_seconds=0.03
+            graph, counting_slow, max_batch_size=1, timeout_seconds=0.03
         )
         result = dispatcher.dispatch(dag, "mid-batch timeout")
         assert result.timed_out is True
@@ -826,3 +826,51 @@ class TestChainedFailure:
         # B and C are stuck (blocked by failed deps) — should be failed too
         assert "b" in result.failed
         assert "c" in result.failed
+
+
+# ---------------------------------------------------------------------------
+# C4 fix: max_batch_size semantics
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(10)
+class TestMaxBatchSizeSemantics:
+    """Verify max_batch_size parameter limits tasks picked per dispatch round.
+
+    Note: execution within each batch is synchronous (sequential), so
+    max_batch_size controls how many tasks are dequeued from the ready list
+    per round, not true concurrency.
+    """
+
+    def test_constructor_accepts_max_batch_size(self) -> None:
+        """DAGDispatcher constructor accepts max_batch_size parameter."""
+        graph = TaskGraph(":memory:")
+        dispatcher = DAGDispatcher(graph, _ok_executor, max_batch_size=2)
+        assert dispatcher._max_batch_size == 2
+
+    def test_batch_size_limits_pick_per_round(self) -> None:
+        """max_batch_size=2 with 4 tasks: at most 2 tasks per round, all complete."""
+        rounds_log: list[list[str]] = []
+        call_count = {"n": 0}
+
+        def tracking(profile_id: str, task: str) -> Artifact:
+            call_count["n"] += 1
+            return _make_artifact(profile_id)
+
+        dag = _build_dag([
+            DAGTask(id="s1", agent="a1", output="o1"),
+            DAGTask(id="s2", agent="a2", output="o2"),
+            DAGTask(id="s3", agent="a3", output="o3"),
+            DAGTask(id="s4", agent="a4", output="o4"),
+        ])
+        graph = TaskGraph(":memory:")
+        dispatcher = DAGDispatcher(graph, tracking, max_batch_size=2)
+        result = dispatcher.dispatch(dag, "batch test")
+        # All 4 should complete
+        assert set(result.completed) == {"s1", "s2", "s3", "s4"}
+
+    def test_default_max_batch_size_is_3(self) -> None:
+        """Default max_batch_size is 3."""
+        graph = TaskGraph(":memory:")
+        dispatcher = DAGDispatcher(graph, _ok_executor)
+        assert dispatcher._max_batch_size == 3

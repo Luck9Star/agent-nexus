@@ -1,4 +1,4 @@
-//! Workflow phase types for the PlatformRouter's 4-phase composite agent orchestration.
+//! Workflow phase types for the `PlatformRouter`'s 4-phase composite agent orchestration.
 //!
 //! The router executes composite agents through a fixed sequence:
 //! **Research → Synthesis → Implementation → Verification**
@@ -25,6 +25,7 @@ pub enum WorkflowPhase {
 
 impl WorkflowPhase {
     /// Canonical execution order.
+    #[must_use] 
     pub fn ordered() -> [WorkflowPhase; 4] {
         [
             WorkflowPhase::Research,
@@ -35,6 +36,7 @@ impl WorkflowPhase {
     }
 
     /// Whether this phase supports parallel agent execution.
+    #[must_use] 
     pub fn is_parallel(&self) -> bool {
         matches!(self, WorkflowPhase::Research | WorkflowPhase::Implementation)
     }
@@ -99,6 +101,7 @@ pub struct WorkflowContext {
 
 impl WorkflowContext {
     /// Create a new workflow context for a composite agent run.
+    #[must_use] 
     pub fn new(conversation_id: String, message: String, agent_name: String) -> Self {
         let phase_context = message.clone();
         Self {
@@ -114,6 +117,7 @@ impl WorkflowContext {
     }
 
     /// Consume the context and return elapsed time since creation.
+    #[must_use] 
     pub fn close(self) -> std::time::Duration {
         self.started_at.elapsed()
     }

@@ -231,7 +231,7 @@ impl UvBridge {
                     }
                 }
                 Err(UvError::CommandFailed(
-                    format!("uv binary not found on system (tried: {:?})", candidates),
+                    format!("uv binary not found on system (tried: {candidates:?})"),
                 ))
             })
             .await

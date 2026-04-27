@@ -120,7 +120,7 @@ impl EvolutionEngine {
         self.health.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Record a health event and persist the updated state to SQLite.
+    /// Record a health event and persist the updated state to `SQLite`.
     fn record_health(&self, success: bool) {
         let (score, total) = {
             let mut health = self.health_guard();
@@ -207,7 +207,6 @@ impl EvolutionEngine {
                 Err(EvolverError::SkillNotFound(name)) => {
                     tracing::debug!("Skill not found for evolution: {name}, skipping");
                     // Don't abort — other suggestions may still be processable
-                    continue;
                 }
                 Err(e) => {
                     return Err(e.into());

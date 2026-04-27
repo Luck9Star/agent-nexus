@@ -875,42 +875,42 @@ class TestTaskComposerWithTaskGraph:
 
 @pytest.mark.timeout(30)
 class TestCapabilityInference:
-    """E2E: _infer_capabilities covers all 36 declared expert capabilities."""
+    """E2E: infer_capabilities covers all 36 declared expert capabilities."""
 
     def test_tradeoff_analysis_now_reachable(self):
         """'tradeoff' keyword now triggers tradeoff_analysis capability."""
-        from agent_nexus.platform.agency.task_composer import _infer_capabilities
+        from agent_nexus.platform.agency.task_composer import infer_capabilities
 
-        caps = _infer_capabilities("Analyze tradeoff of microservices vs monolith")
+        caps = infer_capabilities("Analyze tradeoff of microservices vs monolith")
         assert "tradeoff_analysis" in caps, (
             f"Expected tradeoff_analysis in inferred caps, got {caps}"
         )
 
     def test_api_documentation_now_reachable(self):
         """'api_documentation' keyword triggers api_documentation capability."""
-        from agent_nexus.platform.agency.task_composer import _infer_capabilities
+        from agent_nexus.platform.agency.task_composer import infer_capabilities
 
-        caps = _infer_capabilities("Generate api_documentation for the REST endpoints")
+        caps = infer_capabilities("Generate api_documentation for the REST endpoints")
         assert "api_documentation" in caps, (
             f"Expected api_documentation in inferred caps, got {caps}"
         )
 
     def test_code_indexing_now_reachable(self):
         """'code_indexing' keyword triggers code_indexing capability."""
-        from agent_nexus.platform.agency.task_composer import _infer_capabilities
+        from agent_nexus.platform.agency.task_composer import infer_capabilities
 
-        caps = _infer_capabilities("Perform code_indexing for the repository")
+        caps = infer_capabilities("Perform code_indexing for the repository")
         assert "code_indexing" in caps, (
             f"Expected code_indexing in inferred caps, got {caps}"
         )
 
     def test_fallback_system_design_when_no_keyword(self):
-        """Unknown task description falls back to system_design."""
-        from agent_nexus.platform.agency.task_composer import _infer_capabilities
+        """Unknown task description returns empty capabilities (caller handles)."""
+        from agent_nexus.platform.agency.task_composer import infer_capabilities
 
-        caps = _infer_capabilities("bake a chocolate cake")
-        assert caps == ["system_design"], (
-            f"Expected fallback to system_design, got {caps}"
+        caps = infer_capabilities("bake a chocolate cake")
+        assert caps == [], (
+            f"Expected empty capabilities for unknown task, got {caps}"
         )
 
 
@@ -933,12 +933,16 @@ _ALL_EXPERTS = {
     "agency.tool-evaluator": ["tool_evaluation", "technology_assessment", "comparison_analysis"],
     "agency.lsp-index-engineer": ["lsp_indexing", "code_indexing", "semantic_analysis"],
     "agency.agents-orchestrator": ["orchestration", "task_decomposition", "agent_coordination"],
+    "agency.devops-automator": ["ci_cd_pipeline", "deployment_automation", "infrastructure_management"],
+    "agency.frontend-developer": ["frontend_development", "ui_implementation", "web_performance"],
+    "agency.git-workflow-master": ["git_operations", "branch_management", "merge_strategies"],
+    "agency.mcp-builder": ["mcp_server_construction", "tool_integration", "protocol_handling"],
 }
 
 
 @pytest.mark.timeout(30)
 class TestAllExpertTypes:
-    """E2E: every expert in the 12-agent pool is selectable via their capabilities."""
+    """E2E: every expert in the agent pool is selectable via their capabilities."""
 
     def test_each_expert_selectable_by_primary_capability(self):
         """Each of the 12 experts can be selected by its first (primary) capability."""
@@ -960,8 +964,8 @@ class TestAllExpertTypes:
                 f"Got: {result_ids}"
             )
 
-    def test_all_12_experts_registered(self):
-        """Registry contains exactly 12 profiles after import."""
+    def test_all_experts_registered(self):
+        """Registry contains all 16 profiles after import."""
         registry = _build_registry()
         all_ids = registry.list_all()
         expected_ids = sorted(_ALL_EXPERTS.keys())
@@ -1032,7 +1036,7 @@ class TestNetworkCapabilityImpact:
     """E2E: verify which experts have network access and its impact."""
 
     def test_network_capable_experts_identified(self):
-        """Only 3 of 12 experts have network in allowed_tools."""
+        """Experts with network access in allowed_tools are identified correctly."""
         registry = _build_registry()
         network_agents = []
         non_network_agents = []
@@ -1045,14 +1049,23 @@ class TestNetworkCapabilityImpact:
             else:
                 non_network_agents.append(agent_id)
 
-        assert sorted(network_agents) == [
+        expected_network = sorted([
             "agency.ai-engineer",
+            "agency.code-reviewer",
+            "agency.codebase-onboarding",
+            "agency.lsp-index-engineer",
             "agency.security-engineer",
+            "agency.software-architect",
+            "agency.sre",
+            "agency.test-results-analyzer",
             "agency.tool-evaluator",
-        ], f"Unexpected network agents: {network_agents}"
+        ])
+        assert sorted(network_agents) == expected_network, (
+            f"Unexpected network agents: {sorted(network_agents)}"
+        )
 
-        assert len(non_network_agents) == 9, (
-            f"Expected 9 non-network agents, got {len(non_network_agents)}"
+        assert len(non_network_agents) == 7, (
+            f"Expected 7 non-network agents, got {len(non_network_agents)}"
         )
 
 

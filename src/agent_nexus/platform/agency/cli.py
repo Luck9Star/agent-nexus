@@ -14,7 +14,17 @@ from .qa_gate import QAGate, QAGateInput
 from .registry import ExpertRegistry
 from .selector import SelectionRequest, SpecialistSelector
 
-_SCHEMA_PATH = Path(__file__).resolve().parents[4] / "schemas" / "expert-profile.schema.json"
+def _find_repo_root() -> Path:
+    """Walk up from this file to find the repo root (directory with .git)."""
+    current = Path(__file__).resolve().parent
+    for _ in range(10):
+        if (current / ".git").exists():
+            return current
+        current = current.parent
+    return Path(__file__).resolve().parents[4]  # fallback
+
+
+_SCHEMA_PATH = _find_repo_root() / "schemas" / "expert-profile.schema.json"
 
 
 @click.group()
@@ -70,13 +80,16 @@ def plan_composition(
     allowlist: str,
 ) -> None:
     """Plan a composition DAG for a given task."""
-    # Import and load registry
-    importer = AgencyImporter(
-        vendor_path=vendor_path,
-        allowlist_path=allowlist,
-        output_dir="/tmp/agency-plan-composer",
-    )
-    profiles = importer.dry_run()
+    try:
+        importer = AgencyImporter(
+            vendor_path=vendor_path,
+            allowlist_path=allowlist,
+            output_dir=".",
+        )
+        profiles = importer.dry_run()
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
 
     registry = ExpertRegistry()
     for pkg in profiles:
@@ -87,9 +100,9 @@ def plan_composition(
     selector = SpecialistSelector(registry)
 
     # Infer capabilities from task
-    from .task_composer import _infer_capabilities
+    from .task_composer import infer_capabilities
 
-    required_caps = _infer_capabilities(task)
+    required_caps = infer_capabilities(task)
     request = SelectionRequest(
         task_type=mode,
         required_capabilities=required_caps,
@@ -178,7 +191,10 @@ def validate_output(
                 f"  Missing sections: {', '.join(result.contract_result.missing_sections)}"
             )
         if not result.gitnexus_result.passed:
-            click.echo(f"  GitNexus gate failures: {', '.join(result.gitnexus_result.failed_checks)}")
+            click.echo(
+                f"  GitNexus gate failures: "
+                f"{', '.join(result.gitnexus_result.failed_checks)}"
+            )
         sys.exit(1)
 
 
@@ -190,13 +206,12 @@ def list_experts(
     allowlist: str,
 ) -> None:
     """Preview experts available for import from the vendor repo."""
-    importer = AgencyImporter(
-        vendor_path=vendor_path,
-        allowlist_path=allowlist,
-        output_dir="/tmp/agency-list",
-    )
-
     try:
+        importer = AgencyImporter(
+            vendor_path=vendor_path,
+            allowlist_path=allowlist,
+            output_dir=".",
+        )
         profiles = importer.dry_run()
     except Exception as exc:
         click.echo(f"Error: {exc}", err=True)

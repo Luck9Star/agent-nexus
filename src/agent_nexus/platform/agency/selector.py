@@ -139,21 +139,18 @@ class SpecialistSelector:
 
         # 2. Fast path: find agents that individually cover ALL required caps
         full_match = [
-            p for p in eligible
+            p
+            for p in eligible
             if not required_set or required_set.issubset(set(p.get("capabilities", [])))
         ]
 
         if full_match:
-            return self._score_and_rank(
-                full_match, required_set, optional_set, request
-            )
+            return self._score_and_rank(full_match, required_set, optional_set, request)
 
         # 3. Slow path: no single agent covers all required caps.
         #    Use greedy set-cover to find a multi-agent team.
         if not required_set:
-            return self._score_and_rank(
-                eligible, required_set, optional_set, request
-            )
+            return self._score_and_rank(eligible, required_set, optional_set, request)
 
         team = self._greedy_set_cover(eligible, required_set)
         if not team:
@@ -202,7 +199,11 @@ class SpecialistSelector:
             used_ids.add(best_profile["id"])
             remaining -= best_coverage
 
-        return selected if not remaining else []
+        if remaining:
+            logger.warning(
+                "Greedy set-cover could not cover capabilities: %s", remaining
+            )
+        return selected
 
     def _score_and_rank(
         self,
@@ -220,6 +221,8 @@ class SpecialistSelector:
                 dedup and do not truncate below the candidate count, because
                 every member was selected for unique capability coverage.
         """
+        request_perm_level = _permission_level(request.permissions)
+
         # Score each candidate
         scored: list[tuple[float, dict[str, Any], list[str]]] = []
         for profile in candidates:
@@ -238,8 +241,15 @@ class SpecialistSelector:
             if task_match > 0:
                 reasons.append(f"Task type match: {request.task_type}")
 
-            perm_fit = 1.0
-            reasons.append("Permission fit")
+            agent_perm = profile.get("permissions", {}).get("mode", "plan")
+            agent_perm_level = _permission_level(agent_perm)
+            perm_fit = (agent_perm_level + 1) / (request_perm_level + 1)
+            if perm_fit >= 1.0:
+                reasons.append(f"Permission fit: {agent_perm} (exact match)")
+            else:
+                reasons.append(
+                    f"Permission fit: {agent_perm} (less permissive than request {request.permissions})"
+                )
 
             raw_score = (
                 self.WEIGHT_REQUIRED * req_overlap
@@ -286,6 +296,8 @@ class SpecialistSelector:
         for raw_score, profile, reasons in selected:
             normalized = raw_score / max_possible if max_possible > 0 else 0.0
             final_score = normalized * (1.0 - self.WEIGHT_DIVERSITY) + self.WEIGHT_DIVERSITY
+            # Floor ensures every selected agent has a non-zero score
+            final_score = max(final_score, 0.01)
 
             results.append(
                 SelectionResult(

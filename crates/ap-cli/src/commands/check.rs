@@ -179,7 +179,7 @@ pub fn run_check_package(path: &str, output: &OutputFormatter) -> Result<()> {
 
     // Check 3: Python source directory exists
     let has_src = std::fs::read_dir(&pkg_path)?
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .any(|e| e.path().is_dir() && !e.file_name().to_string_lossy().ends_with(".py"));
     if has_src {
         output.success("[PASS] Source directory: present");

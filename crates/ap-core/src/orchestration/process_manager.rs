@@ -57,6 +57,7 @@ impl SpawnConfig {
     /// containing only essential system vars (PATH, HOME, USER, LANG, TERM)
     /// plus whatever is passed in the `env` map. This prevents accidental
     /// leakage of parent API keys or secrets.
+    #[must_use] 
     pub fn isolated(mut self) -> Self {
         self.isolated = true;
         self
@@ -83,7 +84,7 @@ pub struct ManagedProcess {
 
 pub type IoPair = (Box<dyn AsyncWrite + Unpin + Send>, Box<dyn AsyncRead + Unpin + Send>);
 
-/// ProcessManager manages subprocess lifecycles.
+/// `ProcessManager` manages subprocess lifecycles.
 ///
 /// **Design note**: All methods require `&mut self` (single-owner pattern).
 /// For multi-task access, wrap in `Arc<Mutex<ProcessManager>>` or use a
@@ -771,8 +772,8 @@ impl ProcessManagerHandle {
                 continue;
             }
             match tokio::time::timeout(timeout, proc.child.wait()).await {
-                Ok(Ok(_)) => continue,
-                Ok(Err(_)) => continue,
+                Ok(Ok(_)) => {}
+                Ok(Err(_)) => {}
                 Err(_) => {
                     warn!(id, "graceful_shutdown_all: timeout, killing");
                     if let Err(e) = proc.child.kill().await {

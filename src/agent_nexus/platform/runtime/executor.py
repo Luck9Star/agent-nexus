@@ -307,30 +307,39 @@ class IPythonExecutor:
                 sys.stderr = old_err
 
             stdout = buf_out.getvalue()
-            _stderr = buf_err.getvalue()
+            stderr = buf_err.getvalue()
 
             # Collect variables created in this execution
             vars_created = self._detect_new_variables(pre_keys)
 
             # Handle errors
             if result.error_before_exec:
+                err_msg = str(result.error_before_exec)
+                if stderr:
+                    err_msg = f"{err_msg}\n--- stderr ---\n{stderr}"
                 return ExecutionResult(
                     success=False,
                     output=stdout or "",
-                    error=str(result.error_before_exec),
+                    error=err_msg,
                     variables_created=vars_created,
                 )
             if result.error_in_exec:
+                err_msg = str(result.error_in_exec)
+                if stderr:
+                    err_msg = f"{err_msg}\n--- stderr ---\n{stderr}"
                 return ExecutionResult(
                     success=False,
                     output=stdout or "",
-                    error=str(result.error_in_exec),
+                    error=err_msg,
                     variables_created=vars_created,
                 )
 
+            combined_output = stdout
+            if stderr:
+                combined_output = f"{stdout}\n--- stderr ---\n{stderr}" if stdout else stderr
             return ExecutionResult(
                 success=True,
-                output=stdout or "",
+                output=combined_output or "",
                 variables_created=vars_created,
             )
 
@@ -375,13 +384,16 @@ class IPythonExecutor:
         Returns:
             IPython ExecutionResult.
         """
-        if self._shell is None:
+        # Capture shell reference locally to prevent race with reset()
+        # setting self._shell to None while this thread is still running.
+        shell = self._shell
+        if shell is None:
             raise RuntimeError("_run_cell_sync called before shell initialization")
         try:
-            result = self._shell.run_cell(transformed, store_history=False)
+            result = shell.run_cell(transformed, store_history=False)
             return result
         finally:
-            self._exec_done.set()  # Signal thread completion
+            self._exec_done.set()
 
     def inject(self, name: str, value: Any) -> None:
         """Inject a variable into the namespace.

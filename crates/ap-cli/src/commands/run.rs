@@ -6,7 +6,7 @@
 //!   The agent owns stdin/stdout directly, so external MCP clients can connect.
 //! - **cli**: Replace current process with the agent for direct interactive use.
 //!   The agent gets raw terminal I/O without pipe intermediaries.
-//! - **router**: Orchestrate via PlatformRouter. Spawns the agent as a managed
+//! - **router**: Orchestrate via `PlatformRouter`. Spawns the agent as a managed
 //!   process, routes a chat message through the 4-phase composite workflow,
 //!   then shuts down. Use `--message` to provide the chat input.
 //!
@@ -122,7 +122,7 @@ fn read_message_from_stdin() -> Result<String> {
 }
 
 /// Router mode: spawn the agent as a managed process, route a chat message
-/// through the PlatformRouter, then shut down.
+/// through the `PlatformRouter`, then shut down.
 fn run_router_mode(agent: &str, message: &str, output: &OutputFormatter) -> Result<()> {
     // Resolve agent from lockfile.
     let root = commands::find_project_root(
@@ -179,7 +179,7 @@ fn run_router_mode(agent: &str, message: &str, output: &OutputFormatter) -> Resu
         env.insert("AGENT_NEXUS_ROOT".to_string(), root.to_string_lossy().to_string());
         env.insert("AGENT_DIR".to_string(), install_dir.to_string_lossy().to_string());
 
-        let args_str: Vec<&str> = cmd_args.iter().map(|s| s.as_str()).collect();
+        let args_str: Vec<&str> = cmd_args.iter().map(std::string::String::as_str).collect();
         handle
             .spawn(agent, &python, &args_str, Some(env))
             .await
@@ -221,7 +221,7 @@ fn run_router_mode(agent: &str, message: &str, output: &OutputFormatter) -> Resu
                 for phase in ap_core::orchestration::WorkflowPhase::ordered() {
                     if let Some(pr) = result.phase_results.get(&phase) {
                         let status = if pr.success { "OK" } else { "FAIL" };
-                        eprintln!("  {} [{}]", phase, status);
+                        eprintln!("  {phase} [{status}]");
                     }
                 }
             }

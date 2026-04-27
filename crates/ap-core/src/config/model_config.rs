@@ -14,7 +14,7 @@ pub struct ResolvedModel {
     pub api_key_env: String,
     pub api_type: ProviderApiType,
     /// Whether the resolved model matches the originally requested provider.
-    /// `false` means a fallback was used (AGENT_MODEL, DEFAULT_MODEL, or hardcoded).
+    /// `false` means a fallback was used (`AGENT_MODEL`, `DEFAULT_MODEL`, or hardcoded).
     #[serde(default)]
     pub resolved_from_requested: bool,
 }

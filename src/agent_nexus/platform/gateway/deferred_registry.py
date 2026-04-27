@@ -96,15 +96,24 @@ class DeferredAgentRegistry:
         self._tool_adapters: dict[str, list[McpToolAdapter]] = {}
         # Reverse index: full_name -> McpToolAdapter for O(1) lookup
         self._tool_by_name: dict[str, McpToolAdapter] = {}
-        self._lock = asyncio.Lock()
+        # Per-agent activation locks allow concurrent activation of different
+        # agents.  The global lock only protects the _agent_locks dict itself
+        # (very short hold time).
+        self._agent_locks: dict[str, asyncio.Lock] = {}
+        self._global_lock = asyncio.Lock()
 
-    def _get_lock(self) -> asyncio.Lock:
-        """Return the activation lock.
+    async def _get_agent_lock(self, agent_id: str) -> asyncio.Lock:
+        """Get or create a per-agent activation lock.
 
-        Kept as a property for backward compatibility with existing callers.
-        The lock is now created eagerly in ``__init__`` (Python 3.10+).
+        Uses double-checked locking: check without the global lock first,
+        then acquire it only if we need to create a new entry.  This keeps
+        the global lock hold time to a single dict assignment.
         """
-        return self._lock
+        if agent_id not in self._agent_locks:
+            async with self._global_lock:
+                if agent_id not in self._agent_locks:
+                    self._agent_locks[agent_id] = asyncio.Lock()
+        return self._agent_locks[agent_id]
 
     # ------------------------------------------------------------------
     # Registration
@@ -192,7 +201,7 @@ class DeferredAgentRegistry:
             KeyError: Agent not registered.
             RuntimeError: Agent subprocess failed to start.
         """
-        async with self._get_lock():
+        async with await self._get_agent_lock(name):
             # Check if already activated (could be core or previously activated)
             if name in self._core_agents:
                 info = self._core_agents[name]

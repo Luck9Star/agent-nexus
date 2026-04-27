@@ -45,34 +45,68 @@ pub enum TaskGraphError {
 // Cycle detection helper
 // ---------------------------------------------------------------------------
 
-/// Depth-first search with three-color marking for cycle detection.
+/// Iterative depth-first search with three-color marking for cycle detection.
 ///
 /// Returns `true` if a cycle is found starting from `name`.
+/// Uses an explicit stack instead of recursion to avoid stack overflow on
+/// deep dependency chains.
 fn dfs(
-    name: &str,
+    start: &str,
     tasks: &[TaskItem],
     name_index: &HashMap<String, usize>,
     white: &mut HashSet<String>,
     gray: &mut HashSet<String>,
     black: &mut HashSet<String>,
 ) -> bool {
-    white.remove(name);
-    gray.insert(name.to_string());
-    let Some(&idx) = name_index.get(name) else {
-        return false;
-    };
-    for dep in &tasks[idx].blocked_by {
-        if gray.contains(dep) {
-            return true;
-        }
-        if !black.contains(dep)
-            && dfs(dep, tasks, name_index, white, gray, black)
-        {
-            return true;
+    /// One frame of the iterative DFS: tracks which children we still need to visit.
+    struct Frame {
+        name: String,
+        child_idx: usize,
+    }
+
+    let mut stack: Vec<Frame> = vec![Frame {
+        name: start.to_string(),
+        child_idx: 0,
+    }];
+
+    // Mark start as discovered (gray)
+    white.remove(start);
+    gray.insert(start.to_string());
+
+    while let Some(frame) = stack.last_mut() {
+        let Some(&idx) = name_index.get(&frame.name) else {
+            // No such task — skip (shouldn't happen with valid data)
+            let done = stack.pop().unwrap();
+            gray.remove(&done.name);
+            black.insert(done.name);
+            continue;
+        };
+
+        let deps = &tasks[idx].blocked_by;
+        if frame.child_idx < deps.len() {
+            let dep = deps[frame.child_idx].clone();
+            frame.child_idx += 1;
+
+            if gray.contains(&dep) {
+                return true; // Cycle found
+            }
+            if !black.contains(&dep) {
+                // Descend into this child
+                white.remove(&dep);
+                gray.insert(dep.clone());
+                stack.push(Frame {
+                    name: dep,
+                    child_idx: 0,
+                });
+            }
+        } else {
+            // All children visited — mark black and pop
+            let done = stack.pop().unwrap();
+            gray.remove(&done.name);
+            black.insert(done.name);
         }
     }
-    gray.remove(name);
-    black.insert(name.to_string());
+
     false
 }
 
@@ -80,7 +114,7 @@ fn dfs(
 // TaskGraph
 // ---------------------------------------------------------------------------
 
-/// TaskGraph stores task dependency relationships in SQLite.
+/// `TaskGraph` stores task dependency relationships in `SQLite`.
 ///
 /// **Note**: This type is `!Send + !Sync` because `rusqlite::Connection` is not thread-safe.
 /// To use in async contexts, wrap in `std::sync::Mutex` and access via `tokio::task::spawn_blocking`.
@@ -335,6 +369,12 @@ impl TaskGraph {
     }
 
     /// Connection-agnostic cycle detection used by both `detect_cycle` and `add_task` transaction.
+    ///
+    /// **Performance note:** This method performs a full table scan via
+    /// [`load_all_tasks_from_conn`], loading every task row into memory.
+    /// The DFS cycle check itself is O(V + E) in both time and space.
+    /// Callers should avoid invoking this in tight loops for large graphs;
+    /// consider batching or caching the result if repeated checks are needed.
     fn detect_cycle_with_conn(
         conn: &Connection,
     ) -> Result<bool, TaskGraphError> {

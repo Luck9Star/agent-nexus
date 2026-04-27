@@ -30,6 +30,7 @@ pub enum CliError {
 
 impl CliError {
     /// Returns the error category for structured output.
+    #[must_use] 
     pub fn kind(&self) -> ErrorKind {
         match self {
             Self::Init(_) => ErrorKind::Init,

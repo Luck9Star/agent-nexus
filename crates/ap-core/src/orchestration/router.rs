@@ -48,14 +48,15 @@ pub struct PlatformRouter {
     pm: ProcessManagerHandle,
     subtask: SubtaskController,
     composites: HashMap<String, CompositeDefinition>,
-    /// Per-agent locks to serialize IPC (take_io → return_io) cycles.
+    /// Per-agent locks to serialize IPC (`take_io` → `return_io`) cycles.
     /// Uses `tokio::sync::Mutex` because the lock is held across `.await` points
-    /// (send_chat, receive_result). The outer `std::sync::Mutex` guards the
-    /// HashMap only (pure sync ops, no .await).
+    /// (`send_chat`, `receive_result`). The outer `std::sync::Mutex` guards the
+    /// `HashMap` only (pure sync ops, no .await).
     agent_locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl PlatformRouter {
+    #[must_use] 
     pub fn new(pm: ProcessManagerHandle, config: SubtaskConfig) -> Self {
         Self {
             pm,
@@ -72,7 +73,7 @@ impl PlatformRouter {
 
     /// Get or create a per-agent `tokio::sync::Mutex` for serializing IPC cycles.
     ///
-    /// The outer `std::sync::Mutex` guards the HashMap lookup only (no `.await`).
+    /// The outer `std::sync::Mutex` guards the `HashMap` lookup only (no `.await`).
     /// The returned `Arc<tokio::sync::Mutex<()>>` is safe to hold across `.await`
     /// points during `send_chat` / `receive_result`.
     fn agent_lock(&self, name: &str) -> Arc<tokio::sync::Mutex<()>> {
@@ -222,20 +223,17 @@ impl PlatformRouter {
         match phase {
             WorkflowPhase::Research => {
                 format!(
-                    "## Research Results\n\n{}\n\nBased on the above research, create an implementation plan.",
-                    phase_result
+                    "## Research Results\n\n{phase_result}\n\nBased on the above research, create an implementation plan."
                 )
             }
             WorkflowPhase::Synthesis => {
                 format!(
-                    "## Implementation Plan\n\n{}\n\nExecute the above plan.",
-                    phase_result
+                    "## Implementation Plan\n\n{phase_result}\n\nExecute the above plan."
                 )
             }
             WorkflowPhase::Implementation => {
                 format!(
-                    "## Implementation Output\n\n{}\n\nVerify the above implementation is correct and complete.",
-                    phase_result
+                    "## Implementation Output\n\n{phase_result}\n\nVerify the above implementation is correct and complete."
                 )
             }
             WorkflowPhase::Verification => phase_result.to_string(),
@@ -370,7 +368,7 @@ impl PlatformRouter {
 
     /// Send a chat message to an agent via IPC and receive the result.
     ///
-    /// Takes the IO pair from the ProcessManager, performs the chat, then
+    /// Takes the IO pair from the `ProcessManager`, performs the chat, then
     /// returns the IO pair. The pair is NOT returned to the PM — the caller
     /// is responsible for managing process lifecycle.
     async fn ipc_chat(

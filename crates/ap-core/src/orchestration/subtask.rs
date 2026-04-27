@@ -74,11 +74,13 @@ pub struct SubtaskController {
 }
 
 impl SubtaskController {
+    #[must_use] 
     pub fn new(config: SubtaskConfig) -> Self {
         Self { config }
     }
 
     /// Read-only access to the subtask configuration.
+    #[must_use] 
     pub fn config(&self) -> &SubtaskConfig {
         &self.config
     }

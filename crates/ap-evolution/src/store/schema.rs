@@ -107,7 +107,7 @@ pub const GET_SCHEMA_VERSION_SQL: &str =
     "SELECT value FROM _meta WHERE key = 'schema_version'";
 
 /// Migrations to run when upgrading from one version to the next.
-/// Each entry is (from_version, to_version, SQL).
+/// Each entry is (`from_version`, `to_version`, SQL).
 /// Add new entries here when the schema evolves.
 pub const MIGRATIONS: &[(&str, &str, &str)] = &[
     // Example for future use:

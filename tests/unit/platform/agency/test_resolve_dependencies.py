@@ -44,17 +44,32 @@ class TestResolveDependencies:
         for t in specialist:
             assert t.blocked_by == [], f"{t.id} should have no blocked_by"
 
-    def test_overlapping_caps_creates_dependency(
+    def test_overlapping_caps_subset_creates_dependency(
         self, planner: DynamicCompositePlanner
     ) -> None:
-        """If task B needs a capability that task A provides, B should be blocked by A."""
+        """If task B's caps are a subset of task A's, B should be blocked by A.
+
+        Mere overlap (neither is a subset) does NOT create a dependency.
+        """
         subtasks = [
-            _subtask("arch", ["system_design", "architecture_review"]),
-            _subtask("review", ["architecture_review", "code_review"]),
+            _subtask("arch", ["system_design", "architecture_review", "security_review"]),
+            _subtask("review", ["architecture_review"]),
         ]
         dag = planner.resolve_dependencies(subtasks, composition_name="dep-chain")
         review_task = next(t for t in dag.specialist_tasks if t.id == "review")
         assert "arch" in review_task.blocked_by
+
+    def test_overlapping_but_different_no_dependency(
+        self, planner: DynamicCompositePlanner
+    ) -> None:
+        """Tasks with overlapping but non-subset caps run in parallel."""
+        subtasks = [
+            _subtask("arch", ["system_design", "architecture_review"]),
+            _subtask("review", ["architecture_review", "code_review"]),
+        ]
+        dag = planner.resolve_dependencies(subtasks, composition_name="overlap")
+        review_task = next(t for t in dag.specialist_tasks if t.id == "review")
+        assert review_task.blocked_by == []
 
     def test_all_specialists_block_integrate(
         self, planner: DynamicCompositePlanner
@@ -77,18 +92,26 @@ class TestResolveDependencies:
         assert validate.blocked_by == ["integrate"]
 
     def test_chain_dependency(self, planner: DynamicCompositePlanner) -> None:
-        """A -> B -> C chain based on capability overlap."""
+        """Subset chain: A has superset caps, B is subset of A, C depends on B.
+
+        With subset rule (<=):
+        - design: {system_design, tradeoff_analysis} (superset)
+        - plan: {system_design} (subset of design → blocked by design)
+        - risk: {tradeoff_analysis, security_review} (overlaps design but not subset)
+        """
         subtasks = [
-            _subtask("design", ["system_design"]),
-            _subtask("plan", ["system_design", "tradeoff_analysis"]),
+            _subtask("design", ["system_design", "tradeoff_analysis"]),
+            _subtask("plan", ["system_design"]),
             _subtask("risk", ["tradeoff_analysis", "security_review"]),
         ]
         dag = planner.resolve_dependencies(subtasks, composition_name="chain")
         plan_task = next(t for t in dag.specialist_tasks if t.id == "plan")
         risk_task = next(t for t in dag.specialist_tasks if t.id == "risk")
 
+        # plan is a strict subset of design → blocked by design
         assert "design" in plan_task.blocked_by
-        assert "plan" in risk_task.blocked_by
+        # risk overlaps design (tradeoff_analysis) but is not a subset → parallel
+        assert risk_task.blocked_by == []
 
     def test_empty_subtasks_raises(self, planner: DynamicCompositePlanner) -> None:
         with pytest.raises(ValueError, match="at least one"):

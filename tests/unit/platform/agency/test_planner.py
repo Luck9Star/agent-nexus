@@ -311,3 +311,142 @@ class TestPlannerInput:
 
         assert dag.name == "integration-design"
         assert dag.max_parallel == 3
+
+
+# ---------------------------------------------------------------------------
+# C2 fix: Smart dependency resolution (strict-subset rule)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(30)
+class TestSmartDependencyResolution:
+    """resolve_dependencies uses strict-subset rule for blocked_by edges."""
+
+    def test_overlapping_but_different_capabilities_no_block(self) -> None:
+        """Tasks with overlapping but different capabilities run in parallel.
+
+        task_a has {code_review, security_review} and task_b has
+        {security_review, reliability_review}. Neither is a subset of the
+        other, so no blocked_by edges are created.
+        """
+        subtasks = [
+            SubtaskDef(
+                id="task_a",
+                goal="review code",
+                needed_capabilities=["code_review", "security_review"],
+                output_contract="report_a",
+                assigned_agent="agency.agent-a",
+            ),
+            SubtaskDef(
+                id="task_b",
+                goal="security analysis",
+                needed_capabilities=["security_review", "reliability_review"],
+                output_contract="report_b",
+                assigned_agent="agency.agent-b",
+            ),
+        ]
+        planner = DynamicCompositePlanner()
+        dag = planner.resolve_dependencies(subtasks, composition_name="overlap-test")
+
+        a_task = next(t for t in dag.tasks if t.id == "task_a")
+        b_task = next(t for t in dag.tasks if t.id == "task_b")
+        # Neither is a subset of the other → no blocked_by
+        assert a_task.blocked_by == []
+        assert b_task.blocked_by == []
+
+    def test_strict_subset_creates_dependency(self) -> None:
+        """A task whose capabilities are a strict subset of another IS blocked."""
+        subtasks = [
+            SubtaskDef(
+                id="broad_task",
+                goal="full review",
+                needed_capabilities=["code_review", "security_review", "reliability_review"],
+                output_contract="broad_report",
+                assigned_agent="agency.agent-a",
+            ),
+            SubtaskDef(
+                id="narrow_task",
+                goal="security only",
+                needed_capabilities=["security_review"],
+                output_contract="narrow_report",
+                assigned_agent="agency.agent-b",
+            ),
+        ]
+        planner = DynamicCompositePlanner()
+        dag = planner.resolve_dependencies(subtasks, composition_name="subset-test")
+
+        narrow = next(t for t in dag.tasks if t.id == "narrow_task")
+        # narrow_task's caps {security_review} is a strict subset of
+        # broad_task's caps → narrow_task blocked_by broad_task
+        assert "broad_task" in narrow.blocked_by
+
+    def test_identical_capability_sets_create_dependency(self) -> None:
+        """Identical capability sets: later task blocked by first producer.
+
+        resolve_dependencies uses <= (non-strict subset), so identical
+        capability sets cause the second task to depend on the first.
+        """
+        subtasks = [
+            SubtaskDef(
+                id="first",
+                goal="review code",
+                needed_capabilities=["code_review", "security_review"],
+                output_contract="report_1",
+                assigned_agent="agency.agent-a",
+            ),
+            SubtaskDef(
+                id="second",
+                goal="another review",
+                needed_capabilities=["code_review", "security_review"],
+                output_contract="report_2",
+                assigned_agent="agency.agent-b",
+            ),
+        ]
+        planner = DynamicCompositePlanner()
+        dag = planner.resolve_dependencies(subtasks, composition_name="identical-test")
+
+        first = next(t for t in dag.tasks if t.id == "first")
+        second = next(t for t in dag.tasks if t.id == "second")
+        # First is not blocked (it's the producer)
+        assert first.blocked_by == []
+        # Second has identical caps to first → second <= first → blocked
+        assert "first" in second.blocked_by
+
+    def test_three_tasks_partial_subset_no_overlap(self) -> None:
+        """A⊂B and C has no overlap with either: only A depends on B, C is free."""
+        subtasks = [
+            SubtaskDef(
+                id="broad",
+                goal="broad task",
+                needed_capabilities=["system_design", "architecture_review", "tool_evaluation"],
+                output_contract="broad_out",
+                assigned_agent="agency.agent-a",
+            ),
+            SubtaskDef(
+                id="narrow",
+                goal="narrow task",
+                needed_capabilities=["system_design"],
+                output_contract="narrow_out",
+                assigned_agent="agency.agent-b",
+            ),
+            SubtaskDef(
+                id="unrelated",
+                goal="unrelated task",
+                needed_capabilities=["test_design", "test_analysis"],
+                output_contract="test_out",
+                assigned_agent="agency.agent-c",
+            ),
+        ]
+        planner = DynamicCompositePlanner()
+        dag = planner.resolve_dependencies(subtasks, composition_name="partial-test")
+
+        broad = next(t for t in dag.tasks if t.id == "broad")
+        narrow = next(t for t in dag.tasks if t.id == "narrow")
+        unrelated = next(t for t in dag.tasks if t.id == "unrelated")
+
+        # narrow is a strict subset of broad → blocked
+        assert "broad" in narrow.blocked_by
+        # broad is NOT a subset of narrow
+        assert broad.blocked_by == []
+        # unrelated has no overlap at all → not blocked
+        assert unrelated.blocked_by == []

@@ -42,6 +42,14 @@ impl GitInstaller {
     /// out a specific semver version tag, then moves the result to the final
     /// location atomically.
     ///
+    /// **Concurrency note:** This method does not hold a per-agent lock. Concurrent
+    /// installs of the *same* agent (same URL/dirname) may race on the temporary and
+    /// final directory paths, producing a corrupted install. Callers that may invoke
+    /// parallel installs for the same agent should serialize them externally, e.g.
+    /// via a per-agent advisory lock keyed on the directory name.
+    // TODO: Implement an advisory lock (e.g., flock-based `AgentLock`) so that
+    //       concurrent `install()` calls for the same agent are serialized automatically.
+    ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub fn install(
@@ -53,7 +61,13 @@ impl GitInstaller {
         // Validate install_dir: reject path traversal attempts
         Self::validate_install_dir(&self.install_dir)?;
 
-        // Validate URL scheme: reject dangerous schemes like file://
+        // Trust model: remote URLs must use an allowed scheme (https/http/git/ssh).
+        // Local paths (/, ./, ~/) are trusted without scheme validation — the
+        // user explicitly chose a local source.  Local paths are still checked
+        // for path-traversal by `validate_local_source_path` below.  This
+        // split (remote = allowlist, local = trust + traversal guard) avoids
+        // false positives on developer workstations while blocking accidental
+        // use of `file://` or other unsafe schemes.
         let allowed_schemes = ["https://", "http://", "git://", "ssh://"];
         let is_local_path = url.starts_with('/') || url.starts_with('.') || url.starts_with('~');
         if !allowed_schemes.iter().any(|s| url.starts_with(s)) && !is_local_path {
@@ -268,8 +282,7 @@ impl GitInstaller {
         for component in expanded.components() {
             if let std::path::Component::ParentDir = component {
                 return Err(InstallerError::Validation(format!(
-                    "local source path must not contain '..' components: {}",
-                    url
+                    "local source path must not contain '..' components: {url}"
                 )));
             }
         }
@@ -307,8 +320,7 @@ impl GitInstaller {
         if expanded.exists() {
             let canonical = std::fs::canonicalize(&expanded).map_err(|e| {
                 InstallerError::Validation(format!(
-                    "cannot canonicalize local path '{}': {}",
-                    url, e
+                    "cannot canonicalize local path '{url}': {e}"
                 ))
             })?;
 

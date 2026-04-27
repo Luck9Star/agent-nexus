@@ -2,7 +2,7 @@
 //!
 //! Matches the Python CLI `create agent` command with --description, --tools,
 //! --wizard, and --output flags. Generates: agent-manifest.yaml, agent.py,
-//! SKILL.md, pyproject.toml, <pkg>/__init__.py, <pkg>/agent.py, <pkg>/mcp_adapter.py.
+//! SKILL.md, pyproject.toml, <pkg>/__init__.py, <pkg>/agent.py, <pkg>/`mcp_adapter.py`.
 
 use anyhow::{Context, Result};
 
@@ -29,12 +29,10 @@ pub fn run_agent(
     // Resolve tool pattern
     let tool_list = TOOLS_MODE_MAP
         .iter()
-        .find(|(k, _)| k == &tools)
-        .map(|(_, v)| *v)
-        .unwrap_or_else(|| {
+        .find(|(k, _)| k == &tools).map_or_else(|| {
             eprintln!("Warning: Unknown tools pattern '{tools}', falling back to 'simple'");
             &["run"] as &[&str]
-        });
+        }, |(_, v)| *v);
 
     if wizard {
         // Interactive wizard mode -- prompt for parameters
@@ -101,11 +99,9 @@ fn create_scaffold(
     std::fs::write(pkg_dir.join("mcp_adapter.py"), mcp_adapter_content)?;
 
     let file_count = std::fs::read_dir(&agent_dir)
-        .map(|d| d.count())
-        .unwrap_or(0)
+        .map_or(0, std::iter::Iterator::count)
         + std::fs::read_dir(&pkg_dir)
-            .map(|d| d.count())
-            .unwrap_or(0);
+            .map_or(0, std::iter::Iterator::count);
 
     output.success(&format!("Created agent: {}", agent_dir.display()));
     output.info(&format!("  Tools: {}", tools.join(", ")));

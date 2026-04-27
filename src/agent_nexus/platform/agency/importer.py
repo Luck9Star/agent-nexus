@@ -9,9 +9,19 @@ from .allowlist import load_allowlist
 from .parser import parse_frontmatter
 from .policy import check_content_policy
 
+# Pre-compiled set of YAML special characters for O(min(n,m)) quoting check
+_YAML_SPECIAL_CHARS = frozenset(':#{}[]",&*?|-=<>!%@`' + "\n\r\t")
+
 # Default output contract section mappings by artifact_type
 _CONTRACT_SECTIONS: dict[str, list[str]] = {
-    "architecture_plan": ["context", "assumptions", "proposed_design", "tradeoffs", "risks", "next_steps"],
+    "architecture_plan": [
+        "context",
+        "assumptions",
+        "proposed_design",
+        "tradeoffs",
+        "risks",
+        "next_steps",
+    ],
     "technical_report": ["summary", "methodology", "findings", "recommendations"],
     "review_report": ["summary", "findings", "severity", "recommendations"],
     "risk_report": ["findings", "severity", "affected_components", "mitigation"],
@@ -21,9 +31,13 @@ _CONTRACT_SECTIONS: dict[str, list[str]] = {
     "onboarding_guide": ["overview", "architecture", "getting_started", "key_concepts"],
     "evaluation_report": ["summary", "criteria", "scores", "recommendation"],
     "index_report": ["summary", "index_structure", "coverage", "recommendations"],
-    "orchestration_plan": ["objective", "task_decomposition", "agent_assignments", "execution_order"],
+    "orchestration_plan": [
+        "objective",
+        "task_decomposition",
+        "agent_assignments",
+        "execution_order",
+    ],
 }
-
 
 
 def _dump_yaml(data: object, f: Any, indent: int = 0) -> None:
@@ -68,9 +82,20 @@ def _dump_yaml(data: object, f: Any, indent: int = 0) -> None:
                 f.write(f"{prefix}- {_yaml_quote(str(item))}\n")
 
 
-_YAML_KEYWORDS = frozenset({
-    "true", "false", "yes", "no", "on", "off", "null", "y", "n", "~",
-})
+_YAML_KEYWORDS = frozenset(
+    {
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off",
+        "null",
+        "y",
+        "n",
+        "~",
+    }
+)
 
 
 def _yaml_quote(s: str) -> str:
@@ -89,9 +114,10 @@ def _yaml_quote(s: str) -> str:
         return f'"{escaped}"'
     except ValueError:
         pass
-    if any(c in s for c in (":", "#", "{", "}", "[", "]", ",", "&", "*", "?", "|", "-", "<", ">", "=", "!", "%", "@", "`", "\n", "\r", "\t")):
+    if _YAML_SPECIAL_CHARS & set(s):
         return f'"{escaped}"'
     return s
+
 
 def _derive_category(source_path: str) -> str:
     """Extract category from the source path (first directory component)."""
@@ -124,7 +150,12 @@ class AgencyImporter:
         assert self._allowlist_data is not None
         return self._allowlist_data
 
-    def _build_profile_package(self, parsed: dict, entry: dict) -> dict[str, Any]:
+    def _build_profile_package(
+        self,
+        parsed: dict,
+        entry: dict,
+        imported_at: date | None = None,
+    ) -> dict[str, Any]:
         """Build a complete profile package from parsed frontmatter and an allowlist entry.
 
         Returns a dict with keys: id, expert_profile, normalized_prompt, source_md, output_contract.
@@ -152,7 +183,7 @@ class AgencyImporter:
                 "vibe": parsed["vibe"],
                 "source_md_path": source_path,
                 "normalized_prompt_path": f"normalized/{entry['id']}.md",
-                "imported_at": date.today().isoformat(),
+                "imported_at": (imported_at or date.today()).isoformat(),
             },
             "capabilities": entry["capabilities"],
             "routing": {
@@ -191,11 +222,8 @@ class AgencyImporter:
             f"{parsed['body']}"
         )
 
-        # Build the output_contract dict
-        output_contract: dict[str, Any] = {
-            "artifact_type": artifact_type,
-            "required_sections": _CONTRACT_SECTIONS.get(artifact_type, ["summary"]),
-        }
+        # Reuse the same output_contract dict from expert_profile
+        output_contract = expert_profile["output_contract"]
 
         return {
             "id": entry["id"],
@@ -222,9 +250,7 @@ class AgencyImporter:
             try:
                 md_file.resolve().relative_to(self.vendor_path.resolve())
             except ValueError:
-                raise ValueError(
-                    f"source_path escapes vendor directory: {source_path}"
-                )
+                raise ValueError(f"source_path escapes vendor directory: {source_path}") from None
 
             if not md_file.is_file():
                 raise FileNotFoundError(f"Vendor file not found: {md_file}")
@@ -280,14 +306,16 @@ class AgencyImporter:
                 f.write(pkg["normalized_prompt"])
 
             # Collect index entry
-            index_entries.append({
-                "id": profile_id,
-                "name": ep.get("name", ""),
-                "category": ep.get("profile", {}).get("category", ""),
-                "capabilities": ep.get("capabilities", []),
-                "profile_file": f"{profile_id}.json",
-                "prompt_file": f"normalized/{profile_id}.md",
-            })
+            index_entries.append(
+                {
+                    "id": profile_id,
+                    "name": ep.get("name", ""),
+                    "category": ep.get("profile", {}).get("category", ""),
+                    "capabilities": ep.get("capabilities", []),
+                    "profile_file": f"{profile_id}.json",
+                    "prompt_file": f"normalized/{profile_id}.md",
+                }
+            )
 
         # Write source.lock.yaml
         source_lock: dict[str, Any] = {

@@ -15,6 +15,7 @@ class Artifact:
     source_agent: str
     artifact_type: str
     sections: dict[str, object]
+    metadata: dict[str, object] | None = None
 
 
 @dataclass
@@ -90,14 +91,25 @@ class Integrator:
                     f"Artifact from '{artifact.source_agent}' has too many sections "
                     f"({len(artifact.sections)}); max 100"
                 )
-            # Validate section value sizes to prevent memory exhaustion
+            # Validate and merge sections in a single pass
             for key, value in artifact.sections.items():
+                # Validate section value sizes to prevent memory exhaustion
                 if isinstance(value, str) and len(value) > Integrator.MAX_SECTION_VALUE_SIZE:
                     raise ValueError(
                         f"Section '{key}' in artifact from '{artifact.source_agent}' "
                         f"exceeds max size ({len(value)} > {Integrator.MAX_SECTION_VALUE_SIZE})"
                     )
-            for key, value in artifact.sections.items():
+                if isinstance(value, (list, dict)):
+                    total_chars = sum(
+                        len(str(v)) for v in (value.values() if isinstance(value, dict) else value)
+                    )
+                    if total_chars > Integrator.MAX_SECTION_VALUE_SIZE:
+                        raise ValueError(
+                            f"Section '{key}' in artifact from '{artifact.source_agent}' "
+                            f"exceeds max aggregate size ({total_chars} > "
+                            f"{Integrator.MAX_SECTION_VALUE_SIZE})"
+                        )
+                # Merge into consolidated sections
                 if key in merged_sections:
                     existing = merged_sections[key]
                     if isinstance(existing, list) and isinstance(value, list):
@@ -178,6 +190,18 @@ def _extract_risks(artifact: Artifact, risks: list[str]) -> None:
                 risks.append(value)
 
 
+def _normalize_severity(value: str) -> str:
+    """Normalize severity terms to a standard high/medium/low scale."""
+    lower = value.strip().lower()
+    if lower in ("critical", "severe", "major", "high"):
+        return "high"
+    if lower in ("moderate", "warning", "medium"):
+        return "medium"
+    if lower in ("low", "minor", "info", "informational"):
+        return "low"
+    return lower
+
+
 def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
     """Detect conflicting viewpoints across artifacts."""
     conflicts: list[ConflictItem] = []
@@ -189,7 +213,7 @@ def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
     for artifact in artifacts:
         for key, value in artifact.sections.items():
             if key == "severity" and isinstance(value, str):
-                severity_by_agent[artifact.source_agent] = value
+                severity_by_agent[artifact.source_agent] = _normalize_severity(value)
 
     severity_values = set(severity_by_agent.values())
     if len(severity_values) > 1:
@@ -231,7 +255,7 @@ def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
             # Exclude synthetic/structural sections that Integrator.merge adds to
             # all artifacts (final_recommendation, decision_summary) — these inflate
             # the overlap check and cause false positives.
-            _STRUCTURAL_SECTIONS = frozenset({
+            _structural_sections = frozenset({
                 "final_recommendation", "decision_summary", "recommendation",
             })
             agent_section_keys: dict[str, set[str]] = {}
@@ -239,7 +263,7 @@ def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
                 if artifact.source_agent in risk_sets:
                     agent_section_keys[artifact.source_agent] = set(
                         artifact.sections.keys()
-                    ) - _STRUCTURAL_SECTIONS
+                    ) - _structural_sections
             section_sets = list(agent_section_keys.values())
             if section_sets:
                 shared = section_sets[0]
@@ -250,7 +274,10 @@ def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
                     conflicts.append(
                         ConflictItem(
                             field="risks",
-                            description="Experts have completely disjoint risk findings — potential blind spots",
+                            description=(
+                                "Experts have completely disjoint risk "
+                                "findings — potential blind spots"
+                            ),
                             agents=conflicting_agents,
                         )
                     )

@@ -76,6 +76,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
     /// Receive the next agent response, converting it to an `AgentResult`.
     /// If a timeout (in seconds) is provided, aborts with `IpcError::Timeout` on expiry.
     ///
+    /// **Timeout semantics:** The timeout applies to the *total* wait for a final
+    /// result, not per-message. Internally, each iteration of the receive loop
+    /// tracks cumulative elapsed time since the first call. `Progress` messages
+    /// do NOT reset the timeout clock — they are informational and the loop
+    /// continues waiting, but the total elapsed time keeps accumulating. If the
+    /// agent sends only Progress messages and never a Result or Error, the total
+    /// timeout will eventually expire.
+    ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub async fn receive_result(&mut self, timeout: Option<f64>) -> Result<AgentResult, IpcError> {
@@ -131,7 +139,6 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
                 AgentToPlatformType::Progress => {
                     // Progress messages are informational; skip and wait for the final result.
                     tracing::debug!("Skipping progress message, waiting for final result");
-                    continue;
                 }
             }
         }
@@ -140,7 +147,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
     /// Decompose the protocol back into the underlying reader and writer.
     ///
     /// Use after a complete IPC round to recover the IO handles for return
-    /// to the ProcessManager via `return_io`.
+    /// to the `ProcessManager` via `return_io`.
     pub fn into_parts(self) -> (R, W) {
         self.stream.into_parts()
     }

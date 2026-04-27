@@ -43,6 +43,7 @@ class QAGateResult:
     passed: bool
     contract_result: ContractValidationResult
     gitnexus_result: GitNexusCheckResult
+    failures: list[str] = field(default_factory=list)
 
 
 class QAGate:
@@ -70,9 +71,21 @@ class QAGate:
         sections = output.get("sections", {})
         missing = [s for s in required_sections if s not in sections]
 
+        # Validate that present sections have non-empty, non-whitespace values
+        empty_sections: list[str] = []
+        for s in required_sections:
+            if s in sections:
+                value = sections[s]
+                if value is None:
+                    empty_sections.append(s)
+                elif isinstance(value, str) and value.strip() == "":
+                    empty_sections.append(s)
+
+        all_missing = missing + empty_sections
+
         return ContractValidationResult(
-            passed=len(missing) == 0,
-            missing_sections=missing,
+            passed=len(all_missing) == 0,
+            missing_sections=all_missing,
         )
 
     @staticmethod
@@ -120,8 +133,15 @@ class QAGate:
 
         overall = contract.passed and gitnexus.passed
 
+        failures: list[str] = []
+        if not contract.passed:
+            failures.append(f"Missing sections: {contract.missing_sections}")
+        if not gitnexus.passed:
+            failures.append(f"GitNexus gate failed: {gitnexus.failed_checks}")
+
         return QAGateResult(
             passed=overall,
             contract_result=contract,
             gitnexus_result=gitnexus,
+            failures=failures,
         )

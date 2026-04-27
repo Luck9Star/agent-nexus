@@ -135,7 +135,7 @@ impl SkillEvolver {
     }
 }
 
-/// Check whether a [`StoreError`] originated from an SQLite constraint violation
+/// Check whether a [`StoreError`] originated from an `SQLite` constraint violation
 /// (e.g. UNIQUE, CHECK, NOT NULL).  Uses rusqlite's typed error code instead
 /// of string matching so it is locale-independent and forwards-compatible.
 fn is_constraint_violation(err: &StoreError) -> bool {

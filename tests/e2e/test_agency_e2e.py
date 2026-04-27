@@ -938,32 +938,32 @@ class TestTOMLInjectionPrevention:
 
 @pytest.mark.timeout(10)
 class TestCapabilityInference:
-    """E2E: _infer_capabilities() correctly matches task descriptions."""
+    """E2E: infer_capabilities() correctly matches task descriptions."""
 
     def test_review_the_code_includes_code_review(self):
-        from agent_nexus.platform.agency.task_composer import _infer_capabilities
+        from agent_nexus.platform.agency.task_composer import infer_capabilities
 
-        caps = _infer_capabilities("review the code")
+        caps = infer_capabilities("review the code")
         assert "code_review" in caps, f"Expected code_review in {caps}"
 
     def test_preview_the_changes_excludes_code_review(self):
         """'preview' should NOT match 'review' — was a false positive."""
-        from agent_nexus.platform.agency.task_composer import _infer_capabilities
+        from agent_nexus.platform.agency.task_composer import infer_capabilities
 
-        caps = _infer_capabilities("preview the changes")
+        caps = infer_capabilities("preview the changes")
         assert "code_review" not in caps, f"code_review should not be in {caps} for 'preview'"
 
     def test_security_analysis_includes_security_review(self):
-        from agent_nexus.platform.agency.task_composer import _infer_capabilities
+        from agent_nexus.platform.agency.task_composer import infer_capabilities
 
-        caps = _infer_capabilities("security analysis")
+        caps = infer_capabilities("security analysis")
         assert "security_review" in caps, f"Expected security_review in {caps}"
 
     def test_insecurity_measurement_excludes_security_review(self):
         """'insecurity' should NOT match 'security' — word boundary check."""
-        from agent_nexus.platform.agency.task_composer import _infer_capabilities
+        from agent_nexus.platform.agency.task_composer import infer_capabilities
 
-        caps = _infer_capabilities("insecurity measurement")
+        caps = infer_capabilities("insecurity measurement")
         assert "security_review" not in caps, f"security_review should not be in {caps} for 'insecurity'"
 
 

@@ -49,7 +49,7 @@ pub fn run(
         source.url.clone()
     };
 
-    output.info(&format!("Installing '{}' ...", agent));
+    output.info(&format!("Installing '{agent}' ..."));
 
     let install_dir = root.join(".agents");
     let installer = GitInstaller::new(install_dir);
@@ -60,7 +60,7 @@ pub fn run(
 
     let agent_dir = installed_path.join(agent);
     if !agent_dir.exists() {
-        anyhow::bail!("Agent '{}' not found in source repository", agent);
+        anyhow::bail!("Agent '{agent}' not found in source repository");
     }
 
     // Resolve actual HEAD commit SHA for reproducible installs
@@ -165,26 +165,23 @@ pub fn run_uninstall(agent: &str, output: &OutputFormatter) -> Result<()> {
     let lockfile_path = root.join("lockfile.json");
     let lockfile_mgr = LockfileManager::new(lockfile_path);
 
-    match lockfile_mgr.get(agent).context("Failed to read lockfile")? {
-        Some(_) => {
-            lockfile_mgr
-                .remove(agent)
-                .context("Failed to remove from lockfile")?;
+    if lockfile_mgr.get(agent).context("Failed to read lockfile")?.is_some() {
+        lockfile_mgr
+            .remove(agent)
+            .context("Failed to remove from lockfile")?;
 
-            // Remove install directory if it exists
-            let install_dir = root.join(".agents").join(agent);
-            if install_dir.exists() {
-                std::fs::remove_dir_all(&install_dir)
-                    .with_context(|| format!("Failed to remove install directory {}", install_dir.display()))?;
-            }
+        // Remove install directory if it exists
+        let install_dir = root.join(".agents").join(agent);
+        if install_dir.exists() {
+            std::fs::remove_dir_all(&install_dir)
+                .with_context(|| format!("Failed to remove install directory {}", install_dir.display()))?;
+        }
 
-            output.success(&format!("Uninstalled {agent}"));
-            Ok(())
-        }
-        None => {
-            output.error(&format!("Agent '{agent}' is not installed."));
-            Err(anyhow::anyhow!("Agent '{agent}' is not installed."))
-        }
+        output.success(&format!("Uninstalled {agent}"));
+        Ok(())
+    } else {
+        output.error(&format!("Agent '{agent}' is not installed."));
+        Err(anyhow::anyhow!("Agent '{agent}' is not installed."))
     }
 }
 

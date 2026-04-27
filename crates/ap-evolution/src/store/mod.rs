@@ -119,31 +119,48 @@ impl EvolutionStore {
             }
         };
 
-        // Existing DB at older version — apply migration chain.
-        let mut current = current;
-        while current != schema::SCHEMA_VERSION {
-            let mut applied = false;
-            for (from, to, sql) in schema::MIGRATIONS {
-                if current == *from {
-                    conn.execute_batch(sql)?;
-                    current = to.to_string();
-                    applied = true;
-                    break;
+        // Existing DB at older version — apply migration chain inside a transaction
+        // so that a crash mid-migration does not leave the schema in a partial state.
+        conn.execute_batch("BEGIN TRANSACTION")?;
+        let migration_result: std::result::Result<(), rusqlite::Error> = (|| {
+            let mut current = current;
+            while current != schema::SCHEMA_VERSION {
+                let mut applied = false;
+                for (from, to, sql) in schema::MIGRATIONS {
+                    if current == *from {
+                        conn.execute_batch(sql)?;
+                        current = to.to_string();
+                        applied = true;
+                        break;
+                    }
+                }
+                if !applied {
+                    return Err(rusqlite::Error::ToSqlConversionFailure(
+                        Box::from(format!(
+                            "migration stuck at version {current}: no migration from {current} to {target}",
+                            target = schema::SCHEMA_VERSION
+                        )),
+                    ));
                 }
             }
-            if !applied {
-                return Err(rusqlite::Error::ToSqlConversionFailure(
-                    Box::from(format!(
-                        "migration stuck at version {current}: no migration from {current} to {target}",
-                        target = schema::SCHEMA_VERSION
-                    )),
-                ));
+
+            // All migrations applied — stamp the target version.
+            conn.execute(schema::SET_SCHEMA_VERSION_SQL, [schema::SCHEMA_VERSION])?;
+            Ok(())
+        })();
+
+        match migration_result {
+            Ok(()) => {
+                conn.execute_batch("COMMIT")?;
+                Ok(())
+            }
+            Err(e) => {
+                // Best-effort rollback; ignore error if the rollback itself fails
+                // (the connection may be in a broken state regardless).
+                let _ = conn.execute_batch("ROLLBACK");
+                Err(e)
             }
         }
-
-        // All migrations applied — stamp the target version.
-        conn.execute(schema::SET_SCHEMA_VERSION_SQL, [schema::SCHEMA_VERSION])?;
-        Ok(())
     }
 
     /// Acquire a connection from the pool.

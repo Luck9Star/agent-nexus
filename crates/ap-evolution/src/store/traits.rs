@@ -36,7 +36,7 @@ pub trait Store: Send + Sync {
         deactivate_parents: bool,
     ) -> Result<()>;
 
-    /// Load the persisted health state (score, total_evaluations).
+    /// Load the persisted health state (score, `total_evaluations`).
     fn load_health_state(&self) -> Result<(f64, u64)>;
 
     /// Persist the health state.

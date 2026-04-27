@@ -31,15 +31,17 @@ def parse_frontmatter(md_content: str) -> dict:
 
     rest = stripped[first_newline + 1:]
 
-    # Find the closing --- using regex to match only standalone delimiter lines,
-    # not horizontal rules in body content (e.g. "---" used as <hr>).
-    closing_match = re.search(r"\n---\s*$", rest, re.MULTILINE)
-    if closing_match is None:
+    # Find the closing --- by counting matches: only the first standalone
+    # delimiter line after the opening one closes the frontmatter.  Using
+    # re.search with MULTILINE could prematurely match a horizontal rule
+    # in the body, so we split on delimiter lines and take the first split.
+    delimiter_re = re.compile(r"^---[ \t]*$", re.MULTILINE)
+    parts = re.split(delimiter_re, rest, maxsplit=1)
+    if len(parts) < 2:
         raise ValueError("No closing frontmatter delimiter found")
 
-    closing_index = closing_match.start()
-    yaml_block = rest[:closing_index]
-    body = rest[closing_match.end():].strip()  # skip past the matched delimiter
+    yaml_block = parts[0]
+    body = parts[1].strip()
 
     if not yaml_block.strip():
         raise ValueError("Empty frontmatter block")

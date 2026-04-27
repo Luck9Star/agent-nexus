@@ -11,6 +11,7 @@ runtime (TaskGraph + ProcessManager).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -60,8 +61,14 @@ class DispatchResult:
     failed: list[str] = field(default_factory=list)
     """IDs of tasks that failed."""
 
+    errors: dict[str, str] = field(default_factory=dict)
+    """task_id → error message for failed tasks."""
+
     timed_out: bool = False
     """Whether the dispatch hit its timeout limit."""
+
+    hit_iteration_limit: bool = False
+    """Whether the dispatch exceeded its iteration guard (indicates a possible bug)."""
 
 
 # ---------------------------------------------------------------------------
@@ -148,19 +155,19 @@ class DAGDispatcher:
 
     The dispatcher uses ``TaskGraph`` for state tracking (pending →
     in_progress → completed/failed) and respects ``blocked_by`` edges
-    for topological ordering with configurable parallelism.
+    for topological ordering with configurable batch size.
     """
 
     def __init__(
         self,
         graph: TaskGraph,
         executor: ExpertExecutor,
-        max_parallel: int = 3,
+        max_batch_size: int = 3,
         timeout_seconds: float | None = None,
     ) -> None:
         self._graph = graph
         self._executor = executor
-        self._max_parallel = max(1, max_parallel)
+        self._max_batch_size = max(1, max_batch_size)
         self._timeout_seconds = timeout_seconds
 
     @property
@@ -239,35 +246,47 @@ class DAGDispatcher:
                     # In synchronous mode, stale IN_PROGRESS tasks from a prior
                     # crash would cause an infinite loop. Fail them instead.
                     for t in in_progress:
-                        self._graph.fail_task(t.id)
+                        with contextlib.suppress(ValueError, RuntimeError):
+                            self._graph.fail_task(t.id)
                         result.failed.append(t.id)
                     break
 
                 # Only PENDING tasks remain but none are ready → blocked by failed deps
                 for t in pending_or_in_progress:
-                    self._graph.fail_task(t.id)
+                    with contextlib.suppress(ValueError, RuntimeError):
+                        self._graph.fail_task(t.id)
                     result.failed.append(t.id)
                 break
 
-            # Dispatch up to max_parallel
-            batch = ready_specialists[: self._max_parallel]
+            # Dispatch up to max_batch_size tasks per round (synchronous within batch)
+            batch = ready_specialists[: self._max_batch_size]
+            started_in_batch: list[str] = []
             for task_item in batch:
                 if deadline is not None and time.monotonic() > deadline:
                     result.timed_out = True
+                    # Fail any tasks we started in this batch but didn't complete
+                    for tid in started_in_batch:
+                        task = self._graph.get_task(tid)
+                        if task is not None and task.state == TaskState.IN_PROGRESS:
+                            with contextlib.suppress(ValueError, RuntimeError):
+                                self._graph.fail_task(tid)
+                            result.failed.append(tid)
                     break
 
                 self._graph.start_task(task_item.id)
+                started_in_batch.append(task_item.id)
                 try:
                     artifact = self._executor(task_item.agent, task_description)
                     self._graph.complete_task(task_item.id)
                     result.artifacts[task_item.id] = artifact
                     result.completed.append(task_item.id)
-                except Exception:
+                except Exception as exc:
                     logger.exception(
                         "Executor failed for task '%s' (agent '%s')",
                         task_item.id,
                         task_item.agent,
                     )
+                    result.errors[task_item.id] = str(exc)
                     try:
                         self._graph.fail_task(task_item.id)
                     except (ValueError, RuntimeError):
@@ -280,6 +299,7 @@ class DAGDispatcher:
         # If the loop was terminated by the max_iterations guard (not a normal
         # break), mark the result as timed_out so callers know it didn't finish.
         if iteration >= max_iterations:
+            result.hit_iteration_limit = True
             result.timed_out = True
             logger.warning(
                 "DAGDispatch exceeded max_iterations (%d) for %d tasks — "
@@ -289,11 +309,15 @@ class DAGDispatcher:
             )
 
         # Clean up any tasks left in IN_PROGRESS after loop exit (e.g. mid-batch timeout)
+        failed_set = set(result.failed)
         for tid in specialist_ids:
             task = self._graph.get_task(tid)
             if task is not None and task.state == TaskState.IN_PROGRESS:
-                self._graph.fail_task(tid)
-                result.failed.append(tid)
+                with contextlib.suppress(ValueError, RuntimeError):
+                    self._graph.fail_task(tid)
+                if tid not in failed_set:
+                    result.failed.append(tid)
+                    failed_set.add(tid)
 
         # Clean up orphaned PENDING tasks whose dependencies have all completed/failed.
         # Without this, tasks blocked by failed deps remain PENDING forever.
@@ -305,8 +329,15 @@ class DAGDispatcher:
             if not deps:
                 continue
             dep_tasks = [self._graph.get_task(d) for d in deps]
-            if all(t is not None and t.state in (TaskState.COMPLETED, TaskState.FAILED) for t in dep_tasks):
-                self._graph.fail_task(tid)
-                result.failed.append(tid)
+            all_done = all(
+                t is not None and t.state in (TaskState.COMPLETED, TaskState.FAILED)
+                for t in dep_tasks
+            )
+            if all_done:
+                with contextlib.suppress(ValueError, RuntimeError):
+                    self._graph.fail_task(tid)
+                if tid not in failed_set:
+                    result.failed.append(tid)
+                    failed_set.add(tid)
 
         return result

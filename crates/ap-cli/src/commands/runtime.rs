@@ -83,12 +83,10 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
     let lockfile_mgr = ap_fetcher::lockfile::LockfileManager::new(lockfile_path);
     let agents: Vec<String> = if all {
         lockfile_mgr
-            .load()
-            .map(|lf| lf.agents.into_keys().collect())
-            .unwrap_or_else(|e| {
+            .load().map_or_else(|e| {
                 output.info(&format!("Note: could not read lockfile: {e}"));
                 Vec::new()
-            })
+            }, |lf| lf.agents.into_keys().collect())
     } else {
         let name = agent.ok_or_else(|| anyhow::anyhow!("Agent name required when --all is not set"))?;
         if lockfile_mgr.get(name)?.is_none() {
@@ -105,7 +103,7 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
         .ok()
         .map(|entries| {
             entries
-                .filter_map(|e| e.ok())
+                .filter_map(std::result::Result::ok)
                 .filter(|e| {
                     e.file_name().to_string_lossy().ends_with(".port")
                 })
@@ -133,19 +131,19 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
             let is_alive = pid_str.split(':').next()
                 .and_then(|p| p.trim().parse::<i32>().ok())
                 .filter(|&pid| pid > 0)
-                .map(|pid| {
+                .is_some_and(|pid| {
                     // Signal 0 doesn't kill the process — just checks existence.
                     // Returns 0 if the process exists, -1 with ESRCH otherwise.
                     unsafe { libc::kill(pid, 0) == 0 }
-                })
-                .unwrap_or(false);
+                });
 
             if is_alive {
                 // Process is still running — skip to avoid duplicate start.
                 output.info(&format!("Agent '{agent_name}' is already running (PID: {pid_str})."));
                 continue;
-            } else {
-                // Process is dead — clean stale PID/port files and restart.
+            }
+            // Process is dead — clean stale PID/port files and restart.
+            {
                 let port_file = root.join(".agents").join(format!("{agent_name}.port"));
                 let _ = std::fs::remove_file(&pid_file);
                 let _ = std::fs::remove_file(&port_file);
@@ -272,7 +270,7 @@ pub fn run_stop(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Res
     let agents_dir = root.join(".agents");
     let pid_files: Vec<(String, std::path::PathBuf)> = if all {
         std::fs::read_dir(&agents_dir)?
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|e| {
                 e.file_name()
                     .to_string_lossy()
@@ -513,17 +511,15 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
             })
             .collect();
         output.data(&arr);
+    } else if running.is_empty() {
+        output.info("No agents running.");
     } else {
-        if running.is_empty() {
-            output.info("No agents running.");
-        } else {
-            println!("{:<25} {:<10} {:<10} Status", "Agent", "PID", "Port");
-            println!("{}", "-".repeat(60));
-            for (name, pid, alive, port) in &running {
-                let status = if *alive { "running" } else { "dead" };
-                let port_str = port.map_or("-".to_string(), |p| p.to_string());
-                println!("{:<25} {:<10} {:<10} {status}", name, pid, port_str);
-            }
+        println!("{:<25} {:<10} {:<10} Status", "Agent", "PID", "Port");
+        println!("{}", "-".repeat(60));
+        for (name, pid, alive, port) in &running {
+            let status = if *alive { "running" } else { "dead" };
+            let port_str = port.map_or("-".to_string(), |p| p.to_string());
+            println!("{name:<25} {pid:<10} {port_str:<10} {status}");
         }
     }
 
@@ -670,7 +666,7 @@ pub fn run_exec(agent: &str, args: &[String], output: &OutputFormatter) -> Resul
         bail!("Agent '{agent}' has no entrypoint (tried main.py, agent.py, mcp_adapter.py).");
     };
 
-    output.info(&format!("Spawning agent '{agent}' via {} ...", cmd));
+    output.info(&format!("Spawning agent '{agent}' via {cmd} ..."));
 
     // Reuse existing tokio runtime if available, otherwise create one.
     // Avoids panic from Runtime::new() inside an existing runtime (M16).
@@ -845,17 +841,13 @@ async fn async_exec(
     output.info(&format!("Task sent to '{agent_id}' via tools/call '{tool_name}', waiting for result..."));
 
     // Read tool call response with timeout. Kill child on timeout to prevent leaks.
-    let tool_resp = match tokio::time::timeout(
+    let tool_resp = if let Ok(result) = tokio::time::timeout(
         std::time::Duration::from_secs(RESPONSE_TIMEOUT_SECS),
         mcp_read(&mut reader),
     )
-    .await
-    {
-        Ok(result) => result.context("Failed to read agent response")?,
-        Err(_) => {
-            let _ = child.kill().await;
-            bail!("Timed out after {RESPONSE_TIMEOUT_SECS}s waiting for agent response");
-        }
+    .await { result.context("Failed to read agent response")? } else {
+        let _ = child.kill().await;
+        bail!("Timed out after {RESPONSE_TIMEOUT_SECS}s waiting for agent response");
     };
 
     // Extract text content from MCP tool result.

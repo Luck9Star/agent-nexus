@@ -1,4 +1,7 @@
-"""TaskComposer — orchestrates the full agency pipeline: select → plan → dispatch → integrate → validate."""
+"""TaskComposer — orchestrates the full agency pipeline.
+
+select → plan → dispatch → integrate → validate.
+"""
 
 from __future__ import annotations
 
@@ -45,8 +48,6 @@ class TaskComposerResult:
     skipped_tasks: list[str] = field(default_factory=list)
 
 
-
-
 # Task type → required capabilities mapping
 _TASK_CAPABILITY_MAP: dict[str, list[str]] = {
     "architecture": ["system_design", "architecture_review"],
@@ -71,11 +72,9 @@ _TASK_CAPABILITY_MAP: dict[str, list[str]] = {
     "observability": ["observability"],
     "coverage": ["coverage_assessment"],
     "index": ["lsp_indexing", "semantic_analysis"],
-    "orchestrat": ["orchestration", "task_decomposition"],
     "orchestration": ["orchestration", "task_decomposition"],
     "coordinate": ["agent_coordination"],
     "coordination": ["agent_coordination"],
-    "decompos": ["task_decomposition"],
     "decomposition": ["task_decomposition"],
     "navigate": ["code_navigation", "architecture_mapping"],
     "compare": ["comparison_analysis"],
@@ -86,17 +85,57 @@ _TASK_CAPABILITY_MAP: dict[str, list[str]] = {
     "code_indexing": ["code_indexing", "lsp_indexing"],
 }
 
+# Chinese keyword → required capabilities mapping
+_CN_TASK_CAPABILITY_MAP: dict[str, list[str]] = {
+    "架构": ["system_design", "architecture_review"],
+    "设计": ["system_design"],
+    "评审": ["code_review"],
+    "安全": ["security_review", "vulnerability_assessment"],
+    "测试": ["test_design", "test_analysis"],
+    "文档": ["technical_writing", "documentation"],
+    "评估": ["tool_evaluation"],
+    "可靠性": ["reliability_review"],
+    "集成": ["system_design", "tool_evaluation"],
+    "后端": ["backend_design", "api_design"],
+    "接口": ["api_design"],
+    "数据库": ["database_design"],
+    "提示词": ["prompt_engineering"],
+    "维护性": ["maintainability_review"],
+    "漏洞": ["vulnerability_assessment"],
+    "事件": ["incident_analysis", "observability"],
+    "覆盖": ["coverage_assessment"],
+    "索引": ["lsp_indexing", "semantic_analysis"],
+    "编排": ["orchestration", "task_decomposition"],
+    "协调": ["agent_coordination"],
+    "分解": ["task_decomposition"],
+    "导航": ["code_navigation", "architecture_mapping"],
+    "对比": ["comparison_analysis"],
+    "技术": ["technology_assessment"],
+    "权衡": ["tradeoff_analysis"],
+}
 
-def _infer_capabilities(task: str) -> list[str]:
-    """Infer required capabilities from task description."""
-    task_lower = task.lower()
+
+def infer_capabilities(task: str) -> list[str]:
+    """Infer required capabilities from task description.
+
+    Supports both English (word-boundary matching) and Chinese
+    (substring matching) task descriptions.
+    """
     matched: list[str] = []
+
+    # English keyword matching with word boundaries
+    task_lower = task.lower()
     for keyword, caps in _TASK_CAPABILITY_MAP.items():
-        if re.search(rf'\b{re.escape(keyword)}\b', task_lower):
+        if len(keyword) < 3:
+            continue
+        if re.search(rf"\b{re.escape(keyword)}\b", task_lower):
             matched.extend(caps)
-    # Default fallback: broad capabilities
-    if not matched:
-        matched = ["system_design"]
+
+    # Chinese keyword matching (no word boundary support for CJK)
+    for keyword, caps in _CN_TASK_CAPABILITY_MAP.items():
+        if keyword in task:
+            matched.extend(caps)
+
     return list(dict.fromkeys(matched))  # deduplicate preserving order
 
 
@@ -142,7 +181,7 @@ class TaskComposer:
         executor = expert_executor or ProfileBasedExecutor(self.registry)
 
         # Step 1: Infer capabilities
-        required_caps = _infer_capabilities(input.task)
+        required_caps = infer_capabilities(input.task)
 
         # Step 2: Select specialists
         selection_request = SelectionRequest(
@@ -170,7 +209,9 @@ class TaskComposer:
                 SubtaskDef(
                     id=sel.agent_id.replace("agency.", ""),
                     goal=input.task,
-                    needed_capabilities=profile.get("capabilities", []) if profile else required_caps,
+                    needed_capabilities=profile.get("capabilities", [])
+                    if profile
+                    else required_caps,
                     output_contract=artifact_type,
                     assigned_agent=sel.agent_id,
                 )
@@ -193,7 +234,7 @@ class TaskComposer:
             dispatcher = DAGDispatcher(
                 graph=task_graph,
                 executor=executor,
-                max_parallel=input.max_parallel,
+                max_batch_size=input.max_parallel,
                 timeout_seconds=input.timeout_seconds,
             )
             dispatch_result = dispatcher.dispatch(dag, input.task)
@@ -202,6 +243,23 @@ class TaskComposer:
                 raise TimeoutError(
                     f"TaskComposer pipeline timed out after {input.timeout_seconds}s"
                 )
+
+            # Propagate partial execution info: track which tasks failed/skipped
+            if dispatch_result.failed:
+                logger.warning(
+                    "TaskComposer: %d of %d specialist tasks failed: %s",
+                    len(dispatch_result.failed),
+                    len(dag.specialist_tasks),
+                    dispatch_result.failed,
+                )
+                # Log specific error messages for root cause diagnosis
+                for tid, err_msg in dispatch_result.errors.items():
+                    logger.error(
+                        "TaskComposer: task '%s' failed because: %s",
+                        tid,
+                        err_msg,
+                    )
+                skipped.update(dispatch_result.failed)
 
             # Preserve ordering: artifacts in the order they completed
             artifacts = list(dispatch_result.artifacts.values())
@@ -241,17 +299,22 @@ class TaskComposer:
                         except Exception:
                             logger.exception(
                                 "Executor failed for task '%s' (agent '%s') in legacy path",
-                                task.id, task.agent,
+                                task.id,
+                                task.agent,
                             )
                             failed.add(task.id)
                         executed.add(task.id)
 
         if not artifacts:
+            reason = "no specialists selected" if not selected else "all specialists failed"
+            if skipped:
+                reason = f"execution failed or skipped: {sorted(skipped)}"
+            logger.warning("TaskComposer produced no artifacts: %s", reason)
             return TaskComposerResult(
                 task=input.task,
                 selected_agents=selected,
                 dag=dag,
-                qa_passed=False,  # No artifacts = execution failure, not just "no match"
+                qa_passed=False,
                 skipped_tasks=list(skipped),
             )
 
@@ -263,8 +326,8 @@ class TaskComposer:
         first_profile = self.registry.get(selected[0].agent_id)
         required_sections: list[str] = []
         if first_profile:
-            required_sections = (
-                first_profile.get("output_contract", {}).get("required_sections", [])
+            required_sections = first_profile.get("output_contract", {}).get(
+                "required_sections", []
             )
 
         gate_input = QAGateInput(

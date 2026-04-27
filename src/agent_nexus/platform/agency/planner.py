@@ -53,6 +53,42 @@ class PlannerInput:
 
 _RESERVED_IDS = {"integrate", "validate"}
 
+_INVALID_ID_CHARS = {'"', "#", "\n", "\t", "[", "\r", "\\"}
+
+
+def _validate_subtasks(subtasks: list[SubtaskDef], composition_name: str) -> None:
+    """Validate subtask list and composition name.
+
+    Raises:
+        ValueError: If subtasks is empty, contains invalid/duplicate/reserved IDs,
+                    or composition_name contains invalid characters.
+    """
+    if not subtasks:
+        raise ValueError("Need at least one subtask to plan a composition")
+
+    # Validate IDs don't contain TOML-special characters
+    for st in subtasks:
+        for ch in _INVALID_ID_CHARS:
+            if ch in st.id:
+                raise ValueError(f"Subtask id '{st.id}' contains invalid character: {ch!r}")
+
+    # Validate composition_name for TOML-special characters
+    for ch in _INVALID_ID_CHARS:
+        if ch in composition_name:
+            raise ValueError(f"composition_name contains invalid character: {ch!r}")
+
+    # Validate no duplicate IDs
+    seen_ids: set[str] = set()
+    for st in subtasks:
+        if st.id in seen_ids:
+            raise ValueError(f"Duplicate subtask id: '{st.id}'")
+        seen_ids.add(st.id)
+
+    # Validate no reserved IDs
+    for st in subtasks:
+        if st.id in _RESERVED_IDS:
+            raise ValueError(f"Subtask id '{st.id}' is reserved for synthetic tasks")
+
 
 class DynamicCompositePlanner:
     """Generates a temporary CompositionDAG from specialist subtasks.
@@ -73,34 +109,7 @@ class DynamicCompositePlanner:
         Raises:
             ValueError: If subtasks is empty or contains duplicate IDs.
         """
-        if not subtasks:
-            raise ValueError("Need at least one subtask to plan a composition")
-
-        # Validate IDs don't contain TOML-special characters
-        _INVALID_ID_CHARS = {'"', "#", "\n", "\t", "["}
-        for st in subtasks:
-            for ch in _INVALID_ID_CHARS:
-                if ch in st.id:
-                    raise ValueError(f"Subtask id '{st.id}' contains invalid character: {ch!r}")
-
-        # Validate composition_name for TOML-special characters
-        for ch in _INVALID_ID_CHARS:
-            if ch in composition_name:
-                raise ValueError(f"composition_name contains invalid character: {ch!r}")
-
-        # Validate no duplicate IDs
-        seen_ids: set[str] = set()
-        for st in subtasks:
-            if st.id in seen_ids:
-                raise ValueError(f"Duplicate subtask id: '{st.id}'")
-            seen_ids.add(st.id)
-
-        # Validate no reserved IDs
-        for st in subtasks:
-            if st.id in _RESERVED_IDS:
-                raise ValueError(
-                    f"Subtask id '{st.id}' is reserved for synthetic tasks"
-                )
+        _validate_subtasks(subtasks, composition_name)
 
         # Floor at 1, but allow values higher than specialist count
         effective_parallel = max(1, max_parallel)
@@ -157,40 +166,20 @@ class DynamicCompositePlanner:
 
         Unlike ``plan`` (which places all specialist tasks in parallel), this
         method analyses each subtask's ``needed_capabilities`` and creates
-        blocked_by edges when a later subtask depends on a capability produced
-        by an earlier one.
+        blocked_by edges when a later subtask shares a capability with an
+        earlier one.
 
         Dependency rule:
-            Task B depends on Task A if B's needed_capabilities overlap with
-            A's needed_capabilities and A appears earlier in the list.
+            A task B is blocked by task A only when B's capabilities are a
+            strict subset of A's — i.e., A fully subsumes B's scope.  Mere
+            capability overlap (e.g., both need ``code_review`` but have
+            different other capabilities) does NOT create a dependency, so
+            those agents execute in parallel.
 
         Raises:
             ValueError: If subtasks is empty or contains duplicate IDs.
         """
-        if not subtasks:
-            raise ValueError("Need at least one subtask to plan a composition")
-
-        # Validate IDs
-        _INVALID_ID_CHARS = {'"', "#", "\n", "\t", "["}
-        seen_ids: set[str] = set()
-        for st in subtasks:
-            for ch in _INVALID_ID_CHARS:
-                if ch in st.id:
-                    raise ValueError(f"Subtask id '{st.id}' contains invalid character: {ch!r}")
-            if st.id in seen_ids:
-                raise ValueError(f"Duplicate subtask id: '{st.id}'")
-            seen_ids.add(st.id)
-
-        # Validate no reserved IDs
-        for st in subtasks:
-            if st.id in _RESERVED_IDS:
-                raise ValueError(
-                    f"Subtask id '{st.id}' is reserved for synthetic tasks"
-                )
-
-        for ch in _INVALID_ID_CHARS:
-            if ch in composition_name:
-                raise ValueError(f"composition_name contains invalid character: {ch!r}")
+        _validate_subtasks(subtasks, composition_name)
 
         effective_parallel = max(1, max_parallel)
 
@@ -202,14 +191,26 @@ class DynamicCompositePlanner:
                     cap_producer[cap] = st.id
 
         # Build specialist tasks with dynamic blocked_by
+        # Only serialize when one task's capabilities are a strict subset
+        # of the producer's — meaning the producer fully subsumes the
+        # downstream task's scope.  Mere capability overlap does NOT
+        # create a dependency (both agents can work in parallel).
+        subtask_caps: dict[str, set[str]] = {
+            st.id: set(st.needed_capabilities) for st in subtasks
+        }
         dag_tasks: list[DAGTask] = []
         for st in subtasks:
             blocked_by: list[str] = []
+            my_caps = subtask_caps[st.id]
             for cap in st.needed_capabilities:
                 producer = cap_producer.get(cap)
                 if producer and producer != st.id and producer not in blocked_by:
-                    blocked_by.append(producer)
-
+                    producer_caps = subtask_caps[producer]
+                    # Block if this task's capabilities are a subset of (or
+                    # identical to) the producer's. Shared-but-different
+                    # capabilities → parallel execution.
+                    if my_caps <= producer_caps:
+                        blocked_by.append(producer)
             dag_tasks.append(
                 DAGTask(
                     id=st.id,
@@ -265,24 +266,22 @@ def generate_toml(dag: CompositionDAG) -> str:
       blocked_by = ["..."]
     """
     # Validate all string fields for TOML-special characters
-    _INVALID_CHARS = {'"', "#", "\n", "\t", "\r", "\\"}
-    for ch in _INVALID_CHARS:
+    _invalid_chars = {'"', "#", "\n", "\t", "\r", "\\"}
+    for ch in _invalid_chars:
         if ch in dag.name:
             raise ValueError(f"DAG name contains invalid character: {ch!r}")
 
     for task in dag.tasks:
         for field_name, value in [("id", task.id), ("agent", task.agent), ("output", task.output)]:
-            for ch in _INVALID_CHARS:
+            for ch in _invalid_chars:
                 if ch in value:
                     raise ValueError(
                         f"Task {field_name} '{value}' contains invalid character: {ch!r}"
                     )
         for b in task.blocked_by:
-            for ch in _INVALID_CHARS:
+            for ch in _invalid_chars:
                 if ch in b:
-                    raise ValueError(
-                        f"Task blocked_by '{b}' contains invalid character: {ch!r}"
-                    )
+                    raise ValueError(f"Task blocked_by '{b}' contains invalid character: {ch!r}")
 
     lines: list[str] = []
     lines.append("[composition]")

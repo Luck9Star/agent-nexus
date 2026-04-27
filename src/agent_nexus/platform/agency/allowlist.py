@@ -13,7 +13,7 @@ def load_allowlist(path: str) -> dict:
       - ``agents``: list of agent entry dicts
     """
     filepath = Path(path)
-    with filepath.open() as f:
+    with filepath.open(encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
     if not isinstance(data, dict):
@@ -24,6 +24,22 @@ def load_allowlist(path: str) -> dict:
         raise ValueError("Allowlist must have a 'source' key")
     if "agents" not in data or not isinstance(data["agents"], list):
         raise ValueError("Allowlist must have an 'agents' list")
+
+    # Validate each agent entry
+    seen_ids: set[str] = set()
+    for i, entry in enumerate(data["agents"]):
+        if not isinstance(entry, dict):
+            raise ValueError(f"Agent entry #{i} must be a mapping, got {type(entry).__name__}")
+        entry_errors = validate_allowlist_entry(entry)
+        if entry_errors:
+            errs = "; ".join(entry_errors)
+            raise ValueError(
+                f"Agent entry #{i} ({entry.get('id', 'unknown')}): {errs}"
+            )
+        entry_id = entry.get("id", "")
+        if entry_id in seen_ids:
+            raise ValueError(f"Duplicate agent id '{entry_id}' in allowlist")
+        seen_ids.add(entry_id)
 
     source = data["source"]
     if not isinstance(source, dict):
@@ -52,11 +68,18 @@ def validate_allowlist_entry(entry: dict) -> list[str]:
             errors.append("'capabilities' must be a list")
         elif len(caps) == 0:
             errors.append("'capabilities' must be a non-empty list")
+        elif not all(isinstance(c, str) for c in caps):
+            errors.append("'capabilities' entries must all be strings")
 
     if "id" in entry:
         id_val = entry["id"]
         if not isinstance(id_val, str) or not id_val.startswith("agency."):
             errors.append("'id' must be a string starting with 'agency.'")
+
+    if "output_contract" in entry:
+        oc = entry["output_contract"]
+        if not isinstance(oc, str) or not oc.strip():
+            errors.append("'output_contract' must be a non-empty string")
 
     if "source_path" in entry:
         sp = entry["source_path"]

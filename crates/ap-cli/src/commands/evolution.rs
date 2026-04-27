@@ -79,15 +79,13 @@ pub fn run_health(skill_name: Option<&str>, verbose: bool, output: &OutputFormat
                 .map(|s| serde_json::json!({"name": s.name, "version": s.version, "completions": s.total_completions}))
                 .collect();
             output.data(&arr);
+        } else if skills.is_empty() {
+            output.info("No active skills.");
         } else {
-            if skills.is_empty() {
-                output.info("No active skills.");
-            } else {
-                println!("{:<30} {:<10} {:<12} Active", "Skill", "Version", "Completions");
-                println!("{}", "-".repeat(65));
-                for skill in &skills {
-                    println!("{:<30} {:<10} {:<12} {}", skill.name, skill.version, skill.total_completions, skill.is_active);
-                }
+            println!("{:<30} {:<10} {:<12} Active", "Skill", "Version", "Completions");
+            println!("{}", "-".repeat(65));
+            for skill in &skills {
+                println!("{:<30} {:<10} {:<12} {}", skill.name, skill.version, skill.total_completions, skill.is_active);
             }
         }
     }
@@ -112,15 +110,13 @@ pub fn run_list(all: bool, output: &OutputFormatter) -> Result<()> {
             .map(|s| serde_json::json!({"name": s.name, "version": s.version, "active": s.is_active, "completions": s.total_completions}))
             .collect();
         output.data(&arr);
+    } else if skills.is_empty() {
+        output.info(if all { "No skills found." } else { "No active skills." });
     } else {
-        if skills.is_empty() {
-            output.info(if all { "No skills found." } else { "No active skills." });
-        } else {
-            println!("{:<30} {:<10} {:<12} Active", "Name", "Version", "Completions");
-            println!("{}", "-".repeat(65));
-            for skill in &skills {
-                println!("{:<30} {:<10} {:<12} {}", skill.name, skill.version, skill.total_completions, skill.is_active);
-            }
+        println!("{:<30} {:<10} {:<12} Active", "Name", "Version", "Completions");
+        println!("{}", "-".repeat(65));
+        for skill in &skills {
+            println!("{:<30} {:<10} {:<12} {}", skill.name, skill.version, skill.total_completions, skill.is_active);
         }
     }
     Ok(())
@@ -145,14 +141,12 @@ pub fn run_history(skill_name: &str, output: &OutputFormatter) -> Result<()> {
             .map(|s| serde_json::json!({"name": s.name, "version": s.version, "generation": s.lineage_generation}))
             .collect();
         output.data(&arr);
+    } else if ancestry.is_empty() {
+        output.info(&format!("No history found for skill '{skill_name}'."));
     } else {
-        if ancestry.is_empty() {
-            output.info(&format!("No history found for skill '{skill_name}'."));
-        } else {
-            println!("Version lineage for '{skill_name}':");
-            for (i, skill) in ancestry.iter().enumerate() {
-                println!("  {} v{} (gen: {})", "→".repeat(i + 1), skill.version, skill.lineage_generation);
-            }
+        println!("Version lineage for '{skill_name}':");
+        for (i, skill) in ancestry.iter().enumerate() {
+            println!("  {} v{} (gen: {})", "→".repeat(i + 1), skill.version, skill.lineage_generation);
         }
     }
     Ok(())
@@ -210,10 +204,10 @@ pub fn run_fix(skill_name: &str, output: &OutputFormatter) -> Result<()> {
     let result = engine.evolve(trigger).map_err(|e| anyhow::anyhow!("Fix failed: {e}"))?;
 
     let successes: Vec<_> = result.outcomes.iter().filter(|o| matches!(o, ap_evolution::evolver::EvolutionOutcome::Success { .. })).collect();
-    if !successes.is_empty() {
-        output.success(&format!("Skill '{skill_name}' fix completed ({} outcome(s)).", successes.len()));
-    } else {
+    if successes.is_empty() {
         output.info(&format!("No changes made for skill '{skill_name}'."));
+    } else {
+        output.success(&format!("Skill '{skill_name}' fix completed ({} outcome(s)).", successes.len()));
     }
     Ok(())
 }

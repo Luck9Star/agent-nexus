@@ -13,6 +13,7 @@ from agent_nexus.platform.agency.task_composer import (
     TaskComposer,
     TaskComposerInput,
     TaskComposerResult,
+    infer_capabilities,
 )
 
 # Paths
@@ -169,3 +170,47 @@ class TestTaskComposerWithTaskGraph:
         assert result.dag is not None
         assert result.integrated is not None
         assert result.qa_passed is not None
+
+
+# ---------------------------------------------------------------------------
+# C3 fix: Chinese capability inference
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(30)
+class TestChineseCapabilityInference:
+    """infer_capabilities correctly maps Chinese task descriptions."""
+
+    def test_chinese_architecture_keywords(self) -> None:
+        """Chinese keywords like '架构设计' infer system_design and architecture_review."""
+        caps = infer_capabilities("进行架构设计")
+        assert "system_design" in caps
+        assert "architecture_review" in caps
+
+    def test_mixed_chinese_english(self) -> None:
+        """Mixed Chinese+English tasks get capabilities from both."""
+        caps = infer_capabilities("架构设计 security review")
+        assert "system_design" in caps
+        assert "architecture_review" in caps
+        assert "code_review" in caps or "security_review" in caps
+
+    def test_pure_chinese_security(self) -> None:
+        """Pure Chinese '安全评审' gets security capabilities."""
+        caps = infer_capabilities("安全评审")
+        assert "security_review" in caps
+
+    def test_unknown_chinese_returns_something_or_empty(self) -> None:
+        """Unknown Chinese text returns a list (may be empty if no keywords match)."""
+        caps = infer_capabilities("这是一段随机文字没有关键词")
+        assert isinstance(caps, list)
+
+    def test_deduplication_across_maps(self) -> None:
+        """Deduplication when both Chinese and English keywords match same capability.
+
+        'architecture' (English) and '架构' (Chinese) both map to system_design.
+        The result should contain system_design exactly once.
+        """
+        caps = infer_capabilities("architecture 架构")
+        assert "system_design" in caps
+        # Count occurrences
+        assert caps.count("system_design") == 1

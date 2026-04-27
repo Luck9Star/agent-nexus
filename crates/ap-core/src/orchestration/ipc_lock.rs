@@ -22,7 +22,7 @@ impl IpcLockRegistry {
     }
 
     /// Get or create a lock for the given agent.
-    /// Evicts entries whose Arc has no external references (strong_count == 1).
+    /// Evicts entries whose Arc has no external references (`strong_count` == 1).
     pub fn get_or_create(&self, agent_id: &str) -> Arc<Mutex<()>> {
         let mut locks = self.locks.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 

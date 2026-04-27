@@ -2,10 +2,10 @@
 //!
 //! # Lock Ordering Protocol (must be followed to prevent deadlock)
 //!
-//! 1. `agents` RwLock (read or write)
+//! 1. `agents` `RwLock` (read or write)
 //! 2. Per-slot Mutex (one at a time, never hold two simultaneously)
 //!
-//! All I/O operations (shutdown, list_tools, call_tool) must be done outside both locks.
+//! All I/O operations (shutdown, `list_tools`, `call_tool`) must be done outside both locks.
 //! The three-phase pattern (collect under lock → I/O outside lock → update under lock) is used
 //! throughout to maintain this invariant.
 
@@ -48,6 +48,16 @@ struct AgentSlot {
     /// `OnceCell` ensures only one caller creates the client, eliminating the
     /// TOCTOU race where multiple concurrent `activate()` calls each create
     /// redundant MCP clients (which may spawn expensive subprocesses).
+    ///
+    /// # Dead client recovery
+    ///
+    /// `OnceCell` cannot be reset via its API, but we use `take()` to clear
+    /// a dead client when `list_tools` fails (see `activate()` error path)
+    /// or when `force_reactivate` is called. The next `activate()` call will
+    /// create a fresh client via the factory closure. This provides an
+    /// automatic recovery path: broken connections are cleared on first use,
+    /// and `force_reactivate()` allows explicit recovery for callers that
+    /// detect a dead client (e.g. via health check or timeout).
     client: OnceCell<Arc<Mutex<Box<dyn McpClient>>>>,
     tools: OnceCell<Arc<Vec<ToolInfo>>>,
     last_used: std::time::Instant,

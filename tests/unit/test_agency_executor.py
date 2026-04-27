@@ -2,10 +2,11 @@
 
 Validates that:
 - ProfileBasedExecutor loads profile data from registry and produces differentiated artifacts
-- Missing profile_id returns a stub artifact
+- Missing profile_id raises ValueError
 - Different profiles produce different artifacts
 - All required_sections from output_contract are present
 - TaskComposer uses ProfileBasedExecutor by default
+- _build_profile_package preserves custom imported_at dates
 """
 from __future__ import annotations
 
@@ -83,14 +84,11 @@ class TestProfileBasedExecutorCore:
         for section in required:
             assert section in artifact.sections, f"Missing required section: {section}"
 
-    def test_missing_profile_returns_stub(self, populated_registry):
-        """Unknown profile_id produces a minimal stub artifact."""
+    def test_missing_profile_raises_valueerror(self, populated_registry):
+        """Unknown profile_id raises ValueError instead of silent stub."""
         executor = ProfileBasedExecutor(populated_registry)
-        artifact = executor("agency.nonexistent-agent", "Do something")
-
-        assert artifact.source_agent == "agency.nonexistent-agent"
-        assert artifact.artifact_type == "stub"
-        assert "context" in artifact.sections
+        with pytest.raises(ValueError, match="not found in registry"):
+            executor("agency.nonexistent-agent", "Do something")
 
     def test_artifact_type_matches_output_contract(self, populated_registry):
         """artifact_type comes from the profile's output_contract."""
@@ -262,3 +260,60 @@ class TestTaskComposerDefaultExecutor:
 
         if result.integrated is not None:
             assert "custom_section" in result.integrated.merged_sections
+
+
+# ---------------------------------------------------------------------------
+# 5. Importer: _build_profile_package imported_at parameter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(10)
+class TestImporterImportedAt:
+    """_build_profile_package() preserves custom imported_at date."""
+
+    def test_custom_imported_at_preserved(self, importer_profiles):
+        """Passing a custom imported_at date is reflected in the profile package."""
+        from datetime import date
+
+        from agent_nexus.platform.agency.importer import AgencyImporter
+        from agent_nexus.platform.agency.parser import parse_frontmatter
+
+        importer = AgencyImporter(
+            vendor_path=str(_VENDOR_DIR),
+            allowlist_path=str(_ALLOWLIST_PATH),
+            output_dir="/dev/null",
+        )
+        allowlist_data = importer._load_allowlist()
+        entry = allowlist_data["agents"][0]
+        source_path = entry["source_path"]
+        md_file = _VENDOR_DIR / source_path
+        content = md_file.read_text(encoding="utf-8")
+        parsed = parse_frontmatter(content)
+
+        custom_date = date(2020, 1, 1)
+        pkg = importer._build_profile_package(parsed, entry, imported_at=custom_date)
+
+        assert pkg["expert_profile"]["profile"]["imported_at"] == "2020-01-01"
+
+    def test_default_imported_at_is_today(self, importer_profiles):
+        """Without imported_at, today's date is used."""
+        from datetime import date
+
+        from agent_nexus.platform.agency.importer import AgencyImporter
+        from agent_nexus.platform.agency.parser import parse_frontmatter
+
+        importer = AgencyImporter(
+            vendor_path=str(_VENDOR_DIR),
+            allowlist_path=str(_ALLOWLIST_PATH),
+            output_dir="/dev/null",
+        )
+        allowlist_data = importer._load_allowlist()
+        entry = allowlist_data["agents"][0]
+        source_path = entry["source_path"]
+        md_file = _VENDOR_DIR / source_path
+        content = md_file.read_text(encoding="utf-8")
+        parsed = parse_frontmatter(content)
+
+        pkg = importer._build_profile_package(parsed, entry)
+
+        assert pkg["expert_profile"]["profile"]["imported_at"] == date.today().isoformat()
