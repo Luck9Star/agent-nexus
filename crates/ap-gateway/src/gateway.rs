@@ -103,6 +103,26 @@ struct ShutdownState {
     handle: Option<tokio::task::JoinHandle<()>>,
 }
 
+/// An explicit handle for shutting down a running gateway server.
+///
+/// Returned by [`McpGateway::start`]. Wraps `Arc<McpGateway>` so the caller
+/// retains ownership of the gateway while the server is running.
+pub struct ShutdownHandle(Arc<McpGateway>);
+
+impl ShutdownHandle {
+    /// Gracefully shut down the gateway server.
+    ///
+    /// Signals the HTTP server to stop and waits up to 5 seconds for it to finish.
+    pub async fn shutdown(&self) {
+        self.0.do_shutdown().await;
+    }
+
+    /// Get a reference to the underlying gateway.
+    pub fn gateway(&self) -> &Arc<McpGateway> {
+        &self.0
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Config & Gateway
 // ---------------------------------------------------------------------------
@@ -152,14 +172,18 @@ impl McpGateway {
         Arc::clone(&self.registry)
     }
 
-    /// Start the HTTP server. Returns the bound address.
+    /// Start the gateway HTTP server. Returns a [`ShutdownHandle`] that wraps
+    /// the `Arc<Self>` and provides a [`ShutdownHandle::shutdown`] method.
     ///
-    /// The server runs on a background tokio task and can be stopped via
-    /// [`Self::shutdown`].
+    /// # Ownership
+    /// The caller MUST retain the [`ShutdownHandle`] for the lifetime of the server.
+    /// Dropping the handle without calling `shutdown()` will leave the server
+    /// running with no way to stop it. Consider storing the handle in a long-lived
+    /// structure (e.g., a task-local variable or a manager struct).
     ///
     /// # Errors
     /// Returns an error if the underlying operation fails.
-    pub async fn start(self: &Arc<Self>) -> Result<SocketAddr, GatewayError> {
+    pub async fn start(self: &Arc<Self>) -> Result<(SocketAddr, ShutdownHandle), GatewayError> {
         let app = Router::new()
             .route("/tools", get(Self::list_tools_handler))
             .route("/tools/call", post(Self::call_tool_handler))
@@ -187,13 +211,13 @@ impl McpGateway {
         state.tx = Some(tx);
         state.handle = Some(handle);
 
-        Ok(addr)
+        Ok((addr, ShutdownHandle(Arc::clone(self))))
     }
 
     /// Gracefully shut down the HTTP server.
     ///
     /// Signals the server to stop and waits up to 5 seconds for it to finish.
-    pub async fn shutdown(&self) {
+    async fn do_shutdown(&self) {
         let mut state = self.shutdown.lock().await;
         if let Some(tx) = state.tx.take() {
             let _ = tx.send(true);
@@ -204,6 +228,11 @@ impl McpGateway {
     }
 
     /// Handler for GET /tools: list all tools from all registered agents.
+    ///
+    /// This iterates agents sequentially. This is intentional — `get_tools()` only
+    /// reads cached data (no I/O), so parallelization wouldn't improve performance.
+    /// If this becomes a bottleneck, the fix would require restructuring the registry
+    /// to support batch tool queries.
     async fn list_tools_handler(
         State(gw): State<Arc<Self>>,
     ) -> Json<Vec<serde_json::Value>> {
@@ -230,6 +259,17 @@ impl McpGateway {
         State(gw): State<Arc<Self>>,
         Json(req): Json<serde_json::Value>,
     ) -> Result<Json<serde_json::Value>, GatewayError> {
+        // Validate arguments size (defense-in-depth on top of DefaultBodyLimit at router level).
+        if let Some(args) = req.get("arguments") {
+            let args_str = serde_json::to_string(args).unwrap_or_default();
+            if args_str.len() > 1024 * 1024 {
+                // 1MB per arguments
+                return Err(GatewayError::ValidationError(
+                    "arguments too large (max 1MB)".to_string(),
+                ));
+            }
+        }
+
         // Parse the namespaced tool name.
         let (agent, tool, arguments) = crate::schema::extract_tool_call(&req)
             .ok_or_else(|| {
@@ -403,8 +443,9 @@ mod tests {
             idle_timeout_secs: 300,
         };
         let gw = Arc::new(McpGateway::new(config));
-        let addr = gw.start().await.unwrap();
+        let (addr, handle) = gw.start().await.unwrap();
         assert!(addr.port() > 0);
+        handle.shutdown().await;
     }
 
     #[tokio::test]
@@ -414,7 +455,7 @@ mod tests {
             idle_timeout_secs: 300,
         };
         let gw = Arc::new(McpGateway::new(config));
-        let addr = gw.start().await.unwrap();
+        let (addr, _handle) = gw.start().await.unwrap();
 
         let client = reqwest::Client::new();
         let resp = client
@@ -448,7 +489,7 @@ mod tests {
             .await
             .unwrap();
 
-        let addr = gw.start().await.unwrap();
+        let (addr, _handle) = gw.start().await.unwrap();
 
         let client = reqwest::Client::new();
         let resp = client
@@ -483,7 +524,7 @@ mod tests {
             .await
             .unwrap();
 
-        let addr = gw.start().await.unwrap();
+        let (addr, _handle) = gw.start().await.unwrap();
 
         let client = reqwest::Client::new();
         let resp = client
@@ -515,7 +556,7 @@ mod tests {
         // Register but do NOT activate
         registry.register_manifest(test_manifest("reviewer")).await;
 
-        let addr = gw.start().await.unwrap();
+        let (addr, _handle) = gw.start().await.unwrap();
 
         let client = reqwest::Client::new();
         let resp = client
@@ -538,7 +579,7 @@ mod tests {
             idle_timeout_secs: 300,
         };
         let gw = Arc::new(McpGateway::new(config));
-        let addr = gw.start().await.unwrap();
+        let (addr, _handle) = gw.start().await.unwrap();
 
         let client = reqwest::Client::new();
         let resp = client
@@ -560,7 +601,7 @@ mod tests {
             idle_timeout_secs: 300,
         };
         let gw = Arc::new(McpGateway::new(config));
-        let addr = gw.start().await.unwrap();
+        let (addr, _handle) = gw.start().await.unwrap();
 
         let client = reqwest::Client::new();
         let resp = client
@@ -585,7 +626,7 @@ mod tests {
             idle_timeout_secs: 300,
         };
         let gw = Arc::new(McpGateway::new(config));
-        let addr = gw.start().await.unwrap();
+        let (addr, _handle) = gw.start().await.unwrap();
 
         let client = reqwest::Client::new();
         let resp = client
@@ -614,7 +655,7 @@ mod tests {
             idle_timeout_secs: 300,
         };
         let gw = Arc::new(McpGateway::new(config));
-        let addr = gw.start().await.unwrap();
+        let (addr, handle) = gw.start().await.unwrap();
         assert!(addr.port() > 0);
 
         // Verify server is running
@@ -626,8 +667,8 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), axum::http::StatusCode::OK);
 
-        // Shut down gracefully
-        gw.shutdown().await;
+        // Shut down gracefully via ShutdownHandle
+        handle.shutdown().await;
 
         // Server should stop — give it a moment, then confirm connection refused.
         // Use a short timeout to avoid hanging if shutdown didn't work.

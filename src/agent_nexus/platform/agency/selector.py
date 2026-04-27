@@ -181,6 +181,7 @@ class SpecialistSelector:
         while remaining:
             best_profile: dict[str, Any] | None = None
             best_coverage: set[str] = set()
+            best_score = -1.0
 
             for profile in candidates:
                 pid = profile["id"]
@@ -188,9 +189,19 @@ class SpecialistSelector:
                     continue
                 agent_caps = set(profile.get("capabilities", []))
                 coverage = agent_caps & remaining
-                if len(coverage) > len(best_coverage):
+                # Deterministic tie-breaking: prefer more uncovered caps,
+                # then higher overall capability count, then lexicographic id
+                coverage_len = len(coverage)
+                total_caps = len(agent_caps)
+                if (coverage_len > len(best_coverage)
+                        or (coverage_len == len(best_coverage)
+                            and total_caps > best_score)
+                        or (coverage_len == len(best_coverage)
+                            and total_caps == best_score
+                            and pid < (best_profile["id"] if best_profile else ""))):
                     best_profile = profile
                     best_coverage = coverage
+                    best_score = total_caps
 
             if best_profile is None or not best_coverage:
                 break  # No agent can cover remaining caps

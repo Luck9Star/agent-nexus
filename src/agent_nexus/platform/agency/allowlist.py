@@ -85,6 +85,8 @@ def validate_allowlist_entry(entry: dict) -> list[str]:
         sp = entry["source_path"]
         if not isinstance(sp, str) or not sp.endswith(".md"):
             errors.append("'source_path' must be a string ending with '.md'")
+        elif sp.startswith("/") or sp.startswith("~"):
+            errors.append("'source_path' must not be an absolute path or start with '~'")
         elif ".." in Path(sp).parts:
             errors.append("'source_path' must not contain '..' path components")
 

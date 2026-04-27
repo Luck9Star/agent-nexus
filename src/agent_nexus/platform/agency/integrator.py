@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re as _re
+import string as _string
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -202,6 +204,32 @@ def _normalize_severity(value: str) -> str:
     return lower
 
 
+def _tokenize_risk(text: str) -> set[str]:
+    """Normalize a risk description into a set of keyword tokens for comparison."""
+    # Lowercase, strip punctuation, split into tokens
+    lower = text.lower().strip()
+    stripped = lower.translate(str.maketrans(_string.punctuation, " " * len(_string.punctuation)))
+    tokens = set(stripped.split())
+    # Remove common stop words that don't add meaning
+    tokens -= {"the", "a", "an", "is", "are", "was", "were", "be", "been",
+               "being", "have", "has", "had", "do", "does", "did", "will",
+               "would", "could", "should", "may", "might", "shall", "can",
+               "to", "of", "in", "for", "on", "with", "at", "by", "from",
+               "and", "or", "but", "not", "no", "if", "it", "its", "this",
+               "that", "these", "those", "as", "into", "through"}
+    return tokens
+
+
+def _risk_similarity(set_a: set[str], set_b: set[str]) -> float:
+    """Jaccard similarity between two token sets."""
+    if not set_a and not set_b:
+        return 0.0
+    union = set_a | set_b
+    if not union:
+        return 0.0
+    return len(set_a & set_b) / len(union)
+
+
 def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
     """Detect conflicting viewpoints across artifacts."""
     conflicts: list[ConflictItem] = []
@@ -241,17 +269,34 @@ def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
             risk_sets[artifact.source_agent] = risks_found
 
     # If agents have completely disjoint risk sets, that's a potential conflict
-    # only when agents share overlapping section keys (proxy for shared capabilities)
+    # only when agents share overlapping section keys (proxy for shared capabilities).
     if len(risk_sets) >= 2:
-        all_risk_sets = [set(v) for v in risk_sets.values()]
-        # If the intersection of risk findings is empty but both have findings,
-        # agents may be overlooking each other's risks
-        intersection = all_risk_sets[0]
-        for s in all_risk_sets[1:]:
-            intersection = intersection & s
+        all_risk_token_sets = [_tokenize_risk(r) for risks in risk_sets.values() for r in risks]
+        # Compare risk descriptions across agents using token overlap
+        agent_risk_tokens: dict[str, set[str]] = {}
+        for agent_id, risks in risk_sets.items():
+            agent_tokens: set[str] = set()
+            for r in risks:
+                agent_tokens |= _tokenize_risk(r)
+            agent_risk_tokens[agent_id] = agent_tokens
 
-        if len(intersection) == 0 and all(len(s) > 0 for s in all_risk_sets):
-            # Only flag when agents share overlapping domain-specific sections.
+        # Check if any pair of agents has similar risks (Jaccard >= 0.5)
+        agent_ids = list(agent_risk_tokens.keys())
+        has_similar_risks = False
+        for i in range(len(agent_ids)):
+            for j in range(i + 1, len(agent_ids)):
+                sim = _risk_similarity(
+                    agent_risk_tokens[agent_ids[i]],
+                    agent_risk_tokens[agent_ids[j]],
+                )
+                if sim >= 0.5:
+                    has_similar_risks = True
+                    break
+            if has_similar_risks:
+                break
+
+        if not has_similar_risks and all(len(v) > 0 for v in risk_sets.values()):
+            # No similar risks across agents — flag as potential blind spots
             # Exclude synthetic/structural sections that Integrator.merge adds to
             # all artifacts (final_recommendation, decision_summary) — these inflate
             # the overlap check and cause false positives.

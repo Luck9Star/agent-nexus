@@ -380,11 +380,12 @@ class TestSmartDependencyResolution:
         # broad_task's caps → narrow_task blocked_by broad_task
         assert "broad_task" in narrow.blocked_by
 
-    def test_identical_capability_sets_create_dependency(self) -> None:
-        """Identical capability sets: later task blocked by first producer.
+    def test_identical_capability_sets_run_in_parallel(self) -> None:
+        """Identical capability sets: tasks should run in parallel (no dependency).
 
-        resolve_dependencies uses <= (non-strict subset), so identical
-        capability sets cause the second task to depend on the first.
+        resolve_dependencies uses < (strict subset), so identical
+        capability sets do NOT create a dependency edge — both tasks
+        execute in parallel since neither strictly subsumes the other.
         """
         subtasks = [
             SubtaskDef(
@@ -407,10 +408,9 @@ class TestSmartDependencyResolution:
 
         first = next(t for t in dag.tasks if t.id == "first")
         second = next(t for t in dag.tasks if t.id == "second")
-        # First is not blocked (it's the producer)
+        # Neither task is blocked — identical caps run in parallel
         assert first.blocked_by == []
-        # Second has identical caps to first → second <= first → blocked
-        assert "first" in second.blocked_by
+        assert second.blocked_by == []
 
     def test_three_tasks_partial_subset_no_overlap(self) -> None:
         """A⊂B and C has no overlap with either: only A depends on B, C is free."""

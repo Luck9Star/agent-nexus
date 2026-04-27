@@ -178,6 +178,12 @@ impl DeferredAgentRegistry {
         slot.last_used = std::time::Instant::now();
 
         // Initialize the client exactly once.
+        // NOTE: The per-slot Mutex is held across the OnceCell::get_or_init await point.
+        // This is safe because OnceCell's internal synchronization prevents duplicate
+        // initialization, and concurrent callers to activate() will simply wait on the
+        // Mutex until the first caller finishes. The alternative (releasing the lock
+        // before init) would require cloning the OnceCell reference out of the MutexGuard,
+        // which is not possible since OnceCell does not implement Clone.
         let client_arc = slot
             .client
             .get_or_init(|| async {
@@ -194,7 +200,6 @@ impl DeferredAgentRegistry {
 
         // Slow path: call list_tools outside the per-slot lock to avoid
         // blocking other operations on this agent during the network call (H7).
-        // Clone the Arc while holding the lock, then drop the lock before I/O.
         let client_clone = Arc::clone(client_arc);
         drop(slot);
 

@@ -9,6 +9,10 @@ from .allowlist import load_allowlist
 from .parser import parse_frontmatter
 from .policy import check_content_policy
 
+
+class ContentPolicyViolation(Exception):
+    """Raised when imported content fails the content policy check."""
+
 # Pre-compiled set of YAML special characters for O(min(n,m)) quoting check
 _YAML_SPECIAL_CHARS = frozenset(':#{}[]",&*?|-=<>!%@`' + "\n\r\t")
 
@@ -263,7 +267,7 @@ class AgencyImporter:
             if not policy_result["passed"]:
                 high_risks = [r for r in policy_result["risks"] if r["severity"] == "high"]
                 if high_risks:
-                    raise RuntimeError(
+                    raise ContentPolicyViolation(
                         f"Content policy violation in {source_path}: "
                         f"{[r['pattern'] for r in high_risks]}"
                     )

@@ -54,8 +54,15 @@ def parse_frontmatter(md_content: str) -> dict:
     if not isinstance(meta, dict):
         raise ValueError("Frontmatter must be a YAML mapping")
 
+    name = meta.get("name", "")
+    if not name or not name.strip():
+        raise ValueError(
+            "Frontmatter 'name' field is empty or missing — "
+            "vendor file is malformed: every agent must have a non-empty name"
+        )
+
     return {
-        "name": meta.get("name", ""),
+        "name": name,
         "description": meta.get("description", ""),
         "color": meta.get("color", ""),
         "emoji": meta.get("emoji", ""),

@@ -108,6 +108,10 @@ impl SkillEvolver {
         };
 
         // Atomically deactivate parent and insert new skill with lineage link.
+        // NOTE: get_skill_by_name and evolve_skill use separate pool connections.
+        // Under concurrent evolution, another thread may evolve the same skill between
+        // these two calls. This is caught by the UNIQUE constraint on the skill name +
+        // version, which returns a ConcurrentModification error.
         // Catch concurrent modification (H11): if two callers evolve the same
         // skill simultaneously, one wins and the other hits a unique constraint
         // violation on skill name.

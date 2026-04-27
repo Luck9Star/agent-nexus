@@ -91,10 +91,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentProtocol<R, W> {
     /// # Errors
     /// Returns an error if the underlying operation fails.
     pub async fn heartbeat(&mut self) -> Result<(), IpcError> {
-        // Process-level liveness check: send a ping to verify the transport
-        // is still alive. If the process is dead, writing to stdin will fail.
-        // We do NOT wait for a pong response, as receive_result() would
-        // consume legitimate agent responses (progress, results).
+        // DESIGN: We only verify stdin is writable, not that the agent responds.
+        // This is intentional — waiting for a response would consume a legitimate
+        // agent message from the result stream. Process-level health monitoring
+        // (separate from heartbeat) should be done via ProcessManager health checks.
         self.inner.send_chat("__ping__", None).await?;
         Ok(())
     }

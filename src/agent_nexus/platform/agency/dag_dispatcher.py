@@ -172,6 +172,22 @@ class DAGDispatcher:
         self._max_batch_size = max(1, max_batch_size)
         self._timeout_seconds = timeout_seconds
         self._concurrent = concurrent
+        # Persistent thread pool for concurrent execution (reused across batches)
+        self._pool: concurrent.futures.ThreadPoolExecutor | None = None
+
+    def _get_pool(self) -> concurrent.futures.ThreadPoolExecutor:
+        """Lazy-init the persistent thread pool."""
+        if self._pool is None:
+            self._pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=self._max_batch_size,
+            )
+        return self._pool
+
+    def close(self) -> None:
+        """Shut down the thread pool (call when dispatching is complete)."""
+        if self._pool is not None:
+            self._pool.shutdown(wait=False)
+            self._pool = None
 
     @property
     def graph(self) -> TaskGraph:
@@ -286,48 +302,46 @@ class DAGDispatcher:
             batch = ready_specialists[: self._max_batch_size]
 
             if self._concurrent and len(batch) > 1:
-                # Concurrent execution within batch
+                # Concurrent execution within batch using persistent pool
                 per_task_timeout = (
                     self._timeout_seconds if self._timeout_seconds is not None else None
                 )
-                with concurrent.futures.ThreadPoolExecutor(
-                    max_workers=self._max_batch_size,
-                ) as pool:
-                    futures: dict[
-                        concurrent.futures.Future[tuple[Artifact | None, str | None]],
-                        TaskItem,
-                    ] = {}
-                    for task_item in batch:
-                        if deadline is not None and time.monotonic() > deadline:
-                            result.timed_out = True
-                            break
-                        self._graph.start_task(task_item.id)
-                        future = pool.submit(
-                            self._run_executor, task_item, task_description
-                        )
-                        futures[future] = task_item
+                pool = self._get_pool()
+                futures: dict[
+                    concurrent.futures.Future[tuple[Artifact | None, str | None]],
+                    TaskItem,
+                ] = {}
+                for task_item in batch:
+                    if deadline is not None and time.monotonic() > deadline:
+                        result.timed_out = True
+                        break
+                    self._graph.start_task(task_item.id)
+                    future = pool.submit(
+                        self._run_executor, task_item, task_description
+                    )
+                    futures[future] = task_item
 
-                    # Collect results and do graph mutations on the main thread
-                    for future in concurrent.futures.as_completed(
-                        futures, timeout=per_task_timeout
-                    ):
-                        task_item = futures[future]
-                        try:
-                            artifact, error = future.result()
-                        except Exception as exc:
-                            # Executor itself threw something unexpected
-                            error = str(exc)
-                            artifact = None
+                # Collect results and do graph mutations on the main thread
+                for future in concurrent.futures.as_completed(
+                    futures, timeout=per_task_timeout
+                ):
+                    task_item = futures[future]
+                    try:
+                        artifact, error = future.result()
+                    except Exception as exc:
+                        # Executor itself threw something unexpected
+                        error = str(exc)
+                        artifact = None
 
-                        if error is None and artifact is not None:
-                            self._graph.complete_task(task_item.id)
-                            result.artifacts[task_item.id] = artifact
-                            result.completed.append(task_item.id)
-                        else:
-                            with contextlib.suppress(ValueError, RuntimeError):
-                                self._graph.fail_task(task_item.id)
-                            result.errors[task_item.id] = error or "unknown error"
-                            result.failed.append(task_item.id)
+                    if error is None and artifact is not None:
+                        self._graph.complete_task(task_item.id)
+                        result.artifacts[task_item.id] = artifact
+                        result.completed.append(task_item.id)
+                    else:
+                        with contextlib.suppress(ValueError, RuntimeError):
+                            self._graph.fail_task(task_item.id)
+                        result.errors[task_item.id] = error or "unknown error"
+                        result.failed.append(task_item.id)
             else:
                 # Sequential execution (backward compatible)
                 started_in_batch: list[str] = []

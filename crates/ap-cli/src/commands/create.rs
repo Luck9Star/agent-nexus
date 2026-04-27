@@ -200,6 +200,7 @@ fn gen_manifest(
     fallback_model: &str,
 ) -> String {
     let desc_escaped = yaml_escape(description);
+    let name_escaped = yaml_escape(name);
     let tools_yaml = tools
         .iter()
         .map(|t| format!("- {t}"))
@@ -207,7 +208,7 @@ fn gen_manifest(
         .join("\n    ");
 
     format!(
-        r#"name: {name}
+        r#"name: {name_escaped}
 type: atomic
 version: "0.1.0"
 description: "{desc_escaped}"

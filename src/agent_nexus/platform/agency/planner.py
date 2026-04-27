@@ -206,10 +206,11 @@ class DynamicCompositePlanner:
                 producer = cap_producer.get(cap)
                 if producer and producer != st.id and producer not in blocked_by:
                     producer_caps = subtask_caps[producer]
-                    # Block if this task's capabilities are a subset of (or
-                    # identical to) the producer's. Shared-but-different
-                    # capabilities → parallel execution.
-                    if my_caps <= producer_caps:
+                    # Block if this task's capabilities are a STRICT subset
+                    # of the producer's (producer fully subsumes this task's
+                    # scope but has additional capabilities).  Identical
+                    # capability sets → parallel execution (no dependency).
+                    if my_caps < producer_caps:
                         blocked_by.append(producer)
             dag_tasks.append(
                 DAGTask(

@@ -89,16 +89,46 @@ def check_content_policy(md_body: str) -> dict[str, Any]:
       - ``risks`` (list): list of risk dicts, each with keys:
         - ``pattern`` (str): the matched pattern description
         - ``severity`` (str): "high", "medium", or "low"
-        - ``line`` (int): line number where the risk was found
+        - ``line`` (int): line number where the risk was found (in original text)
     """
     risks: list[dict[str, Any]] = []
     # NFKC normalization + confusable mapping collapses Unicode confusables
     # (e.g. fullwidth → ASCII, ligatures → component chars, Cyrillic homoglyphs
     # → Latin) to defeat obfuscation attempts.
     normalized = _normalize_confusables(md_body)
-    lines = normalized.split("\n")
 
-    for line_num, line in enumerate(lines, start=1):
+    # Build line-number mapping: normalized line → original line.
+    # Normalization can change string length (e.g. ligatures → multiple chars)
+    # but NFKC + translate preserves newline positions, so we can map by
+    # splitting both texts and counting newlines.
+    norm_lines = normalized.split("\n")
+    orig_lines = md_body.split("\n")
+
+    # If line counts match (common case), mapping is 1:1.
+    # If they differ, build a char-offset-based mapping.
+    if len(norm_lines) == len(orig_lines):
+        line_map = dict(zip(range(1, len(norm_lines) + 1), range(1, len(orig_lines) + 1)))
+    else:
+        # Build mapping by tracking cumulative char offsets.
+        # Each newline in both texts marks a line boundary.
+        norm_offsets = [0]
+        for i, ch in enumerate(normalized):
+            if ch == "\n":
+                norm_offsets.append(i + 1)
+        orig_offsets = [0]
+        for i, ch in enumerate(md_body):
+            if ch == "\n":
+                orig_offsets.append(i + 1)
+        # Map by offset proximity: for each normalized line start,
+        # find the original line whose start offset is closest.
+        line_map: dict[int, int] = {}
+        orig_idx = 0
+        for norm_line_num, norm_off in enumerate(norm_offsets, start=1):
+            while orig_idx + 1 < len(orig_offsets) and orig_offsets[orig_idx + 1] <= norm_off:
+                orig_idx += 1
+            line_map[norm_line_num] = orig_idx + 1  # 1-based
+
+    for line_num, line in enumerate(norm_lines, start=1):
         line_lower = line.lower()
 
         # Check high severity patterns
@@ -107,7 +137,7 @@ def check_content_policy(md_body: str) -> dict[str, Any]:
                 risks.append({
                     "pattern": description,
                     "severity": "high",
-                    "line": line_num,
+                    "line": line_map.get(line_num, line_num),
                 })
 
         # Check medium severity patterns (English)
@@ -116,7 +146,7 @@ def check_content_policy(md_body: str) -> dict[str, Any]:
                 risks.append({
                     "pattern": description,
                     "severity": "medium",
-                    "line": line_num,
+                    "line": line_map.get(line_num, line_num),
                 })
 
         # Check Chinese high severity patterns.
@@ -137,7 +167,7 @@ def check_content_policy(md_body: str) -> dict[str, Any]:
                     risks.append({
                         "pattern": description,
                         "severity": "high",
-                        "line": line_num,
+                        "line": line_map.get(line_num, line_num),
                     })
 
         # Check Chinese medium severity patterns
@@ -146,7 +176,7 @@ def check_content_policy(md_body: str) -> dict[str, Any]:
                 risks.append({
                     "pattern": description,
                     "severity": "medium",
-                    "line": line_num,
+                    "line": line_map.get(line_num, line_num),
                 })
 
     passed = not any(r["severity"] in ("high", "medium") for r in risks)

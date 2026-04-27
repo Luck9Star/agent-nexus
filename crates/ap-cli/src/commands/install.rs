@@ -32,6 +32,7 @@ pub fn run(
 
     // Resolve source URL: explicit --source flag, or look up in sources.yaml
     let git_url = if let Some(url) = source_url {
+        validate_git_url(url)?;
         url.to_string()
     } else {
         let sources_path = root.join("sources.yaml");
@@ -54,6 +55,9 @@ pub fn run(
     let install_dir = root.join(".agents");
     let installer = GitInstaller::new(install_dir);
 
+    // TODO(RS-CLI-005): The branch name "main" is hardcoded here and in do_update_agent.
+    // This should be configurable per-agent via the lockfile or sources.yaml entry.
+    // Currently all installs assume the remote's default branch is "main".
     let installed_path = installer
         .install(&git_url, Some("main"), version)
         .with_context(|| format!("Failed to install agent '{agent}'"))?;
@@ -436,6 +440,20 @@ pub fn run_info(agent: &str, output: &OutputFormatter) -> Result<()> {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Validate that a git URL uses an allowed scheme.
+/// Prevents SSRF and other injection attacks via user-supplied URLs.
+fn validate_git_url(url: &str) -> Result<()> {
+    let allowed_schemes = ["https://", "http://", "git://", "ssh://", "file://"];
+    if allowed_schemes.iter().any(|s| url.starts_with(s)) {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "Invalid git URL scheme in '{}'. Allowed schemes: https, http, git, ssh, file",
+            url
+        )
+    }
+}
 
 /// Detect agent type from the installed directory structure.
 fn detect_agent_type(install_path: &std::path::Path) -> ap_core::models::agent::AgentType {

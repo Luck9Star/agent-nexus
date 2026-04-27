@@ -39,6 +39,8 @@ pub enum TaskGraphError {
     },
     #[error("Invalid task state: {0}")]
     InvalidState(String),
+    #[error("Unknown dependency: {0}")]
+    UnknownDependency(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +78,11 @@ fn dfs(
     while let Some(frame) = stack.last_mut() {
         let Some(&idx) = name_index.get(&frame.name) else {
             // No such task — skip (shouldn't happen with valid data)
-            let done = stack.pop().unwrap();
+            let Some(done) = stack.pop() else {
+                // Invariant violation: stack was non-empty on last_mut() but empty on pop()
+                tracing::error!("DFS invariant violation: stack unexpectedly empty");
+                break;
+            };
             gray.remove(&done.name);
             black.insert(done.name);
             continue;
@@ -101,7 +107,11 @@ fn dfs(
             }
         } else {
             // All children visited — mark black and pop
-            let done = stack.pop().unwrap();
+            let Some(done) = stack.pop() else {
+                // Invariant violation: stack was non-empty on last_mut() but empty on pop()
+                tracing::error!("DFS invariant violation: stack unexpectedly empty");
+                break;
+            };
             gray.remove(&done.name);
             black.insert(done.name);
         }
@@ -260,6 +270,29 @@ impl TaskGraph {
             if existing.is_some() {
                 tx.rollback()?;
                 return Err(TaskGraphError::DuplicateTask(task.id.clone()));
+            }
+        }
+
+        // Validate blocked_by references: each dependency must exist in the DB
+        // or within the current batch's `seen` set.
+        for task in tasks {
+            for dep_id in &task.blocked_by {
+                // Check batch-local set first (O(1))
+                if seen.contains(dep_id) {
+                    continue;
+                }
+                // Check existing DB rows
+                let exists: bool = tx
+                    .query_row(
+                        "SELECT COUNT(*) > 0 FROM tasks WHERE task_id = ?1",
+                        rusqlite::params![dep_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(false);
+                if !exists {
+                    tx.rollback()?;
+                    return Err(TaskGraphError::UnknownDependency(dep_id.clone()));
+                }
             }
         }
 

@@ -81,16 +81,22 @@ def plan_composition(
     allowlist: str,
 ) -> None:
     """Plan a composition DAG for a given task."""
+    import tempfile
+
+    tmpdir = tempfile.mkdtemp(prefix="agency-plan-")
     try:
         importer = AgencyImporter(
             vendor_path=vendor_path,
             allowlist_path=allowlist,
-            output_dir=".",
+            output_dir=tmpdir,
         )
         profiles = importer.dry_run()
     except Exception as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
+    finally:
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     registry = ExpertRegistry()
     for pkg in profiles:
@@ -346,12 +352,19 @@ def run_composition(
 
     try:
         # Step 1: Load experts
+        import tempfile
+        import shutil
+
+        tmpdir = tempfile.mkdtemp(prefix="agency-run-")
         importer = AgencyImporter(
             vendor_path=vendor_path,
             allowlist_path=allowlist,
-            output_dir=".",
+            output_dir=tmpdir,
         )
-        profiles = importer.dry_run()
+        try:
+            profiles = importer.dry_run()
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
     except Exception as exc:
         click.echo(f"Error loading experts: {exc}", err=True)
         sys.exit(1)
@@ -406,7 +419,7 @@ def run_composition(
             model_string=model,
             config_dir=Path(config_dir) if config_dir else None,
         )
-        click.echo(f"Using LLM executor (model: {executor._model_name})")
+        click.echo(f"Using LLM executor (model: {executor.model_name})")
     except Exception as exc:
         click.echo(
             f"LLM config unavailable ({exc}), "

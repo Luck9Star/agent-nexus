@@ -18,6 +18,16 @@ use crate::output::OutputFormatter;
 /// Default timeout for waiting on an agent response.
 const RESPONSE_TIMEOUT_SECS: u64 = 120;
 
+/// Maximum PID value on Linux (PID_MAX_LIMIT = 4194304).
+/// PIDs exceeding this are invalid and should not be signaled.
+const PID_MAX_LIMIT: i32 = 4_194_304;
+
+/// Validate a PID is within the acceptable range for signaling.
+/// Returns `true` if the PID is valid and safe to use with `libc::kill`.
+fn is_valid_pid(pid: i32) -> bool {
+    pid > 0 && pid <= PID_MAX_LIMIT
+}
+
 /// Resolve the Python interpreter from `AGENT_NEXUS_PYTHON` or fall back to `python3`.
 pub(super) fn resolve_python() -> String {
     match std::env::var("AGENT_NEXUS_PYTHON") {
@@ -130,10 +140,11 @@ pub fn run_start(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Re
             let pid_str = std::fs::read_to_string(&pid_file).unwrap_or_default();
             let is_alive = pid_str.split(':').next()
                 .and_then(|p| p.trim().parse::<i32>().ok())
-                .filter(|&pid| pid > 0)
+                .filter(|&pid| is_valid_pid(pid))
                 .is_some_and(|pid| {
                     // Signal 0 doesn't kill the process — just checks existence.
                     // Returns 0 if the process exists, -1 with ESRCH otherwise.
+                    // SAFETY: pid is validated > 0 and <= PID_MAX_LIMIT.
                     unsafe { libc::kill(pid, 0) == 0 }
                 });
 
@@ -283,7 +294,7 @@ pub fn run_stop(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Res
             })
             .collect()
     } else {
-        let name = agent.expect("clap requires agent name when --all is not set").to_string();
+        let name = agent.ok_or_else(|| anyhow::anyhow!("agent name is required when --all is not set"))?.to_string();
         let pid_path = agents_dir.join(format!("{name}.pid"));
         if !pid_path.exists() {
             output.info(&format!("Agent '{name}' is not running (no PID file)."));
@@ -298,41 +309,47 @@ pub fn run_stop(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Res
         if let Some(pid) = pid_parts[0].parse::<i32>().ok().filter(|&p| p > 0) {
             #[cfg(unix)]
             {
-                // Verify the process exists before signaling (PID recycling protection)
-                // SAFETY: pid comes from a PID file written by this tool at start time.
-                // The start_time component in the PID file provides recycling protection.
-                // kill(pid, 0) is a standard permission/existence check — no signal sent.
-                // pid is validated to be > 0 to avoid sending signals to process groups.
-                let signal_ret = unsafe { libc::kill(pid, 0) };
-                if signal_ret == 0 {
-                    // Process exists — check start_time if available for PID recycling protection
-                    let should_kill = if pid_parts.len() > 1 {
-                        if let Ok(expected_start) = pid_parts[1].parse::<u64>() {
-                            // PID recycling protection: verify the process started
-                            // at approximately the same time we recorded.
-                            validate_pid_start_time(pid, expected_start)
-                        } else {
-                            true // Can't parse start_time, proceed
-                        }
-                    } else {
-                        true // No start_time recorded (old format), assume it's ours
-                    };
-
-                    if should_kill {
-                        // SAFETY: pid was validated above — signal_ret confirmed process exists.
-                        // start_time in PID file guards against PID recycling.
-                        // SIGTERM is the standard graceful termination signal.
-                        let ret = unsafe { libc::kill(pid, libc::SIGTERM) };
-                        if ret == 0 {
-                            output.success(&format!("Agent '{agent_name}' (PID: {pid}) stopped."));
-                        } else {
-                            output.error(&format!("Failed to stop agent '{agent_name}' (PID: {pid})."));
-                        }
-                    } else {
-                        output.info(&format!("Agent '{agent_name}' PID {pid} was recycled, skipping."));
-                    }
+                // Validate PID range before signaling to prevent misuse.
+                if !is_valid_pid(pid) {
+                    // Out-of-range PID — skip signaling, just clean up PID file below.
                 } else {
-                    output.info(&format!("Agent '{agent_name}' (PID: {pid}) is not running."));
+                    // Verify the process exists before signaling (PID recycling protection)
+                    // SAFETY: pid comes from a PID file written by this tool at start time.
+                    // The start_time component in the PID file provides recycling protection.
+                    // kill(pid, 0) is a standard permission/existence check — no signal sent.
+                    // pid is validated > 0 and <= PID_MAX_LIMIT to avoid signaling process groups
+                    // or absurdly large PID values.
+                    let signal_ret = unsafe { libc::kill(pid, 0) };
+                    if signal_ret == 0 {
+                        // Process exists — check start_time if available for PID recycling protection
+                        let should_kill = if pid_parts.len() > 1 {
+                            if let Ok(expected_start) = pid_parts[1].parse::<u64>() {
+                                // PID recycling protection: verify the process started
+                                // at approximately the same time we recorded.
+                                validate_pid_start_time(pid, expected_start)
+                            } else {
+                                true // Can't parse start_time, proceed
+                            }
+                        } else {
+                            true // No start_time recorded (old format), assume it's ours
+                        };
+
+                        if should_kill {
+                            // SAFETY: pid was validated above — signal_ret confirmed process exists.
+                            // start_time in PID file guards against PID recycling.
+                            // SIGTERM is the standard graceful termination signal.
+                            let ret = unsafe { libc::kill(pid, libc::SIGTERM) };
+                            if ret == 0 {
+                                output.success(&format!("Agent '{agent_name}' (PID: {pid}) stopped."));
+                            } else {
+                                output.error(&format!("Failed to stop agent '{agent_name}' (PID: {pid})."));
+                            }
+                        } else {
+                            output.info(&format!("Agent '{agent_name}' PID {pid} was recycled, skipping."));
+                        }
+                    } else {
+                        output.info(&format!("Agent '{agent_name}' (PID: {pid}) is not running."));
+                    }
                 }
             }
             #[cfg(not(unix))]
@@ -441,7 +458,7 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
         let pid_str = std::fs::read_to_string(entry.path()).unwrap_or_default();
         // Handle "pid:start_time" format from runtime start
         let mut parts = pid_str.trim().splitn(2, ':');
-        let pid_num: i32 = parts.next()
+        let raw_pid: i32 = parts.next()
             .and_then(|s| s.parse().ok())
             .filter(|&p| p > 0)
             .unwrap_or(0);
@@ -453,43 +470,51 @@ pub fn run_status(output: &OutputFormatter) -> Result<()> {
         let sse_port: Option<u16> = std::fs::read_to_string(&port_file)
             .ok()
             .and_then(|s| s.trim().parse().ok());
-        if pid_num > 0 {
+        if raw_pid > 0 {
             #[cfg(unix)]
             {
-                let alive = unsafe { libc::kill(pid_num, 0) } == 0;
-                // PID recycling protection: verify the process at this PID
-                // is the same one we started by comparing start times.
-                // Use `ps -o etime=` to get elapsed seconds and compare.
-                let alive = if alive && stored_start_time > 0 {
-                    let current_time = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
-                    let output = std::process::Command::new("ps")
-                        .args(["-o", "etime=", "-p", &pid_num.to_string()])
-                        .output()
-                        .ok();
-                    match output {
-                        Some(o) if o.status.success() => {
-                            let etime_str = String::from_utf8_lossy(&o.stdout);
-                            let elapsed_secs = parse_ps_elapsed(&etime_str);
-                            // stored_start_time + elapsed should roughly equal current_time
-                            // Allow 5-second tolerance for race between kill and ps
-                            elapsed_secs > 0
-                                && (stored_start_time as i64 + elapsed_secs as i64
-                                    - current_time as i64).unsigned_abs()
-                                    <= 5
-                        }
-                        _ => false, // process vanished between kill and ps
-                    }
+                // Reject out-of-range PIDs before signaling to prevent misuse.
+                // Still report the agent as "dead" rather than silently skipping it.
+                if !is_valid_pid(raw_pid) {
+                    // Out-of-range PID — treat as dead, no signal attempted.
+                    running.push((agent_name, raw_pid, false, sse_port));
                 } else {
-                    alive
-                };
-                running.push((agent_name, pid_num, alive, sse_port));
+                    // SAFETY: raw_pid is validated > 0 and <= PID_MAX_LIMIT.
+                    let alive = unsafe { libc::kill(raw_pid, 0) } == 0;
+                    // PID recycling protection: verify the process at this PID
+                    // is the same one we started by comparing start times.
+                    // Use `ps -o etime=` to get elapsed seconds and compare.
+                    let alive = if alive && stored_start_time > 0 {
+                        let current_time = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        let output = std::process::Command::new("ps")
+                            .args(["-o", "etime=", "-p", &raw_pid.to_string()])
+                            .output()
+                            .ok();
+                        match output {
+                            Some(o) if o.status.success() => {
+                                let etime_str = String::from_utf8_lossy(&o.stdout);
+                                let elapsed_secs = parse_ps_elapsed(&etime_str);
+                                // stored_start_time + elapsed should roughly equal current_time
+                                // Allow 5-second tolerance for race between kill and ps
+                                elapsed_secs > 0
+                                    && (stored_start_time as i64 + elapsed_secs as i64
+                                        - current_time as i64).unsigned_abs()
+                                        <= 5
+                            }
+                            _ => false, // process vanished between kill and ps
+                        }
+                    } else {
+                        alive
+                    };
+                    running.push((agent_name, raw_pid, alive, sse_port));
+                }
             }
             #[cfg(not(unix))]
             {
-                running.push((agent_name, pid_num, true, sse_port));
+                running.push((agent_name, raw_pid, true, sse_port));
             }
         }
     }

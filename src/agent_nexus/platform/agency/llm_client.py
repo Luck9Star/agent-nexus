@@ -8,6 +8,7 @@ different model strings and prompts.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,9 @@ from agent_nexus.platform.config.loader import ConfigLoader
 from agent_nexus.platform.config.model_config import ModelConfigManager
 
 logger = logging.getLogger(__name__)
+
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 1.0  # seconds
 
 
 @dataclass
@@ -37,11 +41,15 @@ class LLMClient:
     Reads model config from ``~/.agent-nexus/config.toml`` and resolves
     API keys from environment variables.
 
+    Maintains a persistent ``httpx.Client`` for connection reuse across
+    calls.  Call ``close()`` when done, or use as a context manager.
+
     Usage::
 
         client = LLMClient(model_string="api:MiniMax-M2.7-highspeed")
         response = client.call(system_prompt="You are a planner.", user_message="Design X")
         print(response.text)
+        client.close()
     """
 
     _TIMEOUT = 120.0
@@ -90,10 +98,35 @@ class LLMClient:
                 f"Set the environment variable referenced in config.toml."
             )
 
+        # Lazy-initialised persistent httpx.Client for connection reuse
+        self._http_client: httpx.Client | None = None
+
         logger.info(
             "LLMClient initialized: provider=%s model=%s api=%s",
             self._provider_name, self._model_name, self._provider_config.api,
         )
+
+    def _get_http_client(self, timeout: float | None = None) -> httpx.Client:
+        """Return the persistent httpx.Client, creating it on first use."""
+        effective_timeout = timeout or self._TIMEOUT
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.Client(timeout=effective_timeout)
+        return self._http_client
+
+    def close(self) -> None:
+        """Close the underlying HTTP client."""
+        if self._http_client is not None and not self._http_client.is_closed:
+            self._http_client.close()
+            self._http_client = None
+
+    def __del__(self) -> None:
+        self.close()
+
+    def __enter__(self) -> LLMClient:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
 
     @property
     def model_name(self) -> str:
@@ -102,6 +135,46 @@ class LLMClient:
     @property
     def provider_name(self) -> str:
         return self._provider_name
+
+    @staticmethod
+    def _is_retryable(status_code: int) -> bool:
+        """Return True for transient HTTP status codes that warrant retry."""
+        return status_code == 429 or status_code >= 500
+
+    def _call_with_retry(
+        self,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        timeout: float | None,
+        label: str,
+    ) -> httpx.Response:
+        """Execute a POST with exponential-backoff retry on transient errors."""
+        client = self._get_http_client(timeout)
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                resp = client.post(url, json=payload, headers=headers)
+                if resp.status_code == 200 or not self._is_retryable(resp.status_code):
+                    return resp
+                last_exc = RuntimeError(
+                    f"{label} API call failed (status {resp.status_code}): "
+                    f"{resp.text[:500]}"
+                )
+                logger.warning(
+                    "%s: transient error %d, retry %d/%d",
+                    label, resp.status_code, attempt + 1, _MAX_RETRIES,
+                )
+            except httpx.TransportError as exc:
+                last_exc = exc
+                logger.warning(
+                    "%s: transport error, retry %d/%d: %s",
+                    label, attempt + 1, _MAX_RETRIES, exc,
+                )
+            # Exponential backoff: 1s, 2s, 4s
+            delay = _RETRY_BASE_DELAY * (2 ** attempt)
+            time.sleep(delay)
+        raise last_exc or RuntimeError(f"{label}: all retries exhausted")
 
     def call(
         self,
@@ -161,14 +234,7 @@ class LLMClient:
             "messages": [{"role": "user", "content": user_message}],
         }
 
-        with httpx.Client(timeout=timeout or self._TIMEOUT) as client:
-            resp = client.post(url, json=payload, headers=headers)
-
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"Anthropic API call failed (status {resp.status_code}): "
-                f"{resp.text[:500]}"
-            )
+        resp = self._call_with_retry(url, headers, payload, timeout, "Anthropic")
 
         data = resp.json()
         content_blocks = data.get("content", [])
@@ -200,14 +266,7 @@ class LLMClient:
             "max_tokens": max_tokens or self._MAX_TOKENS,
         }
 
-        with httpx.Client(timeout=timeout or self._TIMEOUT) as client:
-            resp = client.post(url, json=payload, headers=headers)
-
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"OpenAI-compatible API call failed (status {resp.status_code}): "
-                f"{resp.text[:500]}"
-            )
+        resp = self._call_with_retry(url, headers, payload, timeout, "OpenAI")
 
         data = resp.json()
         choices = data.get("choices", [])

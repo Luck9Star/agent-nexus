@@ -393,7 +393,10 @@ pub(crate) fn get_ancestry(
     let mut visited = std::collections::HashSet::<String>::new();
     let mut frontier = vec![skill_id.to_string()];
 
-    // Phase 1: BFS through lineage_parents table
+    // Phase 1: BFS through lineage_parents table.
+    // NOTE: This BFS executes one query per frontier node per depth level.
+    // For the expected lineage depth (single digits), this is acceptable.
+    // If lineage trees become deep, consider batching the parent lookups.
     for _ in 0..max_depth {
         if frontier.is_empty() {
             break;
@@ -418,22 +421,27 @@ pub(crate) fn get_ancestry(
         return Ok(Vec::new());
     }
 
-    // Phase 2: Batch-load all ancestor records in a single query
-    let mut ancestors: Vec<SkillRecord> = Vec::with_capacity(visited.len());
-    let placeholders: Vec<String> = visited.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
-    let sql = format!(
-        "SELECT id, name, version, lineage_origin, lineage_generation,
-                lineage_content_diff, lineage_content_snapshot, directory, is_active,
-                total_selections, total_applied, total_completions, total_fallbacks,
-                created_at, updated_at
-         FROM skill_records WHERE id IN ({})",
-        placeholders.join(",")
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let params: Vec<&str> = visited.iter().map(std::string::String::as_str).collect();
-    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter().copied()), skill_record_from_row)?;
-    for skill in rows {
-        ancestors.push(skill?);
+    // Phase 2: Batch-load all ancestor records in batches to prevent
+    // exceeding SQLite's SQLITE_MAX_VARIABLE_NUMBER limit.
+    const MAX_BATCH_SIZE: usize = 100;
+    let visited_slice: Vec<String> = visited.into_iter().collect();
+    let mut ancestors: Vec<SkillRecord> = Vec::with_capacity(visited_slice.len());
+    for chunk in visited_slice.chunks(MAX_BATCH_SIZE) {
+        let placeholders: Vec<String> = chunk.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+        let sql = format!(
+            "SELECT id, name, version, lineage_origin, lineage_generation,
+                    lineage_content_diff, lineage_content_snapshot, directory, is_active,
+                    total_selections, total_applied, total_completions, total_fallbacks,
+                    created_at, updated_at
+             FROM skill_records WHERE id IN ({})",
+            placeholders.join(",")
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&str> = chunk.iter().map(std::string::String::as_str).collect();
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter().copied()), skill_record_from_row)?;
+        for skill in rows {
+            ancestors.push(skill?);
+        }
     }
 
     // Sort by generation ascending (oldest first), matching Python behavior
@@ -625,23 +633,22 @@ pub(crate) fn list_tables(conn: &Connection) -> Result<Vec<String>, StoreError> 
 
 /// Count rows in a table.
 pub(crate) fn count_rows(conn: &Connection, table: &str) -> Result<i64, StoreError> {
-    // Only allow known table names to prevent SQL injection
-    let allowed = [
-        "skill_records",
-        "skill_lineage_parents",
-        "execution_analyses",
-        "skill_judgments",
-        "context_budget_log",
-        "agent_records",
-        "_meta",
-    ];
-    if !allowed.contains(&table) {
-        return Err(StoreError::Sqlite(rusqlite::Error::InvalidParameterName(
-            format!("Unknown table: {table}"),
-        )));
-    }
-    let sql = format!("SELECT COUNT(*) FROM {table}");
-    let count: i64 = conn.query_row(&sql, [], |row| row.get(0))?;
+    // Use static query strings per whitelisted table to avoid dynamic SQL construction.
+    let sql = match table {
+        "skill_records" => "SELECT COUNT(*) FROM skill_records",
+        "skill_lineage_parents" => "SELECT COUNT(*) FROM skill_lineage_parents",
+        "execution_analyses" => "SELECT COUNT(*) FROM execution_analyses",
+        "skill_judgments" => "SELECT COUNT(*) FROM skill_judgments",
+        "context_budget_log" => "SELECT COUNT(*) FROM context_budget_log",
+        "agent_records" => "SELECT COUNT(*) FROM agent_records",
+        "_meta" => "SELECT COUNT(*) FROM _meta",
+        _ => {
+            return Err(StoreError::Sqlite(rusqlite::Error::InvalidParameterName(
+                format!("Unknown table: {table}"),
+            )));
+        }
+    };
+    let count: i64 = conn.query_row(sql, [], |row| row.get(0))?;
     Ok(count)
 }
 

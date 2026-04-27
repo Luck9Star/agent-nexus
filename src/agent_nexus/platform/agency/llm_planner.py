@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -60,7 +61,8 @@ class LLMPlanner:
     is available or the LLM call fails.
     """
 
-    _FALLBACK_COUNT = 0
+    _fallback_count = 0
+    _fallback_lock = threading.Lock()
 
     def __init__(
         self,
@@ -73,7 +75,8 @@ class LLMPlanner:
     @classmethod
     def fallback_count(cls) -> int:
         """Number of times any LLMPlanner fell back to keywords (monitoring)."""
-        return cls._FALLBACK_COUNT
+        with cls._fallback_lock:
+            return cls._fallback_count
 
     def analyze_task(self, task: str) -> PlannerOutput:
         """Analyze a task and return structured decomposition.
@@ -90,14 +93,16 @@ class LLMPlanner:
         """
         if self._client is None:
             logger.debug("LLMPlanner: no LLM client, falling back to keywords")
-            LLMPlanner._FALLBACK_COUNT += 1
+            with LLMPlanner._fallback_lock:
+                LLMPlanner._fallback_count += 1
             return self._keyword_fallback(task)
 
         try:
             return self._llm_analyze(task)
         except Exception:
             logger.exception("LLMPlanner: LLM call failed, falling back to keywords")
-            LLMPlanner._FALLBACK_COUNT += 1
+            with LLMPlanner._fallback_lock:
+                LLMPlanner._fallback_count += 1
             return self._keyword_fallback(task)
 
     def _llm_analyze(self, task: str) -> PlannerOutput:

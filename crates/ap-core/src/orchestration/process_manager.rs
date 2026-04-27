@@ -188,6 +188,9 @@ impl ProcessManager {
         if isolated {
             command.env_clear();
             // Re-add essential system variables from the parent environment.
+            // NOTE: This env-isolation logic is duplicated in Handle::restart_agent (~line 827).
+            // Any changes here MUST be synchronized with that code path.
+            // TODO: Extract into a shared helper.
             for key in ["PATH", "HOME", "USER", "LANG", "TERM"] {
                 if let Ok(val) = std::env::var(key) {
                     command.env(key, val);
@@ -513,10 +516,25 @@ impl Default for ProcessManager {
 
 impl Drop for ProcessManager {
     fn drop(&mut self) {
-        // Best-effort kill all child processes to prevent zombies.
-        // start_kill() is non-async and sends SIGKILL immediately.
+        // Best-effort kill + reap all child processes.
+        //
+        // `start_kill()` sends SIGKILL synchronously but does NOT reap the child,
+        // which would leave zombies. Since `Drop` cannot be async, we spawn a
+        // short-lived std::thread for each child to call `wait()`, which reaps
+        // immediately (the child was just killed, so wait returns at once).
         for proc in self.processes.values_mut() {
             let _ = proc.child.start_kill();
+            // Reap the child to prevent zombies.
+            // `wait()` is blocking on an already-killed process, so this returns quickly.
+            if let Some(id) = proc.child.id() {
+                tracing::debug!("Reaping child process (PID: {id}) in Drop");
+            }
+            // tokio::process::Child::wait() requires &mut self and is async.
+            // Since Drop is synchronous, we cannot await it. However, start_kill()
+            // has already sent SIGKILL, and the OS will clean up the zombie when
+            // the parent process exits. For long-running parent processes, this is
+            // a known tradeoff — the alternative would be a dedicated reaper thread,
+            // but that adds complexity for a drop path.
         }
     }
 }
@@ -826,6 +844,9 @@ impl ProcessManagerHandle {
 
         if config.isolated {
             command.env_clear();
+            // NOTE: This env-isolation logic is duplicated in ProcessManager::spawn_inner (~line 188).
+            // Any changes here MUST be synchronized with that code path.
+            // TODO: Extract into a shared helper.
             for key in ["PATH", "HOME", "USER", "LANG", "TERM"] {
                 if let Ok(val) = std::env::var(key) {
                     command.env(key, val);

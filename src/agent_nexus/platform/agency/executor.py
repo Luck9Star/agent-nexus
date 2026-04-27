@@ -142,8 +142,8 @@ class LLMExecutor:
         self._expert_clients: dict[str, LLMClient] = {}
 
     @property
-    def _model_name(self) -> str:
-        """Default model name (backward compat)."""
+    def model_name(self) -> str:
+        """Default model name (public API for callers like CLI)."""
         return self._default_client.model_name
 
     def _get_client(self, profile: dict[str, Any]) -> LLMClient:
@@ -237,7 +237,11 @@ class LLMExecutor:
     def _parse_sections(
         self, response_text: str, required_sections: list[str],
     ) -> dict[str, object]:
-        """Parse LLM response into sections using ``##`` markdown headings."""
+        """Parse LLM response into sections using ``##`` markdown headings.
+
+        Fenced code blocks (```) are tracked so that ``##`` headings inside
+        them are **not** treated as section delimiters.
+        """
         # Build a case-insensitive lookup: normalized_key -> original_key
         required_normalized: dict[str, str] = {
             _normalize_heading(s): s for s in required_sections
@@ -251,9 +255,24 @@ class LLMExecutor:
         # First element is text before any ## heading — skip it.
         sections: dict[str, object] = {}
 
+        # Track fenced code block boundaries so we can skip ## headings
+        # that appear inside code blocks.  We rebuild the boundary set
+        # from the *original* text (which pattern.split preserves position
+        # information for via the captured groups).
+        in_code_block: set[int] = _fenced_code_line_indices(response_text)
+
         for i in range(1, len(splits) - 1, 2):
             heading_raw = splits[i].strip()
             content = splits[i + 1].strip()
+
+            # Skip headings that fall inside a fenced code block
+            # The heading position in the original text can be found by
+            # computing the offset up to this split index.
+            heading_offset = _split_offset(response_text, splits, i)
+            heading_line = response_text[:heading_offset].count("\n") + 1
+            if heading_line in in_code_block:
+                continue
+
             heading_norm = _normalize_heading(heading_raw)
 
             if heading_norm in required_normalized:
@@ -274,3 +293,33 @@ class LLMExecutor:
 def _normalize_heading(heading: str) -> str:
     """Normalize a heading for case-insensitive, whitespace-insensitive comparison."""
     return re.sub(r"\s+", "_", heading.strip().lower())
+
+
+def _fenced_code_line_indices(text: str) -> set[int]:
+    """Return the set of 1-based line numbers that fall inside fenced code blocks."""
+    code_lines: set[int] = set()
+    inside = False
+    for lineno, line in enumerate(text.split("\n"), start=1):
+        if line.strip().startswith("```"):
+            inside = not inside
+            code_lines.add(lineno)  # the fence line itself
+            continue
+        if inside:
+            code_lines.add(lineno)
+    return code_lines
+
+
+def _split_offset(text: str, splits: list[str], split_index: int) -> int:
+    """Compute the character offset of ``splits[split_index]`` in the original text."""
+    pos = 0
+    for idx, part in enumerate(splits):
+        if idx == split_index:
+            return pos
+        # Find this part in text starting from pos.  regex split preserves
+        # order, so we can search forward.
+        found = text.find(part, pos)
+        if found != -1:
+            pos = found + len(part)
+        else:
+            pos += len(part)
+    return pos

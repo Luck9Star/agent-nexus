@@ -10,6 +10,32 @@ fn dirs_home() -> Option<std::path::PathBuf> {
     std::env::var("HOME").ok().map(std::path::PathBuf::from)
 }
 
+/// Clean up stale `.tmp-*` directories left behind by crashed installs.
+///
+/// Scans `base_dir` for directories matching `.tmp-*` and removes any that
+/// are older than 1 hour. This prevents stale temp directories from accumulating
+/// after process crashes during install.
+fn cleanup_stale_tmp_dirs(base_dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(base_dir) else {
+        return;
+    };
+    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str.starts_with(".tmp-") {
+            if let Ok(metadata) = entry.metadata() {
+                if let Ok(modified) = metadata.modified() {
+                    if modified < cutoff {
+                        debug!("Cleaning up stale temp directory: {:?}", entry.path());
+                        let _ = std::fs::remove_dir_all(entry.path());
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Errors from git installer operations.
 #[derive(Debug, Error)]
 pub enum InstallerError {
@@ -85,12 +111,16 @@ impl GitInstaller {
         // Ensure install_dir exists
         std::fs::create_dir_all(&self.install_dir)?;
 
+        // Clean up stale temp directories from previous crashed installs.
+        cleanup_stale_tmp_dirs(&self.install_dir);
+
         // Determine final destination path from the URL
         let dir_name = Self::url_to_dirname(url);
         let final_path = self.install_dir.join(&dir_name);
 
-        // Create a temp directory under install_dir for atomic clone
-        let tmp_path = self.install_dir.join(format!(".tmp-{dir_name}"));
+        // Create a temp directory under install_dir for atomic clone.
+        // Include PID to prevent races when multiple processes install the same agent.
+        let tmp_path = self.install_dir.join(format!(".tmp-{dir_name}-{}", std::process::id()));
         if tmp_path.exists() {
             std::fs::remove_dir_all(&tmp_path)?;
         }

@@ -197,6 +197,16 @@ fn format_toml_value(value: &toml::Value) -> String {
     }
 }
 
+/// Check if the given command name matches a known safe editor.
+fn is_known_editor(name: &str) -> bool {
+    const KNOWN_EDITORS: &[&str] = &[
+        "vi", "vim", "nvim", "neovim", "nano", "pico", "emacs", "emacsclient",
+        "code", "codium", "subl", "atom", "gedit", "kate", "micro", "helix",
+        "hx", "ed", "joe", "mcedit", "tilde",
+    ];
+    KNOWN_EDITORS.contains(&name)
+}
+
 /// Run `config edit` command -- open config.toml in $EDITOR.
 pub fn run_edit(output: &OutputFormatter) -> Result<()> {
     let root = commands::find_project_root(&std::env::current_dir()?);
@@ -205,10 +215,30 @@ pub fn run_edit(output: &OutputFormatter) -> Result<()> {
         anyhow::bail!("config.toml not found. Run `agent-nexus init` first.");
     }
 
-    // EDITOR is trusted input per Unix convention; basic validation only.
+    // EDITOR is user-controlled input; validate aggressively.
     let editor = std::env::var("EDITOR")
         .ok()
         .filter(|e| !e.is_empty() && !e.contains('\0') && !e.contains(".."))
+        .filter(|e| {
+            // Whitelist known editor basenames to prevent command injection.
+            // Canonicalize the path if it looks like an absolute/relative path.
+            if e.contains('/') {
+                // Path-based editor — verify it resolves to an existing file
+                let path = std::path::Path::new(e);
+                if let Ok(canonical) = path.canonicalize() {
+                    let basename = canonical
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    is_known_editor(&basename)
+                } else {
+                    false
+                }
+            } else {
+                // Bare command name (e.g. "vim", "nano")
+                is_known_editor(e)
+            }
+        })
         .unwrap_or_else(|| "vi".to_string());
     let status = std::process::Command::new(&editor)
         .arg(&path)

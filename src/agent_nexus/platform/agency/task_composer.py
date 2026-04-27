@@ -318,6 +318,7 @@ class TaskComposer:
                         continue
                     if all(dep in executed for dep in task.blocked_by):
                         try:
+                            executed.add(task.id)
                             artifact = executor(task.agent, input.task)
                             artifacts.append(artifact)
                         except Exception:
@@ -327,7 +328,9 @@ class TaskComposer:
                                 task.agent,
                             )
                             failed.add(task.id)
-                        executed.add(task.id)
+                        else:
+                            # executed.add already done above before executor call
+                            pass
 
         if not artifacts:
             reason = "no specialists selected" if not selected else "all specialists failed"

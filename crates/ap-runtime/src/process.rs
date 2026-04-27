@@ -43,10 +43,13 @@ impl DetachedProcess {
         self.child.as_ref().and_then(Child::id)
     }
 
-    /// Consume this handle **without** killing the child process.
+    /// Forget the process, preventing Drop from killing it.
     ///
-    /// Use this when the child is meant to outlive the current scope (e.g.
-    /// a long-running agent daemon).
+    /// # Warning
+    /// This creates a zombie process on Unix systems because the Child's
+    /// resources are leaked without reaping. The zombie persists until the
+    /// parent process exits. Only use this if an external supervisor manages
+    /// the child process lifecycle.
     pub fn forget(mut self) {
         if let Some(mut child) = self.child.take() {
             // Drop stdin/stdout/stderr handles before forgetting to prevent
@@ -144,6 +147,14 @@ impl AgentProcess {
         args: &[&str],
         env: Option<HashMap<String, String>>,
     ) -> Result<Self, ProcessError> {
+        // Defense-in-depth: validate cmd parameter to prevent path traversal attacks.
+        if cmd.contains("..") {
+            return Err(ProcessError::Spawn(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "command path must not contain '..'",
+            )));
+        }
+
         let mut command = Command::new(cmd);
         command
             .args(args)

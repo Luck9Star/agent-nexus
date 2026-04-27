@@ -90,6 +90,8 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
         let deadline = timeout.map(|secs| {
             (std::time::Instant::now(), secs)
         });
+        // Extract timeout_secs once to avoid repeated unwrap on deadline.
+        let timeout_secs = timeout;
         loop {
             // Track cumulative elapsed time across Progress messages.
             // Each Progress message must NOT reset the timeout clock.
@@ -99,7 +101,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
             });
             if let Some(r) = remaining {
                 if r <= 0.0 {
-                    return Err(IpcError::Timeout { timeout: deadline.unwrap().1 });
+                    return Err(IpcError::Timeout { timeout: timeout_secs.unwrap_or(0.0) });
                 }
             }
             let per_iter_timeout = remaining.or(timeout);
@@ -115,7 +117,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
                     .await
                     {
                         Ok(result) => result?,
-                        Err(_) => return Err(IpcError::Timeout { timeout: deadline.unwrap().1 }),
+                        Err(_) => return Err(IpcError::Timeout { timeout: timeout_secs.unwrap_or(0.0) }),
                     }
                 }
                 None => receive_fut.await?,
