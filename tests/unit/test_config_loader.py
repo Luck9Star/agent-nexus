@@ -259,3 +259,111 @@ class TestConfigLoaderTomlDecodeError:
         loader = ConfigLoader(config_dir=tmp_path)
         config = loader.load_config()
         assert config.models.default == DEFAULT_MODEL_STRING
+
+
+# ============================================================================
+# Sources from config.toml [sources]
+# ============================================================================
+
+
+class TestConfigLoaderSourcesFromToml:
+    """Sources are parsed from [sources] section in config.toml."""
+
+    def test_sources_parsed_from_toml(self, tmp_path: Path) -> None:
+        cfg = tmp_path / CONFIG_FILE
+        cfg.write_text("""\
+sources = [
+    {name = "official", type = "git", url = "https://github.com/official/repo.git", branch = "main"},
+    {name = "private", type = "git", url = "https://git.example.com/private.git"},
+]
+""")
+        loader = ConfigLoader(config_dir=tmp_path)
+        config = loader.load_config()
+        assert len(config.sources) == 2
+        assert config.sources[0].name == "official"
+        assert config.sources[0].url == "https://github.com/official/repo.git"
+        assert config.sources[1].name == "private"
+
+    def test_sources_empty_when_not_in_toml(self, tmp_path: Path) -> None:
+        cfg = tmp_path / CONFIG_FILE
+        cfg.write_text('[models]\ndefault = "test:model"\n')
+        loader = ConfigLoader(config_dir=tmp_path)
+        config = loader.load_config()
+        assert config.sources == []
+
+    def test_sources_present_in_merged_config(self, tmp_path: Path) -> None:
+        cfg = tmp_path / CONFIG_FILE
+        cfg.write_text("""\
+sources = [
+    {name = "global-source", url = "https://global.example.com/repo.git"},
+]
+""")
+        loader = ConfigLoader(config_dir=tmp_path)
+        merged = loader.load_merged_config(project_dir=tmp_path)
+        assert len(merged.sources) == 1
+        assert merged.sources[0].name == "global-source"
+
+
+# ============================================================================
+# Project-level agent-nexus.toml
+# ============================================================================
+
+
+class TestConfigLoaderProjectConfig:
+    """Project-level agent-nexus.toml merging."""
+
+    def test_project_model_overrides_global(self, tmp_path: Path) -> None:
+        cfg = tmp_path / CONFIG_FILE
+        cfg.write_text('[models]\ndefault = "global:model"\n')
+
+        proj_cfg = tmp_path / "agent-nexus.toml"
+        proj_cfg.write_text('[models]\ndefault = "project:model"\n')
+
+        loader = ConfigLoader(config_dir=tmp_path)
+        merged = loader.load_merged_config(project_dir=tmp_path)
+        assert merged.models.default == "project:model"
+
+    def test_no_project_config_uses_global(self, tmp_path: Path) -> None:
+        cfg = tmp_path / CONFIG_FILE
+        cfg.write_text('[models]\ndefault = "global:model"\n')
+
+        loader = ConfigLoader(config_dir=tmp_path)
+        merged = loader.load_merged_config(project_dir=tmp_path)
+        assert merged.models.default == "global:model"
+
+    def test_project_stages_override_global(self, tmp_path: Path) -> None:
+        cfg = tmp_path / CONFIG_FILE
+        cfg.write_text(
+            '[models]\ndefault = "global:model"\n'
+            '[models.stages]\nplanning = "global:planner"\n'
+        )
+
+        proj_cfg = tmp_path / "agent-nexus.toml"
+        proj_cfg.write_text(
+            '[models.stages]\nplanning = "project:planner"\n'
+            'execution = "project:executor"\n'
+        )
+
+        loader = ConfigLoader(config_dir=tmp_path)
+        merged = loader.load_merged_config(project_dir=tmp_path)
+        assert merged.models.stages["planning"] == "project:planner"
+        assert merged.models.stages["execution"] == "project:executor"
+
+    def test_project_providers_merge_with_global(self, tmp_path: Path) -> None:
+        cfg = tmp_path / CONFIG_FILE
+        cfg.write_text('[models]\ndefault = "global:model"\n')
+
+        proj_cfg = tmp_path / "agent-nexus.toml"
+        proj_cfg.write_text(
+            '[models]\ndefault = ""\n'
+            '[models.providers.custom]\n'
+            'base_url = "https://custom.api/v1"\n'
+            'api_key_env = "CUSTOM_KEY"\n'
+        )
+
+        loader = ConfigLoader(config_dir=tmp_path)
+        merged = loader.load_merged_config(project_dir=tmp_path)
+        # default from global (project left empty), custom provider from project
+        assert merged.models.default == "global:model"
+        assert "custom" in merged.models.providers
+        assert "openai" in merged.models.providers  # built-ins still present
