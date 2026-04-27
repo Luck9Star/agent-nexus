@@ -118,11 +118,14 @@ fn multi_provider_config() -> PlatformConfig {
         },
     );
     PlatformConfig {
+        schema_version: "1.0".to_string(),
         models: ModelConfig {
             default: "openai:gpt-4o".to_string(),
+            stages: std::collections::HashMap::new(),
             providers,
         },
         runtime: Default::default(),
+        sources: vec![],
     }
 }
 

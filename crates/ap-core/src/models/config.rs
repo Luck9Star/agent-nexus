@@ -21,12 +21,33 @@ pub struct ProviderConfig {
     pub api: ProviderApiType,
 }
 
+/// A source entry for agent package distribution.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SourceEntry {
+    pub name: String,
+    #[serde(default = "default_source_type")]
+    pub r#type: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default = "default_branch")]
+    pub branch: String,
+}
+
+fn default_source_type() -> String {
+    "git".to_string()
+}
+fn default_branch() -> String {
+    "main".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelConfig {
     #[serde(default = "default_model")]
     pub default: String,
     #[serde(default)]
     pub providers: std::collections::HashMap<String, ProviderConfig>,
+    #[serde(default)]
+    pub stages: std::collections::HashMap<String, String>,
 }
 
 fn default_model() -> String {
@@ -76,6 +97,7 @@ impl Default for ModelConfig {
         Self {
             default: default_model(),
             providers: default_providers(),
+            stages: std::collections::HashMap::new(),
         }
     }
 }
@@ -100,12 +122,31 @@ impl Default for RuntimeConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlatformConfig {
+    #[serde(default = "default_schema_version")]
+    pub schema_version: String,
     #[serde(default)]
     pub runtime: RuntimeConfig,
     #[serde(default)]
     pub models: ModelConfig,
+    #[serde(default)]
+    pub sources: Vec<SourceEntry>,
+}
+
+fn default_schema_version() -> String {
+    "1.0".to_string()
+}
+
+impl Default for PlatformConfig {
+    fn default() -> Self {
+        Self {
+            schema_version: default_schema_version(),
+            runtime: RuntimeConfig::default(),
+            models: ModelConfig::default(),
+            sources: Vec::new(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -137,5 +178,41 @@ api = "openai-compatible"
         let config = PlatformConfig::default();
         assert_eq!(config.models.default, "openai:gpt-4o");
         assert_eq!(config.runtime.python_path, "python3");
+        assert_eq!(config.schema_version, "1.0");
+        assert!(config.sources.is_empty());
+    }
+
+    #[test]
+    fn parse_sources_from_toml() {
+        let toml_str = r#"
+[[sources]]
+name = "official"
+type = "git"
+url = "https://github.com/official/repo.git"
+branch = "main"
+
+[[sources]]
+name = "private"
+type = "git"
+url = "https://git.example.com/private.git"
+"#;
+        let config: PlatformConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.sources.len(), 2);
+        assert_eq!(config.sources[0].name, "official");
+        assert_eq!(config.sources[0].url, "https://github.com/official/repo.git");
+        assert_eq!(config.sources[1].name, "private");
+    }
+
+    #[test]
+    fn parse_stages_from_toml() {
+        let toml_str = r#"
+[models.stages]
+planning = "anthropic:claude-opus-4-20250116"
+execution = "anthropic:claude-sonnet-4-20250514"
+"#;
+        let config: PlatformConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.models.stages.len(), 2);
+        assert_eq!(config.models.stages["planning"], "anthropic:claude-opus-4-20250116");
+        assert_eq!(config.models.stages["execution"], "anthropic:claude-sonnet-4-20250514");
     }
 }

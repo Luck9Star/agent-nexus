@@ -7,6 +7,7 @@ from enum import StrEnum
 from pydantic import Field
 
 from agent_nexus.models._common import FrozenModel
+from agent_nexus.models.distribution import SourceEntry
 
 
 class ProviderApiType(StrEnum):
@@ -81,5 +82,7 @@ class PlatformConfig(FrozenModel):
     This is the top-level object parsed from config.toml.
     """
 
+    schema_version: str = "1.0"
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     models: ModelConfig = Field(default_factory=ModelConfig)
+    sources: list[SourceEntry] = Field(default_factory=list)

@@ -123,6 +123,7 @@ mod tests {
         PlatformConfig {
             models: ModelConfig {
                 default: "openai:gpt-4o".into(),
+                stages: HashMap::new(),
                 providers: {
                     let mut m = HashMap::new();
                     m.insert(
