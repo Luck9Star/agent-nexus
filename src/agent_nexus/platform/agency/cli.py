@@ -14,6 +14,7 @@ from .qa_gate import QAGate, QAGateInput
 from .registry import ExpertRegistry
 from .selector import SelectionRequest, SpecialistSelector
 
+
 def _find_repo_root() -> Path:
     """Walk up from this file to find the repo root (directory with .git)."""
     current = Path(__file__).resolve().parent
@@ -313,8 +314,18 @@ def check_profiles(output_dir: str) -> None:
 @click.option("--max-parallel", default=3, type=int, help="Max concurrent expert executions")
 @click.option("--vendor-path", required=True, help="Path to the agency-agents vendor repo")
 @click.option("--allowlist", required=True, help="Path to the allowlist YAML file")
-@click.option("--model", default=None, help="Override model string (e.g. 'api:MiniMax-M2.7-highspeed')")
-@click.option("--config-dir", default=None, help="Config directory (default: ~/.agent-nexus/)")
+@click.option(
+    "--model", default=None,
+    help="Override model string (e.g. 'api:MiniMax-M2.7-highspeed')",
+)
+@click.option(
+    "--config-dir", default=None,
+    help="Config directory (default: ~/.agent-nexus/)",
+)
+@click.option(
+    "--use-llm", is_flag=True, default=False,
+    help="Use LLM for planning, integration, and QA (requires API config)",
+)
 def run_composition(
     task: str,
     mode: str,
@@ -323,6 +334,7 @@ def run_composition(
     allowlist: str,
     model: str | None,
     config_dir: str | None,
+    use_llm: bool,
 ) -> None:
     """Full pipeline: load experts, select, build DAG, execute, integrate, QA."""
     # Load .env from config dir so API keys are available
@@ -349,60 +361,44 @@ def run_composition(
         ep = pkg["expert_profile"]
         registry.add(ep["id"], ep, ep["capabilities"])
 
-    # Step 2: Infer capabilities + select specialists
-    from .task_composer import infer_capabilities
+    # Step 2-6: Delegate to TaskComposer (avoids duplicating pipeline logic)
+    from .task_composer import TaskComposer, TaskComposerInput
 
-    required_caps = infer_capabilities(task)
-    selector = SpecialistSelector(registry)
-    request = SelectionRequest(
-        task_type=mode,
-        required_capabilities=required_caps,
-        optional_capabilities=[],
-        max_agents=5,
-        permissions="plan",
-    )
-    selected = selector.select(request)
+    # Initialize LLM components if requested
+    llm_planner = None
+    llm_integrator = None
+    llm_qa_gate = None
 
-    if not selected:
-        click.echo("No matching specialists found for the task.")
-        return
+    if use_llm:
+        try:
+            from .llm_client import LLMClient
+            from .llm_integrator import LLMIntegrator
+            from .llm_planner import LLMPlanner
+            from .llm_qa_gate import LLMQualityGate
 
-    # Step 3: Build subtasks with real agent capabilities
-    subtasks: list[SubtaskDef] = []
-    for sel in selected:
-        profile = registry.get(sel.agent_id)
-        agent_caps = (
-            profile.get("capabilities", required_caps)
-            if profile
-            else required_caps
-        )
-        artifact_type = (
-            profile.get("output_contract", {}).get("artifact_type", "report")
-            if profile
-            else "report"
-        )
-        subtasks.append(
-            SubtaskDef(
-                id=sel.agent_id.replace("agency.", ""),
-                goal=task,
-                needed_capabilities=agent_caps,
-                output_contract=artifact_type,
-                assigned_agent=sel.agent_id,
+            config_path = Path(config_dir) if config_dir else None
+            planner_client = LLMClient(
+                model_string=model, stage="planning", config_dir=config_path,
             )
-        )
+            integrator_client = LLMClient(
+                model_string=model, stage="integration", config_dir=config_path,
+            )
+            qa_client = LLMClient(
+                model_string=model, stage="qa", config_dir=config_path,
+            )
+            llm_planner = LLMPlanner(registry=registry, client=planner_client)
+            llm_integrator = LLMIntegrator(client=integrator_client)
+            llm_qa_gate = LLMQualityGate(client=qa_client)
+            click.echo("LLM-powered planning, integration, and QA enabled")
+        except Exception as exc:
+            click.echo(
+                f"Warning: LLM components unavailable ({exc}), "
+                "using rule-based fallback. Check config.toml and API key.",
+                err=True,
+            )
 
-    # Step 4: Generate DAG
-    planner = DynamicCompositePlanner()
-    dag = planner.resolve_dependencies(
-        subtasks,
-        composition_name=f"composition-{mode}",
-        max_parallel=max_parallel,
-    )
-
-    # Step 5: Execute with LLMExecutor (falls back to ProfileBasedExecutor if no config)
-    from .dag_dispatcher import DAGDispatcher
+    # Create executor (LLM for experts if config available)
     from .executor import LLMExecutor, ProfileBasedExecutor
-    from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
     try:
         executor = LLMExecutor(
@@ -412,55 +408,48 @@ def run_composition(
         )
         click.echo(f"Using LLM executor (model: {executor._model_name})")
     except Exception as exc:
-        click.echo(f"LLM config unavailable ({exc}), falling back to profile-based executor", err=True)
+        click.echo(
+            f"LLM config unavailable ({exc}), "
+            "falling back to profile-based executor",
+            err=True,
+        )
         executor = ProfileBasedExecutor(registry=registry)
 
+    from agent_nexus.platform.orchestration.task_graph import TaskGraph
+
     graph = TaskGraph(":memory:")
-    dispatcher = DAGDispatcher(
-        graph=graph,
-        executor=executor,
-        max_batch_size=max_parallel,
+    composer = TaskComposer(registry)
+    composer_input = TaskComposerInput(
+        task=task,
+        mode=mode,
+        max_parallel=max_parallel,
+        timeout_seconds=120.0,
+    )
+    composer_result = composer.run(
+        composer_input,
+        expert_executor=executor,
+        task_graph=graph,
+        llm_planner=llm_planner,
+        llm_integrator=llm_integrator,
+        llm_qa_gate=llm_qa_gate,
         concurrent=True,
     )
-    dispatch_result = dispatcher.dispatch(dag, task)
     graph.close()
 
-    # Step 6: Integrate + QA
-    if dispatch_result.artifacts:
-        from .integrator import Integrator
-        from .qa_gate import QAGate, QAGateInput
+    # Output results
+    click.echo("\n=== Composition Result ===")
+    click.echo(f"Selected: {len(composer_result.selected_agents)} experts")
+    click.echo(f"QA passed: {composer_result.qa_passed}")
+    if composer_result.skipped_tasks:
+        click.echo(f"Skipped: {composer_result.skipped_tasks}")
 
-        artifacts = list(dispatch_result.artifacts.values())
-        integrated = Integrator.merge(artifacts)
-
-        # QA validation
-        first_profile = registry.get(selected[0].agent_id)
-        required_sections = (
-            first_profile.get("output_contract", {}).get("required_sections", [])
-            if first_profile
-            else []
-        )
-        gate_input = QAGateInput(
-            output={"sections": integrated.merged_sections},
-            required_sections=required_sections,
-            task_type=mode,
-        )
-        qa_result = QAGate.run(gate_input)
-
-        # Output results
-        click.echo("\n=== Composition Result ===")
-        click.echo(f"Selected: {len(selected)} experts")
-        click.echo(f"Completed: {len(dispatch_result.completed)}")
-        click.echo(f"Failed: {len(dispatch_result.failed)}")
-        click.echo(f"QA passed: {qa_result.passed}")
-        click.echo(f"\n--- Merged Output ---")
-        for key, value in integrated.merged_sections.items():
+    if composer_result.integrated:
+        click.echo("\n--- Merged Output ---")
+        for key, value in composer_result.integrated.merged_sections.items():
             click.echo(f"\n## {key}")
             click.echo(str(value))
     else:
         click.echo("No artifacts produced — all experts failed.")
-        for tid, err in dispatch_result.errors.items():
-            click.echo(f"  {tid}: {err}")
 
 
 if __name__ == "__main__":

@@ -6,13 +6,8 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import httpx
-
-from agent_nexus.models.config import ProviderApiType
-from agent_nexus.platform.config.loader import ConfigLoader
-from agent_nexus.platform.config.model_config import ModelConfigManager
-
 from .integrator import Artifact
+from .llm_client import LLMClient
 
 if TYPE_CHECKING:
     from .registry import ExpertRegistry
@@ -123,13 +118,9 @@ class ProfileBasedExecutor:
 class LLMExecutor:
     """Executor that calls a real LLM API using expert profiles as system prompts.
 
-    Supports both ``anthropic-messages`` and ``openai-compatible`` API formats.
-    Reads model config from ``~/.agent-nexus/config.toml`` via
-    :class:`ConfigLoader`.
+    Delegates API calls to :class:`LLMClient`.  Supports per-expert model
+    overrides via the ``model`` field in expert profiles.
     """
-
-    _TIMEOUT = 120.0
-    _MAX_TOKENS = 4096
 
     def __init__(
         self,
@@ -138,43 +129,40 @@ class LLMExecutor:
         config_dir: Path | None = None,
     ) -> None:
         self._registry = registry
+        self._config_dir = config_dir
+        self._default_model_string = model_string
 
-        # 1. Load config
-        loader = ConfigLoader(config_dir=config_dir)
-        platform_config = loader.load_config()
-
-        # 2. Create ModelConfigManager
-        mgr = ModelConfigManager(platform_config)
-
-        # 3. Resolve model string (use config default if not provided)
-        resolved = model_string or mgr.resolve_model(__name__)
-        if not resolved:
-            raise ValueError(
-                "No model string resolved — set [models].default in config.toml "
-                "or pass model_string explicitly"
-            )
-
-        # 4. Parse into (provider_name, model_name)
-        self._provider_name, self._model_name = mgr.parse_model_string(resolved)
-
-        # 5. Get provider config (base_url, api_type)
-        self._provider_config = mgr.get_provider_config(self._provider_name)
-
-        # 6. Resolve API key
-        self._api_key = mgr.resolve_api_key(self._provider_name)
-        if not self._api_key:
-            raise ValueError(
-                f"API key for provider '{self._provider_name}' is empty. "
-                f"Set the environment variable referenced in config.toml "
-                f"(e.g. api_key_env = 'API_API_KEY') and ensure it is exported."
-            )
-
-        logger.info(
-            "LLMExecutor initialized: provider=%s model=%s api=%s",
-            self._provider_name,
-            self._model_name,
-            self._provider_config.api,
+        # Create default client (used when expert has no model override)
+        self._default_client = LLMClient(
+            model_string=model_string,
+            config_dir=config_dir,
         )
+
+        # Cache per-expert clients (keyed by model string)
+        self._expert_clients: dict[str, LLMClient] = {}
+
+    @property
+    def _model_name(self) -> str:
+        """Default model name (backward compat)."""
+        return self._default_client.model_name
+
+    def _get_client(self, profile: dict[str, Any]) -> LLMClient:
+        """Get LLMClient for an expert, respecting per-expert model override."""
+        expert_model = profile.get("model")
+        if not expert_model:
+            return self._default_client
+
+        if expert_model not in self._expert_clients:
+            self._expert_clients[expert_model] = LLMClient(
+                model_string=expert_model,
+                config_dir=self._config_dir,
+            )
+            logger.info(
+                "Per-expert model override: %s → %s",
+                profile.get("id", "unknown"),
+                expert_model,
+            )
+        return self._expert_clients[expert_model]
 
     def __call__(self, profile_id: str, task: str) -> Artifact:
         profile = self._registry.get(profile_id)
@@ -198,98 +186,17 @@ class LLMExecutor:
             required_sections=required_sections,
         )
 
-        # Call LLM
-        if self._provider_config.api == ProviderApiType.ANTHROPIC_MESSAGES:
-            response_text = self._call_anthropic_api(system_prompt, task)
-        else:
-            response_text = self._call_openai_api(system_prompt, task)
-
-        sections = self._parse_sections(response_text, required_sections)
+        # Use per-expert client if available
+        client = self._get_client(profile)
+        response = client.call(system_prompt=system_prompt, user_message=task)
+        sections = self._parse_sections(response.text, required_sections)
 
         return Artifact(
             source_agent=profile_id,
             artifact_type=artifact_type,
             sections=sections,
-            metadata={"llm": True, "model": self._model_name},
+            metadata={"llm": True, "model": response.model, "provider": response.provider},
         )
-
-    # ------------------------------------------------------------------
-    # API callers
-    # ------------------------------------------------------------------
-
-    def _call_anthropic_api(self, system_prompt: str, user_message: str) -> str:
-        """Call Anthropic Messages API format.
-
-        ``POST {base_url}/v1/messages``
-        """
-        base_url = self._provider_config.base_url.rstrip("/")
-        url = f"{base_url}/v1/messages"
-
-        headers: dict[str, str] = {
-            "x-api-key": self._api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
-
-        payload: dict[str, Any] = {
-            "model": self._model_name,
-            "max_tokens": self._MAX_TOKENS,
-            "system": system_prompt,
-            "messages": [{"role": "user", "content": user_message}],
-        }
-
-        with httpx.Client(timeout=self._TIMEOUT) as client:
-            resp = client.post(url, json=payload, headers=headers)
-
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"Anthropic API call failed (status {resp.status_code}): "
-                f"{resp.text[:500]}"
-            )
-
-        data = resp.json()
-        # Anthropic Messages response: {"content": [{"type": "text", "text": "..."}]}
-        content_blocks = data.get("content", [])
-        return "".join(
-            block.get("text", "") for block in content_blocks if block.get("type") == "text"
-        )
-
-    def _call_openai_api(self, system_prompt: str, user_message: str) -> str:
-        """Call OpenAI-compatible Chat Completions API.
-
-        ``POST {base_url}/v1/chat/completions``
-        """
-        base_url = self._provider_config.base_url.rstrip("/")
-        url = f"{base_url}/v1/chat/completions"
-
-        headers: dict[str, str] = {
-            "Authorization": f"Bearer {self._api_key}",
-            "content-type": "application/json",
-        }
-
-        payload: dict[str, Any] = {
-            "model": self._model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-        }
-
-        with httpx.Client(timeout=self._TIMEOUT) as client:
-            resp = client.post(url, json=payload, headers=headers)
-
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"OpenAI-compatible API call failed (status {resp.status_code}): "
-                f"{resp.text[:500]}"
-            )
-
-        data = resp.json()
-        # OpenAI Chat Completions response: {"choices": [{"message": {"content": "..."}}]}
-        choices = data.get("choices", [])
-        if choices:
-            return choices[0].get("message", {}).get("content", "")
-        return ""
 
     # ------------------------------------------------------------------
     # Prompt building & parsing

@@ -219,6 +219,36 @@ class ModelConfigManager:
         )
         return ""
 
+    def resolve_stage_model(self, stage: str) -> str | None:
+        """Resolve the model string for a specific pipeline stage.
+
+        Looks up ``[models.stages].<stage>`` in config, falls back to
+        ``default`` if not set.
+
+        Parameters
+        ----------
+        stage:
+            Pipeline stage name (e.g. ``"planning"``, ``"integration"``,
+            ``"qa"``, ``"execution"``).
+
+        Returns
+        -------
+        str | None
+            The resolved ``provider:model`` string, or None if neither
+            the stage override nor default is configured.
+        """
+        stage_model = self._config.models.stages.get(stage)
+        if stage_model:
+            logger.debug("Stage '%s' model: %s", stage, stage_model)
+            return stage_model
+
+        default = self._config.models.default
+        if default:
+            logger.debug("Stage '%s' falling back to default: %s", stage, default)
+            return default
+
+        return None
+
     def parse_model_string(self, model_string: str) -> tuple[str, str]:
         """Split a ``provider:model`` string into ``(provider, model_name)``.
 

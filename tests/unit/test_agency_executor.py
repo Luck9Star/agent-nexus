@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent_nexus.platform.agency.executor import ProfileBasedExecutor
+from agent_nexus.platform.agency.executor import LLMExecutor, ProfileBasedExecutor
 from agent_nexus.platform.agency.importer import AgencyImporter
-from agent_nexus.platform.agency.task_composer import TaskComposer, TaskComposerInput, TaskComposerResult
 from agent_nexus.platform.agency.integrator import Artifact
+from agent_nexus.platform.agency.llm_client import LLMResponse
 from agent_nexus.platform.agency.registry import ExpertRegistry
 from agent_nexus.platform.agency.task_composer import (
     TaskComposer,
@@ -317,3 +318,65 @@ class TestImporterImportedAt:
         pkg = importer._build_profile_package(parsed, entry)
 
         assert pkg["expert_profile"]["profile"]["imported_at"] == date.today().isoformat()
+
+
+# ---------------------------------------------------------------------------
+# 6. LLMExecutor per-expert model override
+# ---------------------------------------------------------------------------
+
+
+def _make_registry_with_model_override():
+    """Registry where one expert has a model override."""
+    registry = ExpertRegistry()
+    registry.add("agency.expert-a", {
+        "id": "agency.expert-a",
+        "name": "Expert A",
+        "capabilities": ["code_review"],
+        "profile": {"body": "You are a code reviewer."},
+        "output_contract": {
+            "artifact_type": "report",
+            "required_sections": ["summary"],
+        },
+        # No model override — uses default
+    }, ["code_review"])
+    registry.add("agency.expert-b", {
+        "id": "agency.expert-b",
+        "name": "Expert B",
+        "capabilities": ["security_review"],
+        "profile": {"body": "You are a security expert."},
+        "output_contract": {
+            "artifact_type": "report",
+            "required_sections": ["summary"],
+        },
+        "model": "anthropic:claude-sonnet-4-20250514",  # Per-expert override
+    }, ["security_review"])
+    return registry
+
+
+@patch("agent_nexus.platform.agency.executor.LLMClient")
+def test_llm_executor_uses_per_expert_model(mock_llm_client):
+    mock_default = MagicMock()
+    mock_default.call.return_value = LLMResponse(
+        text="## summary\nExpert A summary",
+        model="default-model",
+        provider="api",
+    )
+    mock_expert = MagicMock()
+    mock_expert.call.return_value = LLMResponse(
+        text="## summary\nExpert B summary",
+        model="claude-sonnet-4-20250514",
+        provider="anthropic",
+    )
+    mock_llm_client.side_effect = [mock_default, mock_expert]
+
+    registry = _make_registry_with_model_override()
+    executor = LLMExecutor(registry=registry, model_string="api:default-model")
+
+    # Expert A should use default client
+    artifact_a = executor("agency.expert-a", "review code")
+    assert artifact_a.metadata["model"] == "default-model"
+
+    # Expert B should use per-expert client
+    artifact_b = executor("agency.expert-b", "security review")
+    assert artifact_b.metadata["model"] == "claude-sonnet-4-20250514"
+    assert mock_llm_client.call_count == 2  # default + expert override

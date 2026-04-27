@@ -22,6 +22,9 @@ if TYPE_CHECKING:
     from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
     from .dag_dispatcher import ExpertExecutor
+    from .llm_integrator import LLMIntegrator
+    from .llm_planner import LLMPlanner
+    from .llm_qa_gate import LLMQualityGate
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +164,10 @@ class TaskComposer:
         input: TaskComposerInput,
         expert_executor: ExpertExecutor | None = None,
         task_graph: TaskGraph | None = None,
+        llm_planner: LLMPlanner | None = None,
+        llm_integrator: LLMIntegrator | None = None,
+        llm_qa_gate: LLMQualityGate | None = None,
+        concurrent: bool = False,
     ) -> TaskComposerResult:
         """Execute the full pipeline.
 
@@ -177,11 +184,27 @@ class TaskComposer:
             through DAGDispatcher (proper dependency tracking, state
             transitions, failure propagation). When None, the legacy
             in-process loop is used (backward compatible).
+        llm_planner:
+            Optional LLMPlanner for semantic task decomposition.
+            Falls back to keyword-based ``infer_capabilities()`` when None.
+        llm_integrator:
+            Optional LLMIntegrator for semantic artifact synthesis.
+            Falls back to ``Integrator.merge()`` when None.
+        llm_qa_gate:
+            Optional LLMQualityGate for semantic quality evaluation.
+            Falls back to structural ``QAGate`` when None.
+        concurrent:
+            When True, use ThreadPoolExecutor for parallel LLM calls.
+            Passed through to DAGDispatcher.
         """
         executor = expert_executor or ProfileBasedExecutor(self.registry)
 
-        # Step 1: Infer capabilities
-        required_caps = infer_capabilities(input.task)
+        # Step 1: Infer capabilities (LLM or keyword fallback)
+        if llm_planner is not None:
+            planner_output = llm_planner.analyze_task(input.task)
+            required_caps = planner_output.capabilities
+        else:
+            required_caps = infer_capabilities(input.task)
 
         # Step 2: Select specialists
         selection_request = SelectionRequest(
@@ -236,6 +259,7 @@ class TaskComposer:
                 executor=executor,
                 max_batch_size=input.max_parallel,
                 timeout_seconds=input.timeout_seconds,
+                concurrent=concurrent,
             )
             dispatch_result = dispatcher.dispatch(dag, input.task)
 
@@ -318,10 +342,13 @@ class TaskComposer:
                 skipped_tasks=list(skipped),
             )
 
-        # Step 5: Integrate
-        integrated = Integrator.merge(artifacts)
+        # Step 5: Integrate (LLM or rule-based fallback)
+        if llm_integrator is not None:
+            integrated = llm_integrator.synthesize(artifacts, task=input.task)
+        else:
+            integrated = Integrator.merge(artifacts)
 
-        # Step 6: QA Gate validation
+        # Step 6: QA Gate validation (LLM or structural-only)
         # Determine required sections from first selected agent's output contract
         first_profile = self.registry.get(selected[0].agent_id)
         required_sections: list[str] = []
@@ -330,12 +357,20 @@ class TaskComposer:
                 "required_sections", []
             )
 
-        gate_input = QAGateInput(
-            output={"sections": integrated.merged_sections},
-            required_sections=required_sections,
-            task_type=input.mode,
-        )
-        qa_result = QAGate.run(gate_input)
+        if llm_qa_gate is not None:
+            qa_result = llm_qa_gate.evaluate(
+                integrated,
+                task=input.task,
+                required_sections=required_sections,
+                task_type=input.mode,
+            )
+        else:
+            gate_input = QAGateInput(
+                output={"sections": integrated.merged_sections},
+                required_sections=required_sections,
+                task_type=input.mode,
+            )
+            qa_result = QAGate.run(gate_input)
 
         return TaskComposerResult(
             task=input.task,

@@ -39,6 +39,11 @@ class ModelConfig(FrozenModel):
         [models]
         default = "openai:gpt-4o"
 
+        [models.stages]
+        planning = "openai:gpt-4o"
+        integration = "openai:gpt-4o"
+        qa = "openai:gpt-4o"
+
         [models.providers.deepseek]
         base_url = "https://api.deepseek.com/v1"
         api_key_env = "DEEPSEEK_API_KEY"
@@ -47,6 +52,12 @@ class ModelConfig(FrozenModel):
 
     default: str = "openai:gpt-4o"
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+    stages: dict[str, str] = Field(default_factory=dict)
+    """Per-stage model overrides (e.g. ``{"planning": "openai:gpt-4o"}``).
+
+    Supported stages: ``planning``, ``integration``, ``qa``, ``execution``.
+    Falls back to ``default`` if a stage is not specified.
+    """
 
 
 class RuntimeConfig(FrozenModel):
