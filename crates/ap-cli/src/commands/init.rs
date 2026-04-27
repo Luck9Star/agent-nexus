@@ -145,22 +145,21 @@ pub fn run(dir: &str, output: &OutputFormatter) -> Result<()> {
     }
 
     // Migrate sources.yaml → config.toml if needed.
-    // Users who ran `init` before this change have sources.yaml but no [[sources]] in config.toml.
     let sources_yaml = target.join("sources.yaml");
     if sources_yaml.exists() && config_path.exists() {
         let config_toml_mgr = SourceManager::new_toml(config_path.clone());
         let has_sources = !config_toml_mgr.list().is_empty();
         if !has_sources {
-            let yaml_mgr = SourceManager::new(sources_yaml);
-            match yaml_mgr.list() {
-                yaml_sources if !yaml_sources.is_empty() => {
-                    if let Err(e) = config_toml_mgr.save(&yaml_sources) {
-                        output.info(&format!("Warning: failed to migrate sources from sources.yaml: {e}"));
-                    } else {
-                        output.info("Migrated sources from sources.yaml to config.toml (legacy file preserved)");
+            if let Ok(yaml_content) = std::fs::read_to_string(&sources_yaml) {
+                if let Ok(yaml_sources) = SourceManager::parse(&yaml_content) {
+                    if !yaml_sources.is_empty() {
+                        if let Err(e) = config_toml_mgr.save(&yaml_sources) {
+                            output.info(&format!("Warning: failed to migrate sources from sources.yaml: {e}"));
+                        } else {
+                            output.info("Migrated sources from sources.yaml to config.toml (legacy file preserved)");
+                        }
                     }
                 }
-                _ => {}
             }
         }
     }

@@ -1,12 +1,10 @@
 //! Source manager for agent package sources.
 //!
-//! Supports two storage backends:
-//! - **YAML** (`sources.yaml`) — legacy, deprecated
-//! - **TOML** (`config.toml [sources]`) — primary, aligns with Python platform
+//! Sources are stored in `config.toml` under the `[[sources]]` section.
+//! Legacy `sources.yaml` reading is supported via [`SourceManager::parse`] for migration.
 
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, warn};
 
@@ -32,41 +30,24 @@ pub enum SourceError {
 }
 
 /// Internal wrapper for the `sources:` map format in YAML.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct SourcesYaml {
     sources: Vec<SourceEntry>,
 }
 
-/// Storage backend for source entries.
-#[derive(Debug, Clone, PartialEq)]
-enum StorageMode {
-    /// Read/write from `config.toml` `[sources]` section.
-    Toml,
-    /// Legacy: read/write from `sources.yaml`.
-    Yaml,
-}
-
-/// Manages agent package sources — supports config.toml and legacy sources.yaml.
+/// Manages agent package sources stored in `config.toml` `[[sources]]`.
+///
+/// Other sections of config.toml (runtime, models, providers) are preserved on write.
 #[derive(Debug)]
 pub struct SourceManager {
     path: PathBuf,
-    mode: StorageMode,
 }
 
 impl SourceManager {
-    /// Create a new source manager pointing to a `sources.yaml` path (legacy mode).
-    #[must_use]
-    pub fn new(path: PathBuf) -> Self {
-        Self { path, mode: StorageMode::Yaml }
-    }
-
     /// Create a new source manager pointing to a `config.toml` path.
-    ///
-    /// Sources are read from and written to the `[sources]` section of the
-    /// TOML file. Other sections (runtime, models, etc.) are preserved.
     #[must_use]
     pub fn new_toml(config_path: PathBuf) -> Self {
-        Self { path: config_path, mode: StorageMode::Toml }
+        Self { path: config_path }
     }
 
     /// Returns the path to the advisory lock file (sibling of the storage file).
@@ -74,12 +55,13 @@ impl SourceManager {
         self.path.with_extension("lock")
     }
 
-    /// Static: parse a YAML string into a list of `SourceEntry`.
+    /// Parse a YAML string into a list of `SourceEntry`.
     ///
     /// Accepts both `{sources: [...]}` (wrapped) and bare `[...]` formats.
+    /// Used for migration from legacy `sources.yaml` files.
     ///
     /// # Errors
-    /// Returns an error if the underlying operation fails.
+    /// Returns an error if the YAML is malformed.
     pub fn parse(yaml: &str) -> Result<Vec<SourceEntry>, SourceError> {
         let trimmed = yaml.trim();
         if trimmed.is_empty() {
@@ -103,31 +85,11 @@ impl SourceManager {
         Ok(entries)
     }
 
-    /// Load sources from the configured backend. Returns empty vec if not found.
+    /// Load sources from config.toml. Returns empty vec if not found.
     ///
     /// # Errors
-    /// Returns an error if the underlying operation fails.
+    /// Returns an error if the file cannot be read or parsed.
     pub fn load(&self) -> Result<Vec<SourceEntry>, SourceError> {
-        match self.mode {
-            StorageMode::Toml => self.load_from_toml(),
-            StorageMode::Yaml => self.load_from_yaml(),
-        }
-    }
-
-    fn load_from_yaml(&self) -> Result<Vec<SourceEntry>, SourceError> {
-        if !self.path.exists() {
-            debug!("Sources file not found, returning empty: {:?}", self.path);
-            return Ok(vec![]);
-        }
-        let contents = std::fs::read_to_string(&self.path)?;
-        let entries = Self::parse(&contents)?;
-        for entry in &entries {
-            entry.validate().map_err(SourceError::Validation)?;
-        }
-        Ok(entries)
-    }
-
-    fn load_from_toml(&self) -> Result<Vec<SourceEntry>, SourceError> {
         if !self.path.exists() {
             debug!("Config file not found, returning empty: {:?}", self.path);
             return Ok(vec![]);
@@ -161,31 +123,19 @@ impl SourceManager {
         Ok(entries)
     }
 
-    /// Atomically write sources to the configured backend.
-    /// Acquires an advisory file lock to prevent TOCTOU races with concurrent add/remove.
+    /// Atomically write sources to config.toml.
+    /// Acquires an advisory file lock to prevent TOCTOU races.
     ///
     /// # Errors
-    /// Returns an error if the underlying operation fails.
+    /// Returns an error if the file cannot be written.
     pub fn save(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
         let _lock = FileLock::acquire_exclusive(&self.lock_path())?;
-        match self.mode {
-            StorageMode::Toml => self.save_to_toml(sources),
-            StorageMode::Yaml => self.save_to_yaml(sources),
-        }
+        self.save_inner(sources)
     }
 
-    /// Save sources to sources.yaml. Caller must hold the file lock if concurrent access is possible.
-    fn save_to_yaml(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
-        let wrapped = SourcesYaml {
-            sources: sources.to_vec(),
-        };
-        let yaml = serde_yml::to_string(&wrapped)?;
-        atomic_write(&self.path, &yaml)
-    }
-
-    /// Save sources to config.toml. Caller must hold the file lock if concurrent access is possible.
-    fn save_to_toml(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
-        // Read existing config.toml, update [sources], write back
+    /// Write sources to config.toml without acquiring the lock.
+    /// Caller must hold [`FileLock::acquire_exclusive`] if concurrent access is possible.
+    fn save_inner(&self, sources: &[SourceEntry]) -> Result<(), SourceError> {
         let mut config: toml::Value = if self.path.exists() {
             let contents = std::fs::read_to_string(&self.path)?;
             toml::from_str(&contents).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()))
@@ -193,7 +143,6 @@ impl SourceManager {
             toml::Value::Table(toml::map::Map::new())
         };
 
-        // Serialize sources as TOML array of inline tables
         let sources_array: toml::Value = toml::Value::Array(
             sources.iter().map(|s| {
                 let toml_str = toml::to_string(s).unwrap_or_default();
@@ -217,11 +166,8 @@ impl SourceManager {
 
     /// Add or update a source entry (upsert semantics).
     ///
-    /// Lock is acquired here; `save_to_toml`/`save_to_yaml` is called directly
-    /// (not via `save()`) to avoid double-locking.
-    ///
     /// # Errors
-    /// Returns an error if the underlying operation fails.
+    /// Returns an error if the entry fails validation or the file cannot be written.
     pub fn add(&self, entry: SourceEntry) -> Result<(), SourceError> {
         entry.validate().map_err(SourceError::Validation)?;
 
@@ -230,19 +176,13 @@ impl SourceManager {
         sources.retain(|s| s.name != entry.name);
         debug!("Adding source: {}", entry.name);
         sources.push(entry);
-        match self.mode {
-            StorageMode::Toml => self.save_to_toml(&sources),
-            StorageMode::Yaml => self.save_to_yaml(&sources),
-        }
+        self.save_inner(&sources)
     }
 
     /// Remove a source by name.
     ///
-    /// Lock is acquired here; `save_to_toml`/`save_to_yaml` is called directly
-    /// (not via `save()`) to avoid double-locking.
-    ///
     /// # Errors
-    /// Returns an error if the source is not found.
+    /// Returns [`SourceError::NotFound`] if the source does not exist.
     pub fn remove(&self, name: &str) -> Result<(), SourceError> {
         let _lock = FileLock::acquire_exclusive(&self.lock_path())?;
         let mut sources = self.load()?;
@@ -252,10 +192,7 @@ impl SourceManager {
             return Err(SourceError::NotFound(name.to_string()));
         }
         debug!("Removed source: {}", name);
-        match self.mode {
-            StorageMode::Toml => self.save_to_toml(&sources),
-            StorageMode::Yaml => self.save_to_yaml(&sources),
-        }
+        self.save_inner(&sources)
     }
 }
 
@@ -284,7 +221,7 @@ mod tests {
         }
     }
 
-    // --- YAML mode tests (legacy) ---
+    // --- YAML parse tests (migration compat) ---
 
     #[test]
     fn parse_wrapped_format() {
@@ -322,119 +259,6 @@ sources:
     fn parse_empty_string() {
         let entries = SourceManager::parse("").unwrap();
         assert!(entries.is_empty());
-    }
-
-    #[test]
-    fn yaml_load_missing_file_returns_empty() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sources.yaml");
-        let mgr = SourceManager::new(path);
-        let entries = mgr.load().unwrap();
-        assert!(entries.is_empty());
-    }
-
-    #[test]
-    fn yaml_add_and_list_roundtrip() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sources.yaml");
-        let mgr = SourceManager::new(path);
-
-        mgr.add(make_entry("official", "https://github.com/example/agents")).unwrap();
-        mgr.add(make_entry("private", "https://gitlab.com/example/agents")).unwrap();
-
-        let entries = mgr.list();
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].name, "official");
-        assert_eq!(entries[1].name, "private");
-    }
-
-    #[test]
-    fn yaml_add_upserts_existing_name() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sources.yaml");
-        let mgr = SourceManager::new(path);
-
-        mgr.add(make_entry("official", "https://github.com/example/agents")).unwrap();
-        mgr.add(make_entry("official", "https://github.com/other/repo")).unwrap();
-
-        let entries = mgr.list();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].url, "https://github.com/other/repo");
-    }
-
-    #[test]
-    fn yaml_remove_existing_source() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sources.yaml");
-        let mgr = SourceManager::new(path);
-
-        mgr.add(make_entry("official", "https://github.com/example/agents")).unwrap();
-        mgr.remove("official").unwrap();
-
-        let entries = mgr.list();
-        assert!(entries.is_empty());
-    }
-
-    #[test]
-    fn yaml_remove_nonexistent_source_errors() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sources.yaml");
-        let mgr = SourceManager::new(path);
-
-        let result = mgr.remove("nonexistent");
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("not found"));
-    }
-
-    #[test]
-    fn yaml_add_validates_git_url() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sources.yaml");
-        let mgr = SourceManager::new(path);
-
-        let bad_entry = SourceEntry {
-            name: "bad".to_string(),
-            source_type: "git".to_string(),
-            url: String::new(),
-            branch: "main".to_string(),
-        };
-        let result = mgr.add(bad_entry);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("url is empty"));
-    }
-
-    #[test]
-    fn yaml_load_validates_entries() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sources.yaml");
-
-        let yaml = r#"
-sources:
-  - name: bad
-    type: git
-    url: ""
-    branch: main
-"#;
-        std::fs::write(&path, yaml).unwrap();
-
-        let mgr = SourceManager::new(path);
-        let result = mgr.load();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("url is empty"));
-    }
-
-    #[test]
-    fn yaml_save_produces_wrapped_format() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sources.yaml");
-        let mgr = SourceManager::new(path.clone());
-
-        mgr.add(make_entry("official", "https://github.com/example/agents")).unwrap();
-
-        let contents = std::fs::read_to_string(&path).unwrap();
-        assert!(contents.contains("sources:"));
-        assert!(contents.contains("name: official"));
     }
 
     // --- TOML mode tests (primary) ---
