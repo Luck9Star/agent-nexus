@@ -35,6 +35,8 @@
 | Create | `tests/unit/test_cli_backend_registry.py` | Unit tests for registry + health check |
 | Create | `tests/unit/test_cli_backend_router.py` | Unit tests for routing strategies + fallback |
 | Create | `tests/unit/test_cli_backend_session_store.py` | Unit tests for SQLite session store + archival |
+| Create | `tests/unit/test_cli_backend_config_loader.py` | Unit tests for ConfigLoader CLI backend/routing parsing (Task 7a) |
+| Create | `tests/e2e/test_cli_backend_e2e.py` | E2E integration tests for CLI backend full pipeline (Task 10a) |
 
 ### Rust (Phase 5-7)
 
@@ -829,6 +831,21 @@ class TestGenericCLIBackendAvailability:
         assert backend.name == "claude"
 
 
+class TestGenericCLIBackendModelMap:
+    def test_resolve_known_model(self):
+        backend = GenericCLIBackend(_claude_config())
+        assert backend.resolve_model("sonnet") == "claude-sonnet-4-20250514"
+
+    def test_resolve_unknown_returns_input(self):
+        backend = GenericCLIBackend(_claude_config())
+        assert backend.resolve_model("opus") == "opus"
+
+    def test_empty_model_map_passes_through(self):
+        config = BackendConfig(command="test", args=[])
+        backend = GenericCLIBackend(config)
+        assert backend.resolve_model("anything") == "anything"
+
+
 class TestGenericCLIBackendCall:
     @patch("subprocess.run")
     @patch("shutil.which", return_value="/usr/local/bin/claude")
@@ -866,7 +883,7 @@ class TestGenericCLIBackendCall:
         assert result.returncode == 1
         assert "Error: model not found" in result.raw_stderr
 
-    @patch("subprocess.run", side_effect=TimeoutError("timed out"))
+    @patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=180))
     @patch("shutil.which", return_value="/usr/local/bin/claude")
     def test_timeout_returns_error_result(self, mock_which, mock_run):
         backend = GenericCLIBackend(_claude_config())
@@ -925,6 +942,14 @@ class GenericCLIBackend:
     @property
     def supported_models(self) -> list[str]:
         return list(self._config.model_map.values())
+
+    def resolve_model(self, model_name: str) -> str:
+        """Resolve a short model name through model_map.
+
+        Returns the full model name if found in the map, otherwise
+        returns the input unchanged.
+        """
+        return self._config.model_map.get(model_name, model_name)
 
     def is_available(self) -> bool:
         """Check if the CLI binary exists in PATH."""
@@ -1210,6 +1235,21 @@ git commit -m "feat(cli-backend): add CLIBackendRegistry with discovery and heal
 
 ### Task 6: CLIRouter (4-Strategy Routing + Fallback)
 
+> **G8 note — CLI→API fallback:** The spec describes degradation where CLI failure
+> falls back to original API calls. This is deferred to a follow-up iteration. The current
+> implementation falls back among CLI backends only. Adding API fallback requires `LLMClient`
+> to pass its own `_call_anthropic`/`_call_openai` methods to the router, which would
+> couple the router to HTTP client internals. Instead, `LLMClient._call_cli()` should
+> catch `CLIRouter.AllBackendsUnavailable` and fall back to its normal API path:
+> ```python
+> try:
+>     return self._call_cli(...)
+> except RuntimeError:
+>     logger.warning("All CLI backends unavailable, falling back to API")
+>     # fall through to existing Anthropic/OpenAI logic
+> ```
+> This pattern keeps the router CLI-only and lets LLMClient own the fallback decision.
+
 **Files:**
 - Create: `src/agent_nexus/platform/agency/cli_backend/router.py`
 - Create: `tests/unit/test_cli_backend_router.py`
@@ -1461,6 +1501,11 @@ git commit -m "feat(cli-backend): add CLIRouter with 4-strategy routing and fall
 ## Phase 3: Python Session Store (SQLite)
 
 ### Task 7: CLISessionStore (SQLite CRUD + Schema + Triggers)
+
+> **G16 note — db_path wiring:** The store's database path should be resolved from the
+> platform config directory: `config_dir / "agent-nexus.db"` where `config_dir` defaults
+> to `~/.agent-nexus/` (overridable via `AGENT_NEXUS_HOME`). `LLMClient` and the Agency
+> Pipeline create the store with this path. For testing, the store accepts any `Path`.
 
 **Files:**
 - Create: `src/agent_nexus/platform/agency/cli_backend/session_store.py`
@@ -1901,22 +1946,210 @@ git commit -m "feat(cli-backend): add CLISessionStore with SQLite WAL, triggers,
 
 ---
 
-## Phase 4: Python LLMClient Integration
+### Task 7a: Extend ConfigLoader for CLI Backend Configs
 
-### Task 8: Wire CLI Backend into LLMClient
+> **Fixes gap G1+G7:** ConfigLoader currently only produces `ProviderConfig(base_url, api_key_env, api)`.
+> CLI providers need `BackendConfig(command, args, json_paths, ...)` — this task wires `config_templates.py`
+> into the config loading pipeline so CLI providers are properly parsed from config.toml.
 
 **Files:**
-- Modify: `src/agent_nexus/platform/agency/llm_client.py` — add `_call_cli()` method, `session_id` kwarg, and CLI branch in `call()`
+- Modify: `src/agent_nexus/platform/config/loader.py` — add `load_cli_backends()` and `load_cli_routing()` methods
+- Create: `tests/unit/test_cli_backend_config_loader.py`
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# Add to a new test file: tests/unit/test_cli_backend_llm_integration.py
+# tests/unit/test_cli_backend_config_loader.py
+"""Unit tests for ConfigLoader CLI backend config integration."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from agent_nexus.models.config import ProviderApiType
+from agent_nexus.platform.config.loader import ConfigLoader
+
+
+CLI_CONFIG = """
+[models]
+default = "claude-code:sonnet"
+
+[models.providers.claude-code]
+api = "cli"
+command = "claude"
+args = ["-p"]
+output_format = "json"
+output_format_flag = "--output-format"
+
+[models.providers.claude-code.json_paths]
+text = "result"
+session_id = "session_id"
+model = "model"
+input_tokens = "usage.input_tokens"
+output_tokens = "usage.output_tokens"
+
+[models.providers.openai]
+api = "openai-compatible"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+
+[cli_routing]
+default = "claude-code"
+fallback_enabled = true
+fallback_chain = ["gemini-cli", "codex-cli"]
+
+[cli_routing.model_rules]
+"anthropic:*" = "claude-code"
+"google:*" = "gemini-cli"
+"""
+
+
+class TestConfigLoaderCLIBackends:
+    def test_cli_provider_produces_backend_config(self, tmp_path: Path):
+        (tmp_path / "config.toml").write_text(CLI_CONFIG)
+        loader = ConfigLoader(config_dir=tmp_path)
+
+        backends = loader.load_cli_backends()
+        assert "claude-code" in backends
+        assert backends["claude-code"].command == "claude"
+        assert backends["claude-code"].json_paths.text == "result"
+        assert backends["claude-code"].output_format == "json"
+
+    def test_regular_provider_not_in_cli_backends(self, tmp_path: Path):
+        (tmp_path / "config.toml").write_text(CLI_CONFIG)
+        loader = ConfigLoader(config_dir=tmp_path)
+
+        backends = loader.load_cli_backends()
+        assert "openai" not in backends
+
+        # Regular providers still work through load_config()
+        config = loader.load_config()
+        assert "openai" in config.models.providers
+        assert config.models.providers["openai"].api == ProviderApiType.OPENAI_COMPATIBLE
+
+    def test_cli_routing_loaded(self, tmp_path: Path):
+        (tmp_path / "config.toml").write_text(CLI_CONFIG)
+        loader = ConfigLoader(config_dir=tmp_path)
+
+        routing = loader.load_cli_routing()
+        assert routing is not None
+        assert routing.default == "claude-code"
+        assert routing.fallback_enabled is True
+        assert routing.fallback_chain == ["gemini-cli", "codex-cli"]
+        assert "anthropic:*" in routing.model_rules
+
+    def test_no_cli_providers_returns_empty(self, tmp_path: Path):
+        (tmp_path / "config.toml").write_text("""
+[models]
+default = "openai:gpt-4o"
+
+[models.providers.openai]
+api = "openai-compatible"
+""")
+        loader = ConfigLoader(config_dir=tmp_path)
+        assert len(loader.load_cli_backends()) == 0
+        assert loader.load_cli_routing() is None
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/unit/test_cli_backend_config_loader.py -v`
+Expected: FAIL with `AttributeError: 'ConfigLoader' object has no attribute 'load_cli_backends'`
+
+- [ ] **Step 3: Add CLI config loading methods to ConfigLoader**
+
+In `src/agent_nexus/platform/config/loader.py`, add two new methods after `load_sources()`:
+
+```python
+def load_cli_backends(self) -> dict[str, Any]:
+    """Load CLI backend configs from config.toml ``[models.providers.*]`` sections.
+
+    Only providers with ``api = "cli"`` are included.  Returns a dict
+    mapping provider name → :class:`BackendConfig`.
+    """
+    from agent_nexus.platform.agency.cli_backend.config_templates import (
+        load_backend_configs_from_providers,
+    )
+
+    raw = self._load_raw()
+    providers = raw.get("models", {}).get("providers", {})
+    if not isinstance(providers, dict):
+        return {}
+    return load_backend_configs_from_providers(providers)
+
+def load_cli_routing(self) -> Any:
+    """Load ``[cli_routing]`` section from config.toml.
+
+    Returns ``None`` when the section is absent.
+    """
+    from agent_nexus.platform.agency.cli_backend.config_templates import (
+        load_routing_config,
+    )
+    from agent_nexus.platform.agency.cli_backend.types import RoutingConfig
+
+    raw = self._load_raw()
+    if "cli_routing" not in raw:
+        return None
+    return load_routing_config(raw["cli_routing"])
+
+def _load_raw(self) -> dict[str, Any]:
+    """Read and parse config.toml, returning the raw dict."""
+    config_path = self.config_dir / CONFIG_FILE
+    try:
+        return toml.loads(config_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except toml.TomlDecodeError:
+        return {}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `uv run pytest tests/unit/test_cli_backend_config_loader.py -v`
+Expected: All 4 tests PASS
+
+Also verify no regressions:
+Run: `uv run pytest tests/unit/test_config*.py -v`
+Expected: All existing config tests still pass
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/agent_nexus/platform/config/loader.py tests/unit/test_cli_backend_config_loader.py
+git commit -m "feat(config): wire ConfigLoader to parse CLI backend configs and routing from config.toml"
+```
+
+---
+
+## Phase 4: Python LLMClient Integration
+
+### Task 8: Wire CLI Backend into LLMClient
+
+> **Dependency note (G10):** Task 8 depends on Task 7a (`ConfigLoader.load_cli_backends()`) to
+> obtain the `BackendConfig` for the resolved CLI provider. Task 9 (config templates) provides the
+> default mapping helpers but is NOT a hard dependency — Task 8 can use `BackendConfig` objects
+> obtained directly from `ConfigLoader`. Implementation order: Task 7a → Task 8 → Task 9.
+> Task 9 can also be done before Task 8 if preferred — they are loosely coupled.
+
+> **Fixes gaps G2+G4+G3:** (G2) LLMClient.__init__ crashes on CLI providers because it requires
+> an API key; (G4) `_call_cli()` constructed `BackendConfig(command=self._model_name)` using the
+> model name instead of the CLI binary; (G3) SessionStore never recorded executions.
+
+**Files:**
+- Modify: `src/agent_nexus/platform/agency/llm_client.py` — API key bypass, `_call_cli()`, `session_id` kwarg, SessionStore recording
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/unit/test_cli_backend_llm_integration.py
 """Unit tests for LLMClient CLI backend integration."""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1924,10 +2157,56 @@ import pytest
 from agent_nexus.models.config import ProviderApiType
 
 
-class TestLLMClientCLIIntegration:
+def _write_cli_config(tmp_path: Path) -> Path:
+    """Write a minimal config.toml with a CLI provider."""
+    (tmp_path / "config.toml").write_text("""
+[models]
+default = "claude-code:sonnet"
+
+[models.providers.claude-code]
+api = "cli"
+command = "claude"
+args = ["-p"]
+output_format = "json"
+output_format_flag = "--output-format"
+
+[models.providers.claude-code.json_paths]
+text = "result"
+session_id = "session_id"
+model = "model"
+input_tokens = "usage.input_tokens"
+output_tokens = "usage.output_tokens"
+""")
+    return tmp_path
+
+
+class TestLLMClientCLIInit:
+    def test_cli_provider_skips_api_key_check(self, tmp_path: Path):
+        """CLI providers don't need API keys — they use the CLI's own auth."""
+        _write_cli_config(tmp_path)
+        # This should NOT raise ValueError about missing API key
+        # (will fail with other errors since claude binary isn't really installed,
+        # but the API key check should pass)
+        from agent_nexus.platform.agency.llm_client import LLMClient
+        try:
+            client = LLMClient(
+                model_string="claude-code:sonnet",
+                config_dir=tmp_path,
+            )
+            assert client._provider_config.api == ProviderApiType.CLI
+            assert client._api_key == ""
+            client.close()
+        except ValueError as e:
+            if "API key" in str(e):
+                pytest.fail("CLI provider should not require API key")
+            # Other ValueError from model resolution is OK for this test
+
+
+class TestLLMClientCLICall:
     @patch("shutil.which", return_value="/usr/bin/claude")
     @patch("subprocess.run")
-    def test_cli_call_returns_llm_response(self, mock_run, mock_which):
+    def test_cli_call_returns_llm_response(self, mock_run, mock_which, tmp_path: Path):
+        _write_cli_config(tmp_path)
         mock_run.return_value = MagicMock(
             stdout=json.dumps({
                 "result": "planned tasks",
@@ -1938,25 +2217,73 @@ class TestLLMClientCLIIntegration:
             stderr="",
             returncode=0,
         )
-        # Verify ProviderApiType.CLI exists
-        assert ProviderApiType.CLI.value == "cli"
+
+        from agent_nexus.platform.agency.llm_client import LLMClient
+        client = LLMClient(model_string="claude-code:sonnet", config_dir=tmp_path)
+        response = client.call(
+            system_prompt="You are a planner.",
+            user_message="Design X.",
+            session_id="sess-001",
+        )
+
+        assert response.text == "planned tasks"
+        assert response.model == "claude-sonnet-4-20250514"
+        assert response.metadata.get("session_id") == "sess-001"
+        assert response.metadata.get("input_tokens") == 100
+        client.close()
 ```
 
-- [ ] **Step 2: Run test to verify it passes (CLI enum already added in Task 2)**
+- [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/test_cli_backend_llm_integration.py -v`
-Expected: PASS (validates enum exists)
+Expected: FAIL — LLMClient.__init__ raises `ValueError` about missing API key
 
-- [ ] **Step 3: Add `_call_cli()` method and `session_id` kwarg to LLMClient**
+- [ ] **Step 3: Add API key bypass for CLI providers in `__init__`**
 
-In `src/agent_nexus/platform/agency/llm_client.py`:
+In `src/agent_nexus/platform/agency/llm_client.py`, modify the `__init__` method to skip
+the API key check when the provider type is CLI:
 
-1. Import `GenericCLIBackend` and `BackendConfig` from cli_backend types at the top
-2. Update `call()` signature to add `*, session_id=None` kwarg
-3. Add CLI branch in `call()` that delegates to `_call_cli()`
-4. Implement `_call_cli()` which creates/reuses a `GenericCLIBackend` and returns `LLMResponse`
+```python
+# Replace the existing API key check block:
+#   OLD:
+#     self._api_key = mgr.resolve_api_key(self._provider_name)
+#     if not self._api_key:
+#         raise ValueError(...)
+#   NEW:
+if self._provider_config.api == ProviderApiType.CLI:
+    self._api_key = ""
+    self._cli_backend = self._init_cli_backend(config_dir)
+else:
+    self._api_key = mgr.resolve_api_key(self._provider_name)
+    if not self._api_key:
+        raise ValueError(
+            f"API key for provider '{self._provider_name}' is empty. "
+            f"Set the environment variable referenced in config.toml."
+        )
+    self._cli_backend = None
+```
 
-The key change to `call()`:
+Add the helper method:
+
+```python
+def _init_cli_backend(self, config_dir: Path | None) -> object:
+    """Create a GenericCLIBackend using BackendConfig from config.toml."""
+    from agent_nexus.platform.agency.cli_backend.base import GenericCLIBackend
+    from agent_nexus.platform.agency.cli_backend.types import BackendConfig
+    from agent_nexus.platform.config.loader import ConfigLoader
+
+    loader = ConfigLoader(config_dir=config_dir)
+    cli_backends = loader.load_cli_backends()
+
+    if self._provider_name in cli_backends:
+        config = cli_backends[self._provider_name]
+    else:
+        config = BackendConfig(command=self._provider_name)
+
+    return GenericCLIBackend(config)
+```
+
+- [ ] **Step 4: Add CLI branch to `call()` and `_call_cli()` method**
 
 ```python
 def call(
@@ -1972,10 +2299,10 @@ def call(
 ) -> LLMResponse:
     if self._provider_config.api == ProviderApiType.CLI:
         return self._call_cli(system_prompt, user_message, session_id, timeout)
-    # ... existing Anthropic/OpenAI branches unchanged
+    # ... existing Anthropic/OpenAI branches unchanged ...
 ```
 
-New method:
+New `_call_cli()` method:
 
 ```python
 def _call_cli(
@@ -1985,15 +2312,28 @@ def _call_cli(
     session_id: str | None,
     timeout: float | None,
 ) -> LLMResponse:
-    from agent_nexus.platform.agency.cli_backend.base import GenericCLIBackend
-    from agent_nexus.platform.agency.cli_backend.types import BackendConfig
+    result = self._cli_backend.call(system_prompt, user_message, session_id=session_id)
 
-    config = BackendConfig(
-        command=self._model_name,
-        timeout_secs=int(timeout or self._TIMEOUT),
-    )
-    backend = GenericCLIBackend(config)
-    result = backend.call(system_prompt, user_message, session_id=session_id)
+    # Record execution in session store (if configured)
+    if self._session_store is not None and result.returncode == 0:
+        from agent_nexus.platform.agency.cli_backend.types import CLISessionRecord
+        self._session_store.record_execution(
+            task_id="",
+            backend_type="cli",
+            backend_name=self._cli_backend.name,
+            model=result.model or self._model_name,
+            session_id=result.session_id,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            duration_ms=result.duration_ms,
+            status="success",
+        )
+        if result.session_id:
+            self._session_store.save_session(CLISessionRecord(
+                session_id=result.session_id,
+                backend_name=self._cli_backend.name,
+                model=result.model or self._model_name,
+            ))
 
     return LLMResponse(
         text=result.text,
@@ -2007,18 +2347,29 @@ def _call_cli(
     )
 ```
 
-> **Design Note:** The full integration also needs config.toml parsing to construct `BackendConfig` from the provider section. This is deferred to Task 9 (config templates). The minimal version above derives config from the model name, which works for simple cases. When config.toml has `[providers.claude-code] api = "cli"` sections, `LLMClient.__init__` will construct the proper `BackendConfig` and pass it to `GenericCLIBackend`.
+> **SessionStore wiring note:** `self._session_store` is initialized as `None` by default.
+> To enable session recording, pass a `CLISessionStore` instance via an optional
+> `session_store` parameter added to `LLMClient.__init__`:
+> ```python
+> def __init__(self, ..., session_store=None) -> None:
+>     ...
+>     self._session_store = session_store
+> ```
+> The Agency Pipeline creates the store and injects it when constructing LLMClient.
 
-- [ ] **Step 4: Run existing tests to verify no regressions**
+- [ ] **Step 5: Run tests to verify**
+
+Run: `uv run pytest tests/unit/test_cli_backend_llm_integration.py -v`
+Expected: Both tests PASS
 
 Run: `uv run pytest tests/unit/test_agency_executor.py tests/unit/test_llm_planner.py tests/unit/test_llm_integrator.py tests/unit/test_llm_qa_gate.py -v`
 Expected: All existing tests still PASS (CLI branch only activates when `ProviderApiType.CLI`)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/agent_nexus/platform/agency/llm_client.py tests/unit/test_cli_backend_llm_integration.py
-git commit -m "feat(llm-client): add CLI backend branch with session_id support"
+git commit -m "feat(llm-client): add CLI backend with API key bypass, proper BackendConfig, and session recording"
 ```
 
 ---
@@ -2266,9 +2617,173 @@ git commit -m "feat(cli-backend): complete Python CLI backend module with full e
 
 ---
 
+### Task 10a: End-to-End Integration Test
+
+> **Fixes gap G5:** All prior tasks test individual modules with mocks. This task verifies
+> the full pipeline works: config.toml → ConfigLoader → BackendConfig → GenericCLIBackend → CLIResult → LLMResponse.
+
+**Files:**
+- Create: `tests/integration/test_cli_backend_e2e.py`
+
+- [ ] **Step 1: Write the E2E test**
+
+```python
+# tests/integration/test_cli_backend_e2e.py
+"""End-to-end integration test for CLI backend: config → LLMClient → LLMResponse."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from agent_nexus.platform.agency.cli_backend.types import CLISessionRecord, DataLifecycleConfig
+
+
+CLI_E2E_CONFIG = """
+[models]
+default = "claude-code:sonnet"
+
+[models.providers.claude-code]
+api = "cli"
+command = "claude"
+args = ["-p"]
+output_format = "json"
+output_format_flag = "--output-format"
+
+[models.providers.claude-code.json_paths]
+text = "result"
+session_id = "session_id"
+model = "model"
+input_tokens = "usage.input_tokens"
+output_tokens = "usage.output_tokens"
+
+[models.providers.openai]
+api = "openai-compatible"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+
+[cli_routing]
+default = "claude-code"
+fallback_chain = ["gemini-cli"]
+"""
+
+
+class TestCLIBackendE2E:
+    @patch("shutil.which", return_value="/usr/bin/claude")
+    @patch("subprocess.run")
+    def test_config_to_llm_response(self, mock_run, mock_which, tmp_path: Path):
+        """Full pipeline: config.toml → ConfigLoader → LLMClient → LLMResponse."""
+        (tmp_path / "config.toml").write_text(CLI_E2E_CONFIG)
+
+        mock_run.return_value = MagicMock(
+            stdout=json.dumps({
+                "result": "E2E test passed",
+                "session_id": "sess-e2e",
+                "model": "claude-sonnet-4-20250514",
+                "usage": {"input_tokens": 200, "output_tokens": 100},
+            }),
+            stderr="",
+            returncode=0,
+        )
+
+        from agent_nexus.platform.agency.llm_client import LLMClient
+        client = LLMClient(model_string="claude-code:sonnet", config_dir=tmp_path)
+        response = client.call(
+            system_prompt="You are a test assistant.",
+            user_message="Say hello.",
+        )
+
+        assert response.text == "E2E test passed"
+        assert response.model == "claude-sonnet-4-20250514"
+        assert response.provider == "claude-code"
+        assert response.metadata["session_id"] == "sess-e2e"
+        assert response.metadata["input_tokens"] == 200
+        assert response.metadata["output_tokens"] == 100
+        client.close()
+
+    def test_config_loader_produces_cli_backends(self, tmp_path: Path):
+        """ConfigLoader.load_cli_backends() returns correct BackendConfig objects."""
+        (tmp_path / "config.toml").write_text(CLI_E2E_CONFIG)
+
+        from agent_nexus.platform.config.loader import ConfigLoader
+        loader = ConfigLoader(config_dir=tmp_path)
+
+        backends = loader.load_cli_backends()
+        assert "claude-code" in backends
+        assert backends["claude-code"].command == "claude"
+        assert backends["claude-code"].json_paths.text == "result"
+
+        routing = loader.load_cli_routing()
+        assert routing is not None
+        assert routing.default == "claude-code"
+
+    @patch("shutil.which", return_value="/usr/bin/claude")
+    @patch("subprocess.run")
+    def test_session_store_records_execution(self, mock_run, mock_which, tmp_path: Path):
+        """SessionStore records executions when wired into LLMClient."""
+        from agent_nexus.platform.agency.cli_backend.session_store import CLISessionStore
+
+        db_path = tmp_path / "agent-nexus.db"
+        store = CLISessionStore(db_path)
+
+        # Simulate recording an execution
+        store.record_execution(
+            task_id="task-e2e",
+            backend_type="cli",
+            backend_name="claude-code",
+            model="claude-sonnet-4-20250514",
+            session_id="sess-e2e",
+            input_tokens=200,
+            output_tokens=100,
+            duration_ms=1500,
+            status="success",
+        )
+        store.save_session(CLISessionRecord(
+            session_id="sess-e2e",
+            backend_name="claude-code",
+            model="claude-sonnet-4-20250514",
+        ))
+
+        # Verify data persisted
+        session = store.get_session("sess-e2e")
+        assert session is not None
+        assert session.backend_name == "claude-code"
+
+        stats = store.get_daily_stats()
+        assert len(stats) == 1
+        assert stats[0]["total_calls"] == 1
+        assert stats[0]["success_calls"] == 1
+
+        store.close()
+```
+
+- [ ] **Step 2: Run integration tests**
+
+Run: `uv run pytest tests/integration/test_cli_backend_e2e.py -v`
+Expected: All 3 tests PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/integration/test_cli_backend_e2e.py
+git commit -m "test(cli-backend): add E2E integration test for config → LLMClient → SessionStore pipeline"
+```
+
+---
+
 ## Phase 5: Rust Crate Foundation
 
-### Task 11: Scaffold ap-cli-backend Crate
+### Task 11: Scaffold ap-cli-backend Crate (Part 1: Types + Parser)
+
+> **G9 note:** This monolithic task is split into 3 subtasks for implementation.
+> Each subtask is committed separately.
+
+**Subtask 11a: Types + Parser** (~files: Cargo.toml, lib.rs, types.rs, parser.rs)
+**Subtask 11b: Backend + Registry + Router** (~files: backend.rs, registry.rs, router.rs)
+**Subtask 11c: Session + Health + Archive** (~files: session.rs, health.rs, archive.rs)
 
 **Files:**
 - Create: `crates/ap-cli-backend/Cargo.toml`
@@ -2463,6 +2978,23 @@ fn default_timeout() -> u64 { 180 }
 fn default_true() -> bool { true }
 fn default_hot() -> u32 { 30 }
 fn default_warm() -> u32 { 90 }
+
+impl Default for BackendConfig {
+    fn default() -> Self {
+        Self {
+            command: String::new(),
+            args: Vec::new(),
+            system_prompt_flag: "--system-prompt".into(),
+            session_flag: "--resume".into(),
+            output_format: "json".into(),
+            output_format_flag: String::new(),
+            json_paths: JsonPathConfig::default(),
+            text_patterns: TextPatternConfig::default(),
+            model_map: HashMap::new(),
+            timeout_secs: 180,
+        }
+    }
+}
 
 impl Default for DataLifecycleConfig {
     fn default() -> Self {
@@ -3001,6 +3533,26 @@ impl CLISessionStore {
     }
 
     pub fn close(self) {}
+
+    pub fn prepare_stmt(&self, sql: &str) -> Result<rusqlite::Statement<'_>, CLIBackendError> {
+        self.conn.prepare(sql).map_err(CLIBackendError::Database)
+    }
+
+    pub fn archive_old_data(
+        &self,
+        config: &DataLifecycleConfig,
+        archive_path: &Path,
+    ) -> Result<u64, CLIBackendError> {
+        crate::archive::archive_old_data(&self.conn, config, archive_path)
+    }
+
+    pub fn cleanup_sessions(&self, max_age_days: u32) -> Result<u64, CLIBackendError> {
+        let count = self.conn.execute(
+            "DELETE FROM cli_sessions WHERE last_used_at < datetime('now', ?)",
+            [format!("-{max_age_days} days")],
+        )?;
+        Ok(count as u64)
+    }
 }
 ```
 
@@ -3367,7 +3919,7 @@ mod tests {
             None, Some(50), Some(0), Some(500), "error", None,
         ).unwrap();
 
-        let mut stmt = store.conn.prepare(
+        let mut stmt = store.prepare_stmt(
             "SELECT total_calls, success_calls FROM daily_stats WHERE backend_name = 'claude-code'"
         ).unwrap();
         let row: (i64, i64) = stmt.query_row([], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -3445,27 +3997,30 @@ The handlers should delegate to `ap-cli-backend`:
 // In the match arm for Data command:
 Data { command } => {
     use ap_cli_backend::session::CLISessionStore;
-    let db_path = get_data_dir()?.join("agent-nexus.db");
+    let data_dir = std::path::PathBuf::from(
+        std::env::var("AGENT_NEXUS_HOME")
+            .unwrap_or_else(|_| format!("{}/.agent-nexus", std::env::var("HOME").unwrap_or_else(|_| ".".into())))
+    );
+    std::fs::create_dir_all(&data_dir)?;
+    let db_path = data_dir.join("agent-nexus.db");
     let store = CLISessionStore::open(&db_path)?;
 
     match command {
         DataCommands::Archive => {
             // Use archive module
             let config = ap_cli_backend::types::DataLifecycleConfig::default();
-            let archive_dir = get_data_dir()?.join("archive");
+            let archive_dir = data_dir.join("archive");
             std::fs::create_dir_all(&archive_dir)?;
             let archive_path = archive_dir.join(format!(
                 "agent-nexus-{}.db",
                 chrono::Local::now().format("%Y-%m")
             ));
-            let count = ap_cli_backend::archive::archive_old_data(
-                &store.conn, &config, &archive_path,
-            )?;
+            let count = store.archive_old_data(&config, &archive_path)?;
             println!("Archived {} old records to {}", count, archive_path.display());
         }
         DataCommands::Stats => {
             // Query daily_stats and display
-            let mut stmt = store.conn.prepare(
+            let mut stmt = store.prepare_stmt(
                 "SELECT date, backend_name, total_calls, success_calls FROM daily_stats ORDER BY date DESC LIMIT 10"
             )?;
             let rows = stmt.query_map([], |row| {
@@ -3481,7 +4036,7 @@ Data { command } => {
         }
         DataCommands::Sessions { command: SessionCommands::List } => {
             // List sessions from cli_sessions table
-            let mut stmt = store.conn.prepare(
+            let mut stmt = store.prepare_stmt(
                 "SELECT session_id, backend_name, model, last_used_at FROM cli_sessions ORDER BY last_used_at DESC LIMIT 20"
             )?;
             let rows = stmt.query_map([], |row| {
@@ -3496,10 +4051,7 @@ Data { command } => {
             }
         }
         DataCommands::Sessions { command: SessionCommands::Cleanup { max_age_days } } => {
-            let deleted = store.conn.execute(
-                "DELETE FROM cli_sessions WHERE last_used_at < datetime('now', ?)",
-                [format!("-{max_age_days} days")],
-            )?;
+            let deleted = store.cleanup_sessions(max_age_days)?;
             println!("Cleaned up {} expired sessions", deleted);
         }
     }
@@ -3533,15 +4085,15 @@ git commit -m "feat(ap-cli): add data subcommands (archive, stats, sessions) usi
 | 1. Motivation | N/A (context) | Covered |
 | 2. Architecture (Python) | Tasks 1-6 | All modules created |
 | 2. Architecture (Rust) | Tasks 11-13 | All modules created |
-| 3. Config Schema | Task 9 | Config templates + loader |
+| 3. Config Schema | Task 9, Task 7a | Config templates + ConfigLoader parsing |
 | 4. SQLite Schema | Task 7 | Full schema + triggers |
 | 5. Routing Strategy | Task 6 | 4-strategy + fallback |
 | 6. Error Handling | Task 4 | Nonzero exit, timeout, parse error |
-| 7. LLMClient Integration | Task 8 | CLI branch + session_id |
+| 7. LLMClient Integration | Task 8 | CLI branch + session_id + API key bypass |
 | 8. Output Parsing | Task 3 | JSON path + text regex |
-| 9. Rust Implementation | Tasks 11-13 | Full crate |
+| 9. Rust Implementation | Tasks 11-13 | Full crate (types, parser, backend, session, health, archive) |
 | 10. Operational Details | Task 7 (WAL, triggers), Task 13 (data cmds) | Covered |
-| 11. Testing Strategy | All tasks (TDD) | Unit tests for every module |
+| 11. Testing Strategy | All tasks (TDD), Task 10a (E2E) | Unit + E2E tests for every module |
 | 12. Scope | N/A | MVP only, no streaming/capability matching |
 
 ### Placeholder Scan
@@ -3554,5 +4106,9 @@ No TBD, TODO, or "implement later" in any task code. All steps contain complete 
 - `BackendConfig.command` (str) — used by `GenericCLIBackend` and `build_args()`
 - `RoutingConfig.default` (str) — used by `CLIRouter.resolve()`
 - `CLISessionRecord.session_id` (str) — used by `CLISessionStore.save_session()` and `get_session()`
-- Rust `CLIResult` mirrors Python `CLIResult` fields exactly
+- Rust `CLIResult.duration` (`Duration`) vs Python `CLIResult.duration_ms` (`int`) — intentional
+  difference: Rust uses `std::time::Duration` for idiomatic timing, Python uses integer milliseconds.
+  The `record_execution()` / `record_execution` methods in both languages accept `duration_ms: int`
+  (Python) and `duration_ms: Option<u64>` (Rust) for SQLite storage — the Rust side converts
+  `Duration` → `u64` milliseconds via `duration.as_millis() as u64` before recording.
 - `ProviderApiType.CLI` added to both Python and Rust enums
