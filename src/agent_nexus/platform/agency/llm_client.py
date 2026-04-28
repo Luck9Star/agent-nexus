@@ -4,7 +4,6 @@ Extracts the httpx-based API calling logic from LLMExecutor so that
 LLMPlanner, LLMIntegrator, and LLMQualityGate can all reuse it with
 different model strings and prompts.
 """
-
 from __future__ import annotations
 
 import logging
@@ -22,6 +21,10 @@ from agent_nexus.platform.config.model_config import ModelConfigManager
 from agent_nexus.platform.config.model_db import ModelDBClient
 
 logger = logging.getLogger(__name__)
+
+
+class LLMCallError(Exception):
+    """Raised when an LLM call fails (API error, CLI exit, timeout)."""
 
 _MAX_RETRIES = 3
 _RETRY_BASE_DELAY = 1.0  # seconds
@@ -62,6 +65,7 @@ class LLMClient:
         stage: str | None = None,
         config_dir: Path | None = None,
         capability_registry: ModelCapabilityRegistry | None = None,
+        session_store: Any | None = None,
     ) -> None:
         """Initialise the client.
 
@@ -92,13 +96,20 @@ class LLMClient:
 
         self._provider_name, self._model_name = mgr.parse_model_string(resolved)
         self._provider_config = mgr.get_provider_config(self._provider_name)
-        self._api_key = mgr.resolve_api_key(self._provider_name)
+        self._session_store = session_store
+        self._cli_backend = None
 
-        if not self._api_key:
-            raise ValueError(
-                f"API key for provider '{self._provider_name}' is empty. "
-                f"Set the environment variable referenced in config.toml."
-            )
+        if self._provider_config.api == ProviderApiType.CLI:
+            self._api_key = ""
+            self._cli_backend = self._init_cli_backend(config_dir)
+        else:
+            self._api_key = mgr.resolve_api_key(self._provider_name)
+
+            if not self._api_key:
+                raise ValueError(
+                    f"API key for provider '{self._provider_name}' is empty. "
+                    f"Set the environment variable referenced in config.toml."
+                )
 
         # Load model capability data (replaces hardcoded 4096 max_tokens)
         if capability_registry is not None:
@@ -170,6 +181,24 @@ class LLMClient:
         # Lazy-initialised persistent httpx.Client for connection reuse
         self._http_client: httpx.Client | None = None
 
+    def _init_cli_backend(self, config_dir: Path | None) -> Any:
+        """Create a GenericCLIBackend using BackendConfig from config.toml."""
+        from agent_nexus.platform.agency.cli_backend.base import GenericCLIBackend
+        from agent_nexus.platform.agency.cli_backend.types import BackendConfig
+
+        loader = ConfigLoader(config_dir=config_dir)
+        cli_backends = loader.load_cli_backends()
+        if self._provider_name in cli_backends:
+            config = cli_backends[self._provider_name]
+        else:
+            logger.warning(
+                "CLI provider '%s' not found in config.toml, using minimal BackendConfig "
+                "(command=%s). Output parsing may fail without json_paths/text_patterns config.",
+                self._provider_name, self._provider_name,
+            )
+            config = BackendConfig(command=self._provider_name)
+        return GenericCLIBackend(config)
+
     def _get_http_client(self) -> httpx.Client:
         """Return the persistent httpx.Client, creating it on first use."""
         if self._http_client is None or self._http_client.is_closed:
@@ -178,6 +207,8 @@ class LLMClient:
 
     def close(self) -> None:
         """Close the underlying HTTP client."""
+        if self._cli_backend is not None:
+            pass  # GenericCLIBackend has no resources to close
         if self._http_client is not None and not self._http_client.is_closed:
             self._http_client.close()
             self._http_client = None
@@ -258,6 +289,7 @@ class LLMClient:
         temperature: float | None = None,
         top_p: float | None = None,
         timeout: float | None = None,
+        session_id: str | None = None,
     ) -> LLMResponse:
         """Call the LLM and return a structured response.
 
@@ -281,6 +313,9 @@ class LLMClient:
         -------
         LLMResponse
         """
+        if self._provider_config.api == ProviderApiType.CLI:
+            return self._call_cli(system_prompt, user_message, session_id, timeout)
+
         if self._provider_config.api == ProviderApiType.ANTHROPIC_MESSAGES:
             text, actual_model = self._call_anthropic(
                 system_prompt, user_message,
@@ -348,6 +383,59 @@ class LLMClient:
                 "Failed to update capability from response model '%s'",
                 actual_model, exc_info=True,
             )
+
+    def _call_cli(
+        self,
+        system_prompt: str,
+        user_message: str,
+        session_id: str | None,
+        timeout: float | None,
+    ) -> LLMResponse:
+        """Execute a CLI backend call and return an LLMResponse."""
+        result = self._cli_backend.call(
+            system_prompt, user_message,
+            session_id=session_id, timeout=timeout,
+        )
+
+        if result.returncode != 0:
+            raise LLMCallError(
+                f"CLI backend '{self._cli_backend.name}' exited with code {result.returncode}: "
+                f"{result.raw_stderr[:500]}"
+            )
+
+        status = "success" if result.text else "empty_response"
+
+        if self._session_store is not None:
+            from agent_nexus.platform.agency.cli_backend.types import CLISessionRecord
+
+            self._session_store.record_execution(
+                task_id="",
+                backend_type="cli",
+                backend_name=self._cli_backend.name,
+                model=result.model or self._model_name,
+                session_id=result.session_id,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                duration_ms=result.duration_ms,
+                status=status,
+            )
+            if result.session_id:
+                self._session_store.save_session(CLISessionRecord(
+                    session_id=result.session_id,
+                    backend_name=self._cli_backend.name,
+                    model=result.model or self._model_name,
+                ))
+
+        return LLMResponse(
+            text=result.text,
+            model=result.model or self._model_name,
+            provider=self._provider_name,
+            metadata={
+                "session_id": result.session_id,
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+            },
+        )
 
     def _call_anthropic(
         self,

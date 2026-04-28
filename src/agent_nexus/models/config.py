@@ -16,6 +16,7 @@ class ProviderApiType(StrEnum):
     OPENAI_COMPATIBLE = "openai-compatible"
     ANTHROPIC_MESSAGES = "anthropic-messages"
     OLLAMA = "ollama"
+    CLI = "cli"
 
 
 class ProviderConfig(FrozenModel):

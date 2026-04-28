@@ -6,6 +6,7 @@ members = [
     "crates/ap-fetcher",
     "crates/ap-evolution",
     "crates/ap-cli",
+    "crates/ap-cli-backend",
 ]
 resolver = "2"
 
@@ -64,3 +65,4 @@ ap-runtime = { path = "crates/ap-runtime" }
 ap-gateway = { path = "crates/ap-gateway" }
 ap-fetcher = { path = "crates/ap-fetcher" }
 ap-evolution = { path = "crates/ap-evolution" }
+ap-cli-backend = { path = "crates/ap-cli-backend" }

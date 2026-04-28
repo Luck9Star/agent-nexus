@@ -11,6 +11,7 @@ pub enum ProviderApiType {
     OpenaiCompatible,
     AnthropicMessages,
     Ollama,
+    Cli,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

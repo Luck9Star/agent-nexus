@@ -164,6 +164,45 @@ class ConfigLoader:
             return list(config.sources)
         return self._load_sources_from_yaml()
 
+    def load_cli_backends(self) -> dict[str, Any]:
+        """Load CLI backend configs from config.toml [models.providers.*] sections.
+
+        Only providers with api = "cli" are included.
+        """
+        from agent_nexus.platform.agency.cli_backend.config_templates import (
+            load_backend_configs_from_providers,
+        )
+
+        raw = self._load_raw()
+        providers = raw.get("models", {}).get("providers", {})
+        if not isinstance(providers, dict):
+            return {}
+        return load_backend_configs_from_providers(providers)
+
+    def load_cli_routing(self) -> Any:
+        """Load [cli_routing] section from config.toml.
+
+        Returns None when the section is absent.
+        """
+        from agent_nexus.platform.agency.cli_backend.config_templates import (
+            load_routing_config,
+        )
+
+        raw = self._load_raw()
+        if "cli_routing" not in raw:
+            return None
+        return load_routing_config(raw["cli_routing"])
+
+    def _load_raw(self) -> dict[str, Any]:
+        """Read and parse config.toml, returning the raw dict."""
+        config_path = self.config_dir / CONFIG_FILE
+        try:
+            return toml.loads(config_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except toml.TomlDecodeError:
+            return {}
+
     def load_project_config(
         self, project_dir: Path | None = None
     ) -> PlatformConfig | None:
