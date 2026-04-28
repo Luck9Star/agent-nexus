@@ -1,0 +1,23 @@
+name: doc-filler
+version: 1.0.0
+type: atomic
+description: Word 文档模板填充专家 — 分析模板结构、识别占位符、填充内容并保持样式
+
+model_config:
+  recommended: "standard"
+  fallback: "lightweight"
+
+capabilities: [template-analysis, document-generation]
+
+mcp:
+  tools: [analyze_template, fill_template]
+
+permissions:
+  mode: default
+  allowed_tools: [file_read, file_write]
+  denied_tools: [bash]
+  path_rules:
+    - pattern: "*.docx"
+      access: read-write
+    - pattern: "*.doc"
+      access: read

@@ -1,0 +1,30 @@
+[package]
+name = "ap-evolution"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ap-core = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yml = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+rusqlite = { workspace = true }
+r2d2 = { workspace = true }
+r2d2_sqlite = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+rstest = { workspace = true }
+tokio-test = { workspace = true }
+tempfile = "3"
+criterion = { workspace = true }
+
+[[bench]]
+name = "evolution_store_bench"
+harness = false

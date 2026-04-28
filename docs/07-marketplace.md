@@ -1,6 +1,10 @@
 # Agent 分发与质量
 
-> Agent Nexus POC v5.2 — §9 Agent 分发与质量：Git-based 分发、安装流程、质量验证、发布流程、版本管理、源管理
+> Agent Nexus Design Doc — §9 Agent 分发与质量：Git-based 分发、安装流程、质量验证、发布流程、版本管理、源管理
+
+> **Status**: ✅ Implemented (core distribution) | 🔧 Partial (SemVer parser, quality validation tool)
+> **Code**: `src/agent_nexus/platform/local/installer.py`, `src/agent_nexus/platform/local/supervisor.py`, `src/agent_nexus/platform/local/sources.py`, `src/agent_nexus/platform/local/lockfile.py`, `src/agent_nexus/platform/local/cli/`
+> **Tests**: `tests/unit/test_local_installer.py`, `tests/unit/test_local_supervisor.py`, `tests/unit/test_local_sources.py`, `tests/unit/test_local_lockfile.py`, `tests/unit/cli/`
 
 ## §9 Agent 分发与质量
 

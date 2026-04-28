@@ -1,0 +1,19 @@
+name: code-reviewer
+version: 1.0.0
+type: atomic
+description: 代码质量审查专家，支持多语言规则库和跨文件推理
+
+model_config:
+  recommended: "premium"
+  fallback: "standard"
+  max_turns: 15
+
+capabilities: [static-analysis, anti-pattern-detection, review-report]
+
+mcp:
+  tools: [analyze_code, check_patterns, generate_review]
+
+permissions:
+  mode: default
+  allowed_tools: [file_read, file_write, grep, glob]
+  denied_tools: [bash]

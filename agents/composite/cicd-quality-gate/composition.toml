@@ -1,0 +1,21 @@
+[composition]
+name = "cicd-quality-gate"
+description = "CI/CD 多模型并行质量关卡，集成安全扫描、代码审查和测试"
+
+[tasks.task1]
+name = "security-scan"
+agent = "security-scanner"
+blocked_by = []
+
+[tasks.task2]
+name = "code-review"
+agent = "code-reviewer"
+blocked_by = []
+
+[tasks.task3]
+name = "test-generation"
+agent = "test-suite-generator"
+blocked_by = []
+
+# TODO(task4): quality-gate-decider atomic agent
+# does not exist yet. Will be re-added when the agent is created.

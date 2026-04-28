@@ -1,8 +1,10 @@
 # 产品定位与核心架构
 
-> Agent Nexus POC v5 — §1 产品定位与愿景 + §2 竞争格局与差异化 + §3 核心架构
->
-> **v5.1 更新**：移除 ClawTeam pip 依赖，改为自建编排层（参考 ClawTeam 实现）。详见 §3.2 设计决策 D1。
+> Agent Nexus Design Doc — §1 产品定位与愿景 + §2 竞争格局与差异化 + §3 核心架构
+
+> **Status**: ✅ Implemented
+> **Code**: `src/agent_nexus/platform/` (14,170 lines), `src/agent_nexus/models/` (1,577 lines)
+> **Tests**: `tests/unit/` (55 test files), `tests/e2e/` (integration + e2e)
 
 ## §1 产品定位与愿景
 
@@ -57,7 +59,7 @@ Agent Platform（自研增强层）
 
 ### 1.4 首批 Agent
 
-**Atomic Agents（10）**：requirements-analyzer、doc-filler、code-reviewer、contract-analyzer、api-doc-generator、security-scanner、accessibility-auditor、localization-specialist、market-intelligence-analyst、test-suite-generator
+**Atomic Agents（11）**：requirements-analyzer、doc-filler、code-reviewer、contract-analyzer、api-doc-generator、security-scanner、accessibility-auditor、localization-specialist、market-intelligence-analyst、test-suite-generator、good-skill
 
 **Composite Agents（5）**：feature-delivery-pipeline、document-compliance-gateway、cicd-quality-gate、competitive-intelligence-briefing、product-documentation-suite
 
@@ -121,12 +123,14 @@ deer-flow（Apache-2.0, ByteDance）提供有价值的架构参考：
 │                      Agent Platform                              │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │  Layer 4: Self-Evolution Engine（借鉴 OpenSpace）           │  │
+│  │  Layer 4: Self-Evolution Engine ✅                          │  │
+│  │  Code: platform/evolution/ (3,837 lines)                   │  │
 │  │                                                            │  │
 │  │  Layer 1: Atomic Skill Evolution                          │  │
 │  │  ├── ExecutionAnalyzer (per-task LLM 分析)                │  │
-│  │  ├── FIX: 修复 broken skills                              │  │
-│  │  ├── CAPTURED: 提取成功模式为新 skill                      │  │
+│  │  ├── SkillEvolver: FIX / DERIVED / CAPTURED               │  │
+│  │  ├── HealthChecker: 规则引擎预过滤                         │  │
+│  │  ├── EvolutionStore: SQLite DAG 版本管理                   │  │
 │  │  └── 质量: applied_rate, completion_rate, effective_rate   │  │
 │  │                                                            │  │
 │  │  Layer 2: Composite Orchestration Evolution                │  │
@@ -135,18 +139,20 @@ deer-flow（Apache-2.0, ByteDance）提供有价值的架构参考：
 │  │  └── CAPTURED: 创建新 Composite Agent                     │  │
 │  │                                                            │  │
 │  │  Layer 3: Agent Promotion                                  │  │
-│  │  └── Skill → Agent 提升 (effective_rate > 阈值)            │  │
+│  │  └── AgentPromoter: Skill → Agent 提升 (effective_rate > 阈值) │
 │  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │  Layer 3: Python Runtime（借鉴 CaveAgent）                  │  │
+│  │  Layer 3: Python Runtime ✅                                 │  │
+│  │  Code: platform/runtime/ (1,810 lines)                     │  │
 │  │                                                            │  │
 │  │  每个 Atomic Agent 内部:                                   │  │
-│  │  ├── IPythonRuntime（同进程，Agent 已是子进程无需二次隔离）  │  │
-│  │  │   ├── Variables（业务对象, Pydantic models）             │  │
-│  │  │   ├── Functions（领域函数）                             │  │
-│  │  │   └── Types（类型 schema, 自动注入）                   │  │
-│  │  ├── SecurityChecker（AST 级安全检查）                     │  │
+│  │  ├── IPythonExecutor（同进程 InteractiveShell）              │  │
+│  │  ├── PythonRuntime（Variables/Functions/Types 管理）        │  │
+│  │  ├── SecurityChecker（AST 级安全检查 + 规则集）            │  │
+│  │  ├── PermissionChecker（DEFAULT/PLAN/FULL_AUTO 权限）      │  │
+│  │  ├── TieredRuntimeDescriber（L0-L3 分层描述）              │  │
+│  │  ├── TokenTracker（Token 用量追踪）                        │  │
 │  │  └── LLM 生成 Python 代码操作对象（优先于 tool_call）      │  │
 │  │                                                            │  │
 │  │  Agent 间通信:                                             │  │
@@ -155,18 +161,39 @@ deer-flow（Apache-2.0, ByteDance）提供有价值的架构参考：
 │  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │  Layer 2: 编排层（自建，参考 ClawTeam）                     │  │
-│  │  ├── OrchestrationDSL (TOML DAG 定义)                     │  │
-│  │  ├── TaskGraph（依赖图 + 状态机 + 环检测）                 │  │
-│  │  ├── IPC（stdin/stdout JSON-lines）                       │  │
-│  │  └── ProcessManager（asyncio.subprocess + 健康检查）       │  │
+│  │  Layer 2: 编排层 ✅                                         │  │
+│  │  Code: platform/orchestration/ (2,499 lines)               │  │
+│  │  ├── TaskGraph（SQLite + 依赖图 + 状态机 + 环检测）        │  │
+│  │  ├── IPC（stdin/stdout JSON-lines 管道协议）               │  │
+│  │  ├── ProcessManager（asyncio.subprocess + 健康检查）       │  │
+│  │  └── OrchestrationDSL (TOML DAG 定义 + 验证)              │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │  Layer 1: MCP 暴露层（对外通信）                           │  │
-│  │  ├── FastMCP Server（每个 Agent 独立）                    │  │
-│  │  ├── MCP Gateway（路由/发现）                             │  │
+│  │  Layer 1: MCP 暴露层 ✅                                     │  │
+│  │  Code: platform/gateway/ (1,320 lines)                     │  │
+│  │  ├── MCPGateway（FastMCP Server 聚合）                    │  │
+│  │  ├── DeferredAgentRegistry（Agent 级延迟加载）            │  │
+│  │  ├── ToolAdapter（Agent 工具适配）                         │  │
 │  │  └── 职责: 跨进程调用、外部工具、非 Python 客户端         │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  Platform Router ✅                                         │  │
+│  │  Code: platform/router/ (992 lines)                        │  │
+│  │  ├── 4-Phase Workflow (Research → Synthesis → Implementation → Verification) │
+│  │  └── SubtaskController (超时/重试/并行控制)                │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  基础设施 ✅                                                │  │
+│  │  Code: platform/config/ + local/ + skills/ + hooks/        │  │
+│  │  ├── ConfigLoader + ModelConfigManager (模型配置)          │  │
+│  │  ├── GitInstaller + Lockfile + Sources (Git 分发)          │  │
+│  │  ├── AgentSupervisor (Agent 生命周期管理)                  │  │
+│  │  ├── CLI (Typer, agent-nexus 命令行)                      │  │
+│  │  ├── SkillLoader (SKILL.md 加载)                          │  │
+│  │  └── HookExecutor (Hook 执行器)                           │  │
 │  └────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```

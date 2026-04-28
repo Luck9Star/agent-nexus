@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExpertProfile",
+  "description": "Schema for an imported agency-agents expert profile within Agent Nexus.",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "source",
+    "profile",
+    "capabilities",
+    "routing",
+    "runtime",
+    "permissions",
+    "output_contract",
+    "quality"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^agency\\.[a-z0-9_-]+$",
+      "description": "Globally-unique expert identifier, prefixed with 'agency.'"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable expert name"
+    },
+    "source": {
+      "type": "object",
+      "required": ["kind", "repo", "ref", "path", "license"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["git"],
+          "description": "Source kind (currently only git)"
+        },
+        "repo": {
+          "type": "string",
+          "format": "uri",
+          "description": "Git repository URL"
+        },
+        "ref": {
+          "type": "string",
+          "description": "Pinned Git ref (commit SHA or tag)"
+        },
+        "path": {
+          "type": "string",
+          "description": "Relative path to the expert markdown file within the repo"
+        },
+        "license": {
+          "type": "string",
+          "description": "License identifier (e.g. MIT)"
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "required": ["category", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "Expert category (e.g. engineering, testing, specialized)"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Short description of the expert's focus area"
+        },
+        "body": {
+          "type": "string",
+          "description": "Full expert body/prompt content from the source markdown"
+        },
+        "vibe": {
+          "type": "string",
+          "description": "Expert's communication style and tone guidance"
+        },
+        "source_md_path": {
+          "type": "string",
+          "description": "Relative path to the original markdown source"
+        },
+        "normalized_prompt_path": {
+          "type": "string",
+          "description": "Relative path to the normalized prompt markdown"
+        },
+        "imported_at": {
+          "type": "string",
+          "description": "ISO date when the profile was imported"
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "description": "List of capability tags from the taxonomy"
+    },
+    "routing": {
+      "type": "object",
+      "required": ["task_types", "positive_signals", "negative_signals"],
+      "additionalProperties": false,
+      "properties": {
+        "task_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "positive_signals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "negative_signals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["mode", "runner", "implementation", "model_tier"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["persona_only", "tooled", "autonomous"],
+          "description": "Runtime mode for the expert"
+        },
+        "runner": {
+          "type": "string",
+          "description": "Agent runner that executes this expert"
+        },
+        "implementation": {
+          "type": "string",
+          "description": "Implementation technology (e.g. python-pydanticai)"
+        },
+        "model_tier": {
+          "type": "string",
+          "enum": ["lightweight", "standard", "heavyweight"],
+          "description": "Model tier required by this expert"
+        },
+        "max_context_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum context window tokens"
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "required": ["mode", "allowed_tools", "denied_tools"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["default", "plan", "full_auto"],
+          "description": "Permission mode"
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "denied_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "output_contract": {
+      "type": "object",
+      "required": ["artifact_type", "required_sections"],
+      "additionalProperties": false,
+      "properties": {
+        "artifact_type": {
+          "type": "string",
+          "description": "Type of artifact this expert produces"
+        },
+        "required_sections": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Sections that must appear in the output"
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": true,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["experimental", "stable", "deprecated"],
+          "description": "Quality status of the expert profile"
+        }
+      }
+    }
+  }
+}

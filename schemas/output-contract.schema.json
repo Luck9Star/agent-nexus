@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OutputContract",
+  "description": "Schema for an expert output contract that defines artifact structure.",
+  "type": "object",
+  "required": ["artifact_type", "required_sections"],
+  "additionalProperties": true,
+  "properties": {
+    "artifact_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Type of artifact (e.g. risk_report, architecture_plan, review_report)"
+    },
+    "format": {
+      "type": "string",
+      "description": "Expected output format (e.g. markdown, json)"
+    },
+    "required_sections": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "description": "Sections that must appear in the output artifact"
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "max_findings": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of findings/items in the output"
+        },
+        "require_evidence": {
+          "type": "boolean",
+          "description": "Whether evidence must be provided for each finding"
+        }
+      }
+    }
+  }
+}

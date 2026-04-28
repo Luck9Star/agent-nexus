@@ -1,6 +1,10 @@
 # MCP 暴露与通信
 
-> Agent Nexus POC v5 — §8 MCP 暴露与通信：FastMCP 双模式、MCP Gateway、通信矩阵、Platform Router、SKILL.md 规范、数据流场景
+> Agent Nexus Design Doc — §8 MCP 暴露与通信：FastMCP 双模式、MCP Gateway、通信矩阵、Platform Router、SKILL.md 规范、数据流场景
+
+> **Status**: ✅ Implemented (core) | 🔧 Partial (Provider Adaptation, AnthropicNativeStrategy)
+> **Code**: `src/agent_nexus/platform/gateway/` (gateway.py, deferred_registry.py, tool_adapter.py), `src/agent_nexus/platform/router/` (router.py, workflow.py, subtask.py)
+> **Tests**: `tests/unit/test_gateway_tool_adapter.py`, `tests/unit/test_router_subtask.py`, `tests/unit/test_router_workflow.py`, `tests/unit/test_gateway_module.py`
 
 ## §8 MCP 暴露与通信
 
@@ -113,17 +117,16 @@ def create_gateway(router: Router, model_config: ModelConfigManager) -> FastMCP:
     mcp = FastMCP("agent-platform")
 
     @mcp.tool()
-    def list_agents() -> list[dict]:
-        """列出所有可用 Agent"""
-        return [{"name": name, "tools": a.tools, "type": a.agent_type}
-                for name, a in router.agents.items()]
-
-    @mcp.tool()
-    def list_composite_agents() -> list[dict]:
-        """列出所有 Composite Agent"""
-        return [{"name": name, "dependencies": a.composition.get("dependencies", {})}
-                for name, a in router.agents.items()
-                if a.agent_type == "composite"]
+    def list_agents() -> str:
+        """列出所有注册的 Agent（Atomic + Composite），显示名称、类型、状态和工具数"""
+        lines = ["## Registered Agents\n"]
+        for info in registry.list_all_agents():
+            tier = "core" if info in registry.list_core_agents() else \
+                   "activated" if info.is_activated else "available"
+            running = "running" if info.is_running else "stopped"
+            lines.append(f"- **{info.manifest.name}** ({info.manifest.type.value}) "
+                         f"[{tier}] {running} ({len(info.tool_schemas)} tools)")
+        return "\n".join(lines)
 
     # 动态 Agent 工具暴露: {agent_name}__{tool_name}
     ...
@@ -297,6 +300,8 @@ dependencies:
 #### 8.6.1 设计理念
 
 参考 OpenHarness 的 HookExecutor 设计，Agent 生命周期中的可扩展事件驱动机制。Hook 用于在关键执行节点注入自定义逻辑，实现横切关注点（如验证、通知、审计）的分离。
+
+> `HookExecutor` runtime is implemented in `agent_nexus.platform.hooks.executor`. Hook models are defined in `agent_nexus.models.hooks`.
 
 #### 8.6.2 Hook 类型
 
@@ -551,6 +556,8 @@ def build_context(request: ContextRequest) -> str:
 
 #### 8.8.5 Provider Adaptation
 
+> **Implementation Status**: `DeferredAgentRegistry` with `search_and_activate` is the baseline mechanism and fully implemented in `src/agent_nexus/platform/gateway/deferred_registry.py`. Provider-specific optimizations (`ProviderAwareToolStrategy`, `AnthropicNativeStrategy`) remain as design targets for a future iteration.
+
 Gateway 是唯一感知用户模型 Provider 的位置（来自 `config.toml`）：
 
 ```python
@@ -619,6 +626,8 @@ tool_loading = "lazy"         # 条件性使用，按需激活
 #### 8.8.8 Token 用量追踪与可观测性
 
 > **设计动机**: OpenClaw 用户报告 $200-3600/月费用，根因是缺乏 token 消耗可见性（nanobot #1193, #2020, #2149）。Agent Nexus 在三个层级提供追踪。
+
+> `TokenTracker` class with tiered alerts (80%/90%/95%) and session-level aggregation is implemented in `agent_nexus.platform.runtime.token_tracker`. Low-level budget logging exists in `EvolutionStore.log_budget_event()` and `TokenUsage` / `ContextBudget` models are defined in `agent_nexus.models.context`.
 
 ```python
 class TokenTracker:

@@ -1,0 +1,15 @@
+[runtime]
+python_path = "python3"
+uv_path = "uv"
+
+[models]
+default = "openai:gpt-4o"
+
+[models.providers.deepseek]
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+api = "openai-compatible"
+
+[models.providers.ollama]
+base_url = "http://localhost:11434/v1"
+api = "ollama"

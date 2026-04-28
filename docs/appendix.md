@@ -1,6 +1,9 @@
 # 附录
 
-> Agent Nexus POC v5 — 附录 A-D：ClawTeam TOML Schema、Agent 类型对比表、模型分层配置、参考项目与本地路径
+> Agent Nexus Design Doc — 附录 A-D：OrchestrationDSL TOML Schema、Agent 类型对比表、模型分层配置、参考项目与本地路径
+
+> **Status**: ✅ Implemented
+> **Code**: `src/agent_nexus/models/` (12 model files, 1,577 lines), `src/agent_nexus/platform/config/` (defaults, loader, model_config)
 
 ## 附录
 

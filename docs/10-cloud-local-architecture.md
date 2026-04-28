@@ -1,6 +1,10 @@
 # Git-Based Agent 分发与本地架构
 
-> Agent Nexus POC v5.2 — §12 Git-Based Agent 分发与本地架构：Git 分发模型、本地架构、安装/发布流程、Python POC 实现、Rust 重构路径
+> Agent Nexus Design Doc — §12 Git-Based Agent 分发与本地架构：Git 分发模型、本地架构、安装/发布流程、Python 实现、Rust 重构路径
+
+> **Status**: ✅ Implemented (core) | 🔧 Partial (SemVer parser)
+> **Code**: `src/agent_nexus/platform/local/` (installer.py, sources.py, lockfile.py, supervisor.py, cli/), `src/agent_nexus/models/distribution.py`
+> **Tests**: `tests/unit/test_local_installer.py`, `tests/unit/test_local_supervisor.py`, `tests/unit/test_local_sources.py`, `tests/unit/test_local_lockfile.py`, `tests/unit/cli/`
 
 ## §12 Git-Based Agent 分发与本地架构
 
@@ -158,13 +162,13 @@ sources:
 
 | 职责 | 组件 | 说明 |
 |------|------|------|
-| CLI 入口 | `local/cli.py` | Typer 命令行，install/run/search/list/info |
+| CLI 入口 | `local/cli/` | Typer 命令行（create, init, config, runtime, evolution 命令组） |
 | Git 安装 | `local/installer.py` | git clone --sparse + validate + venv + lockfile |
 | 包源管理 | `local/sources.py` | sources.yaml 解析 + source 刷新 |
 | 进程管理 | `local/supervisor.py` | Agent 子进程启动/停止/健康检查/重启 |
 | MCP 聚合 | `gateway/` | FastMCP Gateway，聚合所有 Agent 为单一 MCP Server |
 | 编排调度 | `router/` | Platform Router，4-Phase Workflow + TOML DAG |
-| 配置管理 | `local/config.py` | config.toml + Provider Registry |
+| 配置管理 | `config/` | config.toml + Provider Registry |
 | 锁文件 | `local/lockfile.py` | lockfile.json 读写 |
 | 模型配置 | `config/` | pydantic-ai provider:model 解析 |
 
@@ -333,21 +337,21 @@ agent-nexus install doc-filler
 - [ ] pyproject.toml 版本号与 manifest 一致
 - [ ] 无敏感文件（.env、credentials）包含在 Agent 目录中
 
-### 12.5 Python POC 实现
+### 12.5 Python 实现
 
-#### 12.5.1 POC 范围
+#### 12.5.1 实现范围
 
-| 组件 | Python POC | 说明 |
-|------|-----------|------|
+| 组件 | 实现 | 说明 |
+|------|------|------|
 | Git Installer | `local/installer.py` | subprocess 调用 git |
 | Source Manager | `local/sources.py` | sources.yaml 解析 + repo 缓存 |
-| CLI | `local/cli.py` | Typer 命令行 |
+| CLI | `local/cli/` | Typer 命令行（create, init, config, runtime, evolution 命令组） |
 | MCP Gateway | `gateway/` | FastMCP 聚合 |
 | Agent Supervisor | `local/supervisor.py` | asyncio subprocess |
-| Config | `local/config.py` | TOML/YAML 解析 |
+| Config | `config/` | TOML/YAML 解析 + Provider Registry |
 | Lockfile | `local/lockfile.py` | JSON 读写 |
 
-#### 12.5.2 POC 代码
+#### 12.5.2 实现代码
 
 **PackageSource 和 SourceManager**：
 
@@ -517,6 +521,12 @@ class AgentSupervisor:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+
+        # Drain stderr in background to prevent pipe buffer deadlock.
+        # When stderr=PIPE is opened but never read, the OS pipe buffer
+        # fills (~64KB) and the writing process blocks indefinitely.
+        asyncio.create_task(self._drain_stderr(proc, name))
+
         handle = AgentHandle(name=name, process=proc, config=config)
         self.agents[name] = handle
         return handle
@@ -601,14 +611,14 @@ def sources():
 
 #### 12.6.1 重构策略
 
-| Python POC 组件 | Rust Crate | 说明 |
-|----------------|-----------|------|
+| Python 组件 | Rust Crate | 说明 |
+|------------|-----------|------|
 | `local/installer.py` | **ap-fetcher** | Git 操作（git2 crate） |
 | `local/sources.py` | ap-fetcher | 包源管理 |
 | `local/supervisor.py` | **ap-runtime** | tokio::process 进程管理 |
 | `gateway/` | **ap-gateway** | rmcp MCP 网关 |
-| `local/cli.py` | **ap-cli** | clap 命令行 |
-| `local/config.py` | **ap-core** | 配置解析 |
+| `local/cli/` | **ap-cli** | clap 命令行 |
+| `config/` | **ap-core** | 配置解析 |
 | `local/lockfile.py` | ap-core | 锁文件管理 |
 | Agent Runtime | **不动** | MCP 边界 = 语言边界 |
 
@@ -704,8 +714,8 @@ Rust 重构前后完全一致的接口：
 
 #### 12.6.5 依赖对比
 
-| 依赖 | 用途 | Python POC | Rust 重构 |
-|------|------|-----------|-----------|
+| 依赖 | 用途 | Python 实现 | Rust 重构 |
+|------|------|------------|-----------|
 | MCP 通信 | Agent ↔ 平台 | FastMCP | rmcp |
 | 进程管理 | Agent 子进程 | asyncio.subprocess | tokio::process |
 | Git 操作 | 包获取 | subprocess(git) | git2 (libgit2) |
@@ -716,8 +726,8 @@ Rust 重构前后完全一致的接口：
 
 ### 12.7 技术选型汇总
 
-| 层级 | 组件 | Python POC | Rust 重构 |
-|------|------|-----------|-----------|
+| 层级 | 组件 | Python 实现 | Rust 重构 |
+|------|------|------------|-----------|
 | **分发** | 包获取 | subprocess(git) | git2 |
 | **分发** | 版本管理 | packaging | semver |
 | **分发** | 包源索引 | PyYAML | serde_yaml |
@@ -730,9 +740,9 @@ Rust 重构前后完全一致的接口：
 | **Agent** | Runtime | IPythonRuntime | 不动（Python） |
 | **Agent** | 依赖管理 | uv | uv（机制不变） |
 
-### 12.8 与现有 POC 文档的关系
+### 12.8 与早期设计文档的关系
 
-本文档（§12）从 v5.1 的"Cloud Service + Local Client"架构重构为 Git-based 分发。主要变更：
+本文档（§12）从早期的"Cloud Service + Local Client"架构重构为 Git-based 分发。主要变更：
 
 | 变更项 | v5.1（Cloud） | v5.2（Git-based） |
 |--------|--------------|-------------------|

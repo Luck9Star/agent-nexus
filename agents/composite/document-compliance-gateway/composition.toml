@@ -1,0 +1,21 @@
+[composition]
+name = "document-compliance-gateway"
+description = "跨维度文档合规检测，集成法律、无障碍、本地化分析"
+
+[tasks.task1]
+name = "contract-analysis"
+agent = "contract-analyzer"
+blocked_by = []
+
+[tasks.task2]
+name = "accessibility-audit"
+agent = "accessibility-auditor"
+blocked_by = []
+
+[tasks.task3]
+name = "localization-analysis"
+agent = "localization-specialist"
+blocked_by = []
+
+# TODO(task4): conflict-detector atomic agent
+# does not exist yet. Will be re-added when the agent is created.

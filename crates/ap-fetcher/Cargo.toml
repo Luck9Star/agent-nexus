@@ -1,0 +1,24 @@
+[package]
+name = "ap-fetcher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ap-core = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yml = { workspace = true }
+thiserror = { workspace = true }
+git2 = { workspace = true }
+semver = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+libc = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+rstest = { workspace = true }
+tokio-test = { workspace = true }
+tempfile = "3"

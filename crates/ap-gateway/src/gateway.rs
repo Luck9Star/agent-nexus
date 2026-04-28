@@ -1,0 +1,689 @@
+//! MCP Gateway: axum HTTP server that aggregates agent tools.
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::extract::{DefaultBodyLimit, State};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use thiserror::Error;
+use tokio::sync::{watch, Mutex};
+
+use crate::deferred_registry::{DeferredAgentRegistry, RegistryError};
+use crate::tool_adapter::McpToolAdapter;
+
+// ---------------------------------------------------------------------------
+// Input validation
+// ---------------------------------------------------------------------------
+
+/// Maximum allowed length for agent or tool names.
+const MAX_NAME_LENGTH: usize = 64;
+
+/// Validate an agent or tool name.
+///
+/// Names must be non-empty, at most `MAX_NAME_LENGTH` characters, and contain
+/// only alphanumeric characters, underscores, and hyphens (`[a-zA-Z0-9_-]+`).
+fn validate_name(label: &str, value: &str) -> Result<(), GatewayError> {
+    if value.is_empty() {
+        return Err(GatewayError::ValidationError(format!(
+            "{label} must not be empty"
+        )));
+    }
+    if value.len() > MAX_NAME_LENGTH {
+        return Err(GatewayError::ValidationError(format!(
+            "{label} exceeds maximum length of {MAX_NAME_LENGTH} characters"
+        )));
+    }
+    if !value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Err(GatewayError::ValidationError(format!(
+            "{label} contains invalid characters: only alphanumeric, underscore, and hyphen are allowed"
+        )));
+    }
+    if value.contains("___") {
+        return Err(GatewayError::ValidationError(format!(
+            "{label} must not contain triple underscores (conflicts with agent__tool separator)"
+        )));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Error type
+// ---------------------------------------------------------------------------
+
+/// Errors from the MCP Gateway.
+#[derive(Debug, Error)]
+pub enum GatewayError {
+    #[error("Bind error: {0}")]
+    Bind(#[from] std::io::Error),
+
+    #[error("Registry error: {0}")]
+    Registry(#[from] RegistryError),
+
+    #[error("Tool call failed: {0}")]
+    ToolCall(String),
+
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+}
+
+impl axum::response::IntoResponse for GatewayError {
+    fn into_response(self) -> axum::response::Response {
+        let (status, message) = match &self {
+            GatewayError::Bind(_) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            GatewayError::Registry(RegistryError::NotFound(_)) => {
+                (axum::http::StatusCode::NOT_FOUND, self.to_string())
+            }
+            GatewayError::Registry(RegistryError::NotActive(_)) => {
+                (axum::http::StatusCode::SERVICE_UNAVAILABLE, self.to_string())
+            }
+            GatewayError::Registry(
+                RegistryError::ActivationFailed(_) | RegistryError::ToolExecutionFailed(_),
+            )
+            | GatewayError::ToolCall(_) => {
+                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
+            }
+            GatewayError::ValidationError(_) => {
+                (axum::http::StatusCode::BAD_REQUEST, self.to_string())
+            }
+        };
+        (status, Json(serde_json::json!({ "error": message }))).into_response()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shutdown state (interior mutability for Arc<Self>)
+// ---------------------------------------------------------------------------
+
+/// Holds the shutdown signal sender and the server task handle.
+#[derive(Default)]
+struct ShutdownState {
+    tx: Option<watch::Sender<bool>>,
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+/// An explicit handle for shutting down a running gateway server.
+///
+/// Returned by [`McpGateway::start`]. Wraps `Arc<McpGateway>` so the caller
+/// retains ownership of the gateway while the server is running.
+pub struct ShutdownHandle(Arc<McpGateway>);
+
+impl ShutdownHandle {
+    /// Gracefully shut down the gateway server.
+    ///
+    /// Signals the HTTP server to stop and waits up to 5 seconds for it to finish.
+    pub async fn shutdown(&self) {
+        self.0.do_shutdown().await;
+    }
+
+    /// Get a reference to the underlying gateway.
+    pub fn gateway(&self) -> &Arc<McpGateway> {
+        &self.0
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Config & Gateway
+// ---------------------------------------------------------------------------
+
+/// Configuration for the MCP Gateway.
+pub struct GatewayConfig {
+    pub listen_addr: String,
+    pub idle_timeout_secs: u64,
+}
+
+impl Default for GatewayConfig {
+    fn default() -> Self {
+        Self {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        }
+    }
+}
+
+/// The main MCP Gateway: an axum HTTP server that aggregates tools from
+/// multiple agents behind a unified namespace.
+pub struct McpGateway {
+    config: GatewayConfig,
+    registry: Arc<DeferredAgentRegistry>,
+    #[allow(dead_code)] // Used for direct namespace lookups in production
+    adapter: McpToolAdapter,
+    shutdown: Mutex<ShutdownState>,
+}
+
+impl McpGateway {
+    /// Create a new gateway with the given configuration.
+    #[must_use] 
+    pub fn new(config: GatewayConfig) -> Self {
+        let registry = Arc::new(DeferredAgentRegistry::with_idle_timeout(
+            std::time::Duration::from_secs(config.idle_timeout_secs),
+        ));
+        Self {
+            config,
+            registry,
+            adapter: McpToolAdapter::new(),
+            shutdown: Mutex::new(ShutdownState::default()),
+        }
+    }
+
+    /// Get a reference to the inner registry for external registration.
+    pub fn registry(&self) -> Arc<DeferredAgentRegistry> {
+        Arc::clone(&self.registry)
+    }
+
+    /// Start the gateway HTTP server. Returns a [`ShutdownHandle`] that wraps
+    /// the `Arc<Self>` and provides a [`ShutdownHandle::shutdown`] method.
+    ///
+    /// # Ownership
+    /// The caller MUST retain the [`ShutdownHandle`] for the lifetime of the server.
+    /// Dropping the handle without calling `shutdown()` will leave the server
+    /// running with no way to stop it. Consider storing the handle in a long-lived
+    /// structure (e.g., a task-local variable or a manager struct).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying operation fails.
+    pub async fn start(self: &Arc<Self>) -> Result<(SocketAddr, ShutdownHandle), GatewayError> {
+        let app = Router::new()
+            .route("/tools", get(Self::list_tools_handler))
+            .route("/tools/call", post(Self::call_tool_handler))
+            .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
+            .with_state(Arc::clone(self));
+
+        let listener = tokio::net::TcpListener::bind(&self.config.listen_addr).await?;
+        let addr = listener.local_addr()?;
+
+        let (tx, rx) = watch::channel(false);
+        let handle = tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let mut rx = rx;
+                    let _ = rx.changed().await;
+                })
+                .await
+            {
+                tracing::error!("Gateway HTTP server fatal error: {e}");
+            }
+        });
+
+        // Store the shutdown sender and server handle for later graceful shutdown.
+        let mut state = self.shutdown.lock().await;
+        state.tx = Some(tx);
+        state.handle = Some(handle);
+
+        Ok((addr, ShutdownHandle(Arc::clone(self))))
+    }
+
+    /// Gracefully shut down the HTTP server.
+    ///
+    /// Signals the server to stop and waits up to 5 seconds for it to finish.
+    async fn do_shutdown(&self) {
+        let mut state = self.shutdown.lock().await;
+        if let Some(tx) = state.tx.take() {
+            let _ = tx.send(true);
+        }
+        if let Some(handle) = state.handle.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+        }
+    }
+
+    /// Handler for GET /tools: list all tools from all registered agents.
+    ///
+    /// This iterates agents sequentially. This is intentional — `get_tools()` only
+    /// reads cached data (no I/O), so parallelization wouldn't improve performance.
+    /// If this becomes a bottleneck, the fix would require restructuring the registry
+    /// to support batch tool queries.
+    async fn list_tools_handler(
+        State(gw): State<Arc<Self>>,
+    ) -> Json<Vec<serde_json::Value>> {
+        let agent_names = gw.registry.list_agents().await;
+
+        let mut all_tools = Vec::new();
+        for name in agent_names {
+            // Try to get cached tools; log and skip inactive agents
+            match gw.registry.get_tools(&name).await {
+                Ok(tools) => {
+                    let schemas = crate::schema::merge_tool_schemas(&name, &tools);
+                    all_tools.extend(schemas);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to get tools for agent '{}': {}", name, e);
+                }
+            }
+        }
+        Json(all_tools)
+    }
+
+    /// Handler for POST /tools/call: invoke a namespaced tool.
+    async fn call_tool_handler(
+        State(gw): State<Arc<Self>>,
+        Json(req): Json<serde_json::Value>,
+    ) -> Result<Json<serde_json::Value>, GatewayError> {
+        // Validate arguments size (defense-in-depth on top of DefaultBodyLimit at router level).
+        if let Some(args) = req.get("arguments") {
+            let args_str = serde_json::to_string(args).unwrap_or_default();
+            if args_str.len() > 1024 * 1024 {
+                // 1MB per arguments
+                return Err(GatewayError::ValidationError(
+                    "arguments too large (max 1MB)".to_string(),
+                ));
+            }
+        }
+
+        // Parse the namespaced tool name.
+        let (agent, tool, arguments) = crate::schema::extract_tool_call(&req)
+            .ok_or_else(|| {
+                GatewayError::ToolCall("Invalid tool call request: missing or malformed 'name'".to_string())
+            })?;
+
+        // Validate agent and tool names before any lookup.
+        validate_name("agent_name", &agent)?;
+        validate_name("tool_name", &tool)?;
+
+        // Agent must be explicitly activated before tool calls.
+        // Returns 503 if the agent is registered but not yet running.
+        let result = gw.registry.call_tool(&agent, &tool, arguments).await?;
+        Ok(Json(result))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ap_core::models::agent::{AgentManifest, AgentType};
+    use ap_runtime::mcp_client::ToolInfo;
+    use std::future::Future;
+    use std::pin::Pin;
+
+    // -----------------------------------------------------------------------
+    // Validation unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn validate_name_accepts_valid_names() {
+        assert!(validate_name("agent_name", "code-reviewer").is_ok());
+        assert!(validate_name("agent_name", "my_agent").is_ok());
+        assert!(validate_name("tool_name", "review").is_ok());
+        assert!(validate_name("tool_name", "a").is_ok());
+        assert!(validate_name("tool_name", "tool-v2").is_ok());
+        assert!(validate_name("tool_name", "ABC123").is_ok());
+    }
+
+    #[test]
+    fn validate_name_rejects_empty() {
+        let err = validate_name("agent_name", "").unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn validate_name_rejects_special_characters() {
+        let err = validate_name("agent_name", "agent.with.dots").unwrap_err();
+        assert!(err.to_string().contains("invalid characters"));
+
+        let err = validate_name("tool_name", "tool name with spaces").unwrap_err();
+        assert!(err.to_string().contains("invalid characters"));
+
+        let err = validate_name("tool_name", "tool;DROP TABLE").unwrap_err();
+        assert!(err.to_string().contains("invalid characters"));
+
+        let err = validate_name("tool_name", "../../../etc/passwd").unwrap_err();
+        assert!(err.to_string().contains("invalid characters"));
+    }
+
+    #[test]
+    fn validate_name_rejects_overly_long() {
+        let long_name = "a".repeat(65);
+        let err = validate_name("agent_name", &long_name).unwrap_err();
+        assert!(err.to_string().contains("maximum length"));
+    }
+
+    #[test]
+    fn validate_name_accepts_max_length() {
+        let max_name = "a".repeat(64);
+        assert!(validate_name("agent_name", &max_name).is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // Gateway integration tests
+    // -----------------------------------------------------------------------
+
+    /// Mock MCP client for gateway integration tests.
+    struct MockMcpClient {
+        tools: Vec<ToolInfo>,
+    }
+
+    impl MockMcpClient {
+        fn new(tools: Vec<ToolInfo>) -> Self {
+            Self { tools }
+        }
+    }
+
+    impl ap_runtime::mcp_client::McpClient for MockMcpClient {
+        fn list_tools(
+            &self,
+        ) -> Pin<
+            Box<
+                dyn Future<
+                        Output = Result<Vec<ToolInfo>, ap_runtime::mcp_client::McpError>,
+                    > + Send
+                    + '_,
+            >,
+        > {
+            let tools = self.tools.clone();
+            Box::pin(async move { Ok(tools) })
+        }
+
+        fn call_tool(
+            &self,
+            name: &str,
+            arguments: serde_json::Value,
+        ) -> Pin<
+            Box<
+                dyn Future<
+                        Output = Result<serde_json::Value, ap_runtime::mcp_client::McpError>,
+                    > + Send
+                    + '_,
+            >,
+        > {
+            let name = name.to_string();
+            Box::pin(async move {
+                Ok(serde_json::json!({
+                    "tool": name,
+                    "arguments": arguments,
+                    "status": "ok"
+                }))
+            })
+        }
+    }
+
+    fn test_manifest(name: &str) -> AgentManifest {
+        AgentManifest {
+            name: name.to_string(),
+            version: "0.1.0".to_string(),
+            agent_type: AgentType::Atomic,
+            description: format!("Test agent {name}"),
+            capabilities: vec![],
+            model_preferences: None,
+            role: None,
+            dependencies: Default::default(),
+            permissions: None,
+            tools: vec![],
+            denied_tools: vec![],
+            permission_mode: None,
+            skills: vec![],
+            hooks: Default::default(),
+            mcp_servers: Default::default(),
+            pip_dependencies: vec![],
+            effort: None,
+            max_turns: None,
+            memory_scope: None,
+            isolation: None,
+            color: None,
+            background: false,
+            initial_prompt: None,
+        }
+    }
+
+    fn sample_tools() -> Vec<ToolInfo> {
+        vec![ToolInfo {
+            name: "review".to_string(),
+            description: Some("Review code".to_string()),
+            input_schema: Some(serde_json::json!({"type": "object"})),
+        }]
+    }
+
+    #[tokio::test]
+    async fn start_gateway_binds_to_address() {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        };
+        let gw = Arc::new(McpGateway::new(config));
+        let (addr, handle) = gw.start().await.unwrap();
+        assert!(addr.port() > 0);
+        handle.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn tools_endpoint_returns_empty_when_no_agents() {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        };
+        let gw = Arc::new(McpGateway::new(config));
+        let (addr, _handle) = gw.start().await.unwrap();
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("http://{addr}/tools"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        let body: Vec<serde_json::Value> = resp.json().await.unwrap();
+        assert!(body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn tools_endpoint_lists_active_agent_tools() {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        };
+        let gw = Arc::new(McpGateway::new(config));
+        let registry = gw.registry();
+
+        // Register and activate an agent
+        registry.register_manifest(test_manifest("code-reviewer")).await;
+        let tools = sample_tools();
+        registry
+            .activate(
+                "code-reviewer",
+                Box::new(move || Box::new(MockMcpClient::new(tools))),
+            )
+            .await
+            .unwrap();
+
+        let (addr, _handle) = gw.start().await.unwrap();
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("http://{addr}/tools"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        let body: Vec<serde_json::Value> = resp.json().await.unwrap();
+        assert_eq!(body.len(), 1);
+        assert_eq!(body[0]["name"], "code-reviewer___review");
+    }
+
+    #[tokio::test]
+    async fn call_tool_endpoint_forwards_to_agent() {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        };
+        let gw = Arc::new(McpGateway::new(config));
+        let registry = gw.registry();
+
+        // Register and activate an agent
+        registry.register_manifest(test_manifest("code-reviewer")).await;
+        let tools = sample_tools();
+        registry
+            .activate(
+                "code-reviewer",
+                Box::new(move || Box::new(MockMcpClient::new(tools))),
+            )
+            .await
+            .unwrap();
+
+        let (addr, _handle) = gw.start().await.unwrap();
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("http://{addr}/tools/call"))
+            .json(&serde_json::json!({
+                "name": "code-reviewer___review",
+                "arguments": {"path": "/src/main.rs"}
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["tool"], "review");
+        assert_eq!(body["arguments"]["path"], "/src/main.rs");
+        assert_eq!(body["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn call_tool_inactive_agent_returns_error() {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        };
+        let gw = Arc::new(McpGateway::new(config));
+        let registry = gw.registry();
+
+        // Register but do NOT activate
+        registry.register_manifest(test_manifest("reviewer")).await;
+
+        let (addr, _handle) = gw.start().await.unwrap();
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("http://{addr}/tools/call"))
+            .json(&serde_json::json!({
+                "name": "reviewer___some_tool",
+                "arguments": {}
+            }))
+            .send()
+            .await
+            .unwrap();
+        // Agent is registered but not active -> 503 Service Unavailable
+        assert_eq!(resp.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn call_tool_malformed_name_returns_error() {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        };
+        let gw = Arc::new(McpGateway::new(config));
+        let (addr, _handle) = gw.start().await.unwrap();
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("http://{addr}/tools/call"))
+            .json(&serde_json::json!({
+                "name": "no_separator",
+                "arguments": {}
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn call_tool_special_chars_in_agent_name_returns_400() {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        };
+        let gw = Arc::new(McpGateway::new(config));
+        let (addr, _handle) = gw.start().await.unwrap();
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("http://{addr}/tools/call"))
+            .json(&serde_json::json!({
+                "name": "../etc___passwd",
+                "arguments": {}
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert!(body["error"].as_str().unwrap().contains("invalid characters"));
+    }
+
+    #[tokio::test]
+    async fn call_tool_special_chars_in_tool_name_returns_400() {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        };
+        let gw = Arc::new(McpGateway::new(config));
+        let (addr, _handle) = gw.start().await.unwrap();
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("http://{addr}/tools/call"))
+            .json(&serde_json::json!({
+                "name": "agent___tool with spaces",
+                "arguments": {}
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn default_config_works() {
+        let config = GatewayConfig::default();
+        assert_eq!(config.listen_addr, "127.0.0.1:0");
+        assert_eq!(config.idle_timeout_secs, 300);
+    }
+
+    #[tokio::test]
+    async fn graceful_shutdown_completes() {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".to_string(),
+            idle_timeout_secs: 300,
+        };
+        let gw = Arc::new(McpGateway::new(config));
+        let (addr, handle) = gw.start().await.unwrap();
+        assert!(addr.port() > 0);
+
+        // Verify server is running
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("http://{addr}/tools"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        // Shut down gracefully via ShutdownHandle
+        handle.shutdown().await;
+
+        // Server should stop — give it a moment, then confirm connection refused.
+        // Use a short timeout to avoid hanging if shutdown didn't work.
+        let result = tokio::time::timeout(Duration::from_secs(3), async {
+            client
+                .get(format!("http://{addr}/tools"))
+                .send()
+                .await
+        })
+        .await;
+
+        // The request should either error (connection refused) or timeout
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Server should have shut down and stopped accepting connections"
+        );
+    }
+}

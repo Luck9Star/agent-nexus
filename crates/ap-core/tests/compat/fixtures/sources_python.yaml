@@ -1,0 +1,9 @@
+sources:
+  - name: official
+    type: git
+    url: https://github.com/anthropics/agent-nexus-agents
+    branch: main
+  - name: community
+    type: git
+    url: https://github.com/community/agent-nexus-contrib
+    branch: stable

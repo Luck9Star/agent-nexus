@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "agents": {
+    "code-reviewer": {
+      "version": "1.2.0",
+      "source": "official",
+      "commit_sha": "abc1234def5678901234567890abcdef12345678",
+      "agent_type": "atomic",
+      "installed_at": "2026-04-20T10:00:00+00:00",
+      "venv_path": ".venvs/code-reviewer",
+      "dependencies": []
+    },
+    "feature-delivery": {
+      "version": "0.5.0",
+      "source": "official",
+      "commit_sha": "1234abc5678def9012345678abcdef0123456789",
+      "agent_type": "composite",
+      "installed_at": "2026-04-21T15:30:00+00:00",
+      "venv_path": ".venvs/feature-delivery",
+      "dependencies": ["code-reviewer"]
+    }
+  }
+}

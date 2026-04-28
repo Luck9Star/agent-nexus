@@ -1,0 +1,18 @@
+name: localization-specialist
+version: 1.0.0
+type: atomic
+description: 翻译与本地化专家，术语表管理和语域识别
+
+model_config:
+  recommended: "standard"
+  fallback: "lightweight"
+
+capabilities: [text-analysis, glossary-management, localization]
+
+mcp:
+  tools: [analyze_text, manage_glossary, localize]
+
+permissions:
+  mode: default
+  allowed_tools: [file_read, file_write, grep, glob]
+  denied_tools: [bash]

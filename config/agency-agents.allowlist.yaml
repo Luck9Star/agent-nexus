@@ -1,0 +1,195 @@
+# Agency Agents Allowlist
+# Pinned to a specific commit ref for reproducible imports.
+# Only agents listed here will be imported from the agency-agents repo.
+
+source:
+  repo: https://github.com/msitarzewski/agency-agents
+  ref: 29c2a88fad8ab6e340c7ee6b97d71ee1736920e0
+
+agents:
+  - source_path: engineering/engineering-software-architect.md
+    id: agency.software-architect
+    capabilities:
+      - system_design
+      - architecture_review
+      - tradeoff_analysis
+    output_contract: architecture_plan
+    tools:
+      # network: dependency checking
+      allowed: [file_read, network]
+      denied: [bash, file_write]
+
+  - source_path: engineering/engineering-backend-architect.md
+    id: agency.backend-architect
+    capabilities:
+      - backend_design
+      - api_design
+      - database_design
+    output_contract: architecture_plan
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
+
+  - source_path: engineering/engineering-ai-engineer.md
+    id: agency.ai-engineer
+    capabilities:
+      - ai_engineering
+      - model_integration
+      - prompt_engineering
+    output_contract: technical_report
+    tools:
+      # network: researches models online
+      allowed: [file_read, network]
+      denied: [bash, file_write]
+
+  - source_path: engineering/engineering-code-reviewer.md
+    id: agency.code-reviewer
+    capabilities:
+      - code_review
+      - security_review
+      - maintainability_review
+    output_contract: review_report
+    tools:
+      # network: lint APIs, security databases
+      allowed: [file_read, network]
+      denied: [bash, file_write]
+
+  - source_path: engineering/engineering-devops-automator.md
+    id: agency.devops-automator
+    capabilities:
+      - ci_cd_pipeline
+      - deployment_automation
+      - infrastructure_management
+    output_contract: automation_plan
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
+
+  - source_path: engineering/engineering-frontend-developer.md
+    id: agency.frontend-developer
+    capabilities:
+      - frontend_development
+      - ui_implementation
+      - web_performance
+    output_contract: frontend_plan
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
+
+  - source_path: engineering/engineering-git-workflow-master.md
+    id: agency.git-workflow-master
+    capabilities:
+      - git_operations
+      - branch_management
+      - merge_strategies
+    output_contract: workflow_plan
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
+
+  - source_path: engineering/engineering-security-engineer.md
+    id: agency.security-engineer
+    capabilities:
+      - security_review
+      - threat_modeling
+      - vulnerability_assessment
+    output_contract: risk_report
+    tools:
+      # network: CVE lookups
+      allowed: [file_read, network]
+      denied: [bash, file_write]
+
+  - source_path: engineering/engineering-sre.md
+    id: agency.sre
+    capabilities:
+      - reliability_review
+      - incident_analysis
+      - observability
+    output_contract: reliability_report
+    tools:
+      # network: monitoring/alerting APIs
+      allowed: [file_read, network]
+      denied: [bash, file_write]
+
+  - source_path: testing/testing-test-results-analyzer.md
+    id: agency.test-results-analyzer
+    capabilities:
+      - test_design
+      - test_analysis
+      - coverage_assessment
+    output_contract: test_analysis_report
+    tools:
+      # network: CI result fetching
+      allowed: [file_read, network]
+      denied: [bash, file_write]
+
+  - source_path: engineering/engineering-technical-writer.md
+    id: agency.technical-writer
+    capabilities:
+      - technical_writing
+      - documentation
+      - api_documentation
+    output_contract: documentation
+    tools:
+      # file_write: writes documentation output
+      allowed: [file_read, file_write]
+      denied: [bash, network]
+
+  - source_path: engineering/engineering-codebase-onboarding-engineer.md
+    id: agency.codebase-onboarding
+    capabilities:
+      - codebase_onboarding
+      - code_navigation
+      - architecture_mapping
+    output_contract: onboarding_guide
+    tools:
+      # network: doc fetching
+      allowed: [file_read, network]
+      denied: [bash, file_write]
+
+  - source_path: testing/testing-tool-evaluator.md
+    id: agency.tool-evaluator
+    capabilities:
+      - tool_evaluation
+      - technology_assessment
+      - comparison_analysis
+    output_contract: evaluation_report
+    tools:
+      # network: researches tools online
+      allowed: [file_read, network]
+      denied: [bash, file_write]
+
+  - source_path: specialized/specialized-mcp-builder.md
+    id: agency.mcp-builder
+    capabilities:
+      - mcp_server_construction
+      - tool_integration
+      - protocol_handling
+    output_contract: mcp_server_plan
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
+
+  - source_path: specialized/lsp-index-engineer.md
+    id: agency.lsp-index-engineer
+    capabilities:
+      - lsp_indexing
+      - code_indexing
+      - semantic_analysis
+    output_contract: index_report
+    tools:
+      # network+file_write: index management
+      allowed: [file_read, network, file_write]
+      denied: [bash]
+
+  - source_path: specialized/agents-orchestrator.md
+    id: agency.agents-orchestrator
+    capabilities:
+      - orchestration
+      - task_decomposition
+      - agent_coordination
+    output_contract: orchestration_plan
+    # Pure planning, no file access needed
+    tools:
+      allowed: []
+      denied: [bash, file_write, network]

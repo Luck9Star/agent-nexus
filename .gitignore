@@ -29,6 +29,7 @@ Thumbs.db
 # Testing
 .pytest_cache/
 .coverage
+coverage.json
 htmlcov/
 
 # SQLite
@@ -37,3 +38,25 @@ htmlcov/
 .gitnexus
 .claude/skills/
 AGENTS.md
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Test-generated agent promotion fixtures
+.agents/
+
+# Graphify output (generated)
+graphify-out/
+
+# Claude scheduled tasks (runtime state)
+.claude/scheduled_tasks.json
+.claude/scheduled_tasks.lock
+
+# Serena (IDE tool state)
+.serena/
+
+# Claude harness state
+.claude/harness/
+.claude/harness-state.json

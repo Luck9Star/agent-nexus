@@ -1,0 +1,18 @@
+[composition]
+name = "product-documentation-suite"
+description = "产品文档套件：API Doc + Code Review 并行后 Localization"
+
+[tasks.task1]
+name = "API文档生成"
+agent = "api-doc-generator"
+blocked_by = []
+
+[tasks.task2]
+name = "代码审查"
+agent = "code-reviewer"
+blocked_by = []
+
+[tasks.task3]
+name = "文档本地化"
+agent = "localization-specialist"
+blocked_by = ["task1", "task2"]

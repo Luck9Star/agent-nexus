@@ -1,8 +1,10 @@
 # Agent 体系
 
-> Agent Nexus POC v5 — §7 Agent 体系：两种 Agent 类型、Atomic Agent 组成、Composite Agent 组成、三种运行模式、概念映射表、Agent Package 结构、Agent 目录
->
-> **v5.1 更新**：移除 ClawTeam 依赖，Agent 编排改为自建 OrchestrationDSL。
+> Agent Nexus Design Doc — §7 Agent 体系：两种 Agent 类型、Atomic Agent 组成、Composite Agent 组成、三种运行模式、概念映射表、Agent Package 结构、Agent 目录
+
+> **Status**: ✅ Implemented
+> **Code**: `src/agent_nexus/models/agent.py`, `agents/atomic/`, `agents/composite/`
+> **Tests**: `tests/unit/test_agent_models.py`
 
 ## §7 Agent 体系
 
@@ -45,21 +47,22 @@ Composite Agent = OrchestrationDSL（TOML DAG）
 
 ### 7.4 三种运行模式
 
-| 模式 | 说明 | 用途 |
-|------|------|------|
-| **MCP Standalone** | 直接作为 MCP Server 运行（`uvx agent-name`） | 外部框架（nanobot/Hermes）直接调用 |
-| **Platform Router** | 通过 Platform Router 管理（stdin/stdout JSON-lines） | Web UI、Composite Agent 编排 |
-| **CLI Standalone** | 直接命令行运行（`agent-name run`） | 开发调试、快速测试 |
+| 模式 | TOML/YAML 值 | Python Enum | 说明 | 用途 |
+|------|-------------|-------------|------|------|
+| **MCP Standalone** | `mcp` | `RunMode.MCP_STANDALONE` | 直接作为 MCP Server 运行（`uvx agent-name`） | 外部框架（nanobot/Hermes）直接调用 |
+| **Platform Router** | `local` | `RunMode.PLATFORM_ROUTER` | 通过 Platform Router 管理（stdin/stdout JSON-lines） | Web UI、Composite Agent 编排 |
+| **CLI Standalone** | `cli` | `RunMode.CLI_STANDALONE` | 直接命令行运行（`agent-name run`） | 开发调试、快速测试 |
 
 ```python
 # 双模式入口（main.py）
+# RunMode enum: MCP_STANDALONE="mcp", PLATFORM_ROUTER="local", CLI_STANDALONE="cli"
 def main():
-    mode = os.getenv("AGENT_MODE", "mcp")
+    mode = os.getenv("AGENT_MODE", RunMode.MCP_STANDALONE)
 
-    if mode == "local":
+    if mode == RunMode.PLATFORM_ROUTER:
         # Platform Router 模式：stdin/stdout JSON-lines
         asyncio.run(serve(my_pydantic_agent))
-    elif mode == "cli":
+    elif mode == RunMode.CLI_STANDALONE:
         # CLI Standalone 模式
         asyncio.run(run_cli(my_pydantic_agent))
     else:
@@ -75,7 +78,7 @@ def main():
 | Composite Agent | OrchestrationDSL（TOML DAG） | 声明式编排，Platform Router 执行 |
 | Agent 间通信 | IPC（stdin/stdout JSON-lines） | 管道通信，零文件 IO |
 | 任务管理 | TaskGraph（SQLite + 状态机） | blocked_by 依赖图 + 环检测 |
-| 进程管理 | ProcessManager（asyncio.subprocess） | 健康检查 + 自动重启 |
+| 进程管理 | ProcessManager（asyncio.subprocess + asyncio.Lock） | 健康检查 + 自动重启 + 并发安全 |
 | Token 优化 | DeferredAgentRegistry | Agent 级 Deferred Loading |
 | MCP 暴露 | MCP Gateway | 聚合所有 Agent 为单一 MCP Server |
 
@@ -109,6 +112,8 @@ class AgentPackage:
 
 #### Atomic Agent Package 目录结构
 
+**设计目标**：
+
 ```
 agent-doc-filler/
 ├── agent-manifest.yaml       # 元数据 + 权限 + 模型配置
@@ -130,7 +135,21 @@ agent-doc-filler/
     └── test_agent.py
 ```
 
+**当前实现**（以 doc-filler 为例）：
+
+```
+agents/atomic/doc-filler/
+├── agent-manifest.yaml       # ✅ 已实现
+├── SKILL.md                  # ✅ 已实现
+├── agent.py                  # ✅ 已实现（PydanticAI 核心逻辑）
+└── pyproject.toml            # ✅ 已实现
+```
+
+> tools/、hooks/、mcp_servers/、mcp_adapter.py、local_adapter.py 等目录和文件为设计目标，将在后续迭代中按需添加。当前 Agent 通过 Platform 的 MCP Gateway 和 IPC 基础设施统一管理。
+
 #### Composite Agent Package 目录结构
+
+**设计目标**：
 
 ```
 agent-feature-delivery-pipeline/
@@ -145,6 +164,17 @@ agent-feature-delivery-pipeline/
 └── tests/
     └── test_composition.py
 ```
+
+**当前实现**：
+
+```
+agents/composite/feature-delivery-pipeline/
+├── agent-manifest.yaml       # ✅ 已实现
+├── SKILL.md                  # ✅ 已实现
+└── pyproject.toml            # ✅ 已实现
+```
+
+> composition.toml、hooks/ 等为设计目标。编排由 Platform Router 通过 OrchestrationDSL 统一管理。
 
 #### agent-manifest.yaml 规范
 
@@ -197,7 +227,7 @@ hooks:
 
 ### 7.7 Agent 目录
 
-**Atomic Agents（10）：**
+**Atomic Agents（11，含 1 个自进化晋升的 good-skill）：**
 
 | Name | Domain | Model Tier | Key Differentiator |
 |------|--------|------------|-------------------|
@@ -211,6 +241,7 @@ hooks:
 | Localization Specialist | 文档/内容 - 翻译与适配 | Standard | 术语表管理，语域识别 |
 | Market Intelligence Analyst | 研究/分析 - 市场研究 | Standard | Porter/SWOT/PESTEL 方法论 |
 | Test Suite Generator | 软件工程 - 测试 | Standard | 每范式测试策略 |
+| Good Skill * | 通用 | Standard | 自进化自动晋升示例（from sk-1, effective_rate=0.9）|
 
 **Composite Agents（5）：**
 
@@ -249,6 +280,44 @@ max_turns: 5
 ```
 
 角色类型通过 §7.8 的声明式规格 `role` 字段指定。角色预设的工具集可作为白名单起点，开发者可通过 `tools` 字段进一步限制或扩展。
+
+### 7.7.1 Agent 封装厚度指南
+
+> **设计原则**: Agent 的封装厚度应匹配其领域复杂度。过度封装增加维护成本，封装不足则丢失领域价值。
+
+**封装厚度判定矩阵：**
+
+| 封装维度 | 薄封装（Runtime + Skill 即可） | 厚封装（完整 Atomic Agent） |
+|---------|------------------------------|---------------------------|
+| **流程** | 单步调用（prompt → result） | 多阶段管道（analyze → check → review） |
+| **领域知识** | LLM 自身能力即可（如 SWOT 分析） | 需要规则库/标准库（如 OWASP Top 10、WCAG 2.2） |
+| **分发需求** | 仅本机使用 | 需要跨团队安装、版本管理 |
+| **编排需求** | 独立使用 | 被 Composite Agent 编排 |
+| **进化需求** | 无 | 参与自进化（FIX/DERIVED/CAPTURED/Promotion） |
+
+**当前 Agent 封装厚度评估：**
+
+| Agent | 封装厚度 | 理由 |
+|-------|---------|------|
+| code-reviewer | 厚 | 三阶段管道 + 多语言规则库 + 评分系统 |
+| doc-filler | 厚 | 两阶段管道 + 样式继承链 + 模板领域知识 |
+| requirements-analyzer | 厚 | 多轮对话追踪策略 + 交互流程控制 |
+| test-suite-generator | 中厚 | AST 解析 + 每范式测试策略 |
+| security-scanner | 中厚 | OWASP Top 10 模式匹配 + 规则引擎 |
+| accessibility-auditor | 中厚 | WCAG 2.2 AA 87 条标准库 |
+| contract-analyzer | 中 | 条款依赖理解 + 多法域合规（核心是 LLM 能力） |
+| localization-specialist | 薄 | 术语表管理 + 语域识别（核心是 API 翻译调用） |
+| api-doc-generator | 中 | OpenAPI 3.1 标准生成 |
+| market-intelligence-analyst | 薄 | Porter/SWOT/PESTEL 框架化方法论（LLM 本身具备） |
+| good-skill | 薄 | 自进化晋升产物，任务简单 |
+
+**薄封装 Agent 的替代路径**：
+
+对于领域逻辑较薄的 Agent（如 market-intelligence-analyst），可通过以下方式按需生成而非预封装：
+
+1. **Skill + Runtime 直出**：通过 Skill Evolution 的 CAPTURED 模式，从成功的 Runtime 交互中提取 Skill
+2. **动态 Agent**：Runtime + SKILL.md 即可实现"一个 prompt 的专业化"，无需完整的 Agent Package 结构
+3. **自进化晋升**：good-skill 已验证了从 Skill → Agent 的自动晋升路径，薄封装 Agent 可以按需进化而来
 
 ### 7.8 Agent Definition（声明式规格）
 

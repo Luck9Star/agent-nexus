@@ -1,0 +1,19 @@
+name: cicd-quality-gate
+version: 1.0.0
+type: composite
+description: CI/CD 多模型并行质量关卡，集成安全扫描、代码审查和测试
+
+permissions:
+  mode: default
+  allowed_tools: [file_read, file_write, grep, glob]
+  denied_tools: [bash]
+
+model_config:
+  recommended: "standard"
+  fallback: "lightweight"
+
+dependencies:
+  atomic_agents:
+    - security-scanner
+    - code-reviewer
+    - test-suite-generator

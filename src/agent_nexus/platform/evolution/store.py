@@ -1,0 +1,1394 @@
+"""EvolutionStore -- SQLite persistence for skill records and evolution data.
+
+Architecture mirrors TaskGraph: WAL mode, connection-per-operation, no
+shared state between calls.  All write operations are atomic within a
+single transaction.
+
+Tables:
+    skill_records          -- Skill identity + lineage + quality counters
+    skill_lineage_parents  -- DAG edges (many-to-many)
+    execution_analyses     -- Post-task analysis (one per task per agent)
+    skill_judgments        -- Per-skill assessment within an analysis
+    context_budget_log     -- Token usage / compaction observability
+    agent_records          -- Composite Agent evolution tracking (Layer 2)
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sqlite3
+import uuid
+from collections.abc import Generator
+from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from agent_nexus.models.evolution import (
+    EvolutionMetrics,
+    SkillLineage,
+    SkillOrigin,
+    SkillRecord,
+)
+from agent_nexus.platform.utils import (
+    now_iso as _now_iso,
+)
+from agent_nexus.platform.utils import (
+    sqlite_connection,
+)
+
+if TYPE_CHECKING:
+    from agent_nexus.platform.evolution.evolver import EvolveResult
+
+
+logger = logging.getLogger(__name__)
+
+
+_SQL_CHUNK_SIZE = 500
+"""Max variables per IN clause — stays well below SQLite's SQLITE_MAX_VARIABLE_NUMBER (999)."""
+
+_SKILL_COLUMNS = (
+    "id, name, version, lineage_origin, lineage_generation, "
+    "lineage_content_diff, lineage_content_snapshot, directory, "
+    "is_active, total_selections, total_applied, total_completions, "
+    "total_fallbacks, created_at, updated_at"
+)
+"""Column list for skill_records SELECT queries — single source of truth."""
+
+
+def _chunked_in_fetchall(
+    conn: sqlite3.Connection,
+    sql_template: str,
+    values: list[str] | tuple[str, ...],
+    extra_params: tuple[Any, ...] = (),
+) -> list[tuple[Any, ...]]:
+    """Execute *sql_template* in chunks, bypassing the SQLite variable limit.
+
+    *sql_template* must contain exactly one ``{IN}`` placeholder (curly-braced
+    literal ``IN``) marking where the ``?, ?, ...`` list should be inserted.
+    *extra_params* are appended after the IN values in every chunk execution.
+
+    Returns the concatenated ``fetchall()`` results from all chunks.
+    """
+    vals = list(values)
+    if not vals:
+        return []
+    all_rows: list[tuple[Any, ...]] = []
+    for i in range(0, len(vals), _SQL_CHUNK_SIZE):
+        chunk = vals[i : i + _SQL_CHUNK_SIZE]
+        ph = ",".join("?" * len(chunk))
+        sql = sql_template.replace("{IN}", ph)
+        all_rows.extend(conn.execute(sql, tuple(chunk) + extra_params).fetchall())
+    return all_rows
+
+_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS skill_records (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL DEFAULT '1.0.0',
+    lineage_origin TEXT NOT NULL DEFAULT 'imported',
+    lineage_generation INTEGER NOT NULL DEFAULT 0,
+    lineage_content_diff TEXT,
+    lineage_content_snapshot TEXT,
+    directory TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    total_selections INTEGER NOT NULL DEFAULT 0,
+    total_applied INTEGER NOT NULL DEFAULT 0,
+    total_completions INTEGER NOT NULL DEFAULT 0,
+    total_fallbacks INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sr_active ON skill_records(is_active);
+CREATE INDEX IF NOT EXISTS idx_sr_name ON skill_records(name);
+CREATE INDEX IF NOT EXISTS idx_sr_updated ON skill_records(updated_at);
+
+CREATE TABLE IF NOT EXISTS skill_lineage_parents (
+    skill_id TEXT NOT NULL,
+    parent_id TEXT NOT NULL,
+    PRIMARY KEY (skill_id, parent_id),
+    FOREIGN KEY (skill_id) REFERENCES skill_records(id),
+    FOREIGN KEY (parent_id) REFERENCES skill_records(id)
+);
+CREATE INDEX IF NOT EXISTS idx_lp_parent ON skill_lineage_parents(parent_id);
+
+CREATE TABLE IF NOT EXISTS execution_analyses (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    agent_name TEXT NOT NULL,
+    analysis TEXT NOT NULL,
+    evolution_suggestions TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ea_task ON execution_analyses(task_id);
+
+CREATE TABLE IF NOT EXISTS skill_judgments (
+    id TEXT PRIMARY KEY,
+    analysis_id TEXT NOT NULL,
+    skill_id TEXT NOT NULL,
+    selected INTEGER NOT NULL DEFAULT 0,
+    applied INTEGER NOT NULL DEFAULT 0,
+    completed INTEGER NOT NULL DEFAULT 0,
+    fell_back INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (analysis_id) REFERENCES execution_analyses(id),
+    FOREIGN KEY (skill_id) REFERENCES skill_records(id)
+);
+CREATE INDEX IF NOT EXISTS idx_sj_skill ON skill_judgments(skill_id);
+CREATE INDEX IF NOT EXISTS idx_sj_analysis ON skill_judgments(analysis_id);
+
+CREATE TABLE IF NOT EXISTS context_budget_log (
+    id TEXT PRIMARY KEY,
+    agent_name TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    tokens_before INTEGER,
+    tokens_after INTEGER,
+    details TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cbl_agent ON context_budget_log(agent_name);
+CREATE INDEX IF NOT EXISTS idx_cbl_agent_created
+    ON context_budget_log(agent_name, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_records (
+    agent_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'atomic',
+    skill_ids TEXT DEFAULT '[]',
+    orchestration_toml TEXT,
+    effective_rate REAL DEFAULT 0.0,
+    avg_steps REAL,
+    avg_duration_ms REAL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ar_active ON agent_records(is_active);
+CREATE INDEX IF NOT EXISTS idx_ar_name ON agent_records(name);
+"""
+
+
+class EvolutionStore:
+    """SQLite-backed persistence for the Self-Evolution Engine.
+
+    Uses WAL mode for concurrent read/write.  Connection-per-operation
+    pattern (same as TaskGraph) for async compatibility.
+
+    For ``:memory:`` databases, a single persistent connection is kept
+    alive because ``sqlite3.connect(":memory:")`` creates a separate
+    database each time.
+    """
+
+    def __init__(self, db_path: Path) -> None:
+        self._db_path = db_path
+        self._is_memory = str(db_path) == ":memory:"
+        self._memory_conn: sqlite3.Connection | None = None
+        self._init_db()
+
+    def close(self) -> None:
+        """Release persistent resources.
+
+        Closes the in-memory connection if one is held.  File-based
+        connections are already closed per-operation by ``_conn()``.
+        """
+        if self._memory_conn is not None:
+            try:
+                self._memory_conn.close()
+            except Exception:
+                logger.warning("Failed to close evolution store connection", exc_info=True)
+            self._memory_conn = None
+
+    def __del__(self) -> None:
+        # Safety net: close connection if close() was never called.
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def _init_db(self) -> None:
+        with self._conn() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            for stmt in _SCHEMA_SQL.split(";"):
+                stmt = stmt.strip()
+                if stmt:
+                    conn.execute(stmt)
+
+    @contextmanager
+    def _conn(
+        self, *, immediate: bool = False
+    ) -> Generator[sqlite3.Connection, None, None]:
+        """Context manager for DB connections.
+
+        Delegates to :func:`sqlite_connection` for standardised setup,
+        teardown, and transaction handling.
+        """
+        # Lazy-init the in-memory connection on first use.
+        if self._is_memory and self._memory_conn is None:
+            self._memory_conn = sqlite3.connect(":memory:")
+            self._memory_conn.execute("PRAGMA foreign_keys=ON")
+
+        with sqlite_connection(
+            self._db_path,
+            immediate=immediate,
+            persistent_conn=self._memory_conn,
+        ) as conn:
+            yield conn
+
+    # ------------------------------------------------------------------
+    # Skill Record CRUD
+    # ------------------------------------------------------------------
+
+    def save_skill_record(self, record: SkillRecord) -> None:
+        """Insert a skill record, or update its metadata on ID conflict.
+
+        On conflict (same ``id``), metadata fields (name, version,
+        lineage, directory, is_active) are updated from the new record,
+        but **quality counters** (total_selections, total_applied,
+        total_completions, total_fallbacks) are **preserved** — they
+        are managed atomically via :meth:`increment_counters` and
+        :meth:`record_analysis`.
+        """
+        with self._conn(immediate=True) as conn:
+            lin = record.lineage
+            snapshot_json = json.dumps(
+                lin.content_snapshot or {}, ensure_ascii=False
+            )
+            diff_json = lin.content_diff or ""
+            conn.execute(
+                """
+                INSERT INTO skill_records (
+                    id, name, version,
+                    lineage_origin, lineage_generation,
+                    lineage_content_diff, lineage_content_snapshot,
+                    directory, is_active,
+                    total_selections, total_applied,
+                    total_completions, total_fallbacks,
+                    created_at, updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    version = excluded.version,
+                    lineage_origin = excluded.lineage_origin,
+                    lineage_generation = excluded.lineage_generation,
+                    lineage_content_diff = excluded.lineage_content_diff,
+                    lineage_content_snapshot = excluded.lineage_content_snapshot,
+                    directory = excluded.directory,
+                    is_active = is_active,
+                    total_selections = total_selections,
+                    total_applied = total_applied,
+                    total_completions = total_completions,
+                    total_fallbacks = total_fallbacks,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    record.id,
+                    record.name,
+                    record.version,
+                    lin.origin.value,
+                    lin.generation,
+                    diff_json,
+                    snapshot_json,
+                    record.directory,
+                    int(record.is_active),
+                    record.total_selections,
+                    record.total_applied,
+                    record.total_completions,
+                    record.total_fallbacks,
+                    record.first_seen.isoformat(),
+                    record.last_updated.isoformat(),
+                ),
+            )
+            # Sync lineage parents
+            conn.execute(
+                "DELETE FROM skill_lineage_parents WHERE skill_id = ?",
+                (record.id,),
+            )
+            if lin.parent_skill_ids:
+                conn.executemany(
+                    "INSERT INTO skill_lineage_parents (skill_id, parent_id) "
+                    "VALUES (?, ?)",
+                    [(record.id, pid) for pid in lin.parent_skill_ids],
+                )
+
+    def get_skill_record(self, skill_id: str) -> SkillRecord | None:
+        """Load a single skill record by ID."""
+        with self._conn() as conn:
+            row = conn.execute(
+                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE id = ?",
+                (skill_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_record(conn, row)
+
+    def get_skill_records_batch(
+        self, skill_ids: list[str]
+    ) -> dict[str, SkillRecord]:
+        """Load multiple skill records by ID in a single query.
+
+        Returns a dict mapping each found ID to its SkillRecord.
+        IDs not found in the database are simply absent from the result.
+        """
+        if not skill_ids:
+            return {}
+        with self._conn() as conn:
+            rows = _chunked_in_fetchall(
+                conn,
+                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE id IN ({{IN}})",
+                skill_ids,
+            )
+            found_ids = {row[0] for row in rows}
+            parents = self._batch_load_parents(conn, found_ids)
+            result: dict[str, SkillRecord] = {}
+            for row in rows:
+                record = self._row_to_record(conn, row, parents)
+                result[record.id] = record
+            return result
+
+    def get_active_skills(
+        self, *, limit: int | None = None, offset: int = 0,
+    ) -> list[SkillRecord]:
+        """Load active skill records, optionally paginated.
+
+        Args:
+            limit: Maximum number of records to return.  ``None`` returns all.
+            offset: Number of records to skip (only used when *limit* is set).
+        """
+        with self._conn() as conn:
+            sql = f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE is_active = 1"
+            params: list[Any] = []
+            if limit is not None:
+                sql += " LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
+            rows = conn.execute(sql, params if params else ()).fetchall()
+            active_ids = {row[0] for row in rows}
+            parents = self._batch_load_parents(conn, active_ids)
+            return self._rows_to_records(conn, rows, parents)
+
+    def get_all_skills(
+        self, *, limit: int | None = None, offset: int = 0,
+    ) -> list[SkillRecord]:
+        """Load all skill records (including inactive), optionally paginated.
+
+        Args:
+            limit: Maximum number of records to return.  ``None`` returns all.
+            offset: Number of records to skip (only used when *limit* is set).
+        """
+        with self._conn() as conn:
+            sql = f"SELECT {_SKILL_COLUMNS} FROM skill_records"
+            params: list[Any] = []
+            if limit is not None:
+                sql += " LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
+            rows = conn.execute(sql, params if params else ()).fetchall()
+            all_ids = {row[0] for row in rows}
+            parents = self._batch_load_parents(conn, all_ids)
+            return self._rows_to_records(conn, rows, parents)
+
+    def deactivate_skill(self, skill_id: str) -> bool:
+        """Set is_active = False for a skill record."""
+        with self._conn(immediate=True) as conn:
+            cur = conn.execute(
+                "UPDATE skill_records SET is_active = 0, updated_at = ? "
+                "WHERE id = ?",
+                (_now_iso(), skill_id),
+            )
+            return cur.rowcount > 0
+
+    def get_versions(self, name: str) -> list[SkillRecord]:
+        """Load all versions of a named skill, sorted by generation."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE name = ? "
+                "ORDER BY lineage_generation ASC",
+                (name,),
+            ).fetchall()
+            version_ids = {row[0] for row in rows}
+            parents = self._batch_load_parents(conn, version_ids)
+            return self._rows_to_records(conn, rows, parents)
+
+    # ------------------------------------------------------------------
+    # Atomic counter increments
+
+    @staticmethod
+    def _validate_counter_invariants(
+        *, selected: bool, applied: bool, completed: bool, fell_back: bool,
+    ) -> None:
+        """Validate counter prerequisite invariants.
+
+        Each flag requires its prerequisite:
+        applied -> selected, completed -> applied, fell_back -> selected.
+        """
+        if applied and not selected:
+            raise ValueError("applied requires selected=True")
+        if completed and not applied:
+            raise ValueError("completed requires applied=True")
+        if fell_back and not selected:
+            raise ValueError("fell_back requires selected=True")
+
+    def increment_counters(
+        self,
+        skill_id: str,
+        *,
+        selected: bool = False,
+        applied: bool = False,
+        completed: bool = False,
+        fell_back: bool = False,
+    ) -> None:
+        """Atomically increment quality counters for a skill.
+
+        Called within the same transaction as judgment insert.
+        """
+        self._validate_counter_invariants(
+            selected=selected, applied=applied,
+            completed=completed, fell_back=fell_back,
+        )
+
+        sets: list[str] = []
+        params: list[str] = []
+        if selected:
+            sets.append("total_selections = total_selections + 1")
+        if applied:
+            sets.append("total_applied = total_applied + 1")
+        if completed:
+            sets.append("total_completions = total_completions + 1")
+        if fell_back:
+            sets.append("total_fallbacks = total_fallbacks + 1")
+
+        if not sets:
+            return
+
+        with self._conn(immediate=True) as conn:
+            sets.append("updated_at = ?")
+            params.append(_now_iso())
+            params.append(skill_id)
+
+            cur = conn.execute(
+                f"UPDATE skill_records SET {', '.join(sets)} WHERE id = ?",
+                tuple(params),
+            )
+            if cur.rowcount == 0:
+                logger.warning(
+                    "increment_counters: skill_id %s not found — counters not updated",
+                    skill_id,
+                )
+
+    # ------------------------------------------------------------------
+    # Analysis + Judgments (atomic)
+    # ------------------------------------------------------------------
+
+    def record_analysis(
+        self,
+        task_id: str,
+        agent_name: str,
+        analysis_text: str,
+        evolution_suggestions: list[dict[str, Any]] | None = None,
+        judgments: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Insert analysis + judgments + update counters in one transaction.
+
+        Args:
+            task_id: The task being analyzed.
+            agent_name: Agent that executed the task.
+            analysis_text: LLM analysis text.
+            evolution_suggestions: List of evolution suggestion dicts.
+            judgments: List of judgment dicts with keys:
+                skill_id, selected, applied, completed, fell_back.
+
+        Returns:
+            The analysis ID.
+        """
+        analysis_id = str(uuid.uuid4())
+        now = _now_iso()
+        suggestions_json = json.dumps(
+            evolution_suggestions or [], ensure_ascii=False
+        )
+
+        with self._conn(immediate=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO execution_analyses (
+                    id, task_id, agent_name, analysis,
+                    evolution_suggestions, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    analysis_id,
+                    task_id,
+                    agent_name,
+                    analysis_text,
+                    suggestions_json,
+                    now,
+                ),
+            )
+
+            judgment_rows = [
+                (str(uuid.uuid4()), analysis_id, j.get("skill_id"),
+                 int(j.get("selected", False)), int(j.get("applied", False)),
+                 int(j.get("completed", False)), int(j.get("fell_back", False)))
+                for j in (judgments or []) if j.get("skill_id")
+            ]
+            if judgment_rows:
+                conn.executemany(
+                    "INSERT INTO skill_judgments (id, analysis_id, skill_id, "
+                    "selected, applied, completed, fell_back) VALUES (?,?,?,?,?,?,?)",
+                    judgment_rows,
+                )
+
+            # Validate counter invariants for all judgments, then batch
+            # increment counters grouped by skill_id to avoid per-judgment
+            # UPDATE statements.
+            deltas: dict[str, dict[str, int]] = {}
+            for j in judgments or []:
+                sid = j.get("skill_id")
+                if not sid:
+                    continue
+                selected = bool(j.get("selected", False))
+                applied = bool(j.get("applied", False))
+                completed = bool(j.get("completed", False))
+                fell_back = bool(j.get("fell_back", False))
+
+                self._validate_counter_invariants(
+                    selected=selected, applied=applied,
+                    completed=completed, fell_back=fell_back,
+                )
+
+                d = deltas.setdefault(sid, {"sel": 0, "app": 0, "comp": 0, "fb": 0})
+                if selected:
+                    d["sel"] += 1
+                if applied:
+                    d["app"] += 1
+                if completed:
+                    d["comp"] += 1
+                if fell_back:
+                    d["fb"] += 1
+
+            for sid, d in deltas.items():
+                conn.execute(
+                    "UPDATE skill_records SET "
+                    "total_selections = total_selections + ?, "
+                    "total_applied = total_applied + ?, "
+                    "total_completions = total_completions + ?, "
+                    "total_fallbacks = total_fallbacks + ?, "
+                    "updated_at = ? WHERE id = ?",
+                    (d["sel"], d["app"], d["comp"], d["fb"], now, sid),
+                )
+
+        return analysis_id
+
+    def get_analyses_for_task(
+        self, task_id: str
+    ) -> list[dict[str, Any]]:
+        """Load all analyses for a given task.
+
+        Fetches all analysis rows first, then batch-loads judgments in
+        a single SQL query to avoid N+1 per-row judgment lookups.
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, task_id, agent_name, analysis, "
+                "evolution_suggestions, created_at "
+                "FROM execution_analyses WHERE task_id = ?",
+                (task_id,),
+            ).fetchall()
+            if not rows:
+                return []
+
+            # Collect analysis IDs for batch judgment query
+            analysis_ids = [r[0] for r in rows]
+
+            # Single query for all judgments across these analyses
+            j_rows = _chunked_in_fetchall(
+                conn,
+                "SELECT id, analysis_id, skill_id, selected, applied, "
+                "completed, fell_back FROM skill_judgments "
+                "WHERE analysis_id IN ({IN})",
+                analysis_ids,
+            )
+
+            # Group judgments by analysis_id
+            judgments_by_analysis: dict[str, list[dict[str, Any]]] = {}
+            for r in j_rows:
+                aid = r[1]
+                judgments_by_analysis.setdefault(aid, []).append(
+                    self._judgment_row_to_dict(r)
+                )
+
+            # Build result dicts without per-row queries
+            results: list[dict[str, Any]] = []
+            for r in rows:
+                results.append({
+                    "id": r[0],
+                    "task_id": r[1],
+                    "agent_name": r[2],
+                    "analysis": r[3],
+                    "evolution_suggestions": json.loads(r[4]) if r[4] else [],
+                    "created_at": r[5],
+                    "judgments": judgments_by_analysis.get(r[0], []),
+                })
+            return results
+
+    def get_judgments_for_skill(
+        self, skill_id: str, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Load recent judgments for a skill."""
+        if limit < 1:
+            limit = 1
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, analysis_id, skill_id, selected, applied, "
+                "completed, fell_back FROM skill_judgments "
+                "WHERE skill_id = ? ORDER BY rowid DESC LIMIT ?",
+                (skill_id, limit),
+            ).fetchall()
+            return [
+                self._judgment_row_to_dict(r)
+                for r in rows
+            ]
+
+    def get_judgments_batch(
+        self, skill_ids: set[str], limit_per_skill: int = 50
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Load recent judgments for multiple skills in one query.
+
+        Returns ``{skill_id: [judgment_dict, ...]}``.
+
+        Uses a window function to guarantee *each* skill gets up to
+        *limit_per_skill* rows, avoiding the uneven truncation that a
+        plain global LIMIT would cause.
+        """
+        if not skill_ids:
+            return {}
+        if limit_per_skill < 1:
+            limit_per_skill = 1
+        with self._conn() as conn:
+            rows = _chunked_in_fetchall(
+                conn,
+                "SELECT id, analysis_id, skill_id, selected, applied, "
+                "completed, fell_back FROM ("
+                "SELECT *, ROW_NUMBER() OVER ("
+                "PARTITION BY skill_id ORDER BY rowid DESC"
+                ") AS rn FROM skill_judgments "
+                "WHERE skill_id IN ({IN})"
+                ") WHERE rn <= ?",
+                list(skill_ids),
+                extra_params=(limit_per_skill,),
+            )
+        result: dict[str, list[dict[str, Any]]] = {sid: [] for sid in skill_ids}
+        for r in rows:
+            sid = r[2]
+            result[sid].append(self._judgment_row_to_dict(r))
+        return result
+
+    # ------------------------------------------------------------------
+    # Context Budget Log
+    # ------------------------------------------------------------------
+
+    def log_budget_event(
+        self,
+        agent_name: str,
+        event_type: str,
+        tokens_before: int | None = None,
+        tokens_after: int | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> str:
+        """Record a context budget event."""
+        log_id = str(uuid.uuid4())
+        details_json = json.dumps(details or {}, ensure_ascii=False)
+        with self._conn(immediate=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO context_budget_log (
+                    id, agent_name, event_type,
+                    tokens_before, tokens_after, details, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    log_id,
+                    agent_name,
+                    event_type,
+                    tokens_before,
+                    tokens_after,
+                    details_json,
+                    _now_iso(),
+                ),
+            )
+        return log_id
+
+    def get_budget_log(
+        self, agent_name: str, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Load recent budget log entries for an agent."""
+        if limit < 1:
+            limit = 1
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, agent_name, event_type, tokens_before, "
+                "tokens_after, details, created_at "
+                "FROM context_budget_log WHERE agent_name = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (agent_name, limit),
+            ).fetchall()
+            return [
+                {
+                    "id": r[0],
+                    "agent_name": r[1],
+                    "event_type": r[2],
+                    "tokens_before": r[3],
+                    "tokens_after": r[4],
+                    "details": r[5],
+                    "created_at": r[6],
+                }
+                for r in rows
+            ]
+
+    # ------------------------------------------------------------------
+    # Evolution (new version = new record, deactivate old)
+    # ------------------------------------------------------------------
+
+    def evolve_skill(
+        self,
+        new_record: SkillRecord,
+        parent_skill_ids: list[str],
+    ) -> EvolveResult:
+        """Atomic evolution: insert new version, deactivate old for FIX.
+
+        For FIX: parent is deactivated (same name, same directory).
+        For DERIVED: parent stays active (new name, new directory).
+        For CAPTURED: no parents (parent_skill_ids empty).
+        """
+        from agent_nexus.platform.evolution.evolver import EvolveResult
+
+        try:
+            with self._conn(immediate=True) as conn:
+                # For FIX: deactivate parent(s) and guard against
+                # duplicate-active — two FIX evolutions for the same skill
+                # name should not leave two active records.
+                if new_record.lineage.origin == SkillOrigin.FIXED:
+                    # Pre-validate ALL parents exist before deactivating any.
+                    # Without this, a partial deactivation + return would be
+                    # committed by the _conn context manager on normal exit,
+                    # leaving some parents deactivated with no replacement.
+                    if parent_skill_ids:
+                        found = {
+                            r[0] for r in _chunked_in_fetchall(
+                                conn,
+                                "SELECT id FROM skill_records WHERE id IN ({IN})",
+                                parent_skill_ids,
+                            )
+                        }
+                        missing = set(parent_skill_ids) - found
+                        if missing:
+                            raise ValueError(
+                                f"Parent skill_id(s) not found: {missing} — "
+                                f"cannot deactivate for FIX evolution"
+                            )
+
+                    # All checks passed — deactivate parents atomically.
+                    if parent_skill_ids:
+                        now = _now_iso()
+                        for ci in range(0, len(parent_skill_ids), _SQL_CHUNK_SIZE):
+                            chunk = parent_skill_ids[ci : ci + _SQL_CHUNK_SIZE]
+                            ph = ",".join("?" * len(chunk))
+                            conn.execute(
+                                f"UPDATE skill_records SET is_active = 0, updated_at = ? "
+                                f"WHERE id IN ({ph})",
+                                (now, *chunk),
+                            )
+
+                    # Guard: after deactivating parents, if another active
+                    # skill with the same name still exists (from a
+                    # concurrent FIX evolution that committed between our
+                    # read and this write), abort to prevent duplicate-active
+                    # records.  We check AFTER deactivation so that parent
+                    # records (same name, different ID) are excluded.
+                    dup = conn.execute(
+                        "SELECT id FROM skill_records "
+                        "WHERE name = ? AND is_active = 1 AND id != ?",
+                        (new_record.name, new_record.id),
+                    ).fetchone()
+                    if dup is not None:
+                        raise ValueError(
+                            f"Duplicate active skill: '{new_record.name}' "
+                            f"(id={dup[0]}) already active"
+                        )
+
+                # Insert new record — evolved skills always have unique IDs
+                # (uuid-suffixed), so plain INSERT is sufficient.
+                lin = new_record.lineage
+                snapshot_json = json.dumps(
+                    lin.content_snapshot or {}, ensure_ascii=False
+                )
+                conn.execute(
+                    """
+                    INSERT INTO skill_records (
+                        id, name, version,
+                        lineage_origin, lineage_generation,
+                        lineage_content_diff, lineage_content_snapshot,
+                        directory, is_active,
+                        total_selections, total_applied,
+                        total_completions, total_fallbacks,
+                        created_at, updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        new_record.id,
+                        new_record.name,
+                        new_record.version,
+                        lin.origin.value,
+                        lin.generation,
+                        lin.content_diff or "",
+                        snapshot_json,
+                        new_record.directory,
+                        int(new_record.is_active),
+                        new_record.total_selections,
+                        new_record.total_applied,
+                        new_record.total_completions,
+                        new_record.total_fallbacks,
+                        new_record.first_seen.isoformat(),
+                        new_record.last_updated.isoformat(),
+                    ),
+                )
+
+                # Insert lineage parents
+                if parent_skill_ids:
+                    conn.executemany(
+                        "INSERT INTO skill_lineage_parents "
+                        "(skill_id, parent_id) VALUES (?, ?)",
+                        [(new_record.id, pid) for pid in parent_skill_ids],
+                    )
+
+        except sqlite3.IntegrityError:
+            logger.warning(
+                "Skill ID collision during evolution: %s", new_record.id
+            )
+            return EvolveResult(
+                success=False,
+                error=f"Skill ID collision: {new_record.id}",
+            )
+        except ValueError as exc:
+            # Validation failures raised inside _conn context — the
+            # context manager rolls back on exception, so partial
+            # deactivations are undone.
+            logger.warning("evolve_skill validation failed: %s", exc)
+            return EvolveResult(success=False, error=str(exc))
+        except sqlite3.Error as exc:
+            logger.error(
+                "Database error during skill evolution: %s", exc, exc_info=True
+            )
+            return EvolveResult(
+                success=False,
+                error=f"Database error during evolution: {exc}",
+            )
+
+        return EvolveResult(success=True, new_record=new_record)
+
+    # ------------------------------------------------------------------
+    # Lineage queries
+    # ------------------------------------------------------------------
+
+    def get_ancestry_batch(
+        self, skill_ids: list[str], max_depth: int = 10
+    ) -> dict[str, list[SkillRecord]]:
+        """Walk up lineage trees for multiple skills in a single connection.
+
+        Returns ``{skill_id: [ancestors_oldest_first]}``.
+        """
+        if not skill_ids:
+            return {}
+        with self._conn() as conn:
+            # Iterative BFS: load parents only for known frontier IDs
+            # instead of loading the entire lineage table.
+            visited_per_skill: dict[str, set[str]] = {sid: set() for sid in skill_ids}
+            frontiers: dict[str, list[str]] = {sid: [sid] for sid in skill_ids}
+
+            for _ in range(max_depth):
+                # Collect all IDs we need parents for this round
+                all_frontier_ids: set[str] = set()
+                for sid in skill_ids:
+                    all_frontier_ids.update(frontiers[sid])
+
+                if not all_frontier_ids:
+                    break
+
+                # Load parents only for the current frontier
+                round_parents = self._batch_load_parents(conn, all_frontier_ids)
+
+                next_frontiers: dict[str, list[str]] = {sid: [] for sid in skill_ids}
+                any_progress = False
+                for sid in skill_ids:
+                    for fid in frontiers[sid]:
+                        for pid in round_parents.get(fid, []):
+                            if pid not in visited_per_skill[sid]:
+                                visited_per_skill[sid].add(pid)
+                                next_frontiers[sid].append(pid)
+                                any_progress = True
+                frontiers = next_frontiers
+                if not any_progress:
+                    break
+
+            # Collect all ancestor IDs and batch-load in one query
+            all_ancestor_ids: set[str] = set()
+            for s in visited_per_skill.values():
+                all_ancestor_ids.update(s)
+
+            if not all_ancestor_ids:
+                return {sid: [] for sid in skill_ids}
+
+            rows = _chunked_in_fetchall(
+                conn,
+                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE id IN ({{IN}})",
+                list(all_ancestor_ids),
+            )
+
+            ancestors_ids = {r[0] for r in rows}
+            parents = self._batch_load_parents(conn, ancestors_ids)
+            records_by_id: dict[str, SkillRecord] = {}
+            for row in rows:
+                record = self._row_to_record(conn, row, parents)
+                records_by_id[record.id] = record
+
+            result: dict[str, list[SkillRecord]] = {}
+            for sid in skill_ids:
+                ancestors = [
+                    records_by_id[aid]
+                    for aid in visited_per_skill[sid]
+                    if aid in records_by_id
+                ]
+                ancestors.sort(key=lambda r: r.lineage.generation)
+                result[sid] = ancestors
+            return result
+
+    def get_ancestry(
+        self, skill_id: str, max_depth: int = 10
+    ) -> list[SkillRecord]:
+        """Walk up the lineage tree, returns ancestors oldest-first."""
+        with self._conn() as conn:
+            visited: set[str] = set()
+            frontier = [skill_id]
+
+            # Phase 1: BFS — load parents only for the current frontier
+            # each round, instead of the entire lineage table.
+            for _ in range(max_depth):
+                if not frontier:
+                    break
+                round_parents = self._batch_load_parents(conn, set(frontier))
+                next_frontier: list[str] = []
+                for sid in frontier:
+                    for pid in round_parents.get(sid, []):
+                        if pid in visited:
+                            continue
+                        visited.add(pid)
+                        next_frontier.append(pid)
+                frontier = next_frontier
+
+            if not visited:
+                return []
+
+            # Phase 2: Batch-load all ancestor records in one query
+            rows = _chunked_in_fetchall(
+                conn,
+                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE id IN ({{IN}})",
+                list(visited),
+            )
+
+            ancestor_ids = {r[0] for r in rows}
+            parents = self._batch_load_parents(conn, ancestor_ids)
+            ancestors: list[SkillRecord] = []
+            for row in rows:
+                ancestors.append(self._row_to_record(conn, row, parents))
+
+            ancestors.sort(key=lambda r: r.lineage.generation)
+            return ancestors
+
+    def get_children(self, parent_id: str) -> list[str]:
+        """Find skill IDs derived from the given parent."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT skill_id FROM skill_lineage_parents "
+                "WHERE parent_id = ?",
+                (parent_id,),
+            ).fetchall()
+            return [r[0] for r in rows]
+
+    # ------------------------------------------------------------------
+    # Aggregation
+    # ------------------------------------------------------------------
+
+    def get_metrics(self, agent_name: str | None = None) -> EvolutionMetrics:
+        """Aggregate quality metrics across active skills.
+
+        If agent_name is given, filter by skills belonging to that agent's
+        directory pattern.  Otherwise aggregate all active skills.
+        """
+        with self._conn() as conn:
+            if agent_name:
+                # Escape LIKE wildcards to prevent unintended matches
+                escaped = agent_name.replace("%", "\\%").replace("_", "\\_")
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(total_selections), 0), "
+                    "COALESCE(SUM(total_applied), 0), "
+                    "COALESCE(SUM(total_completions), 0), "
+                    "COALESCE(SUM(total_fallbacks), 0) "
+                    "FROM skill_records WHERE is_active = 1 "
+                    "AND (directory LIKE ? ESCAPE '\\' OR directory = ?)",
+                    (f"agents/{escaped}/%", f"agents/{escaped}"),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(total_selections), 0), "
+                    "COALESCE(SUM(total_applied), 0), "
+                    "COALESCE(SUM(total_completions), 0), "
+                    "COALESCE(SUM(total_fallbacks), 0) "
+                    "FROM skill_records WHERE is_active = 1"
+                ).fetchone()
+
+            total_sel, total_app, total_comp, total_fb = row
+
+            return EvolutionMetrics(
+                total_selections=total_sel,
+                total_applied=total_app,
+                total_completions=total_comp,
+                total_fallbacks=total_fb,
+            )
+
+    # ------------------------------------------------------------------
+    # Agent Records (Composite Agent evolution, Layer 2)
+    # ------------------------------------------------------------------
+
+    def save_agent_record(
+        self,
+        agent_id: str,
+        name: str,
+        type: str,
+        skill_ids: list[str],
+        orchestration_toml: str | None = None,
+    ) -> None:
+        """Insert or update an agent record."""
+        skill_ids_json = json.dumps(skill_ids, ensure_ascii=False)
+        now = _now_iso()
+        with self._conn(immediate=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO agent_records (
+                    agent_id, name, type, skill_ids, orchestration_toml,
+                    effective_rate, avg_steps, avg_duration_ms,
+                    is_active, created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?,
+                    0.0, NULL, NULL,
+                    1, ?, ?
+                )
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    name = excluded.name,
+                    type = excluded.type,
+                    skill_ids = excluded.skill_ids,
+                    orchestration_toml = COALESCE(excluded.orchestration_toml, agent_records.orchestration_toml),
+                    effective_rate = CASE WHEN agent_records.effective_rate IS NOT NULL THEN agent_records.effective_rate ELSE 0.0 END,
+                    avg_steps = agent_records.avg_steps,
+                    avg_duration_ms = agent_records.avg_duration_ms,
+                    is_active = agent_records.is_active,
+                    created_at = agent_records.created_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    agent_id, name, type, skill_ids_json, orchestration_toml,
+                    now, now,
+                ),
+            )
+
+    def get_agent_record(self, agent_id: str) -> dict[str, Any] | None:
+        """Load an agent record by ID."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT agent_id, name, type, skill_ids, orchestration_toml, "
+                "effective_rate, avg_steps, avg_duration_ms, is_active, "
+                "created_at, updated_at "
+                "FROM agent_records WHERE agent_id = ?",
+                (agent_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return self._agent_row_to_dict(row)
+
+    def get_active_agents(self) -> list[dict[str, Any]]:
+        """Load all active agent records."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT agent_id, name, type, skill_ids, orchestration_toml, "
+                "effective_rate, avg_steps, avg_duration_ms, is_active, "
+                "created_at, updated_at "
+                "FROM agent_records WHERE is_active = 1"
+            ).fetchall()
+            return [
+                self._agent_row_to_dict(r)
+                for r in rows
+            ]
+
+    def update_agent_metrics(
+        self,
+        agent_id: str,
+        effective_rate: float,
+        avg_steps: float,
+        avg_duration_ms: float,
+    ) -> bool:
+        """Update computed metrics for an agent record."""
+        with self._conn(immediate=True) as conn:
+            cur = conn.execute(
+                "UPDATE agent_records SET effective_rate = ?, "
+                "avg_steps = ?, avg_duration_ms = ?, updated_at = ? "
+                "WHERE agent_id = ?",
+                (effective_rate, avg_steps, avg_duration_ms, _now_iso(), agent_id),
+            )
+            return cur.rowcount > 0
+
+    def deactivate_agent(self, agent_id: str) -> bool:
+        """Set is_active = False for an agent record."""
+        with self._conn(immediate=True) as conn:
+            cur = conn.execute(
+                "UPDATE agent_records SET is_active = 0, updated_at = ? "
+                "WHERE agent_id = ?",
+                (_now_iso(), agent_id),
+            )
+            return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Row-to-dict helpers (DRY)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _judgment_row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
+        """Convert a 7-column skill_judgments row to a dict."""
+        return {
+            "id": row[0],
+            "analysis_id": row[1],
+            "skill_id": row[2],
+            "selected": bool(row[3]),
+            "applied": bool(row[4]),
+            "completed": bool(row[5]),
+            "fell_back": bool(row[6]),
+        }
+
+    @staticmethod
+    def _agent_row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
+        """Convert an 11-column agent_records row to a dict."""
+        return {
+            "agent_id": row[0],
+            "name": row[1],
+            "type": row[2],
+            "skill_ids": json.loads(row[3]) if row[3] else [],
+            "orchestration_toml": row[4],
+            "effective_rate": row[5],
+            "avg_steps": row[6],
+            "avg_duration_ms": row[7],
+            "is_active": bool(row[8]),
+            "created_at": row[9],
+            "updated_at": row[10],
+        }
+
+    # ------------------------------------------------------------------
+    # Maintenance
+    # ------------------------------------------------------------------
+
+    def clear(self) -> None:
+        """Delete all data (keeps schema).  For testing."""
+        with self._conn(immediate=True) as conn:
+            conn.execute("DELETE FROM skill_judgments")
+            conn.execute("DELETE FROM execution_analyses")
+            conn.execute("DELETE FROM skill_lineage_parents")
+            conn.execute("DELETE FROM context_budget_log")
+            conn.execute("DELETE FROM agent_records")
+            conn.execute("DELETE FROM skill_records")
+
+    def prune_budget_log(
+        self,
+        max_age_days: int = 30,
+        max_rows: int = 10_000,
+    ) -> int:
+        """Prune old or excess rows from ``context_budget_log``.
+
+        Two-pass strategy:
+        1. Delete rows older than *max_age_days*.
+        2. If rows still exceed *max_rows*, delete the oldest entries
+           (by ``created_at``) to bring the count down.
+
+        Returns the total number of deleted rows.
+        """
+        deleted = 0
+        with self._conn(immediate=True) as conn:
+            # Pass 1: age-based pruning
+            cur = conn.execute(
+                "DELETE FROM context_budget_log "
+                "WHERE created_at < datetime('now', ?)",
+                (f"-{max_age_days} days",),
+            )
+            deleted += cur.rowcount
+
+            # Pass 2: cap total row count
+            count = conn.execute(
+                "SELECT COUNT(*) FROM context_budget_log"
+            ).fetchone()[0]
+            if count > max_rows:
+                excess = count - max_rows
+                cur = conn.execute(
+                    "DELETE FROM context_budget_log "
+                    "WHERE id IN ("
+                    "  SELECT id FROM context_budget_log "
+                    "  ORDER BY created_at ASC LIMIT ?"
+                    ")",
+                    (excess,),
+                )
+                deleted += cur.rowcount
+
+        return deleted
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _batch_load_parents(
+        conn: sqlite3.Connection,
+        skill_ids: set[str] | None = None,
+    ) -> dict[str, list[str]]:
+        """Load skill_lineage_parents, optionally filtered by skill_ids.
+
+        When *skill_ids* is provided, only parents for those skills are
+        loaded using an IN clause.  When None, the full table is loaded
+        (legacy fallback for callers that need all edges at once).
+        """
+        parents: dict[str, list[str]] = {}
+        if skill_ids:
+            rows = _chunked_in_fetchall(
+                conn,
+                "SELECT skill_id, parent_id FROM skill_lineage_parents "
+                "WHERE skill_id IN ({IN})",
+                list(skill_ids),
+            )
+        else:
+            rows = conn.execute(
+                "SELECT skill_id, parent_id FROM skill_lineage_parents"
+            ).fetchall()
+        for skill_id, parent_id in rows:
+            parents.setdefault(skill_id, []).append(parent_id)
+        return parents
+
+    def _row_to_record(
+        self,
+        conn: sqlite3.Connection,
+        row: tuple[Any, ...],
+        parents_by_id: dict[str, list[str]] | None = None,
+    ) -> SkillRecord:
+        """Convert a skill_records row to a SkillRecord model.
+
+        Args:
+            conn: Database connection (used for fallback parent lookup).
+            row: Tuple from skill_records query.
+            parents_by_id: Pre-loaded parent IDs keyed by skill_id.
+                If None, parents are queried per-row (N+1 fallback).
+        """
+        (
+            skill_id,
+            name,
+            version,
+            lineage_origin,
+            lineage_generation,
+            lineage_content_diff,
+            lineage_content_snapshot,
+            directory,
+            is_active,
+            total_selections,
+            total_applied,
+            total_completions,
+            total_fallbacks,
+            created_at,
+            updated_at,
+        ) = row
+
+        # Load lineage parents (batch or per-row)
+        if parents_by_id is not None:
+            parent_ids = parents_by_id.get(skill_id, [])
+        else:
+            parent_rows = conn.execute(
+                "SELECT parent_id FROM skill_lineage_parents WHERE skill_id = ?",
+                (skill_id,),
+            ).fetchall()
+            parent_ids = [r[0] for r in parent_rows]
+
+        # Parse snapshot
+        snapshot: dict[str, str] = {}
+        if lineage_content_snapshot and lineage_content_snapshot not in ('""', '{}', 'null'):
+            try:
+                loaded = json.loads(lineage_content_snapshot)
+                if isinstance(loaded, dict) and loaded:
+                    # Validate all values are strings (Pydantic requirement)
+                    if all(isinstance(v, str) for v in loaded.values()):
+                        snapshot = loaded
+                    else:
+                        non_str = [k for k, v in loaded.items() if not isinstance(v, str)]
+                        logger.warning(
+                            "content_snapshot for skill '%s' has non-string values in keys %s, discarding snapshot",
+                            skill_id, non_str,
+                        )
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                logger.warning(
+                    "Corrupted content_snapshot for skill '%s': %s",
+                    skill_id, exc,
+                )
+
+        try:
+            origin = SkillOrigin(lineage_origin)
+        except ValueError:
+            logger.warning(
+                "Invalid lineage_origin '%s' for skill '%s', defaulting to CAPTURED",
+                lineage_origin, skill_id,
+            )
+            origin = SkillOrigin.CAPTURED
+
+        lineage = SkillLineage(
+            origin=origin,
+            generation=lineage_generation,
+            parent_skill_ids=parent_ids,
+            content_diff=lineage_content_diff,
+            content_snapshot=snapshot or None,
+        )
+
+        return SkillRecord(
+            id=skill_id,
+            name=name,
+            version=version,
+            lineage=lineage,
+            directory=directory or "",
+            is_active=bool(is_active),
+            total_selections=total_selections,
+            total_applied=total_applied,
+            total_completions=total_completions,
+            total_fallbacks=total_fallbacks,
+            first_seen=datetime.fromisoformat(created_at),
+            last_updated=datetime.fromisoformat(updated_at),
+        )
+
+    def _rows_to_records(
+        self,
+        conn: sqlite3.Connection,
+        rows: list[tuple[Any, ...]],
+        parents_by_id: dict[str, list[str]] | None = None,
+    ) -> list[SkillRecord]:
+        """Convert multiple rows to SkillRecords, skipping corrupt rows.
+
+        A single malformed row (bad datetime, wrong column count, etc.)
+        is logged and skipped rather than killing the entire batch.
+        """
+        records: list[SkillRecord] = []
+        for row in rows:
+            try:
+                records.append(self._row_to_record(conn, row, parents_by_id))
+            except Exception as exc:
+                row_id = row[0] if row else "<empty>"
+                logger.warning(
+                    "Skipping corrupt skill_records row '%s': %s",
+                    row_id, exc,
+                )
+        return records
+

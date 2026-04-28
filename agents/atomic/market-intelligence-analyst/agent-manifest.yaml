@@ -1,0 +1,18 @@
+name: market-intelligence-analyst
+version: 1.0.0
+type: atomic
+description: 市场研究分析专家，支持 Porter/SWOT/PESTEL 方法论
+
+model_config:
+  recommended: "standard"
+  fallback: "lightweight"
+
+capabilities: [market-analysis, trend-identification, briefing-generation]
+
+mcp:
+  tools: [analyze_market, identify_trends, generate_briefing]
+
+permissions:
+  mode: default
+  allowed_tools: [file_read, file_write, grep, glob]
+  denied_tools: [bash]
