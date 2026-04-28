@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from typing import TYPE_CHECKING
 
 from .integrator import IntegratedArtifact
@@ -34,6 +35,7 @@ class LLMQualityGate:
     """
 
     _FALLBACK_COUNT = 0
+    _fallback_lock = threading.Lock()
 
     def __init__(
         self,
@@ -90,14 +92,16 @@ class LLMQualityGate:
         # Layer 2: Semantic check (LLM)
         if self._client is None:
             logger.debug("LLMQualityGate: no LLM client, structural-only")
-            LLMQualityGate._FALLBACK_COUNT += 1
+            with LLMQualityGate._fallback_lock:
+                LLMQualityGate._FALLBACK_COUNT += 1
             return structural_result
 
         try:
             return self._llm_evaluate(integrated, task, structural_result)
         except Exception:
             logger.exception("LLMQualityGate: LLM call failed, structural-only")
-            LLMQualityGate._FALLBACK_COUNT += 1
+            with LLMQualityGate._fallback_lock:
+                LLMQualityGate._FALLBACK_COUNT += 1
             return structural_result
 
     def _llm_evaluate(

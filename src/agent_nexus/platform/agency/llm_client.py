@@ -170,11 +170,10 @@ class LLMClient:
         # Lazy-initialised persistent httpx.Client for connection reuse
         self._http_client: httpx.Client | None = None
 
-    def _get_http_client(self, timeout: float | None = None) -> httpx.Client:
+    def _get_http_client(self) -> httpx.Client:
         """Return the persistent httpx.Client, creating it on first use."""
-        effective_timeout = timeout or self._TIMEOUT
         if self._http_client is None or self._http_client.is_closed:
-            self._http_client = httpx.Client(timeout=effective_timeout)
+            self._http_client = httpx.Client(timeout=self._TIMEOUT)
         return self._http_client
 
     def close(self) -> None:
@@ -224,11 +223,12 @@ class LLMClient:
         label: str,
     ) -> httpx.Response:
         """Execute a POST with exponential-backoff retry on transient errors."""
-        client = self._get_http_client(timeout)
+        client = self._get_http_client()
+        effective_timeout = timeout or self._TIMEOUT
         last_exc: Exception | None = None
         for attempt in range(_MAX_RETRIES):
             try:
-                resp = client.post(url, json=payload, headers=headers)
+                resp = client.post(url, json=payload, headers=headers, timeout=effective_timeout)
                 if resp.status_code == 200 or not self._is_retryable(resp.status_code):
                     return resp
                 last_exc = RuntimeError(

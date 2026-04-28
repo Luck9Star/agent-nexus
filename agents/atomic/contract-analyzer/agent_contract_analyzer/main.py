@@ -74,7 +74,8 @@ def _run_cli() -> None:
 
     if args.command == "extract":
         try:
-            text = open(args.file_path).read()
+            with open(args.file_path) as f:
+                text = f.read()
             clauses = agent.extract_clauses(text)
             print(json.dumps([c.model_dump() for c in clauses], indent=2, ensure_ascii=False))
         except FileNotFoundError as e:
@@ -83,7 +84,8 @@ def _run_cli() -> None:
 
     elif args.command == "risks":
         try:
-            text = open(args.file_path).read()
+            with open(args.file_path) as f:
+                text = f.read()
             clauses = agent.extract_clauses(text)
             result = agent.analyze_risks(clauses)
             print(json.dumps(result.model_dump(), indent=2, ensure_ascii=False))
@@ -93,7 +95,8 @@ def _run_cli() -> None:
 
     elif args.command == "compliance":
         try:
-            text = open(args.file_path).read()
+            with open(args.file_path) as f:
+                text = f.read()
             clauses = agent.extract_clauses(text)
             result = agent.check_compliance(clauses, args.jurisdiction)
             print(json.dumps(result.model_dump(), indent=2, ensure_ascii=False))

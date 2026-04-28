@@ -252,6 +252,18 @@ _BUILTIN: dict[str, ModelCapability] = {
     ),
 }
 
+# Date-stripped aliases — resolve common short-form IDs to their full
+# entries so callers don't silently fall back to provider defaults.
+_BUILTIN.update({
+    "claude-sonnet-4": _BUILTIN["claude-sonnet-4-20250514"],
+    "claude-opus-4": _BUILTIN["claude-opus-4-20250116"],
+    "claude-3-5-sonnet": _BUILTIN["claude-3-5-sonnet-20241022"],
+    "claude-3-5-haiku": _BUILTIN["claude-3-5-haiku-20241022"],
+    "claude-3-opus": _BUILTIN["claude-3-opus-20240229"],
+    "minimax-m1": _BUILTIN["minimax-m1-0519"],
+    "minimax-t1": _BUILTIN["minimax-t1-0519"],
+})
+
 # Provider-level safe defaults used when no model-specific match is found.
 PROVIDER_DEFAULTS: dict[str, ModelCapability] = {
     "anthropic": ModelCapability(
