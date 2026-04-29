@@ -8,9 +8,19 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
+_JSON_OBJECT_RE = re.compile(r"\{[\s\S]*\}")
+
+
+def _strip_markdown_fence(text: str) -> str:
+    """Strip ```json ... ``` wrapper from LLM output, if present."""
+    m = _JSON_FENCE_RE.search(text)
+    return m.group(1).strip() if m else text.strip()
 
 from .task_composer import infer_capabilities
 
@@ -37,10 +47,20 @@ class PlannerOutput:
         Returns a default (empty) PlannerOutput on parse failure.
         """
         try:
-            data = json.loads(raw)
+            data = json.loads(_strip_markdown_fence(raw))
         except (json.JSONDecodeError, TypeError):
-            logger.warning("LLMPlanner: failed to parse JSON response, returning empty output")
-            return cls()
+            # Attempt to find a JSON object embedded anywhere in the response
+            json_match = _JSON_OBJECT_RE.search(raw)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group())
+                except (json.JSONDecodeError, TypeError):
+                    data = None
+            else:
+                data = None
+            if data is None:
+                logger.warning("LLMPlanner: failed to parse JSON response, returning empty output")
+                return cls()
 
         return cls(
             capabilities=data.get("capabilities", []),
@@ -97,10 +117,20 @@ class LLMPlanner:
             logger.debug("LLMPlanner: no LLM client, falling back to keywords")
             with LLMPlanner._fallback_lock:
                 LLMPlanner._fallback_count += 1
-            return self._keyword_fallback(task)
+            result = self._keyword_fallback(task)
+            logger.info(
+                "LLMPlanner: task analyzed — capabilities=%s, strategy=%s",
+                result.capabilities, result.decomposition_strategy,
+            )
+            return result
 
         try:
-            return self._llm_analyze(task)
+            result = self._llm_analyze(task)
+            logger.info(
+                "LLMPlanner: task analyzed — capabilities=%s, strategy=%s",
+                result.capabilities, result.decomposition_strategy,
+            )
+            return result
         except Exception:
             logger.exception("LLMPlanner: LLM call failed, falling back to keywords")
             with LLMPlanner._fallback_lock:
@@ -114,6 +144,7 @@ class LLMPlanner:
             system_prompt=system_prompt,
             user_message=task,
             temperature=self._temperature,
+            response_format="json",
         )
         return PlannerOutput.from_json(response.text)
 

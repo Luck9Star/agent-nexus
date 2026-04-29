@@ -87,17 +87,25 @@ class TestGenericCLIBackendModelMap:
         assert backend.resolve_model("anything") == "anything"
 
 
+def _mock_popen(stdout: str = "", stderr: str = "", returncode: int = 0) -> MagicMock:
+    """Create a mock Popen that behaves like our call() expects."""
+    proc = MagicMock()
+    proc.communicate.return_value = (stdout, stderr)
+    proc.returncode = returncode
+    proc.pid = 12345
+    return proc
+
+
 class TestGenericCLIBackendCall:
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     @patch("shutil.which", return_value="/usr/local/bin/claude")
-    def test_successful_json_call(self, mock_which, mock_run):
-        mock_run.return_value = MagicMock(
+    def test_successful_json_call(self, mock_which, mock_popen_cls):
+        mock_popen_cls.return_value = _mock_popen(
             stdout=json.dumps({
                 "result": "planned tasks", "session_id": "sess-abc",
                 "model": "claude-sonnet-4-20250514",
                 "usage": {"input_tokens": 100, "output_tokens": 50},
             }),
-            stderr="", returncode=0,
         )
         backend = GenericCLIBackend(_claude_config())
         result = backend.call("You are a planner.", "Design X.")
@@ -108,10 +116,10 @@ class TestGenericCLIBackendCall:
         assert result.input_tokens == 100
         assert result.returncode == 0
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     @patch("shutil.which", return_value="/usr/local/bin/claude")
-    def test_nonzero_exit_code(self, mock_which, mock_run):
-        mock_run.return_value = MagicMock(
+    def test_nonzero_exit_code(self, mock_which, mock_popen_cls):
+        mock_popen_cls.return_value = _mock_popen(
             stdout="", stderr="Error: model not found", returncode=1,
         )
         backend = GenericCLIBackend(_claude_config())
@@ -119,9 +127,13 @@ class TestGenericCLIBackendCall:
         assert result.returncode == 1
         assert "Error: model not found" in result.raw_stderr
 
-    @patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=180))
+    @patch("subprocess.Popen")
     @patch("shutil.which", return_value="/usr/local/bin/claude")
-    def test_timeout_returns_error_result(self, mock_which, mock_run):
+    def test_timeout_returns_error_result(self, mock_which, mock_popen_cls):
+        mock_popen_cls.return_value = _mock_popen()
+        mock_popen_cls.return_value.communicate.side_effect = (
+            subprocess.TimeoutExpired(cmd="claude", timeout=180)
+        )
         backend = GenericCLIBackend(_claude_config())
         result = backend.call("sys", "msg")
         assert result.returncode == -1

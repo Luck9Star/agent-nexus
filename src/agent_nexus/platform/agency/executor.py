@@ -131,11 +131,13 @@ class LLMExecutor:
         config_dir: Path | None = None,
         default_temperature: float | None = None,
         capability_registry: ModelCapabilityRegistry | None = None,
+        timeout: float | None = None,
     ) -> None:
         self._registry = registry
         self._config_dir = config_dir
         self._default_model_string = model_string
         self._default_temperature = default_temperature
+        self._timeout = timeout
 
         # Create default client (used when expert has no model override)
         self._default_client = LLMClient(
@@ -178,6 +180,8 @@ class LLMExecutor:
                 "— cannot produce artifact"
             )
 
+        logger.info("LLMExecutor: dispatching expert '%s'", profile_id)
+
         name: str = profile.get("name", profile_id)
         body: str = profile.get("profile", {}).get("body", "")
         capabilities: list[str] = profile.get("capabilities", [])
@@ -200,8 +204,14 @@ class LLMExecutor:
             system_prompt=system_prompt,
             user_message=task,
             temperature=expert_temperature,
+            timeout=self._timeout,
         )
         sections = self._parse_sections(response.text, required_sections)
+
+        logger.info(
+            "LLMExecutor: expert '%s' completed (model=%s, provider=%s)",
+            profile_id, response.model, response.provider,
+        )
 
         return Artifact(
             source_agent=profile_id,

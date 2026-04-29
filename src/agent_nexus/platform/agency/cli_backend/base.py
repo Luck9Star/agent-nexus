@@ -73,29 +73,55 @@ class GenericCLIBackend:
         effective_timeout = timeout or self._config.timeout_secs
         start = time.monotonic()
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 [self._config.command, *args],
-                capture_output=True, text=True, timeout=effective_timeout,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
+        except OSError:
             duration_ms = int((time.monotonic() - start) * 1000)
-            if proc.returncode != 0:
-                return CLIResult(
-                    text="", model="",
-                    raw_stdout=proc.stdout, raw_stderr=proc.stderr,
-                    returncode=proc.returncode, duration_ms=duration_ms,
-                )
-            result = self._parse_output(proc.stdout, proc.stderr)
-            result.duration_ms = duration_ms
-            result.raw_stdout = proc.stdout
-            result.raw_stderr = proc.stderr
-            return result
+            logger.exception("CLI '%s' failed to start", self._config.command)
+            return CLIResult(
+                text="", model="",
+                raw_stderr="CLI process error",
+                returncode=-1, duration_ms=duration_ms,
+            )
+
+        try:
+            stdout, stderr = proc.communicate(timeout=effective_timeout)
         except subprocess.TimeoutExpired:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
             duration_ms = int((time.monotonic() - start) * 1000)
+            logger.warning(
+                "CLI '%s' timed out after %ss, killed process",
+                self._config.command, effective_timeout,
+            )
             return CLIResult(
                 text="", model="",
                 raw_stderr=f"CLI timed out after {effective_timeout}s",
                 returncode=-1, duration_ms=duration_ms,
             )
+
+        duration_ms = int((time.monotonic() - start) * 1000)
+        if proc.returncode != 0:
+            logger.warning(
+                "CLI '%s' exited with code %d", self._config.command, proc.returncode,
+            )
+            return CLIResult(
+                text="", model="",
+                raw_stdout=stdout, raw_stderr=stderr,
+                returncode=proc.returncode, duration_ms=duration_ms,
+            )
+        result = self._parse_output(stdout, stderr)
+        result.duration_ms = duration_ms
+        result.raw_stdout = stdout
+        result.raw_stderr = stderr
+        return result
 
     def _parse_output(self, stdout: str, stderr: str) -> CLIResult:
         if self._config.output_format == "json":

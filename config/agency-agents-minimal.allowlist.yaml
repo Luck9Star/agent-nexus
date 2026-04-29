@@ -1,0 +1,38 @@
+# Minimal Agency Agents Allowlist for CLI backend testing
+source:
+  repo: https://github.com/msitarzewski/agency-agents
+  ref: 29c2a88fad8ab6e340c7ee6b97d71ee1736920e0
+
+agents:
+  - source_path: engineering/engineering-software-architect.md
+    id: agency.software-architect
+    capabilities:
+      - system_design
+      - architecture_review
+      - tradeoff_analysis
+    output_contract: architecture_plan
+    tools:
+      allowed: [file_read, network]
+      denied: [bash, file_write]
+
+  - source_path: engineering/engineering-backend-architect.md
+    id: agency.backend-architect
+    capabilities:
+      - backend_design
+      - api_design
+      - database_design
+    output_contract: architecture_plan
+    tools:
+      allowed: [file_read]
+      denied: [bash, file_write, network]
+
+  - source_path: engineering/engineering-code-reviewer.md
+    id: agency.code-reviewer
+    capabilities:
+      - code_review
+      - security_review
+      - maintainability_review
+    output_contract: review_report
+    tools:
+      allowed: [file_read, network]
+      denied: [bash, file_write]

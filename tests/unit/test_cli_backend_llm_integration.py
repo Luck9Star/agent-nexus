@@ -49,19 +49,22 @@ class TestLLMClientCLIInit:
 
 class TestLLMClientCLICall:
     @patch("shutil.which", return_value="/usr/bin/claude")
-    @patch("subprocess.run")
-    def test_cli_call_returns_llm_response(self, mock_run, mock_which, tmp_path: Path):
+    @patch("subprocess.Popen")
+    def test_cli_call_returns_llm_response(self, mock_popen_cls, mock_which, tmp_path: Path):
         _write_cli_config(tmp_path)
-        mock_run.return_value = MagicMock(
-            stdout=json.dumps({
+        proc = MagicMock()
+        proc.communicate.return_value = (
+            json.dumps({
                 "result": "planned tasks",
                 "session_id": "sess-001",
                 "model": "claude-sonnet-4-20250514",
                 "usage": {"input_tokens": 100, "output_tokens": 50},
             }),
-            stderr="",
-            returncode=0,
+            "",
         )
+        proc.returncode = 0
+        proc.pid = 12345
+        mock_popen_cls.return_value = proc
         from agent_nexus.platform.agency.llm_client import LLMClient
 
         client = LLMClient(model_string="claude-code:sonnet", config_dir=tmp_path)

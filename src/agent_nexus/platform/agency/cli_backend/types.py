@@ -54,7 +54,7 @@ class BackendConfig:
     json_paths: JsonPathConfig = field(default_factory=JsonPathConfig)
     text_patterns: TextPatternConfig = field(default_factory=TextPatternConfig)
     model_map: dict[str, str] = field(default_factory=dict)
-    timeout_secs: int = 180
+    timeout_secs: int = 300
 
 
 @dataclass

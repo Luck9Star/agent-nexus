@@ -56,7 +56,7 @@ class TestBackendConfig:
         assert config.command == "claude"
         assert config.args == ["-p"]
         assert config.output_format == "json"
-        assert config.timeout_secs == 180
+        assert config.timeout_secs == 300
 
     def test_full_config(self):
         config = BackendConfig(

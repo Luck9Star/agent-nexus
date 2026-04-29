@@ -4,6 +4,7 @@ use crate::backend::GenericCLIBackend;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct CLIBackendRegistry {
     backends: HashMap<String, Arc<GenericCLIBackend>>,
 }

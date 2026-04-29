@@ -321,7 +321,7 @@ class DAGDispatcher:
                     )
                     futures[future] = task_item
 
-                # Collect results and do graph mutations on the main thread
+                # Collect results — fail-fast on first error
                 for future in concurrent.futures.as_completed(
                     futures, timeout=per_task_timeout
                 ):
@@ -329,7 +329,6 @@ class DAGDispatcher:
                     try:
                         artifact, error = future.result()
                     except Exception as exc:
-                        # Executor itself threw something unexpected
                         error = str(exc)
                         artifact = None
 
@@ -342,6 +341,18 @@ class DAGDispatcher:
                             self._graph.fail_task(task_item.id)
                         result.errors[task_item.id] = error or "unknown error"
                         result.failed.append(task_item.id)
+                        # Cancel remaining futures — fail fast
+                        for f in futures:
+                            f.cancel()
+                        break
+
+                # Mark cancelled tasks as failed
+                for f, ti in futures.items():
+                    if ti.id not in result.completed and ti.id not in result.failed:
+                        with contextlib.suppress(ValueError, RuntimeError):
+                            self._graph.fail_task(ti.id)
+                        result.failed.append(ti.id)
+                        result.errors[ti.id] = "cancelled (sibling task failed)"
             else:
                 # Sequential execution (backward compatible)
                 started_in_batch: list[str] = []
@@ -369,6 +380,11 @@ class DAGDispatcher:
                             self._graph.fail_task(task_item.id)
                         result.errors[task_item.id] = error or "unknown error"
                         result.failed.append(task_item.id)
+                        break  # Fail-fast: don't start more tasks in batch
+
+            # Fail-fast: stop dispatching after any task failure
+            if result.failed:
+                break
 
         # If the loop was terminated by the max_iterations guard (not a normal
         # break), mark the result as timed_out so callers know it didn't finish.
@@ -393,25 +409,36 @@ class DAGDispatcher:
                     result.failed.append(tid)
                     failed_set.add(tid)
 
-        # Clean up orphaned PENDING tasks whose dependencies have all completed/failed.
-        # Without this, tasks blocked by failed deps remain PENDING forever.
-        for tid in specialist_ids:
-            task = self._graph.get_task(tid)
-            if task is None or task.state != TaskState.PENDING:
-                continue
-            deps = task.blocked_by
-            if not deps:
-                continue
-            dep_tasks = [self._graph.get_task(d) for d in deps]
-            all_done = all(
-                t is not None and t.state in (TaskState.COMPLETED, TaskState.FAILED)
-                for t in dep_tasks
-            )
-            if all_done:
-                with contextlib.suppress(ValueError, RuntimeError):
-                    self._graph.fail_task(tid)
-                if tid not in failed_set:
-                    result.failed.append(tid)
-                    failed_set.add(tid)
+        # Clean up orphaned PENDING tasks. Loop until stable to handle
+        # transitive failure chains (e.g. A→B→C where failing B must also fail C).
+        changed = True
+        while changed:
+            changed = False
+            for tid in specialist_ids:
+                task = self._graph.get_task(tid)
+                if task is None or task.state != TaskState.PENDING:
+                    continue
+                deps = task.blocked_by
+                if not deps:
+                    # Independent task never started (e.g. after fail-fast)
+                    with contextlib.suppress(ValueError, RuntimeError):
+                        self._graph.fail_task(tid)
+                    if tid not in failed_set:
+                        result.failed.append(tid)
+                        failed_set.add(tid)
+                    changed = True
+                    continue
+                dep_tasks = [self._graph.get_task(d) for d in deps]
+                all_done = all(
+                    t is not None and t.state in (TaskState.COMPLETED, TaskState.FAILED)
+                    for t in dep_tasks
+                )
+                if all_done:
+                    with contextlib.suppress(ValueError, RuntimeError):
+                        self._graph.fail_task(tid)
+                    if tid not in failed_set:
+                        result.failed.append(tid)
+                        failed_set.add(tid)
+                    changed = True
 
         return result

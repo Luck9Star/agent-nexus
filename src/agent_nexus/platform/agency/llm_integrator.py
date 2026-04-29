@@ -8,17 +8,19 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from typing import TYPE_CHECKING
 
 from .integrator import Artifact, ConflictItem, IntegratedArtifact, Integrator
+from .llm_planner import _strip_markdown_fence
 
 if TYPE_CHECKING:
     from .llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
-_MAX_SYNTHESIS_PROMPT_CHARS = 50_000
+_MAX_SYNTHESIS_PROMPT_CHARS = 120_000
 
 
 class LLMIntegrator:
@@ -82,6 +84,10 @@ class LLMIntegrator:
                 LLMIntegrator._fallback_count += 1
             return Integrator.merge(artifacts)
 
+        logger.info(
+            "LLMIntegrator: synthesizing %d expert artifacts", len(artifacts),
+        )
+
         try:
             return self._llm_synthesize(artifacts, task)
         except Exception:
@@ -106,6 +112,7 @@ class LLMIntegrator:
             system_prompt=system_prompt,
             user_message=user_message,
             temperature=self._temperature,
+            response_format="json",
         )
         return self._parse_synthesis(response.text, artifacts)
 
@@ -163,13 +170,23 @@ class LLMIntegrator:
         source_agents = [a.source_agent for a in artifacts]
 
         try:
-            data = json.loads(raw)
+            data = json.loads(_strip_markdown_fence(raw))
         except (json.JSONDecodeError, TypeError):
-            logger.warning("LLMIntegrator: failed to parse JSON, using raw text")
-            return IntegratedArtifact(
-                source_agents=source_agents,
-                merged_sections={"synthesis": raw},
-            )
+            # Attempt to find a JSON object embedded anywhere in the response
+            json_match = re.search(r"\{[\s\S]*\}", raw)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group())
+                except (json.JSONDecodeError, TypeError):
+                    data = None
+            else:
+                data = None
+            if data is None:
+                logger.warning("LLMIntegrator: failed to parse JSON, using raw text")
+                return IntegratedArtifact(
+                    source_agents=source_agents,
+                    merged_sections={"synthesis": raw},
+                )
 
         merged_sections: dict[str, object] = {}
         if "summary" in data:
@@ -195,10 +212,15 @@ class LLMIntegrator:
                 agents=source_agents,
             ))
 
-        return IntegratedArtifact(
+        result = IntegratedArtifact(
             source_agents=source_agents,
             merged_sections=merged_sections,
             conflicts=conflicts,
             risks=data.get("risks", []),
             open_questions=data.get("gaps", []),
         )
+        logger.info(
+            "LLMIntegrator: synthesis complete — %d sections, %d conflicts, %d risks",
+            len(result.merged_sections), len(result.conflicts), len(result.risks),
+        )
+        return result

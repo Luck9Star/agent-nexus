@@ -111,72 +111,98 @@ class LLMClient:
                     f"Set the environment variable referenced in config.toml."
                 )
 
-        # Load model capability data (replaces hardcoded 4096 max_tokens)
+        # CLI providers with no model name skip capability lookup — the CLI
+        # itself decides which model to use, so registry/ModelDB lookups are
+        # unnecessary and just produce noisy warnings for empty model strings.
+        is_cli_no_model = (
+            self._provider_config.api == ProviderApiType.CLI
+            and not self._model_name
+        )
+
         if capability_registry is not None:
             self._capability_registry = capability_registry
         else:
             self._capability_registry = ModelCapabilityRegistry()
-        self._capability = self._capability_registry.get(self._model_name)
 
-        logger.info(
-            "LLMClient initialized: provider=%s model=%s api=%s max_output_tokens=%d",
-            self._provider_name, self._model_name, self._provider_config.api,
-            self._capability.max_output_tokens,
-        )
-
-        # Enrich from models.dev — when a shared registry is in use, update it
-        # in-place so other clients see the enriched data without re-fetching.
-        if self._capability_registry.is_enriched(self._model_name):
-            logger.debug(
-                "Model '%s' already enriched in shared registry, skipping fetch",
-                self._model_name,
+        if is_cli_no_model:
+            # CLI backends manage their own model params — this capability
+            # is never consumed (call() short-circuits to _call_cli).
+            self._capability = ModelCapability(
+                model_id="",
+                provider="",
+                max_output_tokens=0,
+                context_window=0,
+                supports_vision=False,
+                supports_tool_use=False,
+                supports_temperature=False,
+                temperature_min=0.0,
+                temperature_max=0.0,
+                knowledge_cutoff="",
             )
-            self._capability = self._capability_registry.get(self._model_name)
         else:
-            db_client = ModelDBClient()
-            try:
-                remote_data = db_client.fetch_model(self._model_name)
+            # Resolution order:
+            #   1. Already enriched in shared registry → reuse (no warning).
+            #   2. ModelDB remote lookup → build capability from remote data.
+            #   3. Built-in registry.get() → may warn (appropriate: both sources failed).
+            if self._capability_registry.is_enriched(self._model_name):
+                self._capability = self._capability_registry.get(self._model_name)
+            else:
+                db_client = ModelDBClient()
+                try:
+                    remote_data = db_client.fetch_model(self._model_name)
+                except Exception:
+                    logger.debug(
+                        "ModelDB fetch failed, using built-in capability data",
+                        exc_info=True,
+                    )
+                    remote_data = None
+                finally:
+                    db_client.close()
+
                 if remote_data is not None:
-                    cap = self._capability
+                    cap_default = self._capability_registry.get_provider_default(
+                        self._provider_name,
+                    )
                     enriched_cap = ModelCapability(
-                        model_id=remote_data.get("id", cap.model_id),
-                        provider=remote_data.get("provider", cap.provider),
+                        model_id=remote_data.get("id", cap_default.model_id),
+                        provider=remote_data.get("provider", cap_default.provider),
                         max_output_tokens=remote_data.get(
-                            "max_output_tokens", cap.max_output_tokens
+                            "max_output_tokens", cap_default.max_output_tokens
                         ),
                         context_window=remote_data.get(
-                            "context_window", cap.context_window
+                            "context_window", cap_default.context_window
                         ),
                         supports_vision=remote_data.get(
-                            "supports_vision", cap.supports_vision
+                            "supports_vision", cap_default.supports_vision
                         ),
                         supports_tool_use=remote_data.get(
-                            "supports_tool_use", cap.supports_tool_use
+                            "supports_tool_use", cap_default.supports_tool_use
                         ),
                         supports_temperature=remote_data.get(
-                            "supports_temperature", cap.supports_temperature
+                            "supports_temperature", cap_default.supports_temperature
                         ),
                         temperature_min=remote_data.get(
-                            "temperature_min", cap.temperature_min
+                            "temperature_min", cap_default.temperature_min
                         ),
                         temperature_max=remote_data.get(
-                            "temperature_max", cap.temperature_max
+                            "temperature_max", cap_default.temperature_max
                         ),
                         knowledge_cutoff=remote_data.get(
-                            "knowledge_cutoff", cap.knowledge_cutoff
+                            "knowledge_cutoff", cap_default.knowledge_cutoff
                         ),
                     )
                     self._capability_registry.set_override(
                         self._model_name, enriched_cap,
                     )
                     self._capability = enriched_cap
-            except Exception:
-                logger.debug(
-                    "ModelDB enrichment failed, using built-in capability data",
-                    exc_info=True,
-                )
-            finally:
-                db_client.close()
+                else:
+                    self._capability = self._capability_registry.get(self._model_name)
+
+        logger.info(
+            "LLMClient initialized: provider=%s model=%s api=%s max_output_tokens=%d",
+            self._provider_name, self._model_name or "(cli)", self._provider_config.api,
+            self._capability.max_output_tokens,
+        )
 
         # Lazy-initialised persistent httpx.Client for connection reuse
         self._http_client: httpx.Client | None = None
@@ -290,6 +316,7 @@ class LLMClient:
         top_p: float | None = None,
         timeout: float | None = None,
         session_id: str | None = None,
+        response_format: str | None = None,
     ) -> LLMResponse:
         """Call the LLM and return a structured response.
 
@@ -308,6 +335,10 @@ class LLMClient:
             Nucleus sampling threshold.  When ``None`` the model's default is used.
         timeout:
             Override request timeout in seconds.
+        response_format:
+            When ``"json"``, requests the provider to enforce JSON output.
+            OpenAI-compatible APIs set ``response_format: {"type": "json_object"}``.
+            Anthropic uses a prefill assistant message to guide JSON output.
 
         Returns
         -------
@@ -319,12 +350,12 @@ class LLMClient:
         if self._provider_config.api == ProviderApiType.ANTHROPIC_MESSAGES:
             text, actual_model = self._call_anthropic(
                 system_prompt, user_message,
-                max_tokens, temperature, top_p, timeout,
+                max_tokens, temperature, top_p, timeout, response_format,
             )
         else:
             text, actual_model = self._call_openai(
                 system_prompt, user_message,
-                max_tokens, temperature, top_p, timeout,
+                max_tokens, temperature, top_p, timeout, response_format,
             )
 
         self._update_capability_from_response(actual_model)
@@ -445,6 +476,7 @@ class LLMClient:
         temperature: float | None,
         top_p: float | None,
         timeout: float | None,
+        response_format: str | None = None,
     ) -> tuple[str, str]:
         base_url = self._provider_config.base_url.rstrip("/")
         url = f"{base_url}/v1/messages"
@@ -455,11 +487,18 @@ class LLMClient:
             "content-type": "application/json",
         }
 
+        messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
+
+        # Prefill trick for JSON: start assistant response with "{" to
+        # strongly guide the model into producing a JSON object.
+        if response_format == "json":
+            messages.append({"role": "assistant", "content": "{"})
+
         payload: dict[str, Any] = {
             "model": self._model_name,
             "max_tokens": max_tokens or self._capability.max_output_tokens,
             "system": system_prompt,
-            "messages": [{"role": "user", "content": user_message}],
+            "messages": messages,
         }
         self._apply_sampling_params(payload, temperature, top_p)
 
@@ -471,6 +510,9 @@ class LLMClient:
         text = "".join(
             block.get("text", "") for block in content_blocks if block.get("type") == "text"
         )
+        # Restore the "{" we prefilled — Anthropic strips it from the response
+        if response_format == "json" and text and not text.startswith("{"):
+            text = "{" + text
         return text, actual_model
 
     def _call_openai(
@@ -481,6 +523,7 @@ class LLMClient:
         temperature: float | None,
         top_p: float | None,
         timeout: float | None,
+        response_format: str | None = None,
     ) -> tuple[str, str]:
         base_url = self._provider_config.base_url.rstrip("/")
         url = f"{base_url}/v1/chat/completions"
@@ -499,6 +542,9 @@ class LLMClient:
             "max_tokens": max_tokens or self._capability.max_output_tokens,
         }
         self._apply_sampling_params(payload, temperature, top_p)
+
+        if response_format == "json":
+            payload["response_format"] = {"type": "json_object"}
 
         resp = self._call_with_retry(url, headers, payload, timeout, "OpenAI")
 

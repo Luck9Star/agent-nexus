@@ -99,6 +99,7 @@ name = "ap-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ap-cli-backend",
  "ap-core",
  "ap-evolution",
  "ap-fetcher",

@@ -55,7 +55,7 @@ def load_backend_configs_from_providers(
             json_paths=json_paths,
             text_patterns=text_patterns,
             model_map=raw.get("model_map", {}),
-            timeout_secs=raw.get("timeout_secs", 180),
+            timeout_secs=raw.get("timeout_secs", 300),
         )
         result[name] = config
     return result

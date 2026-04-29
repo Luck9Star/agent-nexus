@@ -13,7 +13,7 @@ import logging
 import os
 
 from agent_nexus.models.agent import ModelTier
-from agent_nexus.models.config import PlatformConfig, ProviderConfig
+from agent_nexus.models.config import PlatformConfig, ProviderApiType, ProviderConfig
 
 from .defaults import DEFAULT_MODEL_STRING, MODEL_TIER_MAP
 
@@ -261,14 +261,15 @@ class ModelConfigManager:
         Returns
         -------
         tuple[str, str]
-            ``(provider_name, model_name)``.  If no colon is present,
-            provider defaults to ``"openai"``.
+            ``(provider_name, model_name)``.  If no colon is present
+            and the string matches a known provider (e.g. ``"claude-code"``),
+            it is used as the provider with an empty model name.
+            Otherwise provider defaults to ``"openai"``.
 
         Raises
         ------
         ValueError
-            If *model_string* is empty, or the resulting provider or
-            model name is empty (e.g. ``"openai:"`` or ``":gpt-4o"``).
+            If *model_string* is empty.
         """
         if not model_string or not model_string.strip():
             raise ValueError("model_string must not be empty")
@@ -279,9 +280,21 @@ class ModelConfigManager:
                 raise ValueError(
                     f"Provider part is empty in model string: {model_string!r}"
                 )
+            provider = provider.strip()
+            # CLI providers may have empty model part (e.g. "claude-code:")
+            provider_cfg = self._config.models.providers.get(provider)
             if not model_name.strip():
+                if provider_cfg and provider_cfg.api == ProviderApiType.CLI:
+                    return provider, ""
                 raise ValueError(
                     f"Model name part is empty in model string: {model_string!r}"
                 )
-            return provider.strip(), model_name.strip()
-        return "openai", model_string.strip()
+            return provider, model_name.strip()
+
+        # No colon: check if bare string is a known provider (e.g. "claude-code")
+        bare = model_string.strip()
+        bare_cfg = self._config.models.providers.get(bare)
+        if bare_cfg is not None:
+            return bare, ""
+
+        return "openai", bare

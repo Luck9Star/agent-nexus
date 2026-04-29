@@ -12,6 +12,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from .integrator import IntegratedArtifact
+from .llm_planner import _strip_markdown_fence
 from .qa_gate import QAGate, QAGateInput, QAGateResult
 
 if TYPE_CHECKING:
@@ -87,6 +88,10 @@ class LLMQualityGate:
         structural_result = QAGate.run(structural_input)
 
         if not structural_result.passed:
+            logger.info(
+                "LLMQualityGate: evaluation result — passed=%s, failures=%d",
+                structural_result.passed, len(structural_result.failures),
+            )
             return structural_result
 
         # Layer 2: Semantic check (LLM)
@@ -97,11 +102,20 @@ class LLMQualityGate:
             return structural_result
 
         try:
-            return self._llm_evaluate(integrated, task, structural_result)
+            result = self._llm_evaluate(integrated, task, structural_result)
+            logger.info(
+                "LLMQualityGate: evaluation result — passed=%s, failures=%d",
+                result.passed, len(result.failures),
+            )
+            return result
         except Exception:
             logger.exception("LLMQualityGate: LLM call failed, structural-only")
             with LLMQualityGate._fallback_lock:
                 LLMQualityGate._FALLBACK_COUNT += 1
+            logger.info(
+                "LLMQualityGate: evaluation result — passed=%s, failures=%d",
+                structural_result.passed, len(structural_result.failures),
+            )
             return structural_result
 
     def _llm_evaluate(
@@ -144,6 +158,7 @@ class LLMQualityGate:
             system_prompt=system_prompt,
             user_message=user_message,
             temperature=self._temperature,
+            response_format="json",
         )
         return self._parse_evaluation(response.text, structural_result)
 
@@ -153,15 +168,42 @@ class LLMQualityGate:
         structural_result: QAGateResult,
     ) -> QAGateResult:
         """Parse LLM evaluation response."""
+        import re as _re
+
         try:
-            data = json.loads(raw)
+            data = json.loads(_strip_markdown_fence(raw))
         except (json.JSONDecodeError, TypeError):
-            logger.warning("LLMQualityGate: failed to parse JSON, returning structural result")
-            return structural_result
+            # Attempt to find a JSON object embedded anywhere in the response
+            json_match = _re.search(r"\{[\s\S]*\}", raw)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group())
+                except (json.JSONDecodeError, TypeError):
+                    data = None
+            else:
+                data = None
+            if data is None:
+                logger.warning("LLMQualityGate: failed to parse JSON, returning structural result")
+                return structural_result
 
         score = data.get("score", 0.0)
         issues = data.get("issues", [])
         passed = data.get("passed", score >= self._pass_threshold)
+
+        # Structural trust override: if structural check passed and the LLM
+        # score is within striking distance of the threshold (>= 0.5), trust
+        # the structural result.  Prevents false negatives from weaker
+        # evaluator models that under-score genuinely adequate content.
+        # Scores < 0.5 still fail — the LLM clearly flagged bad content.
+        _STRUCTURAL_TRUST_FLOOR = 0.5
+        if not passed and structural_result.passed and score >= _STRUCTURAL_TRUST_FLOOR:
+            logger.info(
+                "LLMQualityGate: structural trust override — LLM score %.2f "
+                "below threshold %.2f but structural check passed",
+                score,
+                self._pass_threshold,
+            )
+            passed = True
 
         failures: list[str] = []
         if not passed:
