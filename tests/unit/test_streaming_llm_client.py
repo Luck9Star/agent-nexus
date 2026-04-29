@@ -251,3 +251,43 @@ class TestCallAnthropicSDK:
 
             assert result.text == "Fallback stream"
             assert call_count == 2  # First attempt (non-stream) + second attempt (stream)
+
+    def test_streaming_skips_thinking_delta(self):
+        """ThinkingDelta events (no .text attr) are silently skipped."""
+        client = self._make_anthropic_client(streaming=True)
+
+        events = []
+        start_event = MagicMock()
+        start_event.type = "message_start"
+        start_event.message = MagicMock()
+        start_event.message.model = "test-model"
+        events.append(start_event)
+        # ThinkingDelta — has .thinking but no .text
+        thinking_event = MagicMock()
+        thinking_event.type = "content_block_delta"
+        thinking_event.delta = MagicMock(spec=[])
+        thinking_event.delta.thinking = "internal reasoning"
+        events.append(thinking_event)
+        # Normal TextDelta
+        for text in ["Real", " output"]:
+            delta_event = MagicMock()
+            delta_event.type = "content_block_delta"
+            delta_event.delta = MagicMock()
+            delta_event.delta.text = text
+            events.append(delta_event)
+        stop_event = MagicMock()
+        stop_event.type = "message_stop"
+        events.append(stop_event)
+
+        @contextmanager
+        def _mock_anthropic_stream(*args, **kwargs):
+            yield iter(events)
+
+        with patch.object(client, "_get_anthropic_sdk") as mock_get_sdk:
+            mock_sdk = MagicMock()
+            mock_sdk.messages.create.side_effect = _mock_anthropic_stream
+            mock_get_sdk.return_value = mock_sdk
+
+            result = client.call("You are helpful", "Say hi")
+
+            assert result.text == "Real output"

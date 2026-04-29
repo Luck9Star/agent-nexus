@@ -599,6 +599,10 @@ class LLMClient:
         if timeout is not None:
             kwargs["timeout"] = timeout
 
+        def _extract_text_delta(delta: Any) -> str:
+            """Extract text from a content_block_delta, skipping ThinkingDelta."""
+            return getattr(delta, "text", "") or ""
+
         if use_stream:
             text_parts: list[str] = []
             actual_model = self._model_name
@@ -607,7 +611,7 @@ class LLMClient:
                     if event.type == "message_start":
                         actual_model = event.message.model or self._model_name
                     elif event.type == "content_block_delta":
-                        text_parts.append(event.delta.text)
+                        text_parts.append(_extract_text_delta(event.delta))
             text = "".join(text_parts)
         else:
             try:
@@ -619,9 +623,6 @@ class LLMClient:
             except ValueError as exc:
                 if "Streaming is required" not in str(exc):
                     raise
-                # Anthropic SDK mandates streaming for long-running operations.
-                # Fall back to streaming internally, still returning a full
-                # concatenated string so callers are unaffected.
                 logger.debug("Anthropic SDK requires streaming for this request, switching to stream mode")
                 text_parts: list[str] = []
                 actual_model = self._model_name
@@ -630,7 +631,7 @@ class LLMClient:
                         if event.type == "message_start":
                             actual_model = event.message.model or self._model_name
                         elif event.type == "content_block_delta":
-                            text_parts.append(event.delta.text)
+                            text_parts.append(_extract_text_delta(event.delta))
                 text = "".join(text_parts)
 
         # Restore the "{" we prefilled — Anthropic strips it from the response
