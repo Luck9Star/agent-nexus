@@ -204,9 +204,7 @@ class ConfigLoader:
         except toml.TomlDecodeError:
             return {}
 
-    def load_project_config(
-        self, project_dir: Path | None = None
-    ) -> PlatformConfig | None:
+    def load_project_config(self, project_dir: Path | None = None) -> PlatformConfig | None:
         """Load optional project-level ``agent-nexus.toml``.
 
         Searches *project_dir* (defaults to cwd) for ``agent-nexus.toml``.
@@ -247,9 +245,7 @@ class ConfigLoader:
             ),
         )
 
-    def load_merged_config(
-        self, project_dir: Path | None = None
-    ) -> PlatformConfig:
+    def load_merged_config(self, project_dir: Path | None = None) -> PlatformConfig:
         """Load global config merged with optional project-level overrides.
 
         Project config values win where non-empty. Priority:
@@ -423,7 +419,9 @@ class ConfigLoader:
                 logger.warning(
                     "Invalid api type '%s' in provider '%s'. Valid: %s. "
                     "Defaulting to 'openai-compatible'.",
-                    api_str, name, valid,
+                    api_str,
+                    name,
+                    valid,
                 )
                 api_type = ProviderApiType.OPENAI_COMPATIBLE
 

@@ -1,4 +1,5 @@
 """Tests for LLMClient SDK-based streaming and non-streaming calls."""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -13,12 +14,16 @@ from agent_nexus.models.config import (
 )
 
 
-def _make_llm_client(provider_api=ProviderApiType.OPENAI_COMPATIBLE,
-                      streaming=True,
-                      provider_base_url="https://api.test.com/v1"):
+def _make_llm_client(
+    provider_api=ProviderApiType.OPENAI_COMPATIBLE,
+    streaming=True,
+    provider_base_url="https://api.test.com/v1",
+):
     """Create an LLMClient with mocked config for testing."""
-    with patch("agent_nexus.platform.agency.llm_client.ConfigLoader") as MockLoader, \
-         patch("agent_nexus.platform.agency.llm_client.ModelDBClient"):
+    with (
+        patch("agent_nexus.platform.agency.llm_client.ConfigLoader") as MockLoader,  # noqa: N806
+        patch("agent_nexus.platform.agency.llm_client.ModelDBClient"),
+    ):
         platform_cfg = PlatformConfig(
             runtime=RuntimeConfig(),
             models=ModelConfig(
@@ -38,9 +43,11 @@ def _make_llm_client(provider_api=ProviderApiType.OPENAI_COMPATIBLE,
         MockLoader.return_value = mock_loader
 
         import os
+
         os.environ["TEST_API_KEY"] = "test-key-123"
 
         from agent_nexus.platform.agency.llm_client import LLMClient
+
         client = LLMClient(model_string="openai:test-model")
         return client
 
@@ -68,7 +75,10 @@ class TestCallOpenaiSDK:
             assert result.text == "Hello from test"
             mock_sdk.chat.completions.create.assert_called_once()
             call_kwargs = mock_sdk.chat.completions.create.call_args
-            assert call_kwargs.kwargs.get("stream") is None or call_kwargs.kwargs.get("stream") is False
+            assert (
+                call_kwargs.kwargs.get("stream") is None
+                or call_kwargs.kwargs.get("stream") is False
+            )
 
     def test_streaming_uses_sdk_with_stream_true(self):
         """Streaming call uses OpenAI SDK .create(stream=True)."""
@@ -105,8 +115,10 @@ class TestCallAnthropicSDK:
     """Test Anthropic SDK path (streaming and non-streaming)."""
 
     def _make_anthropic_client(self, streaming=True):
-        with patch("agent_nexus.platform.agency.llm_client.ConfigLoader") as MockLoader, \
-             patch("agent_nexus.platform.agency.llm_client.ModelDBClient"):
+        with (
+            patch("agent_nexus.platform.agency.llm_client.ConfigLoader") as MockLoader,  # noqa: N806
+            patch("agent_nexus.platform.agency.llm_client.ModelDBClient"),
+        ):
             platform_cfg = PlatformConfig(
                 runtime=RuntimeConfig(),
                 models=ModelConfig(
@@ -126,9 +138,11 @@ class TestCallAnthropicSDK:
             MockLoader.return_value = mock_loader
 
             import os
+
             os.environ["TEST_API_KEY"] = "test-key-123"
 
             from agent_nexus.platform.agency.llm_client import LLMClient
+
             return LLMClient(model_string="anthropic:test-model")
 
     def test_non_streaming_uses_sdk(self):
@@ -151,7 +165,10 @@ class TestCallAnthropicSDK:
             assert result.text == "Hello from Claude"
             mock_sdk.messages.create.assert_called_once()
             call_kwargs = mock_sdk.messages.create.call_args
-            assert call_kwargs.kwargs.get("stream") is None or call_kwargs.kwargs.get("stream") is False
+            assert (
+                call_kwargs.kwargs.get("stream") is None
+                or call_kwargs.kwargs.get("stream") is False
+            )
 
     def test_streaming_uses_sdk_with_stream_true(self):
         client = self._make_anthropic_client(streaming=True)

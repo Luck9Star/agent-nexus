@@ -4,6 +4,7 @@ Extracts the httpx-based API calling logic from LLMExecutor so that
 LLMPlanner, LLMIntegrator, and LLMQualityGate can all reuse it with
 different model strings and prompts.
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 class LLMCallError(Exception):
     """Raised when an LLM call fails (API error, CLI exit, timeout)."""
+
 
 _MAX_RETRIES = 3
 _RETRY_BASE_DELAY = 1.0  # seconds
@@ -91,9 +93,11 @@ class LLMClient:
         mgr = ModelConfigManager(platform_config)
 
         # Resolve model string: explicit > stage config > default
-        resolved = model_string or (
-            mgr.resolve_stage_model(stage) if stage else None
-        ) or mgr.resolve_model(__name__)
+        resolved = (
+            model_string
+            or (mgr.resolve_stage_model(stage) if stage else None)
+            or mgr.resolve_model(__name__)
+        )
 
         if not resolved:
             raise ValueError(
@@ -121,10 +125,7 @@ class LLMClient:
         # CLI providers with no model name skip capability lookup — the CLI
         # itself decides which model to use, so registry/ModelDB lookups are
         # unnecessary and just produce noisy warnings for empty model strings.
-        is_cli_no_model = (
-            self._provider_config.api == ProviderApiType.CLI
-            and not self._model_name
-        )
+        is_cli_no_model = self._provider_config.api == ProviderApiType.CLI and not self._model_name
 
         if capability_registry is not None:
             self._capability_registry = capability_registry
@@ -199,7 +200,8 @@ class LLMClient:
                         ),
                     )
                     self._capability_registry.set_override(
-                        self._model_name, enriched_cap,
+                        self._model_name,
+                        enriched_cap,
                     )
                     self._capability = enriched_cap
                 else:
@@ -207,7 +209,9 @@ class LLMClient:
 
         logger.info(
             "LLMClient initialized: provider=%s model=%s api=%s max_output_tokens=%d",
-            self._provider_name, self._model_name or "(cli)", self._provider_config.api,
+            self._provider_name,
+            self._model_name or "(cli)",
+            self._provider_config.api,
             self._capability.max_output_tokens,
         )
 
@@ -234,7 +238,8 @@ class LLMClient:
             logger.warning(
                 "CLI provider '%s' not found in config.toml, using minimal BackendConfig "
                 "(command=%s). Output parsing may fail without json_paths/text_patterns config.",
-                self._provider_name, self._provider_name,
+                self._provider_name,
+                self._provider_name,
             )
             config = BackendConfig(command=self._provider_name)
         return GenericCLIBackend(config)
@@ -333,21 +338,26 @@ class LLMClient:
                 if resp.status_code == 200 or not self._is_retryable(resp.status_code):
                     return resp
                 last_exc = RuntimeError(
-                    f"{label} API call failed (status {resp.status_code}): "
-                    f"{resp.text[:500]}"
+                    f"{label} API call failed (status {resp.status_code}): {resp.text[:500]}"
                 )
                 logger.warning(
                     "%s: transient error %d, retry %d/%d",
-                    label, resp.status_code, attempt + 1, _MAX_RETRIES,
+                    label,
+                    resp.status_code,
+                    attempt + 1,
+                    _MAX_RETRIES,
                 )
             except httpx.TransportError as exc:
                 last_exc = exc
                 logger.warning(
                     "%s: transport error, retry %d/%d: %s",
-                    label, attempt + 1, _MAX_RETRIES, exc,
+                    label,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    exc,
                 )
             # Exponential backoff: 1s, 2s, 4s
-            delay = _RETRY_BASE_DELAY * (2 ** attempt)
+            delay = _RETRY_BASE_DELAY * (2**attempt)
             time.sleep(delay)
         raise last_exc or RuntimeError(f"{label}: all retries exhausted")
 
@@ -393,13 +403,23 @@ class LLMClient:
 
         if self._provider_config.api == ProviderApiType.ANTHROPIC_MESSAGES:
             text, actual_model = self._call_anthropic(
-                system_prompt, user_message,
-                max_tokens, temperature, top_p, timeout, response_format,
+                system_prompt,
+                user_message,
+                max_tokens,
+                temperature,
+                top_p,
+                timeout,
+                response_format,
             )
         else:
             text, actual_model = self._call_openai(
-                system_prompt, user_message,
-                max_tokens, temperature, top_p, timeout, response_format,
+                system_prompt,
+                user_message,
+                max_tokens,
+                temperature,
+                top_p,
+                timeout,
+                response_format,
             )
 
         self._update_capability_from_response(actual_model)
@@ -457,12 +477,15 @@ class LLMClient:
             self._capability = real_cap
             logger.info(
                 "Capability updated: '%s' → real model '%s' (max_output_tokens=%d)",
-                self._model_name, actual_model, real_cap.max_output_tokens,
+                self._model_name,
+                actual_model,
+                real_cap.max_output_tokens,
             )
         except Exception:
             logger.debug(
                 "Failed to update capability from response model '%s'",
-                actual_model, exc_info=True,
+                actual_model,
+                exc_info=True,
             )
 
     def _call_cli(
@@ -474,8 +497,10 @@ class LLMClient:
     ) -> LLMResponse:
         """Execute a CLI backend call and return an LLMResponse."""
         result = self._cli_backend.call(
-            system_prompt, user_message,
-            session_id=session_id, timeout=timeout,
+            system_prompt,
+            user_message,
+            session_id=session_id,
+            timeout=timeout,
         )
 
         if result.returncode != 0:
@@ -501,11 +526,13 @@ class LLMClient:
                 status=status,
             )
             if result.session_id:
-                self._session_store.save_session(CLISessionRecord(
-                    session_id=result.session_id,
-                    backend_name=self._cli_backend.name,
-                    model=result.model or self._model_name,
-                ))
+                self._session_store.save_session(
+                    CLISessionRecord(
+                        session_id=result.session_id,
+                        backend_name=self._cli_backend.name,
+                        model=result.model or self._model_name,
+                    )
+                )
 
         return LLMResponse(
             text=result.text,
@@ -535,8 +562,13 @@ class LLMClient:
         except Exception:
             logger.warning("Anthropic SDK init failed, falling back to httpx", exc_info=True)
             return self._call_anthropic_raw(
-                system_prompt, user_message,
-                max_tokens, temperature, top_p, timeout, response_format,
+                system_prompt,
+                user_message,
+                max_tokens,
+                temperature,
+                top_p,
+                timeout,
+                response_format,
             )
 
         messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
@@ -575,9 +607,7 @@ class LLMClient:
         else:
             resp = sdk.messages.create(**kwargs)
             actual_model = resp.model or self._model_name
-            text = "".join(
-                block.text for block in resp.content if block.type == "text"
-            )
+            text = "".join(block.text for block in resp.content if block.type == "text")
 
         # Restore the "{" we prefilled — Anthropic strips it from the response
         if response_format == "json" and text and not text.startswith("{"):
@@ -649,8 +679,13 @@ class LLMClient:
         except Exception:
             logger.warning("OpenAI SDK init failed, falling back to httpx", exc_info=True)
             return self._call_openai_raw(
-                system_prompt, user_message,
-                max_tokens, temperature, top_p, timeout, response_format,
+                system_prompt,
+                user_message,
+                max_tokens,
+                temperature,
+                top_p,
+                timeout,
+                response_format,
             )
 
         messages: list[dict[str, Any]] = [
