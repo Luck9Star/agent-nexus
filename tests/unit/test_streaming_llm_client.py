@@ -207,3 +207,47 @@ class TestCallAnthropicSDK:
             assert result.text == "Hello from Claude"
             call_kwargs = mock_sdk.messages.create.call_args
             assert call_kwargs.kwargs.get("stream") is True
+
+    def test_non_streaming_falls_back_to_stream_when_sdk_requires(self):
+        """When Anthropic SDK rejects non-streaming (long timeout), falls back to streaming internally."""
+        client = self._make_anthropic_client(streaming=False)
+
+        # Anthropic stream events for the fallback path
+        events = []
+        start_event = MagicMock()
+        start_event.type = "message_start"
+        start_event.message = MagicMock()
+        start_event.message.model = "test-model"
+        events.append(start_event)
+        for text in ["Fallback", " stream"]:
+            delta_event = MagicMock()
+            delta_event.type = "content_block_delta"
+            delta_event.delta = MagicMock()
+            delta_event.delta.text = text
+            events.append(delta_event)
+        stop_event = MagicMock()
+        stop_event.type = "message_stop"
+        events.append(stop_event)
+
+        @contextmanager
+        def _mock_stream(*args, **kwargs):
+            yield iter(events)
+
+        call_count = 0
+
+        def _create_side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if kwargs.get("stream") is False or kwargs.get("stream") is None:
+                raise ValueError("Streaming is required for operations that may take longer than 10 minutes.")
+            return _mock_stream(**kwargs)
+
+        with patch.object(client, "_get_anthropic_sdk") as mock_get_sdk:
+            mock_sdk = MagicMock()
+            mock_sdk.messages.create.side_effect = _create_side_effect
+            mock_get_sdk.return_value = mock_sdk
+
+            result = client.call("You are helpful", "Say hi", timeout=900)
+
+            assert result.text == "Fallback stream"
+            assert call_count == 2  # First attempt (non-stream) + second attempt (stream)

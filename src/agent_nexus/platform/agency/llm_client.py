@@ -461,7 +461,7 @@ class LLMClient:
         """Resolve streaming mode: provider config -> global default -> True."""
         if self._provider_config.streaming is not None:
             return self._provider_config.streaming
-        return self._platform_config.streaming_default
+        return self._platform_config.models.streaming_default
 
     def _update_capability_from_response(self, actual_model: str) -> None:
         """Enrich capability data when the API returns a different model name."""
@@ -605,9 +605,28 @@ class LLMClient:
                         text_parts.append(event.delta.text)
             text = "".join(text_parts)
         else:
-            resp = sdk.messages.create(**kwargs)
-            actual_model = resp.model or self._model_name
-            text = "".join(block.text for block in resp.content if block.type == "text")
+            try:
+                resp = sdk.messages.create(**kwargs)
+                actual_model = resp.model or self._model_name
+                text = "".join(
+                    block.text for block in resp.content if block.type == "text"
+                )
+            except ValueError as exc:
+                if "Streaming is required" not in str(exc):
+                    raise
+                # Anthropic SDK mandates streaming for long-running operations.
+                # Fall back to streaming internally, still returning a full
+                # concatenated string so callers are unaffected.
+                logger.debug("Anthropic SDK requires streaming for this request, switching to stream mode")
+                text_parts: list[str] = []
+                actual_model = self._model_name
+                with sdk.messages.create(stream=True, **kwargs) as stream:
+                    for event in stream:
+                        if event.type == "message_start":
+                            actual_model = event.message.model or self._model_name
+                        elif event.type == "content_block_delta":
+                            text_parts.append(event.delta.text)
+                text = "".join(text_parts)
 
         # Restore the "{" we prefilled — Anthropic strips it from the response
         if response_format == "json" and text and not text.startswith("{"):
