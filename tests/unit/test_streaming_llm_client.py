@@ -1,6 +1,7 @@
 """Tests for LLMClient SDK-based streaming and non-streaming calls."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from agent_nexus.models.config import (
@@ -97,4 +98,95 @@ class TestCallOpenaiSDK:
 
             assert result.text == "Hello from stream"
             call_kwargs = mock_sdk.chat.completions.create.call_args
+            assert call_kwargs.kwargs.get("stream") is True
+
+
+class TestCallAnthropicSDK:
+    """Test Anthropic SDK path (streaming and non-streaming)."""
+
+    def _make_anthropic_client(self, streaming=True):
+        with patch("agent_nexus.platform.agency.llm_client.ConfigLoader") as MockLoader, \
+             patch("agent_nexus.platform.agency.llm_client.ModelDBClient"):
+            platform_cfg = PlatformConfig(
+                runtime=RuntimeConfig(),
+                models=ModelConfig(
+                    default="anthropic:test-model",
+                    providers={
+                        "anthropic": ProviderConfig(
+                            base_url="https://api.anthropic.com",
+                            api_key_env="TEST_API_KEY",
+                            api=ProviderApiType.ANTHROPIC_MESSAGES,
+                            streaming=streaming,
+                        ),
+                    },
+                ),
+            )
+            mock_loader = MagicMock()
+            mock_loader.load_config.return_value = platform_cfg
+            MockLoader.return_value = mock_loader
+
+            import os
+            os.environ["TEST_API_KEY"] = "test-key-123"
+
+            from agent_nexus.platform.agency.llm_client import LLMClient
+            return LLMClient(model_string="anthropic:test-model")
+
+    def test_non_streaming_uses_sdk(self):
+        client = self._make_anthropic_client(streaming=False)
+
+        mock_response = MagicMock()
+        mock_response.model = "test-model"
+        mock_block = MagicMock()
+        mock_block.type = "text"
+        mock_block.text = "Hello from Claude"
+        mock_response.content = [mock_block]
+
+        with patch.object(client, "_get_anthropic_sdk") as mock_get_sdk:
+            mock_sdk = MagicMock()
+            mock_sdk.messages.create.return_value = mock_response
+            mock_get_sdk.return_value = mock_sdk
+
+            result = client.call("You are helpful", "Say hi")
+
+            assert result.text == "Hello from Claude"
+            mock_sdk.messages.create.assert_called_once()
+            call_kwargs = mock_sdk.messages.create.call_args
+            assert call_kwargs.kwargs.get("stream") is None or call_kwargs.kwargs.get("stream") is False
+
+    def test_streaming_uses_sdk_with_stream_true(self):
+        client = self._make_anthropic_client(streaming=True)
+
+        # Anthropic stream events
+        events = []
+        # message_start
+        start_event = MagicMock()
+        start_event.type = "message_start"
+        start_event.message = MagicMock()
+        start_event.message.model = "test-model"
+        events.append(start_event)
+        # content_block_delta
+        for text in ["Hello", " from", " Claude"]:
+            delta_event = MagicMock()
+            delta_event.type = "content_block_delta"
+            delta_event.delta = MagicMock()
+            delta_event.delta.text = text
+            events.append(delta_event)
+        # message_stop
+        stop_event = MagicMock()
+        stop_event.type = "message_stop"
+        events.append(stop_event)
+
+        @contextmanager
+        def _mock_anthropic_stream(*args, **kwargs):
+            yield iter(events)
+
+        with patch.object(client, "_get_anthropic_sdk") as mock_get_sdk:
+            mock_sdk = MagicMock()
+            mock_sdk.messages.create.side_effect = _mock_anthropic_stream
+            mock_get_sdk.return_value = mock_sdk
+
+            result = client.call("You are helpful", "Say hi")
+
+            assert result.text == "Hello from Claude"
+            call_kwargs = mock_sdk.messages.create.call_args
             assert call_kwargs.kwargs.get("stream") is True

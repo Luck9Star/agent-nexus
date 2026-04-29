@@ -528,6 +528,73 @@ class LLMClient:
         timeout: float | None,
         response_format: str | None = None,
     ) -> tuple[str, str]:
+        use_stream = self._should_stream()
+
+        try:
+            sdk = self._get_anthropic_sdk()
+        except Exception:
+            logger.warning("Anthropic SDK init failed, falling back to httpx", exc_info=True)
+            return self._call_anthropic_raw(
+                system_prompt, user_message,
+                max_tokens, temperature, top_p, timeout, response_format,
+            )
+
+        messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
+
+        # Prefill trick for JSON: start assistant response with "{" to
+        # strongly guide the model into producing a JSON object.
+        if response_format == "json":
+            messages.append({"role": "assistant", "content": "{"})
+
+        kwargs: dict[str, Any] = {
+            "model": self._model_name,
+            "max_tokens": max_tokens or self._capability.max_output_tokens,
+            "system": system_prompt,
+            "messages": messages,
+        }
+        if temperature is not None and self._capability.supports_temperature:
+            kwargs["temperature"] = max(
+                self._capability.temperature_min,
+                min(self._capability.temperature_max, temperature),
+            )
+        if top_p is not None and self._capability.supports_temperature:
+            kwargs["top_p"] = max(0.0, min(1.0, top_p))
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+
+        if use_stream:
+            text_parts: list[str] = []
+            actual_model = self._model_name
+            with sdk.messages.create(stream=True, **kwargs) as stream:
+                for event in stream:
+                    if event.type == "message_start":
+                        actual_model = event.message.model or self._model_name
+                    elif event.type == "content_block_delta":
+                        text_parts.append(event.delta.text)
+            text = "".join(text_parts)
+        else:
+            resp = sdk.messages.create(**kwargs)
+            actual_model = resp.model or self._model_name
+            text = "".join(
+                block.text for block in resp.content if block.type == "text"
+            )
+
+        # Restore the "{" we prefilled — Anthropic strips it from the response
+        if response_format == "json" and text and not text.startswith("{"):
+            text = "{" + text
+        return text, actual_model
+
+    def _call_anthropic_raw(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int | None,
+        temperature: float | None,
+        top_p: float | None,
+        timeout: float | None,
+        response_format: str | None = None,
+    ) -> tuple[str, str]:
+        """Fallback httpx-based Anthropic call (used when SDK init fails)."""
         base_url = self._provider_config.base_url.rstrip("/")
         url = f"{base_url}/v1/messages"
 
