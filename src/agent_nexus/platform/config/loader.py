@@ -100,6 +100,7 @@ class ConfigLoader:
         runtime = RuntimeConfig(
             python_path=runtime_raw.get("python_path", "python3"),
             uv_path=runtime_raw.get("uv_path", "uv"),
+            log_level=runtime_raw.get("log_level", "INFO"),
         )
 
         # --- Models section ---

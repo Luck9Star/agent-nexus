@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -442,6 +443,17 @@ def run_composition(
     """
     # Resolve vendor_path / allowlist to repo defaults
     vendor_path, allowlist = _resolve_defaults(vendor_path, allowlist)
+
+    # Configure logging from config.toml [runtime].log_level
+    from agent_nexus.platform.config.loader import ConfigLoader
+
+    _cfg_dir = Path(config_dir) if config_dir else None
+    _log_level = ConfigLoader(_cfg_dir).load_config().runtime.log_level
+    logging.basicConfig(
+        level=getattr(logging, _log_level.upper(), logging.INFO),
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     # Load .env from config dir so API keys are available
     _env_dir = config_dir or "~/.agent-nexus"

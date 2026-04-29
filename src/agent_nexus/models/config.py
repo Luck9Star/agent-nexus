@@ -77,6 +77,7 @@ class RuntimeConfig(FrozenModel):
 
     python_path: str = "python3"
     uv_path: str = "uv"
+    log_level: str = "INFO"
 
 
 class PlatformConfig(FrozenModel):
