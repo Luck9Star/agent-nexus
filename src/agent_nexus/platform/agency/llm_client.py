@@ -204,6 +204,9 @@ class LLMClient:
             self._capability.max_output_tokens,
         )
 
+        # Store platform config for streaming resolution
+        self._platform_config = platform_config
+
         # Lazy-initialised persistent httpx.Client for connection reuse
         self._http_client: httpx.Client | None = None
 
@@ -392,6 +395,12 @@ class LLMClient:
                     "Model '%s' does not support top_p — ignoring",
                     self._model_name,
                 )
+
+    def _should_stream(self) -> bool:
+        """Resolve streaming mode: provider config -> global default -> True."""
+        if self._provider_config.streaming is not None:
+            return self._provider_config.streaming
+        return self._platform_config.streaming_default
 
     def _update_capability_from_response(self, actual_model: str) -> None:
         """Enrich capability data when the API returns a different model name."""
