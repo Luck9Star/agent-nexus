@@ -30,6 +30,7 @@ class ProviderConfig(FrozenModel):
     base_url: str = ""
     api_key_env: str = ""
     api: ProviderApiType = ProviderApiType.OPENAI_COMPATIBLE
+    streaming: bool | None = None
 
 
 class ModelConfig(FrozenModel):
@@ -60,6 +61,7 @@ class ModelConfig(FrozenModel):
     Supported stages: ``planning``, ``integration``, ``qa``, ``execution``.
     Falls back to ``default`` if a stage is not specified.
     """
+    streaming_default: bool = True
 
 
 class RuntimeConfig(FrozenModel):
