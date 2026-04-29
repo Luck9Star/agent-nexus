@@ -56,6 +56,7 @@ All design docs live in `docs/`. See `docs/README.md` for the full navigation in
 | Git-based distribution, local architecture, Python implementation, Rust traits | `docs/10-cloud-local-architecture.md` |
 | TOML schemas, model tiers, reference projects | `docs/appendix.md` |
 | Testing overview, coverage, conventions | `docs/testing.md` |
+| Capability testing (contract-driven, 80 tests) | `docs/capability-testing.md` |
 
 ## Architecture Summary
 
