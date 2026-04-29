@@ -35,12 +35,12 @@ class APIProvider:
             config_path = Path(self.config_dir) if self.config_dir else None
             registry = ModelCapabilityRegistry()
 
-            async with LLMClient(
+            with LLMClient(
                 model_string=self.model,
                 config_dir=config_path,
                 capability_registry=registry,
             ) as client:
-                response = await client.call(prompt)
+                response = client.call(prompt)
                 duration_ms = (time.monotonic() - start) * 1000
 
                 return ProviderResult(

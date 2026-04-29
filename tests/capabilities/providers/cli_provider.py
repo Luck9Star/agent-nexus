@@ -17,8 +17,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _subprocess_exec = asyncio.create_subprocess_exec
 
 
-def _agent_package_dir(agent_name: str) -> str:
-    return str(_REPO_ROOT / "agents" / "atomic" / agent_name)
+def _agent_package_dir(contract: CapabilityContract) -> str:
+    subdir = "atomic" if contract.agent_type == "atomic" else "composite"
+    return str(_REPO_ROOT / "agents" / subdir / contract.agent_name)
 
 
 class CLIProvider:
@@ -66,7 +67,7 @@ class CLIProvider:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=_agent_package_dir(contract.agent_name),
+                cwd=_agent_package_dir(contract),
                 env=env,
             )
             stdout_bytes, stderr_bytes = await asyncio.wait_for(

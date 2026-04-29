@@ -98,6 +98,6 @@ class TestAgencyCLI:
             task="Analyze code security",
             max_parallel=3,
         )
-        result = composer.compose(composer_input)
+        result = composer.run(composer_input)
         assert result is not None
-        assert len(result.subtasks) > 0
+        assert len(result.selected_agents) > 0
