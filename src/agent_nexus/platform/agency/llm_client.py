@@ -14,6 +14,13 @@ from typing import Any
 
 import httpx
 
+try:
+    import anthropic
+    import openai
+except ImportError:
+    anthropic = None  # type: ignore[assignment]
+    openai = None  # type: ignore[assignment]
+
 from agent_nexus.models.capability import ModelCapability, ModelCapabilityRegistry
 from agent_nexus.models.config import ProviderApiType
 from agent_nexus.platform.config.loader import ConfigLoader
@@ -210,6 +217,10 @@ class LLMClient:
         # Lazy-initialised persistent httpx.Client for connection reuse
         self._http_client: httpx.Client | None = None
 
+        # Lazy-initialised SDK clients (created on first use)
+        self._openai_sdk: openai.OpenAI | None = None
+        self._anthropic_sdk: anthropic.Anthropic | None = None
+
     def _init_cli_backend(self, config_dir: Path | None) -> Any:
         """Create a GenericCLIBackend using BackendConfig from config.toml."""
         from agent_nexus.platform.agency.cli_backend.base import GenericCLIBackend
@@ -234,13 +245,43 @@ class LLMClient:
             self._http_client = httpx.Client(timeout=self._TIMEOUT)
         return self._http_client
 
+    def _get_openai_sdk(self):
+        """Lazy-initialise and cache the OpenAI SDK client."""
+        if openai is None:
+            raise ImportError("openai package not installed")
+        if self._openai_sdk is None:
+            base_url = self._provider_config.base_url or None
+            self._openai_sdk = openai.OpenAI(
+                api_key=self._api_key,
+                base_url=base_url,
+            )
+        return self._openai_sdk
+
+    def _get_anthropic_sdk(self):
+        """Lazy-initialise and cache the Anthropic SDK client."""
+        if anthropic is None:
+            raise ImportError("anthropic package not installed")
+        if self._anthropic_sdk is None:
+            base_url = self._provider_config.base_url or None
+            self._anthropic_sdk = anthropic.Anthropic(
+                api_key=self._api_key,
+                base_url=base_url,
+            )
+        return self._anthropic_sdk
+
     def close(self) -> None:
-        """Close the underlying HTTP client."""
+        """Close the underlying HTTP client and SDK clients."""
         if self._cli_backend is not None:
             pass  # GenericCLIBackend has no resources to close
         if self._http_client is not None and not self._http_client.is_closed:
             self._http_client.close()
             self._http_client = None
+        if self._openai_sdk is not None:
+            self._openai_sdk.close()
+            self._openai_sdk = None
+        if self._anthropic_sdk is not None:
+            self._anthropic_sdk.close()
+            self._anthropic_sdk = None
 
     def __del__(self) -> None:
         self.close()
