@@ -571,6 +571,11 @@ class LLMClient:
                 response_format,
             )
 
+        logger.info(
+            "LLMClient._call_anthropic: model=%s stream=%s provider=%s",
+            self._model_name, use_stream, self._provider_name,
+        )
+
         messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
 
         # Prefill trick for JSON: start assistant response with "{" to
@@ -706,6 +711,11 @@ class LLMClient:
                 timeout,
                 response_format,
             )
+
+        logger.info(
+            "LLMClient._call_openai: model=%s stream=%s provider=%s",
+            self._model_name, use_stream, self._provider_name,
+        )
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
