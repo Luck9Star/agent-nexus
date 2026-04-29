@@ -4,36 +4,43 @@ uv_path = "uv"
 
 [models]
 default = "openai:gpt-4o"
+streaming_default = true
 
 [models.providers.anthropic]
 base_url = ""
 api_key_env = "ANTHROPIC_API_KEY"
 api = "anthropic-messages"
+streaming = true
 
 [models.providers.minimax]
 base_url = ""
 api_key_env = "MINIMAX_API_KEY"
 api = "openai-compatible"
+streaming = true
 
 [models.providers.openai]
 base_url = ""
 api_key_env = "OPENAI_API_KEY"
 api = "openai-compatible"
+streaming = true
 
 [models.providers.deepseek]
 base_url = "https://api.deepseek.com/v1"
 api_key_env = "DEEPSEEK_API_KEY"
 api = "openai-compatible"
+streaming = false
 
 [models.providers.qwen]
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 api_key_env = "DASHSCOPE_API_KEY"
 api = "openai-compatible"
+streaming = false
 
 [models.providers.ollama]
 base_url = "http://localhost:11434/v1"
 api_key_env = ""
 api = "ollama"
+streaming = true
 
 # ── CLI Backend Integration ──
 # These define CLI tools that can be used as LLM backends.

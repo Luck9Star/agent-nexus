@@ -130,6 +130,7 @@ class ConfigLoader:
             default=default_model,
             providers=providers,
             stages=stages,
+            streaming_default=models_raw.get("streaming_default", True),
         )
 
         # --- Sources section ---
@@ -432,12 +433,14 @@ class ConfigLoader:
                     base_url=raw.get("base_url", existing.base_url),
                     api_key_env=raw.get("api_key_env", existing.api_key_env),
                     api=api_type,
+                    streaming=raw.get("streaming", existing.streaming),
                 )
             else:
                 merged[name] = ProviderConfig(
                     base_url=raw.get("base_url", ""),
                     api_key_env=raw.get("api_key_env", ""),
                     api=api_type,
+                    streaming=raw.get("streaming"),
                 )
 
         return merged
