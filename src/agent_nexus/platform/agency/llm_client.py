@@ -575,6 +575,67 @@ class LLMClient:
         timeout: float | None,
         response_format: str | None = None,
     ) -> tuple[str, str]:
+        use_stream = self._should_stream()
+
+        try:
+            sdk = self._get_openai_sdk()
+        except Exception:
+            logger.warning("OpenAI SDK init failed, falling back to httpx", exc_info=True)
+            return self._call_openai_raw(
+                system_prompt, user_message,
+                max_tokens, temperature, top_p, timeout, response_format,
+            )
+
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ]
+
+        kwargs: dict[str, Any] = {
+            "model": self._model_name,
+            "messages": messages,
+            "max_tokens": max_tokens or self._capability.max_output_tokens,
+        }
+        if temperature is not None and self._capability.supports_temperature:
+            kwargs["temperature"] = max(
+                self._capability.temperature_min,
+                min(self._capability.temperature_max, temperature),
+            )
+        if top_p is not None and self._capability.supports_temperature:
+            kwargs["top_p"] = max(0.0, min(1.0, top_p))
+        if response_format == "json":
+            kwargs["response_format"] = {"type": "json_object"}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+
+        if use_stream:
+            text_parts: list[str] = []
+            actual_model = self._model_name
+            with sdk.chat.completions.create(stream=True, **kwargs) as stream:
+                for chunk in stream:
+                    if chunk.model:
+                        actual_model = chunk.model
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta and delta.content:
+                        text_parts.append(delta.content)
+            return "".join(text_parts), actual_model
+        else:
+            resp = sdk.chat.completions.create(**kwargs)
+            actual_model = resp.model or self._model_name
+            content = resp.choices[0].message.content if resp.choices else ""
+            return content or "", actual_model
+
+    def _call_openai_raw(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int | None,
+        temperature: float | None,
+        top_p: float | None,
+        timeout: float | None,
+        response_format: str | None = None,
+    ) -> tuple[str, str]:
+        """Fallback httpx-based OpenAI call (used when SDK init fails)."""
         base_url = self._provider_config.base_url.rstrip("/")
         url = f"{base_url}/v1/chat/completions"
 
