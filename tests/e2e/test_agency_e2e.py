@@ -977,7 +977,7 @@ class TestPlannerResolveDependencies:
     """E2E: resolve_dependencies() creates correct dependency edges."""
 
     def test_dependency_edges_created_on_capability_overlap(self):
-        """When later subtask shares a capability with an earlier one, an edge is created."""
+        """When a later subtask's caps are a subset of an earlier one, an edge is created."""
         planner = DynamicCompositePlanner()
         subtasks = [
             SubtaskDef(
@@ -990,13 +990,13 @@ class TestPlannerResolveDependencies:
             SubtaskDef(
                 id="task-b",
                 goal="Review architecture",
-                needed_capabilities=["architecture_review", "code_review"],
+                needed_capabilities=["architecture_review"],
                 output_contract="review_report",
                 assigned_agent="agency.code-reviewer",
             ),
         ]
         dag = planner.resolve_dependencies(subtasks, composition_name="dep-test", max_parallel=2)
-        # task-b shares architecture_review with task-a, so task-b depends on task-a
+        # task-b's caps are a subset of task-a's, so task-b depends on task-a
         task_b = next(t for t in dag.tasks if t.id == "task-b")
         assert "task-a" in task_b.blocked_by, f"task-b should be blocked by task-a, got {task_b.blocked_by}"
 

@@ -170,11 +170,13 @@ class DynamicCompositePlanner:
         earlier one.
 
         Dependency rule:
-            A task B is blocked by task A when they share at least one
-            capability *and* A appeared earlier in the subtask list (so
-            A is the canonical producer for that capability).  This
-            ensures that overlapping work is sequenced, while tasks with
-            disjoint capabilities can run in parallel.
+            A task B is blocked by an earlier task A when **every** capability
+            that B needs is already provided by A (i.e. B's
+            ``needed_capabilities`` are a subset of A's).  This models the
+            case where B is a narrower specialist whose work is subsumed by
+            A's broader scope, so B should wait for A to finish first.
+            Mere overlap (neither set is a subset of the other) does **not**
+            create a dependency — those tasks run in parallel.
 
         Raises:
             ValueError: If subtasks is empty or contains duplicate IDs.
@@ -183,24 +185,20 @@ class DynamicCompositePlanner:
 
         effective_parallel = max(1, max_parallel)
 
-        # Build capability -> producing task mapping (first task that declares it wins)
-        cap_producer: dict[str, str] = {}
-        for st in subtasks:
-            for cap in st.needed_capabilities:
-                if cap not in cap_producer:
-                    cap_producer[cap] = st.id
-
-        # Build specialist tasks with dynamic blocked_by
-        # A task is blocked by the first (earliest) producer of any
-        # shared capability.  This sequences overlapping work while
-        # keeping disjoint tasks parallel.
+        # Build specialist tasks with dynamic blocked_by.
+        # Subset rule: task B is blocked by earlier task A when ALL of B's
+        # capabilities are contained in A's (B is narrower than A).
+        # Mere overlap does NOT create a dependency.
         dag_tasks: list[DAGTask] = []
         for st in subtasks:
             blocked_by: list[str] = []
-            for cap in st.needed_capabilities:
-                producer = cap_producer.get(cap)
-                if producer and producer != st.id and producer not in blocked_by:
-                    blocked_by.append(producer)
+            for earlier in subtasks:
+                if earlier.id == st.id:
+                    continue
+                if set(st.needed_capabilities) < set(earlier.needed_capabilities):
+                    # st's caps are a strict subset of earlier's caps → dep
+                    if earlier.id not in blocked_by:
+                        blocked_by.append(earlier.id)
             dag_tasks.append(
                 DAGTask(
                     id=st.id,
