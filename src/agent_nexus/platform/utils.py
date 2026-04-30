@@ -8,11 +8,15 @@ import os
 import re
 import sqlite3
 import tempfile
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Generator
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from agent_nexus.models.composition import (
+    detect_cycles_dfs,  # noqa: F401 — re-exported for backward compat
+)
 
 # Agent name pattern: starts with alphanumeric, then alphanumeric/hyphen/underscore
 AGENT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
@@ -97,45 +101,6 @@ def cache_path_for_url(base_dir: Path, url: str) -> Path:
     """
     digest = hashlib.sha256(url.encode()).hexdigest()[:12]
     return base_dir / "cache" / "repos" / digest
-
-
-def detect_cycles_dfs(
-    nodes: Iterable[str],
-    get_deps: Callable[[str], Iterable[str]],
-) -> list[list[str]]:
-    """DFS cycle detection over a directed graph.
-
-    Args:
-        nodes: All node identifiers.
-        get_deps: Returns dependencies (successors) for a given node.
-
-    Returns:
-        List of cycles, each cycle as a list of node names.
-    """
-    visiting: set[str] = set()
-    visited: set[str] = set()
-    cycles: list[list[str]] = []
-
-    def _dfs(node: str, path: list[str]) -> None:
-        if node in visited:
-            return
-        if node in visiting:
-            # Found a cycle — extract the cycle portion of the path
-            cycle_start = path.index(node)
-            cycles.append(path[cycle_start:] + [node])
-            return
-        visiting.add(node)
-        path.append(node)
-        for dep in get_deps(node):
-            _dfs(dep, path)
-        path.pop()
-        visiting.discard(node)
-        visited.add(node)
-
-    for node in nodes:
-        _dfs(node, [])
-
-    return cycles
 
 
 # ---------------------------------------------------------------------------

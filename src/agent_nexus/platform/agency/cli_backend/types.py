@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent_nexus.platform.config.defaults import DEFAULT_PIPELINE_TIMEOUT
+
 
 @dataclass
 class CLIResult:
@@ -54,7 +56,7 @@ class BackendConfig:
     json_paths: JsonPathConfig = field(default_factory=JsonPathConfig)
     text_patterns: TextPatternConfig = field(default_factory=TextPatternConfig)
     model_map: dict[str, str] = field(default_factory=dict)
-    timeout_secs: int = 300
+    timeout_secs: int = DEFAULT_PIPELINE_TIMEOUT
 
 
 @dataclass

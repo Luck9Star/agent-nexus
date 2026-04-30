@@ -19,6 +19,7 @@ import uuid
 
 import agent_nexus.platform.orchestration.ipc as _ipc_mod
 from agent_nexus.models.ipc import AgentToPlatformType
+from agent_nexus.platform.config.defaults import DEFAULT_PIPELINE_TIMEOUT
 from agent_nexus.platform.orchestration.ipc import IPCError, get_ipc_lock
 from agent_nexus.platform.orchestration.process_manager import AgentHandle
 from agent_nexus.platform.utils import make_error_result as _make_error_result
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Default timeout (seconds) for waiting on an agent subprocess to
 # return a final result via IPC.  Used by both McpToolAdapter and
 # PlatformRouter — keep in sync via this single definition.
-DEFAULT_IPC_EXECUTE_TIMEOUT: float = 300.0
+DEFAULT_IPC_EXECUTE_TIMEOUT: float = float(DEFAULT_PIPELINE_TIMEOUT)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -47,7 +48,7 @@ def _sanitize(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def remove_lock(agent_name: str) -> None:
+def remove_lock(_agent_name: str) -> None:
     """No-op: IPC lock for *agent_name* is intentionally retained.
 
     Despite the function name, the lock dict entry is NOT deleted — popping

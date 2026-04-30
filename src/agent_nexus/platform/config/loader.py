@@ -24,6 +24,10 @@ from agent_nexus.models.config import (
 )
 from agent_nexus.models.distribution import SourceEntry
 
+from .config_templates import (
+    load_backend_configs_from_cli_backends,
+    load_routing_config,
+)
 from .defaults import (
     CONFIG_FILE,
     DEFAULT_CONFIG_DIR,
@@ -168,10 +172,6 @@ class ConfigLoader:
 
     def load_cli_backends(self) -> dict[str, Any]:
         """Load CLI backend configs from config.toml [cli_backends.*] sections."""
-        from agent_nexus.platform.agency.cli_backend.config_templates import (
-            load_backend_configs_from_cli_backends,
-        )
-
         raw = self._load_raw()
         cli_backends = raw.get("cli_backends", {})
         if not isinstance(cli_backends, dict):
@@ -183,10 +183,6 @@ class ConfigLoader:
 
         Returns None when the section is absent.
         """
-        from agent_nexus.platform.agency.cli_backend.config_templates import (
-            load_routing_config,
-        )
-
         raw = self._load_raw()
         if "cli_routing" not in raw:
             return None

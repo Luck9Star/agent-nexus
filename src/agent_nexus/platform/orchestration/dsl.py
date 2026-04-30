@@ -18,6 +18,7 @@ from typing import Any
 
 import toml
 
+from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.models.task import TaskItem, TaskState
 
 # ---------------------------------------------------------------------------
@@ -170,7 +171,7 @@ class OrchestrationDefinition:
 # ---------------------------------------------------------------------------
 
 
-class DSLError(Exception):
+class DSLError(AgentNexusError):
     """Base DSL parsing error."""
 
 

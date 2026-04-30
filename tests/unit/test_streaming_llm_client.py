@@ -45,11 +45,14 @@ def _make_llm_client(
         import os
 
         os.environ["TEST_API_KEY"] = "test-key-123"
+        try:
 
-        from agent_nexus.platform.agency.llm_client import LLMClient
+            from agent_nexus.platform.agency.llm_client import LLMClient
 
-        client = LLMClient(model_string="openai:test-model")
-        return client
+            client = LLMClient(model_string="openai:test-model")
+            return client
+        finally:
+            os.environ.pop("TEST_API_KEY", None)
 
 
 class TestCallOpenaiSDK:
@@ -140,10 +143,13 @@ class TestCallAnthropicSDK:
             import os
 
             os.environ["TEST_API_KEY"] = "test-key-123"
+            try:
 
-            from agent_nexus.platform.agency.llm_client import LLMClient
+                from agent_nexus.platform.agency.llm_client import LLMClient
 
-            return LLMClient(model_string="anthropic:test-model")
+                return LLMClient(model_string="anthropic:test-model")
+            finally:
+                os.environ.pop("TEST_API_KEY", None)
 
     def test_non_streaming_uses_sdk(self):
         client = self._make_anthropic_client(streaming=False)

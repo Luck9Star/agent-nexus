@@ -23,6 +23,7 @@ import yaml
 
 from agent_nexus.models.agent import AgentManifest, AgentType
 from agent_nexus.models.distribution import LockfileEntry, SourceEntry
+from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.platform.utils import AGENT_NAME_RE
 
 from .lockfile import LockfileManager
@@ -60,11 +61,11 @@ def _validate_git_url(url: str) -> None:
         )
 
 
-class AgentNotFoundError(Exception):
+class AgentNotFoundError(AgentNexusError):
     """Raised when an agent is not found in any configured source."""
 
 
-class InstallationError(Exception):
+class InstallationError(AgentNexusError):
     """Raised when clone, validation, or venv creation fails."""
 
 

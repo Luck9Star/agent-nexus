@@ -7,9 +7,9 @@ different model strings and prompts.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -28,6 +28,7 @@ except ImportError:
 
 from agent_nexus.models.capability import ModelCapability, ModelCapabilityRegistry
 from agent_nexus.models.config import ProviderApiType, ProviderConfig
+from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.platform.config.loader import ConfigLoader
 from agent_nexus.platform.config.model_config import ModelConfigManager
 from agent_nexus.platform.config.model_db import ModelDBClient
@@ -35,7 +36,7 @@ from agent_nexus.platform.config.model_db import ModelDBClient
 logger = logging.getLogger(__name__)
 
 
-class LLMCallError(Exception):
+class LLMCallError(AgentNexusError):
     """Raised when an LLM call fails (API error, CLI exit, timeout)."""
 
 
@@ -51,6 +52,19 @@ class LLMResponse:
     model: str
     provider: str
     metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _LLMCallParams:
+    """Shared parameters for internal LLM call methods (data clump extraction)."""
+
+    system_prompt: str
+    user_message: str
+    max_tokens: int | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    timeout: float | None = None
+    response_format: str | None = None
 
 
 class LLMClient:
@@ -337,7 +351,7 @@ class LLMClient:
         """Return True for transient HTTP status codes that warrant retry."""
         return status_code == 429 or status_code >= 500
 
-    def _call_with_retry(
+    async def _call_with_retry(
         self,
         url: str,
         headers: dict[str, str],
@@ -376,7 +390,7 @@ class LLMClient:
             # Exponential backoff: 1s, 2s, 4s (skip on last attempt)
             if attempt < _MAX_RETRIES - 1:
                 delay = _RETRY_BASE_DELAY * (2**attempt)
-                time.sleep(delay)
+                await asyncio.sleep(delay)
         raise last_exc or RuntimeError(f"{label}: all retries exhausted")
 
     def call(
@@ -419,26 +433,20 @@ class LLMClient:
         if self._provider_config.api == ProviderApiType.CLI:
             return self._call_cli(system_prompt, user_message, session_id, timeout)
 
+        params = _LLMCallParams(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            timeout=timeout,
+            response_format=response_format,
+        )
+
         if self._provider_config.api == ProviderApiType.ANTHROPIC_MESSAGES:
-            text, actual_model = self._call_anthropic(
-                system_prompt,
-                user_message,
-                max_tokens,
-                temperature,
-                top_p,
-                timeout,
-                response_format,
-            )
+            text, actual_model = self._call_anthropic(params)
         else:
-            text, actual_model = self._call_openai(
-                system_prompt,
-                user_message,
-                max_tokens,
-                temperature,
-                top_p,
-                timeout,
-                response_format,
-            )
+            text, actual_model = self._call_openai(params)
 
         self._update_capability_from_response(actual_model)
 
@@ -564,31 +572,14 @@ class LLMClient:
             },
         )
 
-    def _call_anthropic(
-        self,
-        system_prompt: str,
-        user_message: str,
-        max_tokens: int | None,
-        temperature: float | None,
-        top_p: float | None,
-        timeout: float | None,
-        response_format: Literal["json"] | None = None,
-    ) -> tuple[str, str]:
+    def _call_anthropic(self, p: _LLMCallParams) -> tuple[str, str]:
         use_stream = self._should_stream()
 
         try:
             sdk = self._get_anthropic_sdk()
         except Exception:
             logger.warning("Anthropic SDK init failed, falling back to httpx", exc_info=True)
-            return self._call_anthropic_raw(
-                system_prompt,
-                user_message,
-                max_tokens,
-                temperature,
-                top_p,
-                timeout,
-                response_format,
-            )
+            return self._call_anthropic_raw(p)
 
         logger.info(
             "LLMClient._call_anthropic: model=%s stream=%s provider=%s",
@@ -597,28 +588,28 @@ class LLMClient:
             self._provider_name,
         )
 
-        messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
+        messages: list[dict[str, Any]] = [{"role": "user", "content": p.user_message}]
 
         # Prefill trick for JSON: start assistant response with "{" to
         # strongly guide the model into producing a JSON object.
-        if response_format == "json":
+        if p.response_format == "json":
             messages.append({"role": "assistant", "content": "{"})
 
         kwargs: dict[str, Any] = {
             "model": self._model_name,
-            "max_tokens": max_tokens or self._capability.max_output_tokens,
-            "system": system_prompt,
+            "max_tokens": p.max_tokens or self._capability.max_output_tokens,
+            "system": p.system_prompt,
             "messages": messages,
         }
-        if temperature is not None and self._capability.supports_temperature:
+        if p.temperature is not None and self._capability.supports_temperature:
             kwargs["temperature"] = max(
                 self._capability.temperature_min,
-                min(self._capability.temperature_max, temperature),
+                min(self._capability.temperature_max, p.temperature),
             )
-        if top_p is not None:
-            kwargs["top_p"] = max(0.0, min(1.0, top_p))
-        if timeout is not None:
-            kwargs["timeout"] = timeout
+        if p.top_p is not None:
+            kwargs["top_p"] = max(0.0, min(1.0, p.top_p))
+        if p.timeout is not None:
+            kwargs["timeout"] = p.timeout
 
         def _extract_text_delta(delta: Any) -> str:
             """Extract text from a content_block_delta, skipping ThinkingDelta."""
@@ -671,19 +662,10 @@ class LLMClient:
                     )
                 text = "".join(text_parts)
 
-        text = self._restore_json_prefill(text, response_format == "json")
+        text = self._restore_json_prefill(text, p.response_format == "json")
         return text, actual_model
 
-    def _call_anthropic_raw(
-        self,
-        system_prompt: str,
-        user_message: str,
-        max_tokens: int | None,
-        temperature: float | None,
-        top_p: float | None,
-        timeout: float | None,
-        response_format: Literal["json"] | None = None,
-    ) -> tuple[str, str]:
+    def _call_anthropic_raw(self, p: _LLMCallParams) -> tuple[str, str]:
         """Fallback httpx-based Anthropic call (used when SDK init fails)."""
         base_url = self._provider_config.base_url.rstrip("/")
         url = f"{base_url}/v1/messages"
@@ -694,22 +676,26 @@ class LLMClient:
             "content-type": "application/json",
         }
 
-        messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
+        messages: list[dict[str, Any]] = [{"role": "user", "content": p.user_message}]
 
         # Prefill trick for JSON: start assistant response with "{" to
         # strongly guide the model into producing a JSON object.
-        if response_format == "json":
+        if p.response_format == "json":
             messages.append({"role": "assistant", "content": "{"})
 
         payload: dict[str, Any] = {
             "model": self._model_name,
-            "max_tokens": max_tokens or self._capability.max_output_tokens,
-            "system": system_prompt,
+            "max_tokens": p.max_tokens or self._capability.max_output_tokens,
+            "system": p.system_prompt,
             "messages": messages,
         }
-        self._apply_sampling_params(payload, temperature, top_p)
+        self._apply_sampling_params(payload, p.temperature, p.top_p)
 
-        resp = self._call_with_retry(url, headers, payload, timeout, "Anthropic")
+        # NOTE: asyncio.run() requires no running event loop in the current thread.
+        # Safe because all callers (LLMPlanner, LLMExecutor, LLMIntegrator, LLMQualityGate)
+        # invoke LLMClient.call() synchronously. If async callers are added, use
+        # httpx.AsyncClient and await _call_with_retry directly instead of asyncio.run().
+        resp = asyncio.run(self._call_with_retry(url, headers, payload, p.timeout, "Anthropic"))
 
         data = resp.json()
         actual_model: str = data.get("model", self._model_name)
@@ -717,34 +703,17 @@ class LLMClient:
         text = "".join(
             block.get("text", "") for block in content_blocks if block.get("type") == "text"
         )
-        text = self._restore_json_prefill(text, response_format == "json")
+        text = self._restore_json_prefill(text, p.response_format == "json")
         return text, actual_model
 
-    def _call_openai(
-        self,
-        system_prompt: str,
-        user_message: str,
-        max_tokens: int | None,
-        temperature: float | None,
-        top_p: float | None,
-        timeout: float | None,
-        response_format: Literal["json"] | None = None,
-    ) -> tuple[str, str]:
+    def _call_openai(self, p: _LLMCallParams) -> tuple[str, str]:
         use_stream = self._should_stream()
 
         try:
             sdk = self._get_openai_sdk()
         except Exception:
             logger.warning("OpenAI SDK init failed, falling back to httpx", exc_info=True)
-            return self._call_openai_raw(
-                system_prompt,
-                user_message,
-                max_tokens,
-                temperature,
-                top_p,
-                timeout,
-                response_format,
-            )
+            return self._call_openai_raw(p)
 
         logger.info(
             "LLMClient._call_openai: model=%s stream=%s provider=%s",
@@ -754,26 +723,26 @@ class LLMClient:
         )
 
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
+            {"role": "system", "content": p.system_prompt},
+            {"role": "user", "content": p.user_message},
         ]
 
         kwargs: dict[str, Any] = {
             "model": self._model_name,
             "messages": messages,
-            "max_tokens": max_tokens or self._capability.max_output_tokens,
+            "max_tokens": p.max_tokens or self._capability.max_output_tokens,
         }
-        if temperature is not None and self._capability.supports_temperature:
+        if p.temperature is not None and self._capability.supports_temperature:
             kwargs["temperature"] = max(
                 self._capability.temperature_min,
-                min(self._capability.temperature_max, temperature),
+                min(self._capability.temperature_max, p.temperature),
             )
-        if top_p is not None:
-            kwargs["top_p"] = max(0.0, min(1.0, top_p))
-        if response_format == "json":
+        if p.top_p is not None:
+            kwargs["top_p"] = max(0.0, min(1.0, p.top_p))
+        if p.response_format == "json":
             kwargs["response_format"] = {"type": "json_object"}
-        if timeout is not None:
-            kwargs["timeout"] = timeout
+        if p.timeout is not None:
+            kwargs["timeout"] = p.timeout
 
         if use_stream:
             text_parts: list[str] = []
@@ -800,16 +769,7 @@ class LLMClient:
             content = resp.choices[0].message.content if resp.choices else ""
             return content or "", actual_model
 
-    def _call_openai_raw(
-        self,
-        system_prompt: str,
-        user_message: str,
-        max_tokens: int | None,
-        temperature: float | None,
-        top_p: float | None,
-        timeout: float | None,
-        response_format: Literal["json"] | None = None,
-    ) -> tuple[str, str]:
+    def _call_openai_raw(self, p: _LLMCallParams) -> tuple[str, str]:
         """Fallback httpx-based OpenAI call (used when SDK init fails)."""
         base_url = self._provider_config.base_url.rstrip("/")
         url = f"{base_url}/v1/chat/completions"
@@ -822,17 +782,18 @@ class LLMClient:
         payload: dict[str, Any] = {
             "model": self._model_name,
             "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
+                {"role": "system", "content": p.system_prompt},
+                {"role": "user", "content": p.user_message},
             ],
-            "max_tokens": max_tokens or self._capability.max_output_tokens,
+            "max_tokens": p.max_tokens or self._capability.max_output_tokens,
         }
-        self._apply_sampling_params(payload, temperature, top_p)
+        self._apply_sampling_params(payload, p.temperature, p.top_p)
 
-        if response_format == "json":
+        if p.response_format == "json":
             payload["response_format"] = {"type": "json_object"}
 
-        resp = self._call_with_retry(url, headers, payload, timeout, "OpenAI")
+        # Same asyncio.run() bridge as _call_anthropic_raw — see note there.
+        resp = asyncio.run(self._call_with_retry(url, headers, payload, p.timeout, "OpenAI"))
 
         data = resp.json()
         actual_model: str = data.get("model", self._model_name)

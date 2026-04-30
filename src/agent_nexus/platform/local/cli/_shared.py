@@ -17,6 +17,8 @@ from typing import Any
 
 import toml
 
+from agent_nexus.platform.config.defaults import DEFAULT_OLLAMA_BASE_URL
+
 logger = logging.getLogger(__name__)
 
 
@@ -219,7 +221,7 @@ class ConfigMigrator:
                         "api": "openai-compatible",
                     },
                     "ollama": {
-                        "base_url": "http://localhost:11434/v1",
+                        "base_url": DEFAULT_OLLAMA_BASE_URL,
                         "api_key_env": "",
                         "api": "ollama",
                     },

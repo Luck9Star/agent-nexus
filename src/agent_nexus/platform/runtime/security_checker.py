@@ -83,6 +83,12 @@ _DEFAULT_FORBIDDEN_ATTRIBUTES = [
     "__builtins__",
     "__bases__",  # MRO chain traversal → sandbox escape
     "__mro__",  # method resolution order → class hierarchy access
+    "__traceback__",  # exception traceback → frame introspection
+    "tb_frame",  # traceback frame → f_globals/f_builtins access
+    "f_globals",  # frame globals → module-level imports/functions
+    "f_builtins",  # frame builtins → __import__, eval, exec
+    "f_locals",  # frame locals → scope variable access
+    "f_code",  # frame code object → code replacement attacks
 ]
 
 _DEFAULT_REGEX_PATTERNS = [
@@ -90,6 +96,9 @@ _DEFAULT_REGEX_PATTERNS = [
     r"__builtins__\s*\[",
     r"__builtins__\s*\.\s*__getitem__\s*\(",
     r"\b__builtins__\b",  # bare __builtins__ Name access bypasses AttributeRule
+    r"map\s*\(\s*(?:__import__|exec|eval|compile)\b",  # map(__import__, ...) bypass
+    r"filter\s*\(\s*(?:__import__|exec|eval|compile)\b",  # filter(exec, ...) bypass
+    r"__traceback__",  # traceback reflection bypass
 ]
 
 

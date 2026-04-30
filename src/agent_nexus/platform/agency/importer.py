@@ -5,13 +5,19 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from agent_nexus.models.errors import AgentNexusError
+
 from .allowlist import load_allowlist
 from .parser import parse_frontmatter
 from .policy import check_content_policy
 
 
-class ContentPolicyViolation(Exception):  # noqa: N818
+class ContentPolicyError(AgentNexusError):
     """Raised when imported content fails the content policy check."""
+
+
+class ContentPolicyViolation(ContentPolicyError):  # noqa: N818
+    """Deprecated alias for ContentPolicyError."""
 
 
 # Pre-compiled set of YAML special characters for O(min(n,m)) quoting check

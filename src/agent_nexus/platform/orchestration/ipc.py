@@ -19,6 +19,7 @@ import logging
 from collections import deque
 from typing import Any
 
+from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.models.ipc import (
     AgentToPlatform,
     AgentToPlatformType,
@@ -26,6 +27,7 @@ from agent_nexus.models.ipc import (
     PlatformToAgentType,
 )
 from agent_nexus.models.task import TaskItem
+from agent_nexus.platform.config.defaults import DEFAULT_PIPELINE_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,7 @@ _INTERNAL_CID = "__internal__"
 # ---------------------------------------------------------------------------
 
 
-class IPCError(Exception):
+class IPCError(AgentNexusError):
     """Base IPC error."""
 
 
@@ -299,7 +301,7 @@ class IPCProtocol:
     async def receive_until_result(
         self,
         task_id: str | None = None,
-        timeout: float = 300.0,
+        timeout: float = DEFAULT_PIPELINE_TIMEOUT,
         progress_callback: Any | None = None,
     ) -> AgentToPlatform:
         """Receive messages until a final result or error arrives.

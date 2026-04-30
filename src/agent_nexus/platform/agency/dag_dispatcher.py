@@ -302,77 +302,9 @@ class DAGDispatcher:
             batch = ready_specialists[: self._max_batch_size]
 
             if self._concurrent and len(batch) > 1:
-                # Concurrent execution within batch using persistent pool
-                per_task_timeout = (
-                    self._timeout_seconds if self._timeout_seconds is not None else None
-                )
-                pool = self._get_pool()
-                futures: dict[
-                    concurrent.futures.Future[tuple[Artifact | None, str | None]],
-                    TaskItem,
-                ] = {}
-                for task_item in batch:
-                    if deadline is not None and time.monotonic() > deadline:
-                        result.timed_out = True
-                        break
-                    self._graph.start_task(task_item.id)
-                    future = pool.submit(self._run_executor, task_item, task_description)
-                    futures[future] = task_item
-
-                # Collect results — fail-fast on first error
-                for future in concurrent.futures.as_completed(futures, timeout=per_task_timeout):
-                    task_item = futures[future]
-                    try:
-                        artifact, error = future.result()
-                    except Exception as exc:
-                        error = str(exc)
-                        artifact = None
-
-                    if error is None and artifact is not None:
-                        self._graph.complete_task(task_item.id)
-                        result.artifacts[task_item.id] = artifact
-                        result.completed.append(task_item.id)
-                    else:
-                        _safe_fail(self._graph, task_item.id)
-                        result.errors[task_item.id] = error or "unknown error"
-                        result.failed.append(task_item.id)
-                        # Cancel remaining futures — fail fast
-                        for f in futures:
-                            f.cancel()
-                        break
-
-                # Mark cancelled tasks
-                for _f, ti in futures.items():
-                    if ti.id not in result.completed and ti.id not in result.failed:
-                        _safe_fail(self._graph, ti.id)
-                        result.cancelled.append(ti.id)
-                        result.errors[ti.id] = "cancelled (sibling task failed)"
+                self._dispatch_parallel(batch, task_description, deadline, result)
             else:
-                # Sequential execution (backward compatible)
-                started_in_batch: list[str] = []
-                for task_item in batch:
-                    if deadline is not None and time.monotonic() > deadline:
-                        result.timed_out = True
-                        # Fail any tasks we started in this batch but didn't complete
-                        for tid in started_in_batch:
-                            task = self._graph.get_task(tid)
-                            if task is not None and task.state == TaskState.IN_PROGRESS:
-                                _safe_fail(self._graph, tid)
-                                result.failed.append(tid)
-                        break
-
-                    self._graph.start_task(task_item.id)
-                    started_in_batch.append(task_item.id)
-                    artifact, error = self._run_executor(task_item, task_description)
-                    if error is None and artifact is not None:
-                        self._graph.complete_task(task_item.id)
-                        result.artifacts[task_item.id] = artifact
-                        result.completed.append(task_item.id)
-                    else:
-                        _safe_fail(self._graph, task_item.id)
-                        result.errors[task_item.id] = error or "unknown error"
-                        result.failed.append(task_item.id)
-                        break  # Fail-fast: don't start more tasks in batch
+                self._dispatch_sequential(batch, task_description, deadline, result)
 
             # Fail-fast: stop dispatching after any task failure or cancellation
             if result.failed or result.cancelled:
@@ -390,8 +322,106 @@ class DAGDispatcher:
                 len(dag.tasks),
             )
 
-        # Clean up any tasks left in IN_PROGRESS after loop exit (e.g. mid-batch timeout)
+        # Clean up any tasks left in IN_PROGRESS after loop exit
+        self._cleanup_stale_tasks(specialist_ids, result)
+
+        return result
+
+    def _dispatch_parallel(
+        self,
+        batch: list[TaskItem],
+        task_description: str,
+        deadline: float | None,
+        result: DispatchResult,
+    ) -> None:
+        """Execute a batch of tasks concurrently using the thread pool."""
+        per_task_timeout = (
+            self._timeout_seconds if self._timeout_seconds is not None else None
+        )
+        pool = self._get_pool()
+        futures: dict[
+            concurrent.futures.Future[tuple[Artifact | None, str | None]],
+            TaskItem,
+        ] = {}
+        for task_item in batch:
+            if deadline is not None and time.monotonic() > deadline:
+                result.timed_out = True
+                break
+            self._graph.start_task(task_item.id)
+            future = pool.submit(self._run_executor, task_item, task_description)
+            futures[future] = task_item
+
+        # Collect results — fail-fast on first error
+        for future in concurrent.futures.as_completed(futures, timeout=per_task_timeout):
+            task_item = futures[future]
+            try:
+                artifact, error = future.result()
+            except Exception as exc:
+                error = str(exc)
+                artifact = None
+
+            if error is None and artifact is not None:
+                self._graph.complete_task(task_item.id)
+                result.artifacts[task_item.id] = artifact
+                result.completed.append(task_item.id)
+            else:
+                _safe_fail(self._graph, task_item.id)
+                result.errors[task_item.id] = error or "unknown error"
+                result.failed.append(task_item.id)
+                # Cancel remaining futures — fail fast
+                for f in futures:
+                    f.cancel()
+                break
+
+        # Mark cancelled tasks
+        for _f, ti in futures.items():
+            if ti.id not in result.completed and ti.id not in result.failed:
+                _safe_fail(self._graph, ti.id)
+                result.cancelled.append(ti.id)
+                result.errors[ti.id] = "cancelled (sibling task failed)"
+
+    def _dispatch_sequential(
+        self,
+        batch: list[TaskItem],
+        task_description: str,
+        deadline: float | None,
+        result: DispatchResult,
+    ) -> None:
+        """Execute a batch of tasks sequentially (backward compatible)."""
+        started_in_batch: list[str] = []
+        for task_item in batch:
+            if deadline is not None and time.monotonic() > deadline:
+                result.timed_out = True
+                # Fail any tasks we started in this batch but didn't complete
+                for tid in started_in_batch:
+                    task = self._graph.get_task(tid)
+                    if task is not None and task.state == TaskState.IN_PROGRESS:
+                        _safe_fail(self._graph, tid)
+                        result.failed.append(tid)
+                break
+
+            self._graph.start_task(task_item.id)
+            started_in_batch.append(task_item.id)
+            artifact, error = self._run_executor(task_item, task_description)
+            if error is None and artifact is not None:
+                self._graph.complete_task(task_item.id)
+                result.artifacts[task_item.id] = artifact
+                result.completed.append(task_item.id)
+            else:
+                _safe_fail(self._graph, task_item.id)
+                result.errors[task_item.id] = error or "unknown error"
+                result.failed.append(task_item.id)
+                break  # Fail-fast: don't start more tasks in batch
+
+    def _cleanup_stale_tasks(
+        self,
+        specialist_ids: set[str],
+        result: DispatchResult,
+    ) -> None:
+        """Clean up IN_PROGRESS and orphaned PENDING tasks after the main loop."""
         failed_set = set(result.failed)
+
+        # Clean up any tasks left in IN_PROGRESS after loop exit (e.g. mid-batch timeout)
         for tid in specialist_ids:
             task = self._graph.get_task(tid)
             if task is not None and task.state == TaskState.IN_PROGRESS:
@@ -429,5 +459,3 @@ class DAGDispatcher:
                         result.failed.append(tid)
                         failed_set.add(tid)
                     changed = True
-
-        return result

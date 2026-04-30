@@ -25,6 +25,7 @@ import uuid
 from collections import deque
 from typing import Any
 
+from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.gateway.tool_adapter import (
     DEFAULT_IPC_EXECUTE_TIMEOUT,
@@ -46,7 +47,7 @@ from .subtask import SubtaskController
 from .workflow import WorkflowContext, WorkflowPhase, WorkflowResult
 
 
-class AgentExecutionError(Exception):
+class AgentExecutionError(AgentNexusError):
     """Raised when an agent interaction fails with a non-IPC error.
 
     Carries ``error`` (human-readable message) and ``error_type`` (exception

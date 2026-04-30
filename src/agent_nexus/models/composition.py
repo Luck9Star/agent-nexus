@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import toml
 
-from agent_nexus.platform.utils import detect_cycles_dfs as _detect_cycles_dfs
+from agent_nexus.models.errors import AgentNexusError
 
 
-class CompositionError(Exception):
+class CompositionError(AgentNexusError):
     """Error in composition.toml parsing or validation."""
 
 
@@ -50,7 +51,8 @@ class Composition:
 
         while remaining:
             ready = [
-                tid for tid in remaining
+                tid
+                for tid in remaining
                 if all(dep in completed for dep in self.tasks[tid].blocked_by)
             ]
             if not ready:
@@ -97,9 +99,7 @@ class Composition:
         for tid, task in tasks.items():
             for dep in task.blocked_by:
                 if dep not in tasks:
-                    raise CompositionError(
-                        f"Task '{tid}' blocked_by unknown task '{dep}'"
-                    )
+                    raise CompositionError(f"Task '{tid}' blocked_by unknown task '{dep}'")
 
         # Validate no cycles
         _detect_cycles(tasks)
@@ -109,7 +109,7 @@ class Composition:
 
 def _detect_cycles(tasks: dict[str, CompositionTask]) -> None:
     """Detect dependency cycles. Raises CompositionError if found."""
-    cycles = _detect_cycles_dfs(
+    cycles = detect_cycles_dfs(
         nodes=tasks.keys(),
         get_deps=lambda name: [dep for dep in tasks[name].blocked_by if dep in tasks],
     )
@@ -117,3 +117,42 @@ def _detect_cycles(tasks: dict[str, CompositionTask]) -> None:
         # Format the first cycle for the error message
         cycle = cycles[0]
         raise CompositionError(f"Dependency cycle: {' -> '.join(cycle)}")
+
+
+def detect_cycles_dfs(
+    nodes: Iterable[str],
+    get_deps: Callable[[str], Iterable[str]],
+) -> list[list[str]]:
+    """DFS cycle detection over a directed graph.
+
+    Args:
+        nodes: All node identifiers.
+        get_deps: Returns dependencies (successors) for a given node.
+
+    Returns:
+        List of cycles, each cycle as a list of node names.
+    """
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    cycles: list[list[str]] = []
+
+    def _dfs(node: str, path: list[str]) -> None:
+        if node in visited:
+            return
+        if node in visiting:
+            # Found a cycle — extract the cycle portion of the path
+            cycle_start = path.index(node)
+            cycles.append(path[cycle_start:] + [node])
+            return
+        visiting.add(node)
+        path.append(node)
+        for dep in get_deps(node):
+            _dfs(dep, path)
+        path.pop()
+        visiting.discard(node)
+        visited.add(node)
+
+    for node in nodes:
+        _dfs(node, [])
+
+    return cycles

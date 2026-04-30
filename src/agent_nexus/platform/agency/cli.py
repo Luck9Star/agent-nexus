@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 import click
 
+from agent_nexus.platform.config.defaults import DEFAULT_LLM_CALL_TIMEOUT, DEFAULT_PIPELINE_TIMEOUT
+
 from .importer import AgencyImporter
 
 if TYPE_CHECKING:
@@ -498,7 +500,7 @@ def _write_report(result: TaskComposerResult, path: Path) -> None:
 )
 @click.option(
     "--timeout",
-    default=300,
+    default=DEFAULT_PIPELINE_TIMEOUT,
     type=int,
     help="Overall pipeline timeout in seconds (default: 300)",
 )
@@ -506,7 +508,7 @@ def _write_report(result: TaskComposerResult, path: Path) -> None:
     "--call-timeout",
     default=None,
     type=int,
-    help="Per-LLM-call HTTP timeout in seconds (default: 120)",
+    help=f"Per-LLM-call HTTP timeout in seconds (default: {DEFAULT_LLM_CALL_TIMEOUT})",
 )
 def run_composition(
     message: str,
@@ -630,7 +632,9 @@ def run_composition(
     # Create executor (LLM for experts if config available)
     from .executor import LLMExecutor, ProfileBasedExecutor
 
-    effective_call_timeout = float(call_timeout) if call_timeout else 120.0
+    effective_call_timeout = (
+        float(call_timeout) if call_timeout else float(DEFAULT_LLM_CALL_TIMEOUT)
+    )
 
     try:
         executor = LLMExecutor(
@@ -657,7 +661,7 @@ def run_composition(
             task=message,
             mode=mode,
             max_parallel=max_parallel,
-            timeout_seconds=float(timeout or 300),
+            timeout_seconds=float(timeout or DEFAULT_PIPELINE_TIMEOUT),
         )
         try:
             composer_result = composer.run(

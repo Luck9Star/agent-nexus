@@ -65,6 +65,9 @@ from agent_nexus.models.distribution import (
     SourceType,
 )
 
+# errors.py — Platform-wide base exception
+from agent_nexus.models.errors import AgentNexusError
+
 # evolution.py — Self-Evolution Engine
 from agent_nexus.models.evolution import (
     EvolutionContext,
@@ -126,6 +129,7 @@ __all__ = [
     "AgentDefinition",
     "AgentManifest",
     "AgentModelConfig",
+    "AgentNexusError",
     "AgentPackage",
     "AgentRole",
     # ipc.py

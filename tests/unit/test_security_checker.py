@@ -282,3 +282,69 @@ class TestExhaustiveForbiddenCoverage:
         checker = SecurityChecker()
         violations = checker.check_code(pattern_code)
         assert len(violations) >= 1, f"{pattern_code} should be blocked by regex"
+
+
+# ============================================================================
+# Sandbox bypass regression tests (map/filter/__traceback__ vectors)
+# ============================================================================
+
+
+class TestSandboxBypassRegression:
+    """Regression tests for critical sandbox bypass vectors.
+
+    These tests ensure that the SecurityChecker catches bypass patterns
+    that were identified as security vulnerabilities:
+    - map(__import__, ...) and filter(__import__, ...) (callback injection)
+    - map(exec, ...) and filter(exec, ...) (callback injection)
+    - __traceback__ reflection (frame introspection → f_builtins access)
+    - Safe callbacks like map(str, ...) and sorted(..., key=abs) remain allowed
+    """
+
+    def test_map_import_bypass_blocked(self) -> None:
+        """map(__import__, ['os']) must be caught — function-as-argument bypass."""
+        checker = SecurityChecker()
+        code = "list(map(__import__, ['os']))"
+        violations = checker.check_code(code)
+        assert len(violations) > 0, "map(__import__, ...) bypass must be caught"
+
+    def test_map_exec_bypass_blocked(self) -> None:
+        """map(exec, ['...']) must be caught — function-as-argument bypass."""
+        checker = SecurityChecker()
+        code = "list(map(exec, ['import os']))"
+        violations = checker.check_code(code)
+        assert len(violations) > 0, "map(exec, ...) bypass must be caught"
+
+    def test_filter_import_bypass_blocked(self) -> None:
+        """filter(__import__, ['os']) must be caught — function-as-argument bypass."""
+        checker = SecurityChecker()
+        code = "list(filter(__import__, ['os']))"
+        violations = checker.check_code(code)
+        assert len(violations) > 0, "filter(__import__, ...) bypass must be caught"
+
+    def test_traceback_frame_access_blocked(self) -> None:
+        """e.__traceback__.tb_frame.f_builtins must be caught — frame introspection."""
+        checker = SecurityChecker()
+        code = "e.__traceback__.tb_frame.f_builtins"
+        violations = checker.check_code(code)
+        assert len(violations) > 0, "__traceback__ frame chain must be caught"
+
+    def test_map_safe_function_allowed(self) -> None:
+        """map(str, [...]) should NOT be blocked — safe callback."""
+        checker = SecurityChecker()
+        code = "list(map(str, [1, 2, 3]))"
+        violations = checker.check_code(code)
+        assert len(violations) == 0, "map(str, ...) should be allowed"
+
+    def test_sorted_key_safe_allowed(self) -> None:
+        """sorted(..., key=abs) should NOT be blocked — safe callback."""
+        checker = SecurityChecker()
+        code = "sorted([-3, 1, -2], key=abs)"
+        violations = checker.check_code(code)
+        assert len(violations) == 0, "sorted(..., key=abs) should be allowed"
+
+    def test_traceback_regex_blocked(self) -> None:
+        """Direct __traceback__ access in string form must be caught by regex."""
+        checker = SecurityChecker()
+        code = "x = e.__traceback__"
+        violations = checker.check_code(code)
+        assert len(violations) > 0, "__traceback__ regex pattern must fire"

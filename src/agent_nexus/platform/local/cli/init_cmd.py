@@ -11,6 +11,7 @@ from pathlib import Path
 
 import typer
 
+from agent_nexus.platform.config.defaults import DEFAULT_OLLAMA_BASE_URL
 from agent_nexus.platform.local.cli._shared import (
     ConfigMigrator,
     _get_config_dir,
@@ -334,7 +335,7 @@ def _run_wizard(config_path: Path) -> None:
             "https://api.deepseek.com/v1",
             "deepseek-chat",
         ),
-        "ollama": (None, "openai-compatible", "http://localhost:11434/v1", "llama3"),
+        "ollama": (None, "openai-compatible", DEFAULT_OLLAMA_BASE_URL, "llama3"),
     }
     key_env, api_type, base_url, default_model = _preset_models[provider]
 
@@ -375,7 +376,7 @@ def _run_wizard(config_path: Path) -> None:
 
 def _default_config_template() -> str:
     """Return the default config.toml template content."""
-    return """\
+    return f"""\
 # Agent Nexus Configuration
 # Schema version: 1.0
 
@@ -412,6 +413,6 @@ api_key_env = "DASHSCOPE_API_KEY"
 api = "openai-compatible"
 
 [models.providers.ollama]
-base_url = "http://localhost:11434/v1"
+base_url = "{DEFAULT_OLLAMA_BASE_URL}"
 api = "ollama"
 """
