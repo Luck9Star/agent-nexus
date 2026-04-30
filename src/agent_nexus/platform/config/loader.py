@@ -171,12 +171,28 @@ class ConfigLoader:
         return self._load_sources_from_yaml()
 
     def load_cli_backends(self) -> dict[str, Any]:
-        """Load CLI backend configs from config.toml [cli_backends.*] sections."""
+        """Load CLI backend configs from config.toml.
+
+        Sources (merged, ``[cli_backends.*]`` takes precedence):
+        1. Providers with ``api = "cli"`` under ``[models.providers.*]``
+        2. Explicit ``[cli_backends.*]`` sections
+        """
+        from .config_templates import load_backend_configs_from_providers
+
         raw = self._load_raw()
+
+        # 1) Providers with api = "cli"
+        providers_raw = raw.get("models", {}).get("providers", {})
+        if not isinstance(providers_raw, dict):
+            providers_raw = {}
+        backends = load_backend_configs_from_providers(providers_raw)
+
+        # 2) Explicit [cli_backends.*] (overrides provider-derived entries)
         cli_backends = raw.get("cli_backends", {})
-        if not isinstance(cli_backends, dict):
-            return {}
-        return load_backend_configs_from_cli_backends(cli_backends)
+        if isinstance(cli_backends, dict):
+            backends.update(load_backend_configs_from_cli_backends(cli_backends))
+
+        return backends
 
     def load_cli_routing(self) -> Any:
         """Load [cli_routing] section from config.toml.

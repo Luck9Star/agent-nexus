@@ -173,13 +173,23 @@ class DAGDispatcher:
         self,
         graph: TaskGraph,
         executor: ExpertExecutor,
-        max_batch_size: int = 3,
+        max_parallel: int | None = None,
         timeout_seconds: float | None = None,
         concurrent: bool = False,
+        *,
+        max_batch_size: int | None = None,
     ) -> None:
+        # Backward compat: max_batch_size is the old name for max_parallel.
+        # max_parallel takes precedence when both are provided.
+        if max_parallel is not None:
+            effective = max_parallel
+        elif max_batch_size is not None:
+            effective = max_batch_size
+        else:
+            effective = 3
         self._graph = graph
         self._executor = executor
-        self._max_batch_size = max(1, max_batch_size)
+        self._max_batch_size = max(1, effective)
         self._timeout_seconds = timeout_seconds
         self._concurrent = concurrent
         # Persistent thread pool for concurrent execution (reused across batches)

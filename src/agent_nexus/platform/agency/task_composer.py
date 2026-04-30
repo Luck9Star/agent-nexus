@@ -311,7 +311,7 @@ class TaskComposer:
             dispatcher = DAGDispatcher(
                 graph=task_graph,
                 executor=executor,
-                max_batch_size=input.max_parallel,
+                max_parallel=input.max_parallel,
                 timeout_seconds=input.timeout_seconds,
                 concurrent=concurrent,
             )

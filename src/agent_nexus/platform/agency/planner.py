@@ -170,11 +170,11 @@ class DynamicCompositePlanner:
         earlier one.
 
         Dependency rule:
-            A task B is blocked by task A only when B's capabilities are a
-            strict subset of A's — i.e., A fully subsumes B's scope.  Mere
-            capability overlap (e.g., both need ``code_review`` but have
-            different other capabilities) does NOT create a dependency, so
-            those agents execute in parallel.
+            A task B is blocked by task A when they share at least one
+            capability *and* A appeared earlier in the subtask list (so
+            A is the canonical producer for that capability).  This
+            ensures that overlapping work is sequenced, while tasks with
+            disjoint capabilities can run in parallel.
 
         Raises:
             ValueError: If subtasks is empty or contains duplicate IDs.
@@ -191,25 +191,16 @@ class DynamicCompositePlanner:
                     cap_producer[cap] = st.id
 
         # Build specialist tasks with dynamic blocked_by
-        # Only serialize when one task's capabilities are a strict subset
-        # of the producer's — meaning the producer fully subsumes the
-        # downstream task's scope.  Mere capability overlap does NOT
-        # create a dependency (both agents can work in parallel).
-        subtask_caps: dict[str, set[str]] = {st.id: set(st.needed_capabilities) for st in subtasks}
+        # A task is blocked by the first (earliest) producer of any
+        # shared capability.  This sequences overlapping work while
+        # keeping disjoint tasks parallel.
         dag_tasks: list[DAGTask] = []
         for st in subtasks:
             blocked_by: list[str] = []
-            my_caps = subtask_caps[st.id]
             for cap in st.needed_capabilities:
                 producer = cap_producer.get(cap)
                 if producer and producer != st.id and producer not in blocked_by:
-                    producer_caps = subtask_caps[producer]
-                    # Block if this task's capabilities are a STRICT subset
-                    # of the producer's (producer fully subsumes this task's
-                    # scope but has additional capabilities).  Identical
-                    # capability sets → parallel execution (no dependency).
-                    if my_caps < producer_caps:
-                        blocked_by.append(producer)
+                    blocked_by.append(producer)
             dag_tasks.append(
                 DAGTask(
                     id=st.id,
