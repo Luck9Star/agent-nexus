@@ -122,7 +122,9 @@ class TieredRuntimeDescriber:
         """
         # Sanitize var_name: strip newlines and control characters to prevent
         # injection of fake context lines into the description output.
-        safe_name = _re.sub(r"[\x00-\x1f\x7f\u200b-\u200f\u2028-\u202e\ufeff]", "", var_name).strip()
+        safe_name = _re.sub(
+            r"[\x00-\x1f\x7f\u200b-\u200f\u2028-\u202e\ufeff]", "", var_name
+        ).strip()
         if not safe_name:
             return ""
 

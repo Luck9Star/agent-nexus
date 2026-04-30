@@ -9,6 +9,7 @@ Reference: cave-agent/src/cave_agent/runtime/executor.py
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import logging
 import sys
@@ -36,10 +37,22 @@ logger = logging.getLogger(__name__)
 # _global_exec_lock = threading.Lock()
 
 # User namespace keys that are IPython internals, not user variables
-_IPYTHON_INTERNALS = frozenset({
-    "In", "Out", "exit", "quit", "get_ipython",
-    "_", "__", "___", "_ih", "_oh", "_sh", "_dh",
-})
+_IPYTHON_INTERNALS = frozenset(
+    {
+        "In",
+        "Out",
+        "exit",
+        "quit",
+        "get_ipython",
+        "_",
+        "__",
+        "___",
+        "_ih",
+        "_oh",
+        "_sh",
+        "_dh",
+    }
+)
 
 
 class IPythonExecutor:
@@ -129,13 +142,12 @@ class IPythonExecutor:
     def close(self) -> None:
         """Release the InteractiveShell and its resources."""
         self._closed = True
-        if self._timed_out:
-            # Wait for the still-running thread to finish before clearing.
-            if not self._exec_done.wait(timeout=5.0):
-                logger.warning(
-                    "Timed-out execution thread still running during close; "
-                    "clearing namespace anyway (race possible)"
-                )
+        # Wait for the still-running thread to finish before clearing.
+        if self._timed_out and not self._exec_done.wait(timeout=5.0):
+            logger.warning(
+                "Timed-out execution thread still running during close; "
+                "clearing namespace anyway (race possible)"
+            )
 
         if self._shell is not None:
             try:
@@ -158,32 +170,27 @@ class IPythonExecutor:
         ``InteractiveShell`` is kept alive for reuse, avoiding the
         50-200 MB cost of re-creating it.
         """
-        if self._timed_out:
-            # Wait for the still-running thread to finish before clearing.
-            if not self._exec_done.wait(timeout=5.0):
-                logger.warning(
-                    "Timed-out execution thread still running during reset; "
-                    "closing shell to prevent contaminated reuse"
-                )
-                # Thread still running — close the shell entirely rather than
-                # allowing new executions on a potentially contaminated namespace.
-                if self._shell is not None:
-                    try:
-                        self._shell.user_ns.clear()
-                    except Exception:
-                        pass
-                    self._shell = None
-                self._pending_injects.clear()
-                self._timed_out = True  # keep flag — shell is unusable
-                self._exec_done.set()
-                return
+        # Wait for the still-running thread to finish before clearing.
+        if self._timed_out and not self._exec_done.wait(timeout=5.0):
+            logger.warning(
+                "Timed-out execution thread still running during reset; "
+                "closing shell to prevent contaminated reuse"
+            )
+            # Thread still running — close the shell entirely rather than
+            # allowing new executions on a potentially contaminated namespace.
+            if self._shell is not None:
+                with contextlib.suppress(Exception):
+                    self._shell.user_ns.clear()
+                self._shell = None
+            self._pending_injects.clear()
+            self._timed_out = True  # keep flag — shell is unusable
+            self._exec_done.set()
+            return
 
         if self._shell is not None:
             # Preserve IPython internals BEFORE clearing
             internals_cache = {
-                k: v
-                for k, v in self._shell.user_ns.items()
-                if k in _IPYTHON_INTERNALS
+                k: v for k, v in self._shell.user_ns.items() if k in _IPYTHON_INTERNALS
             }
             self._shell.user_ns.clear()
             # Re-add preserved internals
@@ -195,10 +202,8 @@ class IPythonExecutor:
     def __del__(self) -> None:
         # Safety net: release shell if close() was never called.
         if hasattr(self, "_shell") and self._shell is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._shell.user_ns.clear()
-            except Exception:
-                pass
             self._shell = None
 
     async def execute(self, code: str, timeout: float = 30.0) -> ExecutionResult:
@@ -298,7 +303,8 @@ class IPythonExecutor:
             try:
                 result = await asyncio.wait_for(
                     asyncio.to_thread(
-                        self._run_cell_sync, transformed,
+                        self._run_cell_sync,
+                        transformed,
                     ),
                     timeout=timeout,
                 )
@@ -436,11 +442,7 @@ class IPythonExecutor:
         in _detect_new_variables).  Avoids the overhead of sorted().
         """
         ns = self._shell.user_ns if self._shell is not None else self._pending_injects
-        return {
-            k for k in ns
-            if k not in _IPYTHON_INTERNALS
-            and not k.startswith("_")
-        }
+        return {k for k in ns if k not in _IPYTHON_INTERNALS and not k.startswith("_")}
 
     def _detect_new_variables(self, pre_keys: set[str]) -> list[str]:
         """Detect variables created since the last execution.

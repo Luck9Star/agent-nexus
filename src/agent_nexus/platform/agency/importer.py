@@ -10,8 +10,9 @@ from .parser import parse_frontmatter
 from .policy import check_content_policy
 
 
-class ContentPolicyViolation(Exception):
+class ContentPolicyViolation(Exception):  # noqa: N818
     """Raised when imported content fails the content policy check."""
+
 
 # Pre-compiled set of YAML special characters for O(min(n,m)) quoting check
 _YAML_SPECIAL_CHARS = frozenset(':#{}[]",&*?|-=<>!%@`' + "\n\r\t")

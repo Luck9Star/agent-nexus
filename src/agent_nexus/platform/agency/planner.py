@@ -195,9 +195,7 @@ class DynamicCompositePlanner:
         # of the producer's — meaning the producer fully subsumes the
         # downstream task's scope.  Mere capability overlap does NOT
         # create a dependency (both agents can work in parallel).
-        subtask_caps: dict[str, set[str]] = {
-            st.id: set(st.needed_capabilities) for st in subtasks
-        }
+        subtask_caps: dict[str, set[str]] = {st.id: set(st.needed_capabilities) for st in subtasks}
         dag_tasks: list[DAGTask] = []
         for st in subtasks:
             blocked_by: list[str] = []

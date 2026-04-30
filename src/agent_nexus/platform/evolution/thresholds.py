@@ -53,15 +53,17 @@ class SkillRates:
         return cls(
             fallback_rate=record.total_fallbacks / sel,
             applied_rate=record.total_applied / sel,
-            completion_rate=record.total_completions / record.total_applied if record.total_applied > 0 else 0.0,
+            completion_rate=record.total_completions / record.total_applied
+            if record.total_applied > 0
+            else 0.0,
             effective_rate=record.total_completions / sel,
         )
 
 
 # Rule identifiers returned by evaluate_skill_health.
-RULE_HIGH_FALLBACK = 1        # fallback_rate > 0.4
-RULE_LOW_COMPLETION = 2       # applied > 0.4 AND completion < 0.35
-RULE_MODERATE_EFFECTIVE = 3   # effective < 0.55 AND applied > 0.25
+RULE_HIGH_FALLBACK = 1  # fallback_rate > 0.4
+RULE_LOW_COMPLETION = 2  # applied > 0.4 AND completion < 0.35
+RULE_MODERATE_EFFECTIVE = 3  # effective < 0.55 AND applied > 0.25
 
 
 @dataclass(frozen=True)

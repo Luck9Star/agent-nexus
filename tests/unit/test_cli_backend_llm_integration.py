@@ -15,14 +15,13 @@ def _write_cli_config(tmp_path: Path) -> Path:
 [models]
 default = "claude-code:sonnet"
 
-[models.providers.claude-code]
-api = "cli"
+[cli_backends.claude-code]
 command = "claude"
 args = ["-p"]
 output_format = "json"
 output_format_flag = "--output-format"
 
-[models.providers.claude-code.json_paths]
+[cli_backends.claude-code.json_paths]
 text = "result"
 session_id = "session_id"
 model = "model"

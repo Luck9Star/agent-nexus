@@ -167,19 +167,16 @@ class ConfigLoader:
         return self._load_sources_from_yaml()
 
     def load_cli_backends(self) -> dict[str, Any]:
-        """Load CLI backend configs from config.toml [models.providers.*] sections.
-
-        Only providers with api = "cli" are included.
-        """
+        """Load CLI backend configs from config.toml [cli_backends.*] sections."""
         from agent_nexus.platform.agency.cli_backend.config_templates import (
-            load_backend_configs_from_providers,
+            load_backend_configs_from_cli_backends,
         )
 
         raw = self._load_raw()
-        providers = raw.get("models", {}).get("providers", {})
-        if not isinstance(providers, dict):
+        cli_backends = raw.get("cli_backends", {})
+        if not isinstance(cli_backends, dict):
             return {}
-        return load_backend_configs_from_providers(providers)
+        return load_backend_configs_from_cli_backends(cli_backends)
 
     def load_cli_routing(self) -> Any:
         """Load [cli_routing] section from config.toml.

@@ -44,10 +44,10 @@ _DEFAULT_FORBIDDEN_IMPORTS = [
     "socket",
     "http",
     "urllib",
-    "pathlib",   # Path provides file read/write, bypassing open() block
-    "tempfile",   # temp file creation bypasses path_rules
-    "builtins",   # access to eval/exec/compile via builtins module
-    "pdb",        # interactive debugger can escape sandbox
+    "pathlib",  # Path provides file read/write, bypassing open() block
+    "tempfile",  # temp file creation bypasses path_rules
+    "builtins",  # access to eval/exec/compile via builtins module
+    "pdb",  # interactive debugger can escape sandbox
 ]
 
 _DEFAULT_FORBIDDEN_FUNCTIONS = [
@@ -82,7 +82,7 @@ _DEFAULT_FORBIDDEN_ATTRIBUTES = [
     "__code__",
     "__builtins__",
     "__bases__",  # MRO chain traversal → sandbox escape
-    "__mro__",    # method resolution order → class hierarchy access
+    "__mro__",  # method resolution order → class hierarchy access
 ]
 
 _DEFAULT_REGEX_PATTERNS = [
@@ -236,11 +236,13 @@ class SecurityChecker:
                         type(node).__name__,
                         exc_info=True,
                     )
-                    violations.append(SecurityViolation(
-                        rule_type=type(rule).__name__,
-                        node_type=type(node).__name__,
-                        message=f"Security rule {type(rule).__name__!r} raised an exception — execution blocked for safety",
-                    ))
+                    violations.append(
+                        SecurityViolation(
+                            rule_type=type(rule).__name__,
+                            node_type=type(node).__name__,
+                            message=f"Security rule {type(rule).__name__!r} raised an exception — execution blocked for safety",  # noqa: E501
+                        )
+                    )
 
         # Regex rules: once on full source
         for rule in self._regex_rules:
@@ -252,11 +254,13 @@ class SecurityChecker:
                     type(rule).__name__,
                     exc_info=True,
                 )
-                violations.append(SecurityViolation(
-                    rule_type=type(rule).__name__,
-                    node_type="source",
-                    message=f"Security rule {type(rule).__name__!r} raised an exception — execution blocked for safety",
-                ))
+                violations.append(
+                    SecurityViolation(
+                        rule_type=type(rule).__name__,
+                        node_type="source",
+                        message=f"Security rule {type(rule).__name__!r} raised an exception — execution blocked for safety",  # noqa: E501
+                    )
+                )
 
         result = tuple(violations)
 

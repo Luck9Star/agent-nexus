@@ -13,7 +13,7 @@ import logging
 import os
 import tempfile
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from agent_nexus.models.distribution import Lockfile, LockfileEntry
@@ -78,7 +78,8 @@ class LockfileManager:
         except (json.JSONDecodeError, ValueError, KeyError, TypeError) as exc:
             logger.error(
                 "Corrupt lockfile %s — returning empty agents list: %s",
-                self._path, exc,
+                self._path,
+                exc,
             )
             self._corrupt_detected = True
             result = Lockfile()
@@ -96,7 +97,7 @@ class LockfileManager:
         """
         lock_path = self._path.with_suffix(".lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        fh = open(lock_path, "w")
+        fh = open(lock_path, "w")  # noqa: SIM115
         try:
             fcntl.flock(fh, fcntl.LOCK_EX)
         except BaseException:
@@ -132,7 +133,8 @@ class LockfileManager:
             except OSError as exc:
                 logger.error(
                     "Failed to back up corrupt lockfile to %s: %s",
-                    backup, exc,
+                    backup,
+                    exc,
                 )
             self._corrupt_detected = False
 
@@ -156,10 +158,8 @@ class LockfileManager:
             logger.debug("Lockfile saved atomically to %s", self._path)
         except BaseException:
             # Clean up the temp file on any failure
-            try:
+            with suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
             raise
 
     def get_entry(self, agent_name: str) -> LockfileEntry | None:
@@ -172,7 +172,9 @@ class LockfileManager:
         return self.load().agents.get(agent_name)
 
     def get_entry_from(
-        self, lockfile: Lockfile, agent_name: str,
+        self,
+        lockfile: Lockfile,
+        agent_name: str,
     ) -> LockfileEntry | None:
         """Return the lockfile entry from an already-loaded lockfile.
 

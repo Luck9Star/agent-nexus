@@ -14,19 +14,48 @@ from typing import Any
 # Maps visually-similar characters from other scripts to their ASCII equivalent.
 # This is NOT comprehensive — a full confusable database has 10k+ entries.
 # It covers the most common attack vectors for prompt injection obfuscation.
-_CONFUSABLE_MAP: dict[int, str] = str.maketrans({
-    # Cyrillic → Latin
-    0x0430: "a", 0x0435: "e", 0x043E: "o", 0x0440: "p", 0x0441: "c",
-    0x0443: "y", 0x0445: "x", 0x0456: "i", 0x0458: "j",
-    0x0410: "A", 0x0412: "B", 0x0415: "E", 0x041A: "K", 0x041C: "M",
-    0x041D: "H", 0x041E: "O", 0x0420: "P", 0x0421: "C", 0x0422: "T",
-    0x0425: "X",
-    # Greek → Latin
-    0x03B1: "a", 0x03B9: "i", 0x03BF: "o", 0x03C1: "p", 0x03C5: "y",
-    # Fullwidth digits
-    0xFF10: "0", 0xFF11: "1", 0xFF12: "2", 0xFF13: "3", 0xFF14: "4",
-    0xFF15: "5", 0xFF16: "6", 0xFF17: "7", 0xFF18: "8", 0xFF19: "9",
-})
+_CONFUSABLE_MAP: dict[int, str] = str.maketrans(
+    {
+        # Cyrillic → Latin
+        0x0430: "a",
+        0x0435: "e",
+        0x043E: "o",
+        0x0440: "p",
+        0x0441: "c",
+        0x0443: "y",
+        0x0445: "x",
+        0x0456: "i",
+        0x0458: "j",
+        0x0410: "A",
+        0x0412: "B",
+        0x0415: "E",
+        0x041A: "K",
+        0x041C: "M",
+        0x041D: "H",
+        0x041E: "O",
+        0x0420: "P",
+        0x0421: "C",
+        0x0422: "T",
+        0x0425: "X",
+        # Greek → Latin
+        0x03B1: "a",
+        0x03B9: "i",
+        0x03BF: "o",
+        0x03C1: "p",
+        0x03C5: "y",
+        # Fullwidth digits
+        0xFF10: "0",
+        0xFF11: "1",
+        0xFF12: "2",
+        0xFF13: "3",
+        0xFF14: "4",
+        0xFF15: "5",
+        0xFF16: "6",
+        0xFF17: "7",
+        0xFF18: "8",
+        0xFF19: "9",
+    }
+)
 
 
 def _normalize_confusables(text: str) -> str:
@@ -37,7 +66,10 @@ def _normalize_confusables(text: str) -> str:
 
 # Pattern categories and their severity levels
 _HIGH_SEVERITY_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"ignore\s+previous\s+instructions"), "prompt injection: ignore previous instructions"),
+    (
+        re.compile(r"ignore\s+previous\s+instructions"),
+        "prompt injection: ignore previous instructions",
+    ),
     (re.compile(r"bypass\s+security"), "prompt injection: bypass security"),
     (re.compile(r"execute\s+shell"), "prompt injection: execute shell command"),
     (re.compile(r"system\s+prompt"), "prompt injection: system prompt reference"),
@@ -72,7 +104,10 @@ _CN_INSTRUCTION_PREFIXES: list[str] = [
 _CN_HIGH_SEVERITY_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"忽略.{0,6}之前"), "prompt injection (CN): ignore previous instructions"),
     (re.compile(r"绕过.{0,4}安全"), "prompt injection (CN): bypass security"),
-    (re.compile(r"(?:告诉|说出|泄露).{0,4}(?:系统)?提示词"), "prompt injection (CN): reveal system prompt"),
+    (
+        re.compile(r"(?:告诉|说出|泄露).{0,4}(?:系统)?提示词"),
+        "prompt injection (CN): reveal system prompt",
+    ),
     (re.compile(r"忘记.{0,4}(?:角色|身份)"), "prompt injection (CN): forget role"),
 ]
 
@@ -107,7 +142,9 @@ def check_content_policy(md_body: str) -> dict[str, Any]:
     # If line counts match (common case), mapping is 1:1.
     # If they differ, build a char-offset-based mapping.
     if len(norm_lines) == len(orig_lines):
-        line_map = dict(zip(range(1, len(norm_lines) + 1), range(1, len(orig_lines) + 1)))
+        line_map = dict(
+            zip(range(1, len(norm_lines) + 1), range(1, len(orig_lines) + 1), strict=False)
+        )
     else:
         # Build mapping by tracking cumulative char offsets.
         # Each newline in both texts marks a line boundary.
@@ -134,20 +171,24 @@ def check_content_policy(md_body: str) -> dict[str, Any]:
         # Check high severity patterns
         for pattern, description in _HIGH_SEVERITY_PATTERNS:
             if pattern.search(line_lower):
-                risks.append({
-                    "pattern": description,
-                    "severity": "high",
-                    "line": line_map.get(line_num, line_num),
-                })
+                risks.append(
+                    {
+                        "pattern": description,
+                        "severity": "high",
+                        "line": line_map.get(line_num, line_num),
+                    }
+                )
 
         # Check medium severity patterns (English)
         for pattern, description in _MEDIUM_SEVERITY_PATTERNS:
             if pattern.search(line_lower):
-                risks.append({
-                    "pattern": description,
-                    "severity": "medium",
-                    "line": line_map.get(line_num, line_num),
-                })
+                risks.append(
+                    {
+                        "pattern": description,
+                        "severity": "medium",
+                        "line": line_map.get(line_num, line_num),
+                    }
+                )
 
         # Check Chinese high severity patterns.
         # These patterns are already specific (e.g., "忽略...之前" is not
@@ -159,25 +200,27 @@ def check_content_policy(md_body: str) -> dict[str, Any]:
         for pattern, description in _CN_HIGH_SEVERITY_PATTERNS:
             match = pattern.search(line)
             if match:
-                has_prefix = any(
-                    p in line for p in _CN_INSTRUCTION_PREFIXES
-                )
+                has_prefix = any(p in line for p in _CN_INSTRUCTION_PREFIXES)
                 at_line_start = match.start() < 3
                 if has_prefix or at_line_start:
-                    risks.append({
-                        "pattern": description,
-                        "severity": "high",
-                        "line": line_map.get(line_num, line_num),
-                    })
+                    risks.append(
+                        {
+                            "pattern": description,
+                            "severity": "high",
+                            "line": line_map.get(line_num, line_num),
+                        }
+                    )
 
         # Check Chinese medium severity patterns
         for pattern, description in _CN_MEDIUM_SEVERITY_PATTERNS:
             if pattern.search(line):
-                risks.append({
-                    "pattern": description,
-                    "severity": "medium",
-                    "line": line_map.get(line_num, line_num),
-                })
+                risks.append(
+                    {
+                        "pattern": description,
+                        "severity": "medium",
+                        "line": line_map.get(line_num, line_num),
+                    }
+                )
 
     passed = not any(r["severity"] in ("high", "medium") for r in risks)
 

@@ -122,25 +122,23 @@ class McpToolAdapter:
                 "ProcessNotAliveError",
             )
 
-        payload = json.dumps(
-            {"tool": self._original_tool_name, "arguments": arguments}
-        )
+        payload = json.dumps({"tool": self._original_tool_name, "arguments": arguments})
 
         try:
             lock = get_ipc_lock(self.agent_name)
             async with lock:
-                await handle.ipc.send_chat(payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__")
-                response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
+                await handle.ipc.send_chat(
+                    payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__"
+                )
+                response = await handle.ipc.receive_until_result(
+                    timeout=DEFAULT_IPC_EXECUTE_TIMEOUT
+                )
         except (TimeoutError, OSError, ConnectionError, IPCError) as exc:
-            logger.error(
-                "IPC error executing tool '%s': %s", self.full_name, exc
-            )
+            logger.error("IPC error executing tool '%s': %s", self.full_name, exc)
             return _make_error_result(f"IPC error: {exc}", type(exc).__name__)
 
         if response.type == AgentToPlatformType.ERROR:
-            return _make_error_result(
-                response.error or "Agent returned an error", "AgentError"
-            )
+            return _make_error_result(response.error or "Agent returned an error", "AgentError")
 
         return {
             "output": response.content or "",
@@ -158,7 +156,8 @@ class McpToolAdapter:
         return {
             "name": self.full_name,
             "description": self.description,
-            "inputSchema": self._input_schema or {
+            "inputSchema": self._input_schema
+            or {
                 "type": "object",
                 "properties": {},
             },

@@ -37,10 +37,12 @@ def _rmtree_best_effort(path: Path, *, context: str = "") -> None:
     Used in cleanup paths (uninstall, rollback) where partial removal is
     acceptable and the caller should not abort.
     """
+
     def _on_error(func, p, exc_info):  # type: ignore[no-untyped-def]
         logger.warning("Failed to remove %s during %s: %s", p, context, exc_info[1])
 
     shutil.rmtree(path, onerror=_on_error)
+
 
 _ALLOWED_GIT_SCHEMES = ("https://", "http://", "git://", "ssh://")
 
@@ -49,8 +51,7 @@ def _validate_git_url(url: str) -> None:
     """Reject URLs with unsupported schemes (e.g. file:///)."""
     if not any(url.startswith(scheme) for scheme in _ALLOWED_GIT_SCHEMES):
         raise ValueError(
-            f"Invalid git URL scheme: {url!r}. "
-            f"Allowed schemes: {', '.join(_ALLOWED_GIT_SCHEMES)}"
+            f"Invalid git URL scheme: {url!r}. Allowed schemes: {', '.join(_ALLOWED_GIT_SCHEMES)}"
         )
     if url.startswith("http://"):
         logger.warning(
@@ -162,12 +163,13 @@ class GitInstaller:
             # 3. Sparse clone
             try:
                 agent_dir = await self._sparse_clone(
-                    source.url, agent_name, relative_path, ref,
+                    source.url,
+                    agent_name,
+                    relative_path,
+                    ref,
                 )
             except Exception as exc:
-                raise InstallationError(
-                    f"Failed to clone agent '{agent_name}': {exc}"
-                ) from exc
+                raise InstallationError(f"Failed to clone agent '{agent_name}': {exc}") from exc
 
             # 4. Validate
             issues, manifest_dict = self._validate_agent_package(agent_dir)
@@ -330,16 +332,12 @@ class GitInstaller:
             )
 
         if not local_path.is_dir():
-            raise InstallationError(
-                f"Local agent path does not exist: {local_path}"
-            )
+            raise InstallationError(f"Local agent path does not exist: {local_path}")
 
         # 1. Validate
         issues, manifest_dict = self._validate_agent_package(local_path)
         if issues:
-            raise InstallationError(
-                f"Agent '{agent_name}' validation failed: {'; '.join(issues)}"
-            )
+            raise InstallationError(f"Agent '{agent_name}' validation failed: {'; '.join(issues)}")
 
         _created_paths: list[Path] = []
         try:
@@ -456,9 +454,13 @@ class GitInstaller:
             # Initial clone: no checkout + blobless partial clone + sparse
             await self._run_git(
                 [
-                    "clone", "--no-checkout", "--depth=1",
-                    "--filter=blob:none", "--sparse",
-                    source_url, str(cache_path),
+                    "clone",
+                    "--no-checkout",
+                    "--depth=1",
+                    "--filter=blob:none",
+                    "--sparse",
+                    source_url,
+                    str(cache_path),
                 ],
                 cwd=cache_path.parent,
             )
@@ -483,9 +485,7 @@ class GitInstaller:
             alt_dir = cache_path / agent_name
             if alt_dir.exists():
                 return alt_dir
-            raise InstallationError(
-                f"Agent directory '{relative_path}' not found in repository"
-            )
+            raise InstallationError(f"Agent directory '{relative_path}' not found in repository")
 
         return agent_dir
 
@@ -534,9 +534,7 @@ class GitInstaller:
                     manifest_data = manifest
                     for field in ("name", "version", "type"):
                         if field not in manifest:
-                            issues.append(
-                                f"agent-manifest.yaml missing required field: {field}"
-                            )
+                            issues.append(f"agent-manifest.yaml missing required field: {field}")
                     if "type" in manifest and manifest["type"] not in {t.value for t in AgentType}:
                         issues.append(f"Invalid agent type: {manifest['type']}")
             except yaml.YAMLError as exc:
@@ -557,9 +555,7 @@ class GitInstaller:
             raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
             return raw if isinstance(raw, dict) else {}
         except Exception as exc:
-            raise InstallationError(
-                f"Failed to read manifest from {manifest_path}: {exc}"
-            ) from exc
+            raise InstallationError(f"Failed to read manifest from {manifest_path}: {exc}") from exc
 
     # ------------------------------------------------------------------
     # Internal: venv management
@@ -609,7 +605,9 @@ class GitInstaller:
         try:
             # Create venv with uv
             proc = await asyncio.create_subprocess_exec(
-                "uv", "venv", str(venv_path),
+                "uv",
+                "venv",
+                str(venv_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -621,17 +619,25 @@ class GitInstaller:
                 raise
 
             if proc.returncode != 0:
-                logger.warning("uv venv failed for %s: %s", agent_name, stderr.decode(errors="replace"))
+                logger.warning(
+                    "uv venv failed for %s: %s", agent_name, stderr.decode(errors="replace")
+                )
                 shutil.rmtree(venv_path, ignore_errors=True)
                 return None
 
             # Install the agent package into the venv (non-editable to avoid
             # relative-path dependency breakage and cache-cleanup fragility).
             # Include [full] extras if defined (e.g. python-docx, fastmcp).
-            install_target = f"{agent_dir}[full]" if self._has_extra(agent_dir, "full") else str(agent_dir)
+            install_target = (
+                f"{agent_dir}[full]" if self._has_extra(agent_dir, "full") else str(agent_dir)
+            )
             proc = await asyncio.create_subprocess_exec(
-                "uv", "pip", "install", install_target,
-                "--python", str(venv_path / "bin" / "python"),
+                "uv",
+                "pip",
+                "install",
+                install_target,
+                "--python",
+                str(venv_path / "bin" / "python"),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -643,7 +649,9 @@ class GitInstaller:
                 raise
 
             if proc.returncode != 0:
-                logger.warning("uv pip install failed for %s: %s", agent_name, stderr.decode(errors="replace"))
+                logger.warning(
+                    "uv pip install failed for %s: %s", agent_name, stderr.decode(errors="replace")
+                )
                 shutil.rmtree(venv_path, ignore_errors=True)
                 return None
 
@@ -670,6 +678,7 @@ class GitInstaller:
     def _get_cache_path(self, source_url: str) -> Path:
         """Derive a stable local cache directory from *source_url*."""
         from agent_nexus.platform.utils import cache_path_for_url
+
         return cache_path_for_url(self._config_dir, source_url)
 
     @staticmethod
@@ -703,7 +712,8 @@ class GitInstaller:
     async def _run_git_capture(args: list[str], cwd: Path) -> str:
         """Run a git command and return its stdout."""
         proc = await asyncio.create_subprocess_exec(
-            "git", *args,
+            "git",
+            *args,
             cwd=str(cwd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

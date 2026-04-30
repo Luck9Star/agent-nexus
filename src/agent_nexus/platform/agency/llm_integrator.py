@@ -6,20 +6,21 @@ Falls back to :class:`Integrator.merge()` when LLM is unavailable.
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 import threading
 from typing import TYPE_CHECKING
 
 from .integrator import Artifact, ConflictItem, IntegratedArtifact, Integrator
-from .llm_planner import _strip_markdown_fence
+from .json_parse import robust_json_parse
 
 if TYPE_CHECKING:
     from .llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
+# Generous limit to accommodate large multi-expert synthesis prompts
+# without truncating.  Most LLMs support 128K+ context; 120K leaves room
+# for system prompts and response tokens.
 _MAX_SYNTHESIS_PROMPT_CHARS = 120_000
 
 
@@ -47,6 +48,12 @@ class LLMIntegrator:
         """Number of times any LLMIntegrator fell back to rules (monitoring)."""
         with cls._fallback_lock:
             return cls._fallback_count
+
+    @classmethod
+    def reset_fallback_count(cls) -> None:
+        """Reset the fallback counter (for test isolation)."""
+        with cls._fallback_lock:
+            cls._fallback_count = 0
 
     def synthesize(
         self,
@@ -85,7 +92,8 @@ class LLMIntegrator:
             return Integrator.merge(artifacts)
 
         logger.info(
-            "LLMIntegrator: synthesizing %d expert artifacts", len(artifacts),
+            "LLMIntegrator: synthesizing %d expert artifacts",
+            len(artifacts),
         )
 
         try:
@@ -126,17 +134,14 @@ class LLMIntegrator:
         per_expert_budget = _MAX_SYNTHESIS_PROMPT_CHARS // max(len(artifacts), 1)
 
         for art in artifacts:
-            sections_str = "\n".join(
-                f"  {k}: {v}" for k, v in art.sections.items()
-            )
-            expert_block = (
-                f"Expert: {art.source_agent}\n{sections_str}"
-            )
+            sections_str = "\n".join(f"  {k}: {v}" for k, v in art.sections.items())
+            expert_block = f"Expert: {art.source_agent}\n{sections_str}"
             if len(expert_block) > per_expert_budget:
                 expert_block = expert_block[:per_expert_budget] + "\n[...truncated]"
                 logger.warning(
                     "LLMIntegrator: truncated expert '%s' output to %d chars",
-                    art.source_agent, per_expert_budget,
+                    art.source_agent,
+                    per_expert_budget,
                 )
             expert_outputs.append(expert_block)
 
@@ -149,9 +154,7 @@ class LLMIntegrator:
             "2. Resolve any conflicting recommendations with reasoning\n"
             "3. Identify gaps or blind spots in the expert analyses\n"
             "4. Produce a unified set of recommendations\n\n"
-            "Expert outputs:\n\n"
-            + prompt_body
-            + "\n\nRespond with ONLY a JSON object:\n"
+            "Expert outputs:\n\n" + prompt_body + "\n\nRespond with ONLY a JSON object:\n"
             "{\n"
             '  "summary": "unified summary",\n'
             '  "recommendations": ["rec1", "rec2"],\n'
@@ -169,24 +172,13 @@ class LLMIntegrator:
         """Parse LLM synthesis response into IntegratedArtifact."""
         source_agents = [a.source_agent for a in artifacts]
 
-        try:
-            data = json.loads(_strip_markdown_fence(raw))
-        except (json.JSONDecodeError, TypeError):
-            # Attempt to find a JSON object embedded anywhere in the response
-            json_match = re.search(r"\{[\s\S]*\}", raw)
-            if json_match:
-                try:
-                    data = json.loads(json_match.group())
-                except (json.JSONDecodeError, TypeError):
-                    data = None
-            else:
-                data = None
-            if data is None:
-                logger.warning("LLMIntegrator: failed to parse JSON, using raw text")
-                return IntegratedArtifact(
-                    source_agents=source_agents,
-                    merged_sections={"synthesis": raw},
-                )
+        data = robust_json_parse(raw)
+        if data is None:
+            logger.warning("LLMIntegrator: failed to parse JSON, using raw text")
+            return IntegratedArtifact(
+                source_agents=source_agents,
+                merged_sections={"synthesis": raw},
+            )
 
         merged_sections: dict[str, object] = {}
         if "summary" in data:
@@ -200,17 +192,17 @@ class LLMIntegrator:
             for key, value in art.sections.items():
                 merged_sections[f"{prefix}.{key}"] = value
 
-        merged_sections["decision_summary"] = (
-            f"LLM-synthesized {len(artifacts)} expert outputs"
-        )
+        merged_sections["decision_summary"] = f"LLM-synthesized {len(artifacts)} expert outputs"
 
         conflicts = []
         for c in data.get("conflicts", []):
-            conflicts.append(ConflictItem(
-                field=c.get("field", "unknown"),
-                description=c.get("description", ""),
-                agents=source_agents,
-            ))
+            conflicts.append(
+                ConflictItem(
+                    field=c.get("field", "unknown"),
+                    description=c.get("description", ""),
+                    agents=source_agents,
+                )
+            )
 
         result = IntegratedArtifact(
             source_agents=source_agents,
@@ -221,6 +213,8 @@ class LLMIntegrator:
         )
         logger.info(
             "LLMIntegrator: synthesis complete — %d sections, %d conflicts, %d risks",
-            len(result.merged_sections), len(result.conflicts), len(result.risks),
+            len(result.merged_sections),
+            len(result.conflicts),
+            len(result.risks),
         )
         return result

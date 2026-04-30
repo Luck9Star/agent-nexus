@@ -20,7 +20,7 @@ import logging
 import sqlite3
 import uuid
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -81,6 +81,7 @@ def _chunked_in_fetchall(
         sql = sql_template.replace("{IN}", ph)
         all_rows.extend(conn.execute(sql, tuple(chunk) + extra_params).fetchall())
     return all_rows
+
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS skill_records (
@@ -200,10 +201,8 @@ class EvolutionStore:
 
     def __del__(self) -> None:
         # Safety net: close connection if close() was never called.
-        try:
+        with suppress(Exception):
             self.close()
-        except Exception:
-            pass
 
     def _init_db(self) -> None:
         with self._conn() as conn:
@@ -215,9 +214,7 @@ class EvolutionStore:
                     conn.execute(stmt)
 
     @contextmanager
-    def _conn(
-        self, *, immediate: bool = False
-    ) -> Generator[sqlite3.Connection, None, None]:
+    def _conn(self, *, immediate: bool = False) -> Generator[sqlite3.Connection, None, None]:
         """Context manager for DB connections.
 
         Delegates to :func:`sqlite_connection` for standardised setup,
@@ -251,9 +248,7 @@ class EvolutionStore:
         """
         with self._conn(immediate=True) as conn:
             lin = record.lineage
-            snapshot_json = json.dumps(
-                lin.content_snapshot or {}, ensure_ascii=False
-            )
+            snapshot_json = json.dumps(lin.content_snapshot or {}, ensure_ascii=False)
             diff_json = lin.content_diff or ""
             conn.execute(
                 """
@@ -306,8 +301,7 @@ class EvolutionStore:
             )
             if lin.parent_skill_ids:
                 conn.executemany(
-                    "INSERT INTO skill_lineage_parents (skill_id, parent_id) "
-                    "VALUES (?, ?)",
+                    "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES (?, ?)",
                     [(record.id, pid) for pid in lin.parent_skill_ids],
                 )
 
@@ -322,9 +316,7 @@ class EvolutionStore:
                 return None
             return self._row_to_record(conn, row)
 
-    def get_skill_records_batch(
-        self, skill_ids: list[str]
-    ) -> dict[str, SkillRecord]:
+    def get_skill_records_batch(self, skill_ids: list[str]) -> dict[str, SkillRecord]:
         """Load multiple skill records by ID in a single query.
 
         Returns a dict mapping each found ID to its SkillRecord.
@@ -347,7 +339,10 @@ class EvolutionStore:
             return result
 
     def get_active_skills(
-        self, *, limit: int | None = None, offset: int = 0,
+        self,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[SkillRecord]:
         """Load active skill records, optionally paginated.
 
@@ -367,7 +362,10 @@ class EvolutionStore:
             return self._rows_to_records(conn, rows, parents)
 
     def get_all_skills(
-        self, *, limit: int | None = None, offset: int = 0,
+        self,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[SkillRecord]:
         """Load all skill records (including inactive), optionally paginated.
 
@@ -390,8 +388,7 @@ class EvolutionStore:
         """Set is_active = False for a skill record."""
         with self._conn(immediate=True) as conn:
             cur = conn.execute(
-                "UPDATE skill_records SET is_active = 0, updated_at = ? "
-                "WHERE id = ?",
+                "UPDATE skill_records SET is_active = 0, updated_at = ? WHERE id = ?",
                 (_now_iso(), skill_id),
             )
             return cur.rowcount > 0
@@ -413,7 +410,11 @@ class EvolutionStore:
 
     @staticmethod
     def _validate_counter_invariants(
-        *, selected: bool, applied: bool, completed: bool, fell_back: bool,
+        *,
+        selected: bool,
+        applied: bool,
+        completed: bool,
+        fell_back: bool,
     ) -> None:
         """Validate counter prerequisite invariants.
 
@@ -441,8 +442,10 @@ class EvolutionStore:
         Called within the same transaction as judgment insert.
         """
         self._validate_counter_invariants(
-            selected=selected, applied=applied,
-            completed=completed, fell_back=fell_back,
+            selected=selected,
+            applied=applied,
+            completed=completed,
+            fell_back=fell_back,
         )
 
         sets: list[str] = []
@@ -501,9 +504,7 @@ class EvolutionStore:
         """
         analysis_id = str(uuid.uuid4())
         now = _now_iso()
-        suggestions_json = json.dumps(
-            evolution_suggestions or [], ensure_ascii=False
-        )
+        suggestions_json = json.dumps(evolution_suggestions or [], ensure_ascii=False)
 
         with self._conn(immediate=True) as conn:
             conn.execute(
@@ -524,10 +525,17 @@ class EvolutionStore:
             )
 
             judgment_rows = [
-                (str(uuid.uuid4()), analysis_id, j.get("skill_id"),
-                 int(j.get("selected", False)), int(j.get("applied", False)),
-                 int(j.get("completed", False)), int(j.get("fell_back", False)))
-                for j in (judgments or []) if j.get("skill_id")
+                (
+                    str(uuid.uuid4()),
+                    analysis_id,
+                    j.get("skill_id"),
+                    int(j.get("selected", False)),
+                    int(j.get("applied", False)),
+                    int(j.get("completed", False)),
+                    int(j.get("fell_back", False)),
+                )
+                for j in (judgments or [])
+                if j.get("skill_id")
             ]
             if judgment_rows:
                 conn.executemany(
@@ -550,8 +558,10 @@ class EvolutionStore:
                 fell_back = bool(j.get("fell_back", False))
 
                 self._validate_counter_invariants(
-                    selected=selected, applied=applied,
-                    completed=completed, fell_back=fell_back,
+                    selected=selected,
+                    applied=applied,
+                    completed=completed,
+                    fell_back=fell_back,
                 )
 
                 d = deltas.setdefault(sid, {"sel": 0, "app": 0, "comp": 0, "fb": 0})
@@ -577,9 +587,7 @@ class EvolutionStore:
 
         return analysis_id
 
-    def get_analyses_for_task(
-        self, task_id: str
-    ) -> list[dict[str, Any]]:
+    def get_analyses_for_task(self, task_id: str) -> list[dict[str, Any]]:
         """Load all analyses for a given task.
 
         Fetches all analysis rows first, then batch-loads judgments in
@@ -611,27 +619,25 @@ class EvolutionStore:
             judgments_by_analysis: dict[str, list[dict[str, Any]]] = {}
             for r in j_rows:
                 aid = r[1]
-                judgments_by_analysis.setdefault(aid, []).append(
-                    self._judgment_row_to_dict(r)
-                )
+                judgments_by_analysis.setdefault(aid, []).append(self._judgment_row_to_dict(r))
 
             # Build result dicts without per-row queries
             results: list[dict[str, Any]] = []
             for r in rows:
-                results.append({
-                    "id": r[0],
-                    "task_id": r[1],
-                    "agent_name": r[2],
-                    "analysis": r[3],
-                    "evolution_suggestions": json.loads(r[4]) if r[4] else [],
-                    "created_at": r[5],
-                    "judgments": judgments_by_analysis.get(r[0], []),
-                })
+                results.append(
+                    {
+                        "id": r[0],
+                        "task_id": r[1],
+                        "agent_name": r[2],
+                        "analysis": r[3],
+                        "evolution_suggestions": json.loads(r[4]) if r[4] else [],
+                        "created_at": r[5],
+                        "judgments": judgments_by_analysis.get(r[0], []),
+                    }
+                )
             return results
 
-    def get_judgments_for_skill(
-        self, skill_id: str, limit: int = 50
-    ) -> list[dict[str, Any]]:
+    def get_judgments_for_skill(self, skill_id: str, limit: int = 50) -> list[dict[str, Any]]:
         """Load recent judgments for a skill."""
         if limit < 1:
             limit = 1
@@ -642,10 +648,7 @@ class EvolutionStore:
                 "WHERE skill_id = ? ORDER BY rowid DESC LIMIT ?",
                 (skill_id, limit),
             ).fetchall()
-            return [
-                self._judgment_row_to_dict(r)
-                for r in rows
-            ]
+            return [self._judgment_row_to_dict(r) for r in rows]
 
     def get_judgments_batch(
         self, skill_ids: set[str], limit_per_skill: int = 50
@@ -716,9 +719,7 @@ class EvolutionStore:
             )
         return log_id
 
-    def get_budget_log(
-        self, agent_name: str, limit: int = 50
-    ) -> list[dict[str, Any]]:
+    def get_budget_log(self, agent_name: str, limit: int = 50) -> list[dict[str, Any]]:
         """Load recent budget log entries for an agent."""
         if limit < 1:
             limit = 1
@@ -772,7 +773,8 @@ class EvolutionStore:
                     # leaving some parents deactivated with no replacement.
                     if parent_skill_ids:
                         found = {
-                            r[0] for r in _chunked_in_fetchall(
+                            r[0]
+                            for r in _chunked_in_fetchall(
                                 conn,
                                 "SELECT id FROM skill_records WHERE id IN ({IN})",
                                 parent_skill_ids,
@@ -804,8 +806,7 @@ class EvolutionStore:
                     # records.  We check AFTER deactivation so that parent
                     # records (same name, different ID) are excluded.
                     dup = conn.execute(
-                        "SELECT id FROM skill_records "
-                        "WHERE name = ? AND is_active = 1 AND id != ?",
+                        "SELECT id FROM skill_records WHERE name = ? AND is_active = 1 AND id != ?",
                         (new_record.name, new_record.id),
                     ).fetchone()
                     if dup is not None:
@@ -817,9 +818,7 @@ class EvolutionStore:
                 # Insert new record — evolved skills always have unique IDs
                 # (uuid-suffixed), so plain INSERT is sufficient.
                 lin = new_record.lineage
-                snapshot_json = json.dumps(
-                    lin.content_snapshot or {}, ensure_ascii=False
-                )
+                snapshot_json = json.dumps(lin.content_snapshot or {}, ensure_ascii=False)
                 conn.execute(
                     """
                     INSERT INTO skill_records (
@@ -854,15 +853,12 @@ class EvolutionStore:
                 # Insert lineage parents
                 if parent_skill_ids:
                     conn.executemany(
-                        "INSERT INTO skill_lineage_parents "
-                        "(skill_id, parent_id) VALUES (?, ?)",
+                        "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES (?, ?)",
                         [(new_record.id, pid) for pid in parent_skill_ids],
                     )
 
         except sqlite3.IntegrityError:
-            logger.warning(
-                "Skill ID collision during evolution: %s", new_record.id
-            )
+            logger.warning("Skill ID collision during evolution: %s", new_record.id)
             return EvolveResult(
                 success=False,
                 error=f"Skill ID collision: {new_record.id}",
@@ -874,9 +870,7 @@ class EvolutionStore:
             logger.warning("evolve_skill validation failed: %s", exc)
             return EvolveResult(success=False, error=str(exc))
         except sqlite3.Error as exc:
-            logger.error(
-                "Database error during skill evolution: %s", exc, exc_info=True
-            )
+            logger.error("Database error during skill evolution: %s", exc, exc_info=True)
             return EvolveResult(
                 success=False,
                 error=f"Database error during evolution: {exc}",
@@ -952,17 +946,13 @@ class EvolutionStore:
             result: dict[str, list[SkillRecord]] = {}
             for sid in skill_ids:
                 ancestors = [
-                    records_by_id[aid]
-                    for aid in visited_per_skill[sid]
-                    if aid in records_by_id
+                    records_by_id[aid] for aid in visited_per_skill[sid] if aid in records_by_id
                 ]
                 ancestors.sort(key=lambda r: r.lineage.generation)
                 result[sid] = ancestors
             return result
 
-    def get_ancestry(
-        self, skill_id: str, max_depth: int = 10
-    ) -> list[SkillRecord]:
+    def get_ancestry(self, skill_id: str, max_depth: int = 10) -> list[SkillRecord]:
         """Walk up the lineage tree, returns ancestors oldest-first."""
         with self._conn() as conn:
             visited: set[str] = set()
@@ -1006,8 +996,7 @@ class EvolutionStore:
         """Find skill IDs derived from the given parent."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT skill_id FROM skill_lineage_parents "
-                "WHERE parent_id = ?",
+                "SELECT skill_id FROM skill_lineage_parents WHERE parent_id = ?",
                 (parent_id,),
             ).fetchall()
             return [r[0] for r in rows]
@@ -1084,8 +1073,13 @@ class EvolutionStore:
                     name = excluded.name,
                     type = excluded.type,
                     skill_ids = excluded.skill_ids,
-                    orchestration_toml = COALESCE(excluded.orchestration_toml, agent_records.orchestration_toml),
-                    effective_rate = CASE WHEN agent_records.effective_rate IS NOT NULL THEN agent_records.effective_rate ELSE 0.0 END,
+                    orchestration_toml = COALESCE(
+                        excluded.orchestration_toml, agent_records.orchestration_toml
+                    ),
+                    effective_rate = CASE
+                        WHEN agent_records.effective_rate IS NOT NULL
+                        THEN agent_records.effective_rate ELSE 0.0
+                    END,
                     avg_steps = agent_records.avg_steps,
                     avg_duration_ms = agent_records.avg_duration_ms,
                     is_active = agent_records.is_active,
@@ -1093,8 +1087,13 @@ class EvolutionStore:
                     updated_at = excluded.updated_at
                 """,
                 (
-                    agent_id, name, type, skill_ids_json, orchestration_toml,
-                    now, now,
+                    agent_id,
+                    name,
+                    type,
+                    skill_ids_json,
+                    orchestration_toml,
+                    now,
+                    now,
                 ),
             )
 
@@ -1121,10 +1120,7 @@ class EvolutionStore:
                 "created_at, updated_at "
                 "FROM agent_records WHERE is_active = 1"
             ).fetchall()
-            return [
-                self._agent_row_to_dict(r)
-                for r in rows
-            ]
+            return [self._agent_row_to_dict(r) for r in rows]
 
     def update_agent_metrics(
         self,
@@ -1147,8 +1143,7 @@ class EvolutionStore:
         """Set is_active = False for an agent record."""
         with self._conn(immediate=True) as conn:
             cur = conn.execute(
-                "UPDATE agent_records SET is_active = 0, updated_at = ? "
-                "WHERE agent_id = ?",
+                "UPDATE agent_records SET is_active = 0, updated_at = ? WHERE agent_id = ?",
                 (_now_iso(), agent_id),
             )
             return cur.rowcount > 0
@@ -1219,16 +1214,13 @@ class EvolutionStore:
         with self._conn(immediate=True) as conn:
             # Pass 1: age-based pruning
             cur = conn.execute(
-                "DELETE FROM context_budget_log "
-                "WHERE created_at < datetime('now', ?)",
+                "DELETE FROM context_budget_log WHERE created_at < datetime('now', ?)",
                 (f"-{max_age_days} days",),
             )
             deleted += cur.rowcount
 
             # Pass 2: cap total row count
-            count = conn.execute(
-                "SELECT COUNT(*) FROM context_budget_log"
-            ).fetchone()[0]
+            count = conn.execute("SELECT COUNT(*) FROM context_budget_log").fetchone()[0]
             if count > max_rows:
                 excess = count - max_rows
                 cur = conn.execute(
@@ -1262,14 +1254,11 @@ class EvolutionStore:
         if skill_ids:
             rows = _chunked_in_fetchall(
                 conn,
-                "SELECT skill_id, parent_id FROM skill_lineage_parents "
-                "WHERE skill_id IN ({IN})",
+                "SELECT skill_id, parent_id FROM skill_lineage_parents WHERE skill_id IN ({IN})",
                 list(skill_ids),
             )
         else:
-            rows = conn.execute(
-                "SELECT skill_id, parent_id FROM skill_lineage_parents"
-            ).fetchall()
+            rows = conn.execute("SELECT skill_id, parent_id FROM skill_lineage_parents").fetchall()
         for skill_id, parent_id in rows:
             parents.setdefault(skill_id, []).append(parent_id)
         return parents
@@ -1318,7 +1307,7 @@ class EvolutionStore:
 
         # Parse snapshot
         snapshot: dict[str, str] = {}
-        if lineage_content_snapshot and lineage_content_snapshot not in ('""', '{}', 'null'):
+        if lineage_content_snapshot and lineage_content_snapshot not in ('""', "{}", "null"):
             try:
                 loaded = json.loads(lineage_content_snapshot)
                 if isinstance(loaded, dict) and loaded:
@@ -1328,13 +1317,15 @@ class EvolutionStore:
                     else:
                         non_str = [k for k, v in loaded.items() if not isinstance(v, str)]
                         logger.warning(
-                            "content_snapshot for skill '%s' has non-string values in keys %s, discarding snapshot",
-                            skill_id, non_str,
+                            "content_snapshot for skill '%s' has non-string values in keys %s, discarding snapshot",  # noqa: E501
+                            skill_id,
+                            non_str,
                         )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 logger.warning(
                     "Corrupted content_snapshot for skill '%s': %s",
-                    skill_id, exc,
+                    skill_id,
+                    exc,
                 )
 
         try:
@@ -1342,7 +1333,8 @@ class EvolutionStore:
         except ValueError:
             logger.warning(
                 "Invalid lineage_origin '%s' for skill '%s', defaulting to CAPTURED",
-                lineage_origin, skill_id,
+                lineage_origin,
+                skill_id,
             )
             origin = SkillOrigin.CAPTURED
 
@@ -1388,7 +1380,7 @@ class EvolutionStore:
                 row_id = row[0] if row else "<empty>"
                 logger.warning(
                     "Skipping corrupt skill_records row '%s': %s",
-                    row_id, exc,
+                    row_id,
+                    exc,
                 )
         return records
-

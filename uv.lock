@@ -47,6 +47,13 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-timeout" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.40" },
@@ -68,6 +75,13 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
+]
 
 [[package]]
 name = "aiofile"

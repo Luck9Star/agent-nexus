@@ -1,4 +1,4 @@
-"""Local platform infrastructure: lockfile, source management, git-based installation, supervision, CLI.
+"""Local platform: lockfile, source management, git-based installation, supervision, CLI.
 
 Usage::
 

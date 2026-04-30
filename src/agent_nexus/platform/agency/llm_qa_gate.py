@@ -6,13 +6,12 @@ Adds a semantic quality evaluation layer on top of the existing structural
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 from typing import TYPE_CHECKING
 
 from .integrator import IntegratedArtifact
-from .llm_planner import _strip_markdown_fence
+from .json_parse import robust_json_parse
 from .qa_gate import QAGate, QAGateInput, QAGateResult
 
 if TYPE_CHECKING:
@@ -22,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Minimum score threshold for LLM QA pass
 _PASS_THRESHOLD = 0.6
+_MAX_EVAL_PROMPT_CHARS = 50_000
 
 
 class LLMQualityGate:
@@ -35,23 +35,31 @@ class LLMQualityGate:
     Falls back to structural-only when no LLM client is available.
     """
 
-    _FALLBACK_COUNT = 0
+    _fallback_count = 0
     _fallback_lock = threading.Lock()
 
     def __init__(
         self,
         client: LLMClient | None = None,
         pass_threshold: float = _PASS_THRESHOLD,
+        structural_trust_floor: float = 0.5,
         temperature: float | None = None,
     ) -> None:
         self._client = client
         self._pass_threshold = pass_threshold
+        self._structural_trust_floor = structural_trust_floor
         self._temperature = temperature
 
     @classmethod
     def fallback_count(cls) -> int:
         """Number of times any LLMQualityGate fell back to structural-only (monitoring)."""
-        return cls._FALLBACK_COUNT
+        return cls._fallback_count
+
+    @classmethod
+    def reset_fallback_count(cls) -> None:
+        """Reset the fallback counter (for test isolation)."""
+        with cls._fallback_lock:
+            cls._fallback_count = 0
 
     def evaluate(
         self,
@@ -90,7 +98,8 @@ class LLMQualityGate:
         if not structural_result.passed:
             logger.info(
                 "LLMQualityGate: evaluation result — passed=%s, failures=%d",
-                structural_result.passed, len(structural_result.failures),
+                structural_result.passed,
+                len(structural_result.failures),
             )
             return structural_result
 
@@ -98,24 +107,21 @@ class LLMQualityGate:
         if self._client is None:
             logger.debug("LLMQualityGate: no LLM client, structural-only")
             with LLMQualityGate._fallback_lock:
-                LLMQualityGate._FALLBACK_COUNT += 1
+                LLMQualityGate._fallback_count += 1
             return structural_result
 
         try:
             result = self._llm_evaluate(integrated, task, structural_result)
             logger.info(
                 "LLMQualityGate: evaluation result — passed=%s, failures=%d",
-                result.passed, len(result.failures),
+                result.passed,
+                len(result.failures),
             )
             return result
         except Exception:
             logger.exception("LLMQualityGate: LLM call failed, structural-only")
             with LLMQualityGate._fallback_lock:
-                LLMQualityGate._FALLBACK_COUNT += 1
-            logger.info(
-                "LLMQualityGate: evaluation result — passed=%s, failures=%d",
-                structural_result.passed, len(structural_result.failures),
-            )
+                LLMQualityGate._fallback_count += 1
             return structural_result
 
     def _llm_evaluate(
@@ -126,8 +132,7 @@ class LLMQualityGate:
     ) -> QAGateResult:
         """Run LLM-based semantic evaluation."""
         sections_preview = "\n".join(
-            f"  {k}: {str(v)[:200]}..."
-            for k, v in list(integrated.merged_sections.items())[:10]
+            f"  {k}: {str(v)[:200]}..." for k, v in list(integrated.merged_sections.items())[:10]
         )
 
         system_prompt = (
@@ -145,7 +150,7 @@ class LLMQualityGate:
             '    "task_addressed": true/false,\n'
             '    "depth_sufficient": true/false,\n'
             '    "recommendations_actionable": true/false\n'
-            '  }\n'
+            "  }\n"
             "}"
         )
         user_message = (
@@ -153,6 +158,8 @@ class LLMQualityGate:
             f"Experts consulted: {', '.join(integrated.source_agents)}\n\n"
             f"Synthesized output:\n{sections_preview}"
         )
+        if len(user_message) > _MAX_EVAL_PROMPT_CHARS:
+            user_message = user_message[:_MAX_EVAL_PROMPT_CHARS] + "\n[...truncated]"
 
         response = self._client.call(
             system_prompt=system_prompt,
@@ -168,23 +175,10 @@ class LLMQualityGate:
         structural_result: QAGateResult,
     ) -> QAGateResult:
         """Parse LLM evaluation response."""
-        import re as _re
-
-        try:
-            data = json.loads(_strip_markdown_fence(raw))
-        except (json.JSONDecodeError, TypeError):
-            # Attempt to find a JSON object embedded anywhere in the response
-            json_match = _re.search(r"\{[\s\S]*\}", raw)
-            if json_match:
-                try:
-                    data = json.loads(json_match.group())
-                except (json.JSONDecodeError, TypeError):
-                    data = None
-            else:
-                data = None
-            if data is None:
-                logger.warning("LLMQualityGate: failed to parse JSON, returning structural result")
-                return structural_result
+        data = robust_json_parse(raw)
+        if data is None:
+            logger.warning("LLMQualityGate: failed to parse JSON, returning structural result")
+            return structural_result
 
         score = data.get("score", 0.0)
         issues = data.get("issues", [])
@@ -195,8 +189,8 @@ class LLMQualityGate:
         # the structural result.  Prevents false negatives from weaker
         # evaluator models that under-score genuinely adequate content.
         # Scores < 0.5 still fail — the LLM clearly flagged bad content.
-        _STRUCTURAL_TRUST_FLOOR = 0.5
-        if not passed and structural_result.passed and score >= _STRUCTURAL_TRUST_FLOOR:
+        trust_floor = self._structural_trust_floor
+        if not passed and structural_result.passed and score >= trust_floor:
             logger.info(
                 "LLMQualityGate: structural trust override — LLM score %.2f "
                 "below threshold %.2f but structural check passed",
@@ -207,9 +201,7 @@ class LLMQualityGate:
 
         failures: list[str] = []
         if not passed:
-            failures.append(
-                f"LLM quality score: {score:.2f} (threshold: {self._pass_threshold})"
-            )
+            failures.append(f"LLM quality score: {score:.2f} (threshold: {self._pass_threshold})")
             for issue in issues:
                 failures.append(f"Quality issue: {issue}")
 

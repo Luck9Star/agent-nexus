@@ -1,4 +1,5 @@
 """Expert executor implementations for the agency pipeline."""
+
 from __future__ import annotations
 
 import logging
@@ -33,8 +34,7 @@ class ProfileBasedExecutor:
         profile = self._registry.get(profile_id)
         if profile is None:
             raise ValueError(
-                f"Profile '{profile_id}' not found in registry "
-                "— cannot produce artifact"
+                f"Profile '{profile_id}' not found in registry — cannot produce artifact"
             )
 
         name = profile.get("name", profile_id)
@@ -77,20 +77,15 @@ class ProfileBasedExecutor:
             elif section == "recommendations":
                 sections["recommendations"] = [f"Apply {name} expertise to: {task}"]
             elif section == "findings":
-                sections["findings"] = [
-                    f"{cap} perspective on: {task}" for cap in capabilities[:3]
-                ]
+                sections["findings"] = [f"{cap} perspective on: {task}" for cap in capabilities[:3]]
             elif section == "proposed_design":
                 sections["proposed_design"] = f"[{name}] Design for: {task}"
             elif section == "tradeoffs":
                 sections["tradeoffs"] = [
-                    f"Trade-off from {cap} perspective"
-                    for cap in capabilities[:2]
+                    f"Trade-off from {cap} perspective" for cap in capabilities[:2]
                 ]
             elif section == "risks":
-                sections["risks"] = [
-                    f"Risk identified via {cap}" for cap in capabilities[:2]
-                ]
+                sections["risks"] = [f"Risk identified via {cap}" for cap in capabilities[:2]]
             elif section == "next_steps":
                 sections["next_steps"] = [
                     f"Follow up with {cap} analysis" for cap in capabilities[:2]
@@ -109,7 +104,7 @@ class ProfileBasedExecutor:
                 }
             elif section == "execution_order":
                 sections["execution_order"] = [
-                    f"Step {i+1}: {cap}" for i, cap in enumerate(capabilities)
+                    f"Step {i + 1}: {cap}" for i, cap in enumerate(capabilities)
                 ]
             else:
                 logger.warning("Unmapped section '%s' in output contract for '%s'", section, name)
@@ -138,6 +133,7 @@ class LLMExecutor:
         self._default_model_string = model_string
         self._default_temperature = default_temperature
         self._timeout = timeout
+        self._capability_registry = capability_registry
 
         # Create default client (used when expert has no model override)
         self._default_client = LLMClient(
@@ -164,6 +160,7 @@ class LLMExecutor:
             self._expert_clients[expert_model] = LLMClient(
                 model_string=expert_model,
                 config_dir=self._config_dir,
+                capability_registry=self._capability_registry,
             )
             logger.info(
                 "Per-expert model override: %s → %s",
@@ -172,12 +169,18 @@ class LLMExecutor:
             )
         return self._expert_clients[expert_model]
 
+    def close(self) -> None:
+        """Release resources held by per-expert client cache."""
+        for client in self._expert_clients.values():
+            client.close()
+        self._expert_clients.clear()
+        self._default_client.close()
+
     def __call__(self, profile_id: str, task: str) -> Artifact:
         profile = self._registry.get(profile_id)
         if profile is None:
             raise ValueError(
-                f"Profile '{profile_id}' not found in registry "
-                "— cannot produce artifact"
+                f"Profile '{profile_id}' not found in registry — cannot produce artifact"
             )
 
         logger.info("LLMExecutor: dispatching expert '%s'", profile_id)
@@ -210,7 +213,9 @@ class LLMExecutor:
 
         logger.info(
             "LLMExecutor: expert '%s' completed (model=%s, provider=%s)",
-            profile_id, response.model, response.provider,
+            profile_id,
+            response.model,
+            response.provider,
         )
 
         return Artifact(
@@ -240,14 +245,13 @@ class LLMExecutor:
             parts.append(f"You are {name}, an expert assistant.")
 
         if capabilities:
-            parts.append(
-                "Your areas of expertise: " + ", ".join(capabilities) + "."
-            )
+            parts.append("Your areas of expertise: " + ", ".join(capabilities) + ".")
 
         section_list = ", ".join(required_sections)
         parts.append(
             "Your response must include these sections as ## markdown headings: "
-            + section_list + "."
+            + section_list
+            + "."
         )
         parts.append(
             "Use exactly these heading names so they can be parsed. "
@@ -257,7 +261,9 @@ class LLMExecutor:
         return "\n\n".join(parts)
 
     def _parse_sections(
-        self, response_text: str, required_sections: list[str],
+        self,
+        response_text: str,
+        required_sections: list[str],
     ) -> dict[str, object]:
         """Parse LLM response into sections using ``##`` markdown headings.
 
@@ -265,9 +271,7 @@ class LLMExecutor:
         them are **not** treated as section delimiters.
         """
         # Build a case-insensitive lookup: normalized_key -> original_key
-        required_normalized: dict[str, str] = {
-            _normalize_heading(s): s for s in required_sections
-        }
+        required_normalized: dict[str, str] = {_normalize_heading(s): s for s in required_sections}
 
         # Split by ## headings (level-2 only)
         pattern = re.compile(r"^##\s+(.+)$", re.MULTILINE)
@@ -278,19 +282,19 @@ class LLMExecutor:
         sections: dict[str, object] = {}
 
         # Track fenced code block boundaries so we can skip ## headings
-        # that appear inside code blocks.  We rebuild the boundary set
-        # from the *original* text (which pattern.split preserves position
-        # information for via the captured groups).
+        # that appear inside code blocks.
         in_code_block: set[int] = _fenced_code_line_indices(response_text)
+
+        # Precompute character offsets for each split element (avoids O(K×N)
+        # repeated text.find calls).
+        offsets = _compute_split_offsets(response_text, splits)
 
         for i in range(1, len(splits) - 1, 2):
             heading_raw = splits[i].strip()
             content = splits[i + 1].strip()
 
             # Skip headings that fall inside a fenced code block
-            # The heading position in the original text can be found by
-            # computing the offset up to this split index.
-            heading_offset = _split_offset(response_text, splits, i)
+            heading_offset = offsets[i]
             heading_line = response_text[:heading_offset].count("\n") + 1
             if heading_line in in_code_block:
                 continue
@@ -331,17 +335,19 @@ def _fenced_code_line_indices(text: str) -> set[int]:
     return code_lines
 
 
-def _split_offset(text: str, splits: list[str], split_index: int) -> int:
-    """Compute the character offset of ``splits[split_index]`` in the original text."""
+def _compute_split_offsets(text: str, splits: list[str]) -> list[int]:
+    """Precompute character offsets for each element in ``splits``.
+
+    Replaces per-call ``_split_offset()`` with a single O(N) pass, reducing
+    heading offset lookup from O(K×N) to O(N) total.
+    """
+    offsets: list[int] = []
     pos = 0
-    for idx, part in enumerate(splits):
-        if idx == split_index:
-            return pos
-        # Find this part in text starting from pos.  regex split preserves
-        # order, so we can search forward.
+    for part in splits:
+        offsets.append(pos)
         found = text.find(part, pos)
         if found != -1:
             pos = found + len(part)
         else:
             pos += len(part)
-    return pos
+    return offsets

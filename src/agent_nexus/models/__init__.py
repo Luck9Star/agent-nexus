@@ -9,12 +9,6 @@ Usage:
 """
 
 # capability.py — Model capability registry
-from agent_nexus.models.capability import (
-    PROVIDER_DEFAULTS,
-    ModelCapability,
-    ModelCapabilityRegistry,
-)
-
 # agent.py — Agent system
 from agent_nexus.models.agent import (
     AgentDefinition,
@@ -29,6 +23,11 @@ from agent_nexus.models.agent import (
     ModelTier,
     RunMode,
     SkillDefinition,
+)
+from agent_nexus.models.capability import (
+    PROVIDER_DEFAULTS,
+    ModelCapability,
+    ModelCapabilityRegistry,
 )
 
 # composition.py — Shared composition data models

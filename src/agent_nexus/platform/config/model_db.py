@@ -86,6 +86,7 @@ class ModelDBClient:
         # Flat index: normalized_model_id → transformed dict
         self._model_index: dict[str, dict] = {}
         self._index_fetched_at: float = 0.0
+        self._trigram_index: dict[str, set[str]] = {}
         self._http_client: httpx.Client | None = None
 
     # ------------------------------------------------------------------
@@ -114,9 +115,11 @@ class ModelDBClient:
             if result is not None:
                 return result
 
-        # Fuzzy: check if key is a substring of any indexed model id
-        for idx_key, val in self._model_index.items():
-            if key in idx_key or idx_key.endswith(key):
+        # Fuzzy: trigram-accelerated substring search
+        for idx_key in self._trigram_candidates(key):
+            val = self._model_index.get(idx_key)
+            if val is not None and (key in idx_key or idx_key.endswith(key)):
+                logger.info("ModelDB: fuzzy match '%s' → '%s'", key, idx_key)
                 return val
         return None
 
@@ -130,8 +133,11 @@ class ModelDBClient:
         if not q:
             return []
         results: list[dict] = []
-        for val in self._model_index.values():
-            if q in val.get("id", "").lower() or q in val.get("name", "").lower():
+        for idx_key in self._trigram_candidates(q):
+            val = self._model_index.get(idx_key)
+            if val is not None and (
+                q in val.get("id", "").lower() or q in val.get("name", "").lower()
+            ):
                 results.append(val)
         return results
 
@@ -143,6 +149,7 @@ class ModelDBClient:
     def clear_cache(self) -> None:
         """Clear the in-memory index and delete the disk cache file."""
         self._model_index.clear()
+        self._trigram_index.clear()
         self._index_fetched_at = 0.0
         if self._disk_cache_path is not None:
             cache_file = self._disk_cache_path / "_index.json"
@@ -200,10 +207,40 @@ class ModelDBClient:
                         index[short] = transformed
         self._model_index = index
         self._index_fetched_at = time.time()
+        self._build_search_index()
         logger.info(
             "ModelDB: index built — %d models from %d providers",
             len(index), len(data),
         )
+
+    def _build_search_index(self) -> None:
+        """Build trigram index for fast substring matching."""
+        trigrams: dict[str, set[str]] = {}
+        for key, val in self._model_index.items():
+            for i in range(max(len(key) - 2, 0)):
+                trigrams.setdefault(key[i:i + 3], set()).add(key)
+            name = val.get("name", "").lower()
+            for i in range(max(len(name) - 2, 0)):
+                trigrams.setdefault(name[i:i + 3], set()).add(key)
+        self._trigram_index = trigrams
+
+    def _trigram_candidates(self, query: str) -> set[str]:
+        """Return candidate model keys that likely contain *query*.
+
+        Uses frequency-based scoring instead of strict intersection:
+        a candidate only needs to match >= 50% of query trigrams.
+        This tolerates partial matches that strict intersection would miss.
+        """
+        if len(query) < 3:
+            exact = self._model_index.get(query)
+            return {query} if exact is not None else set()
+        query_trigrams = [query[i:i + 3] for i in range(len(query) - 2)]
+        candidate_scores: dict[str, int] = {}
+        for tri in query_trigrams:
+            for key in self._trigram_index.get(tri, set()):
+                candidate_scores[key] = candidate_scores.get(key, 0) + 1
+        threshold = max(len(query_trigrams) // 2, 1)
+        return {k for k, v in candidate_scores.items() if v >= threshold}
 
     def _load_disk_index(self) -> bool:
         """Load the index from disk cache if fresh enough."""
@@ -220,6 +257,7 @@ class ModelDBClient:
                 return False
             self._model_index = payload.get("index", {})
             self._index_fetched_at = fetched_at
+            self._build_search_index()
             logger.debug("ModelDB: loaded index from disk (%d models)", len(self._model_index))
             return bool(self._model_index)
         except Exception:

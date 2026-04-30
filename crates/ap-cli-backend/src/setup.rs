@@ -72,10 +72,24 @@ impl CLISetup {
 
     /// Load config, falling back to empty defaults on any error.
     pub fn from_file_or_default(path: &Path) -> Self {
-        match Self::from_file(path) {
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                tracing::debug!("No CLI backend config at {}", path.display());
+                return Self::empty();
+            }
+            Err(e) => {
+                tracing::warn!("Cannot read CLI backend config from {}: {e}", path.display());
+                return Self::empty();
+            }
+        };
+        match Self::from_str(&content) {
             Ok(setup) => setup,
             Err(e) => {
-                tracing::warn!("Failed to load CLI backend config from {}: {e}", path.display());
+                tracing::warn!(
+                    "Failed to parse CLI backend config from {}: {e}",
+                    path.display()
+                );
                 Self::empty()
             }
         }

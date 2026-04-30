@@ -146,24 +146,16 @@ class MCPGateway:
             try:
                 schemas = await self._registry.activate_agent(manifest.name)
                 await self._register_agent_tools(manifest.name)
-                return (
-                    f"- {manifest.name}: {manifest.description} "
-                    f"({len(schemas)} tools loaded)"
-                )
+                return f"- {manifest.name}: {manifest.description} ({len(schemas)} tools loaded)"
             except Exception as exc:
                 logger.error(
                     "Failed to activate agent '%s': %s",
                     manifest.name,
                     exc,
                 )
-                return (
-                    f"- {manifest.name}: activation failed "
-                    f"[{type(exc).__name__}] {exc}"
-                )
+                return f"- {manifest.name}: activation failed [{type(exc).__name__}] {exc}"
 
-        activated = await asyncio.gather(
-            *[_activate_one(m) for m in results]
-        )
+        activated = await asyncio.gather(*[_activate_one(m) for m in results])
 
         header = "Found and activated the following agents "
         header += "(tools now available):\n"
@@ -317,8 +309,7 @@ class MCPGateway:
             info = self._registry.get_agent_info(agent_name)
             if info is None or info.tool_schemas is None:
                 logger.debug(
-                    "Skipping tool registration for '%s': "
-                    "info=%s, schemas=%s",
+                    "Skipping tool registration for '%s': info=%s, schemas=%s",
                     agent_name,
                     "found" if info else "missing",
                     "available" if info and info.tool_schemas else "none",
@@ -351,13 +342,9 @@ class MCPGateway:
                     full_name = disambiguated
 
                 try:
-                    self._mcp.tool(
-                        self._make_tool_func(adapter, registered_name=full_name)
-                    )
+                    self._mcp.tool(self._make_tool_func(adapter, registered_name=full_name))
                     self._registered_tool_names.add(full_name)
-                    logger.debug(
-                        "Registered gateway tool: %s", full_name
-                    )
+                    logger.debug("Registered gateway tool: %s", full_name)
                 except Exception as exc:
                     # FastMCP may raise if tool name already registered
                     logger.warning(
@@ -388,12 +375,16 @@ class MCPGateway:
             except Exception:
                 logger.debug(
                     "Failed to close IPC stream during cleanup for '%s'",
-                    agent_name, exc_info=True,
+                    agent_name,
+                    exc_info=True,
                 )
         remove_lock(agent_name)
 
     def _make_tool_func(
-        self, adapter: McpToolAdapter, *, registered_name: str | None = None,
+        self,
+        adapter: McpToolAdapter,
+        *,
+        registered_name: str | None = None,
     ) -> Any:
         """Create an async callable that the FastMCP server can invoke.
 
@@ -456,7 +447,8 @@ class MCPGateway:
         # instead of **kwargs (which it rejects with ValueError).
         params, annotations = self._build_params(adapter)
         _invoke.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-            parameters=params, return_annotation=str,
+            parameters=params,
+            return_annotation=str,
         )
         annotations["return"] = str
         _invoke.__annotations__ = annotations
@@ -487,10 +479,7 @@ class MCPGateway:
             if not isinstance(prop_def, dict):
                 continue
             py_type, is_nullable = _resolve_json_schema_type(prop_def)
-            if is_nullable:
-                effective_type = py_type | None  # type: ignore[assignment]
-            else:
-                effective_type = py_type
+            effective_type = py_type | None if is_nullable else py_type  # type: ignore[assignment]
             annotations[prop_name] = effective_type
 
             if prop_name in required:

@@ -75,13 +75,9 @@ _EXPANDED_PREFIX_PATTERNS: tuple[str, ...] = tuple(
     if p.endswith("/**")
 )
 _EXPANDED_FULL_PATTERNS: tuple[str, ...] = tuple(
-    _expand_user(p)
-    for p in SENSITIVE_PATH_PATTERNS
-    if "/" in p and not p.endswith("/**")
+    _expand_user(p) for p in SENSITIVE_PATH_PATTERNS if "/" in p and not p.endswith("/**")
 )
-_BASENAME_PATTERNS: tuple[str, ...] = tuple(
-    p for p in SENSITIVE_PATH_PATTERNS if "/" not in p
-)
+_BASENAME_PATTERNS: tuple[str, ...] = tuple(p for p in SENSITIVE_PATH_PATTERNS if "/" not in p)
 
 # Shell commands considered dangerous in DEFAULT mode.
 _DANGEROUS_COMMAND_PATTERNS: tuple[str, ...] = (
@@ -125,7 +121,7 @@ def _fnmatch_recursive(value: str, pattern: str) -> bool:
 
     idx = pattern.index("/**")
     prefix = pattern[:idx]
-    remainder = pattern[idx + 3:]  # after the /**
+    remainder = pattern[idx + 3 :]  # after the /**
     # remainder examples: "" | "/*.txt" | "/bar/*"
 
     if not remainder:
@@ -137,10 +133,7 @@ def _fnmatch_recursive(value: str, pattern: str) -> bool:
         return False
 
     # Tail is everything after the prefix in value (starts with "/").
-    if value == prefix:
-        tail = ""
-    else:
-        tail = value[len(prefix) :]  # e.g. "/a/b/c.txt"
+    tail = "" if value == prefix else value[len(prefix) :]  # e.g. "/a/b/c.txt"
 
     # ``**`` matches zero or more path segments.
     # Walk every possible split point in *tail* and check if the
@@ -165,10 +158,7 @@ def _fnmatch_recursive(value: str, pattern: str) -> bool:
 
 def _matches_any_pattern(value: str, patterns: list[str] | tuple[str, ...]) -> bool:
     """Check whether *value* matches any of the given fnmatch patterns."""
-    for pattern in patterns:
-        if _fnmatch_recursive(value, pattern):
-            return True
-    return False
+    return any(_fnmatch_recursive(value, pattern) for pattern in patterns)
 
 
 def _is_sensitive_path(path: str, _already_expanded: bool = False) -> bool:
@@ -186,10 +176,7 @@ def _is_sensitive_path(path: str, _already_expanded: bool = False) -> bool:
             return True
     # Check basename for glob-only patterns like *.env, *.pem, *.key
     basename = os.path.basename(expanded)
-    for pattern in _BASENAME_PATTERNS:
-        if fnmatch.fnmatch(basename, pattern):
-            return True
-    return False
+    return any(fnmatch.fnmatch(basename, pattern) for pattern in _BASENAME_PATTERNS)
 
 
 def _is_write_tool(tool_name: str) -> bool:
@@ -218,8 +205,7 @@ class PermissionChecker:
         self._config = config
         # Pre-expand path rules to avoid repeated _expand_user calls in hot path
         self._expanded_path_rules: list[tuple[str, PathAccess]] = [
-            (_expand_user(rule.pattern), rule.access)
-            for rule in config.path_rules
+            (_expand_user(rule.pattern), rule.access) for rule in config.path_rules
         ]
 
     # ------------------------------------------------------------------
@@ -384,9 +370,7 @@ class PermissionChecker:
             )
 
         # Fallback — should not happen with valid PathAccess values
-        return PermissionDecision(
-            allowed=False, reason=f"Unknown path access level: {access}"
-        )
+        return PermissionDecision(allowed=False, reason=f"Unknown path access level: {access}")
 
     @staticmethod
     def _is_dangerous_command(command: str) -> bool:
@@ -397,7 +381,4 @@ class PermissionChecker:
         ``"perform_rm_analysis"`` or ``"info --curl-option"``.
         """
         stripped = command.strip().lower()
-        for pattern in _COMPILED_DANGEROUS_PATTERNS:
-            if pattern.search(stripped):
-                return True
-        return False
+        return any(pattern.search(stripped) for pattern in _COMPILED_DANGEROUS_PATTERNS)

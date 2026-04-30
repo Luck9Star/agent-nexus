@@ -12,6 +12,7 @@ Simplified: no tmux/wsh backends, no file-based mailbox, pure stream IPC.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -37,11 +38,11 @@ logger = logging.getLogger(__name__)
 # We deliberately avoid os.environ.copy() to prevent leaking sensitive
 # credentials (e.g. AWS_SECRET_ACCESS_KEY, DATABASE_URL) into agent sandboxes.
 _ESSENTIAL_ENV_VARS: tuple[str, ...] = (
-    "PATH",          # find executables (python, uvx, etc.)
-    "HOME",          # resolve ~/.agent-nexus config
-    "USER",          # POSIX convention, some tools expect it
-    "LANG",          # locale for encoding (UTF-8)
-    "TERM",          # terminal metadata
+    "PATH",  # find executables (python, uvx, etc.)
+    "HOME",  # resolve ~/.agent-nexus config
+    "USER",  # POSIX convention, some tools expect it
+    "LANG",  # locale for encoding (UTF-8)
+    "TERM",  # terminal metadata
     "AGENT_NEXUS_HOME",  # platform config override
 )
 
@@ -59,9 +60,7 @@ def _build_spawn_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     global _base_env_cache
     if _base_env_cache is None:
         _base_env_cache = {
-            key: value
-            for key in _ESSENTIAL_ENV_VARS
-            if (value := os.environ.get(key)) is not None
+            key: value for key in _ESSENTIAL_ENV_VARS if (value := os.environ.get(key)) is not None
         }
     env = dict(_base_env_cache)  # shallow copy to avoid mutating cache
     if extra:
@@ -138,7 +137,9 @@ class ProcessManager:
     # ------------------------------------------------------------------
 
     async def _drain_stderr(
-        self, process: asyncio.subprocess.Process, name: str,
+        self,
+        process: asyncio.subprocess.Process,
+        name: str,
     ) -> None:
         """Consume stderr to prevent pipe buffer deadlock.
 
@@ -251,16 +252,15 @@ class ProcessManager:
             except Exception:
                 # Kill orphaned process to prevent resource leak
                 logger.exception("Agent '%s' spawn failed", name)
-                try:
+                with contextlib.suppress(ProcessLookupError):
                     process.kill()
-                except ProcessLookupError:
-                    pass
                 try:
                     await process.wait()
                 except Exception:
                     logger.debug(
                         "Failed to wait for orphaned agent '%s' process",
-                        name, exc_info=True,
+                        name,
+                        exc_info=True,
                     )
                 raise
 
@@ -307,17 +307,17 @@ class ProcessManager:
             # Cancel the stderr drain task to prevent it from reading a closed pipe.
             if drain_task is not None and not drain_task.done():
                 drain_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await drain_task
-                except (asyncio.CancelledError, Exception):
-                    pass
 
             if not handle.is_alive:
                 # Already dead -- close IPC and clean up.
                 try:
                     await handle.ipc.stream.close()
                 except Exception:
-                    logger.debug("Failed to close IPC stream for dead agent '%s'", name, exc_info=True)
+                    logger.debug(
+                        "Failed to close IPC stream for dead agent '%s'", name, exc_info=True
+                    )
                 async with self._lock:
                     if self._agents.get(name) is handle:
                         self._agents.pop(name, None)
@@ -362,10 +362,8 @@ class ProcessManager:
 
             # Stage 3: SIGKILL.
             logger.error("Agent '%s' did not exit after SIGTERM, sending SIGKILL", name)
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 process.kill()
-            except ProcessLookupError:
-                pass
 
             try:
                 await process.wait()
@@ -418,7 +416,8 @@ class ProcessManager:
             existing = self._agents.get(name)
             if existing is not None and existing.is_alive:
                 logger.info(
-                    "Agent '%s' already restarted by concurrent caller", name,
+                    "Agent '%s' already restarted by concurrent caller",
+                    name,
                 )
                 return existing
 
@@ -474,9 +473,7 @@ class ProcessManager:
             try:
                 ok = await handle.ipc.send_heartbeat()
             except (IPCError, OSError) as exc:
-                logger.debug(
-                    "Health check IPC failed for agent '%s': %s", name, exc
-                )
+                logger.debug("Health check IPC failed for agent '%s': %s", name, exc)
                 return False
 
             if not ok:
@@ -505,11 +502,7 @@ class ProcessManager:
         ``_agents`` when :meth:`health_check` is not called regularly.
         """
         self._cleanup_dead()
-        return [
-            name
-            for name, handle in self._agents.items()
-            if handle.is_alive
-        ]
+        return [name for name, handle in self._agents.items() if handle.is_alive]
 
     # ------------------------------------------------------------------
     # Bulk operations
@@ -527,14 +520,12 @@ class ProcessManager:
                 *(self.stop_agent(name, timeout=timeout) for name in names),
                 return_exceptions=True,
             )
-            for agent_name, result in zip(names, results):
+            for agent_name, result in zip(names, results, strict=False):
                 if isinstance(result, Exception):
                     logger.error("Error stopping agent '%s': %s", agent_name, result)
         except asyncio.CancelledError:
             # Platform shutdown interrupted gather — force-kill survivors.
-            logger.warning(
-                "stop_all() cancelled mid-shutdown — force-killing remaining agents"
-            )
+            logger.warning("stop_all() cancelled mid-shutdown — force-killing remaining agents")
             for name in names:
                 handle = self._agents.get(name)
                 if handle is not None and handle.is_alive:
@@ -547,10 +538,8 @@ class ProcessManager:
             for name in names:
                 handle = self._agents.get(name)
                 if handle is not None and handle.process.returncode is None:
-                    try:
+                    with contextlib.suppress(Exception):
                         await handle.process.wait()
-                    except Exception:
-                        pass
                 async with self._lock:
                     if self._agents.get(name) is handle:
                         self._agents.pop(name, None)
@@ -596,19 +585,22 @@ class ProcessManager:
                 except Exception:
                     logger.debug(
                         "Failed to close IPC stream for dead agent '%s'",
-                        name, exc_info=True,
+                        name,
+                        exc_info=True,
                     )
 
                 rc = handle.process.returncode
                 if rc is not None and rc != 0:
                     logger.warning(
                         "Agent '%s' exited with non-zero return code %d",
-                        name, rc,
+                        name,
+                        rc,
                     )
                 else:
                     logger.debug(
                         "Cleaned up dead agent handle '%s' (rc=%s)",
-                        name, rc,
+                        name,
+                        rc,
                     )
         return dead
 
@@ -629,10 +621,8 @@ class ProcessManager:
             if handle.drain_task is not None and not handle.drain_task.done():
                 handle.drain_task.cancel()
             # Close IPC streams to release FDs
-            try:
+            with contextlib.suppress(Exception):
                 handle.ipc.stream.close_sync()
-            except Exception:
-                pass
             try:
                 if handle.process.returncode is None:
                     handle.process.kill()

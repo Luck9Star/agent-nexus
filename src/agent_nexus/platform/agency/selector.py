@@ -129,6 +129,7 @@ class SpecialistSelector:
             profile = self.registry.get(pid)
             if profile is None:
                 continue
+            profile.setdefault("id", pid)
             agent_perm = profile.get("permissions", {}).get("mode", "plan")
             if _permission_level(agent_perm) > request_perm_level:
                 continue
@@ -193,12 +194,15 @@ class SpecialistSelector:
                 # then higher overall capability count, then lexicographic id
                 coverage_len = len(coverage)
                 total_caps = len(agent_caps)
-                if (coverage_len > len(best_coverage)
-                        or (coverage_len == len(best_coverage)
-                            and total_caps > best_score)
-                        or (coverage_len == len(best_coverage)
-                            and total_caps == best_score
-                            and pid < (best_profile["id"] if best_profile else ""))):
+                if (
+                    coverage_len > len(best_coverage)
+                    or (coverage_len == len(best_coverage) and total_caps > best_score)
+                    or (
+                        coverage_len == len(best_coverage)
+                        and total_caps == best_score
+                        and pid < (best_profile["id"] if best_profile else "")
+                    )
+                ):
                     best_profile = profile
                     best_coverage = coverage
                     best_score = total_caps
@@ -211,9 +215,7 @@ class SpecialistSelector:
             remaining -= best_coverage
 
         if remaining:
-            logger.warning(
-                "Greedy set-cover could not cover capabilities: %s", remaining
-            )
+            logger.warning("Greedy set-cover could not cover capabilities: %s", remaining)
         return selected
 
     def _score_and_rank(
@@ -259,7 +261,7 @@ class SpecialistSelector:
                 reasons.append(f"Permission fit: {agent_perm} (exact match)")
             else:
                 reasons.append(
-                    f"Permission fit: {agent_perm} (less permissive than request {request.permissions})"
+                    f"Permission fit: {agent_perm} (less permissive than request {request.permissions})"  # noqa: E501
                 )
 
             raw_score = (

@@ -121,18 +121,17 @@ class AgentSupervisor:
         if not lockfile.agents:
             return []
 
-        tasks = [
-            self.start_agent(agent_name, lockfile=lockfile)
-            for agent_name in lockfile.agents
-        ]
+        tasks = [self.start_agent(agent_name, lockfile=lockfile) for agent_name in lockfile.agents]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         started: list[str] = []
-        for agent_name, result in zip(lockfile.agents, results):
+        for agent_name, result in zip(lockfile.agents, results, strict=False):
             if isinstance(result, BaseException):
                 logger.error(
                     "Failed to start agent '%s' [%s]: %s",
-                    agent_name, type(result).__name__, result,
+                    agent_name,
+                    type(result).__name__,
+                    result,
                 )
             elif result:
                 started.append(agent_name)
@@ -193,9 +192,7 @@ class AgentSupervisor:
 
         command = self._build_command(agent_name, entry)
         if not command:
-            logger.error(
-                "Could not build command for agent '%s'", agent_name
-            )
+            logger.error("Could not build command for agent '%s'", agent_name)
             return False
 
         cwd = self._resolve_agent_dir(agent_name)
@@ -213,14 +210,10 @@ class AgentSupervisor:
             if tracker:
                 tracker.reset()
             self._started_agents.add(agent_name)
-            logger.info(
-                "Agent '%s' started (pid=%s)", agent_name, handle.pid
-            )
+            logger.info("Agent '%s' started (pid=%s)", agent_name, handle.pid)
             return True
         except Exception as exc:
-            logger.error(
-                "Failed to start agent '%s': %s", agent_name, exc
-            )
+            logger.error("Failed to start agent '%s': %s", agent_name, exc)
             return False
 
     async def stop_agent(self, agent_name: str) -> bool:
@@ -270,7 +263,7 @@ class AgentSupervisor:
 
         return {
             name: (result if isinstance(result, bool) else False)
-            for name, result in zip(names, results)
+            for name, result in zip(names, results, strict=False)
         }
 
     # ------------------------------------------------------------------
@@ -335,7 +328,7 @@ class AgentSupervisor:
         )
 
         restarted: list[str] = []
-        for agent_name, result in zip(dead_agents, results):
+        for agent_name, result in zip(dead_agents, results, strict=False):
             if isinstance(result, BaseException):
                 logger.error(
                     "Failed to restart agent '%s' [%s]: %s",
@@ -365,9 +358,7 @@ class AgentSupervisor:
     # Internal: command building
     # ------------------------------------------------------------------
 
-    def _build_command(
-        self, agent_name: str, entry: LockfileEntry
-    ) -> list[str] | None:
+    def _build_command(self, agent_name: str, entry: LockfileEntry) -> list[str] | None:
         """Build the subprocess command for an agent.
 
         Strategy:
@@ -394,8 +385,7 @@ class AgentSupervisor:
             venv_python = Path(entry.venv_path).resolve() / "bin" / "python"
             if not venv_python.exists():
                 logger.warning(
-                    "Configured venv for '%s' not found at %s, "
-                    "falling back to system python/uvx",
+                    "Configured venv for '%s' not found at %s, falling back to system python/uvx",
                     agent_name,
                     venv_python,
                 )
@@ -505,9 +495,7 @@ class AgentSupervisor:
             ValueError: If agent_name contains unsafe characters.
         """
         if not AGENT_NAME_RE.match(agent_name):
-            raise ValueError(
-                f"Agent name '{agent_name}' contains unsafe characters"
-            )
+            raise ValueError(f"Agent name '{agent_name}' contains unsafe characters")
         return self._config_dir / "agents" / agent_name
 
     def _build_env(

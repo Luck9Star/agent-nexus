@@ -29,16 +29,14 @@ def sources_list() -> None:
 def sources_add(
     name: str = typer.Option(..., "--name", help="Source name"),
     url: str = typer.Option(..., "--url", help="Source git URL"),
-    source_type: str | None = typer.Option(
-        None, "--type", help="Source type (default: git)"
-    ),
+    source_type: str | None = typer.Option(None, "--type", help="Source type (default: git)"),
 ) -> None:
     """Add a new package source."""
     try:
         _validate_git_url(url)
     except ValueError as exc:
         typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     _loader, _lockfile, sources, _config_dir = _init_managers()
     entry = SourceEntry(name=name, type=source_type or "git", url=url)

@@ -6,22 +6,12 @@ Falls back to keyword matching when LLM is unavailable.
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
-_JSON_OBJECT_RE = re.compile(r"\{[\s\S]*\}")
-
-
-def _strip_markdown_fence(text: str) -> str:
-    """Strip ```json ... ``` wrapper from LLM output, if present."""
-    m = _JSON_FENCE_RE.search(text)
-    return m.group(1).strip() if m else text.strip()
-
+from .json_parse import robust_json_parse
 from .task_composer import infer_capabilities
 
 if TYPE_CHECKING:
@@ -29,6 +19,8 @@ if TYPE_CHECKING:
     from .registry import ExpertRegistry
 
 logger = logging.getLogger(__name__)
+
+_MAX_PLANNING_PROMPT_CHARS = 50_000
 
 
 @dataclass
@@ -46,21 +38,10 @@ class PlannerOutput:
 
         Returns a default (empty) PlannerOutput on parse failure.
         """
-        try:
-            data = json.loads(_strip_markdown_fence(raw))
-        except (json.JSONDecodeError, TypeError):
-            # Attempt to find a JSON object embedded anywhere in the response
-            json_match = _JSON_OBJECT_RE.search(raw)
-            if json_match:
-                try:
-                    data = json.loads(json_match.group())
-                except (json.JSONDecodeError, TypeError):
-                    data = None
-            else:
-                data = None
-            if data is None:
-                logger.warning("LLMPlanner: failed to parse JSON response, returning empty output")
-                return cls()
+        data = robust_json_parse(raw)
+        if data is None:
+            logger.warning("LLMPlanner: failed to parse JSON response, returning empty output")
+            return cls()
 
         return cls(
             capabilities=data.get("capabilities", []),
@@ -100,6 +81,12 @@ class LLMPlanner:
         with cls._fallback_lock:
             return cls._fallback_count
 
+    @classmethod
+    def reset_fallback_count(cls) -> None:
+        """Reset the fallback counter (for test isolation)."""
+        with cls._fallback_lock:
+            cls._fallback_count = 0
+
     def analyze_task(self, task: str) -> PlannerOutput:
         """Analyze a task and return structured decomposition.
 
@@ -120,7 +107,8 @@ class LLMPlanner:
             result = self._keyword_fallback(task)
             logger.info(
                 "LLMPlanner: task analyzed — capabilities=%s, strategy=%s",
-                result.capabilities, result.decomposition_strategy,
+                result.capabilities,
+                result.decomposition_strategy,
             )
             return result
 
@@ -128,7 +116,8 @@ class LLMPlanner:
             result = self._llm_analyze(task)
             logger.info(
                 "LLMPlanner: task analyzed — capabilities=%s, strategy=%s",
-                result.capabilities, result.decomposition_strategy,
+                result.capabilities,
+                result.decomposition_strategy,
             )
             return result
         except Exception:
@@ -152,10 +141,7 @@ class LLMPlanner:
         """Build system prompt with available expert info."""
         all_profiles = self._registry.search_by_capability([])
         if not all_profiles:
-            all_profiles = [
-                self._registry.get(pid)
-                for pid in self._registry.list_all()
-            ]
+            all_profiles = [self._registry.get(pid) for pid in self._registry.list_all()]
         all_profiles = [p for p in all_profiles if p is not None]
 
         all_caps: set[str] = set()
@@ -164,11 +150,9 @@ class LLMPlanner:
             caps = profile.get("capabilities", [])
             all_caps.update(caps)
             name = profile.get("name", profile.get("id", "unknown"))
-            expert_summary.append(
-                f"- {name}: {', '.join(caps)}"
-            )
+            expert_summary.append(f"- {name}: {', '.join(caps)}")
 
-        return (
+        prompt = (
             "You are a task decomposition specialist. Given a user task and a pool of "
             "available experts, analyze the task and determine which capabilities are "
             "required.\n\n"
@@ -182,8 +166,11 @@ class LLMPlanner:
             "}\n\n"
             "The capabilities must come from the available capabilities list above. "
             "The focus_hints should guide each expert on what to focus on. "
-            "Use \"parallel\" unless the task clearly requires sequential execution."
+            'Use "parallel" unless the task clearly requires sequential execution.'
         )
+        if len(prompt) > _MAX_PLANNING_PROMPT_CHARS:
+            prompt = prompt[:_MAX_PLANNING_PROMPT_CHARS] + "\n[...truncated]"
+        return prompt
 
     def _keyword_fallback(self, task: str) -> PlannerOutput:
         """Fall back to keyword-based capability inference."""

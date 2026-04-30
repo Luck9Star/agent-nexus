@@ -155,8 +155,7 @@ class DeferredAgentRegistry:
             # wrong one.
             if manifest.name in self._core_agents:
                 logger.warning(
-                    "Agent '%s' already registered as core, "
-                    "re-registering as deferred",
+                    "Agent '%s' already registered as core, re-registering as deferred",
                     manifest.name,
                 )
                 del self._core_agents[manifest.name]
@@ -165,8 +164,7 @@ class DeferredAgentRegistry:
         else:
             if manifest.name in self._deferred_agents:
                 logger.warning(
-                    "Agent '%s' already registered as deferred, "
-                    "re-registering as core",
+                    "Agent '%s' already registered as deferred, re-registering as core",
                     manifest.name,
                 )
                 del self._deferred_agents[manifest.name]
@@ -261,26 +259,19 @@ class DeferredAgentRegistry:
 
             # 3. Cache
             info.tool_schemas = tool_schemas
-            adapters = [
-                McpToolAdapter(server_name=name, tool_schema=s)
-                for s in tool_schemas
-            ]
+            adapters = [McpToolAdapter(server_name=name, tool_schema=s) for s in tool_schemas]
             self._tool_adapters[name] = adapters
             # Populate reverse index for O(1) get_tool_adapter lookups
             for adapter in adapters:
                 self._tool_by_name[adapter.full_name] = adapter
 
-            logger.info(
-                "Activated agent '%s' with %d tools", name, len(tool_schemas)
-            )
-            if (
-                len(tool_schemas) == 1
-                and tool_schemas[0].get("name") in ("chat", f"{name}__chat")
-            ):
+            logger.info("Activated agent '%s' with %d tools", name, len(tool_schemas))
+            if len(tool_schemas) == 1 and tool_schemas[0].get("name") in ("chat", f"{name}__chat"):
                 logger.warning(
                     "Agent '%s' activated with fallback chat tool only "
                     "(tool='%s'). Tool discovery may have failed.",
-                    name, tool_schemas[0].get("name"),
+                    name,
+                    tool_schemas[0].get("name"),
                 )
             return tool_schemas
 
@@ -292,17 +283,13 @@ class DeferredAgentRegistry:
         """
         handle = info.handle
         if handle is None:
-            logger.warning(
-                "Cannot fetch tools for agent '%s': no active handle", info.name
-            )
+            logger.warning("Cannot fetch tools for agent '%s': no active handle", info.name)
             return []
 
         ipc_lock = get_ipc_lock(info.name)
         try:
             async with ipc_lock:
-                await handle.ipc.send_chat(
-                    _LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID
-                )
+                await handle.ipc.send_chat(_LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID)
                 response = await handle.ipc.receive_until_result(timeout=10.0)
 
             if response.type == AgentToPlatformType.ERROR:
@@ -326,7 +313,8 @@ class DeferredAgentRegistry:
                 except json.JSONDecodeError:
                     logger.debug(
                         "Agent '%s' tool response not valid JSON: %.200s",
-                        info.name, response.content[:200],
+                        info.name,
+                        response.content[:200],
                     )
 
         except Exception as exc:
@@ -334,14 +322,14 @@ class DeferredAgentRegistry:
                 "Failed to fetch tools from agent '%s': %s. "
                 "Using generic chat tool as fallback -- agent may not "
                 "function correctly.",
-                info.name, exc,
+                info.name,
+                exc,
             )
             return [self._fallback_chat_tool(info)]
 
         # No tool schemas found in response
         logger.warning(
-            "Agent '%s' returned no tool schemas. "
-            "Using generic chat tool as fallback.",
+            "Agent '%s' returned no tool schemas. Using generic chat tool as fallback.",
             info.name,
         )
         return [self._fallback_chat_tool(info)]
@@ -495,9 +483,7 @@ class DeferredAgentRegistry:
 
     def list_all_agents(self) -> list[AgentInfo]:
         """Return info for all registered agents (core + deferred)."""
-        return list(self._core_agents.values()) + list(
-            self._deferred_agents.values()
-        )
+        return list(self._core_agents.values()) + list(self._deferred_agents.values())
 
     def list_core_agents(self) -> list[AgentInfo]:
         """Return info for core agents only."""
@@ -526,28 +512,20 @@ class DeferredAgentRegistry:
         for info in self._core_agents.values():
             tool_count = len(info.tool_schemas) if info.tool_schemas else 0
             desc = info.manifest.description.split("\n")[0][:80]
-            lines.append(
-                f"- {info.name}: {desc} [core, {tool_count} tools]"
-            )
+            lines.append(f"- {info.name}: {desc} [core, {tool_count} tools]")
 
         # Deferred agents
         for info in self._deferred_agents.values():
             desc = info.manifest.description.split("\n")[0][:80]
             if info.is_activated:
                 tool_count = len(info.tool_schemas) if info.tool_schemas else 0
-                lines.append(
-                    f"- {info.name}: {desc} [activated, {tool_count} tools]"
-                )
+                lines.append(f"- {info.name}: {desc} [activated, {tool_count} tools]")
             else:
-                lines.append(
-                    f"- {info.name}: {desc} [available]"
-                )
+                lines.append(f"- {info.name}: {desc} [available]")
 
         return "\n".join(lines)
 
-    def search_agents(
-        self, query: str, max_results: int = 5
-    ) -> list[AgentManifest]:
+    def search_agents(self, query: str, max_results: int = 5) -> list[AgentManifest]:
         """Simple keyword search over agent names and descriptions.
 
         Searches across all registered agents (core + deferred).
@@ -564,9 +542,7 @@ class DeferredAgentRegistry:
         query_words = query.lower().split()
         scored: list[tuple[int, AgentManifest]] = []
 
-        for info in itertools.chain(
-            self._core_agents.values(), self._deferred_agents.values()
-        ):
+        for info in itertools.chain(self._core_agents.values(), self._deferred_agents.values()):
             score = sum(1 for w in query_words if w in info._search_words)
             if score > 0:
                 scored.append((score, info.manifest))

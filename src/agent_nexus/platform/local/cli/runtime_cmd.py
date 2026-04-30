@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from pathlib import Path
 
@@ -152,10 +153,8 @@ async def _stop_one(name: str) -> None:
     ok = await supervisor.stop_agent(name)
     if ok:
         pid_file = config_dir / "agents" / f"{name}.pid"
-        try:
+        with contextlib.suppress(FileNotFoundError):
             pid_file.unlink()
-        except FileNotFoundError:
-            pass
         typer.echo(f"Stopped {name}")
     else:
         typer.echo(f"Agent '{name}' is not running.", err=True)
@@ -168,10 +167,8 @@ async def _stop_all() -> None:
     pid_dir = config_dir / "agents"
     if pid_dir.exists():
         for pid_file in pid_dir.glob("*.pid"):
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 pid_file.unlink()
-            except FileNotFoundError:
-                pass
     typer.echo("Stopped all agents.")
 
 
@@ -185,10 +182,8 @@ async def _restart_agent(name: str) -> None:
     ok = await supervisor.stop_agent(name)
     if ok:
         pid_file = config_dir / "agents" / f"{name}.pid"
-        try:
+        with contextlib.suppress(FileNotFoundError):
             pid_file.unlink()
-        except FileNotFoundError:
-            pass
 
     ok = await supervisor.start_agent(name)
     if not ok:
@@ -227,10 +222,8 @@ async def _status() -> None:
                     running.add(agent_name)
                     pids[agent_name] = pid_str
                 except (ProcessLookupError, OSError):
-                    try:
+                    with contextlib.suppress(FileNotFoundError):
                         pid_file.unlink()
-                    except FileNotFoundError:
-                        pass
             except (ValueError, OSError):
                 pass
 

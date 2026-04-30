@@ -70,14 +70,16 @@ def evolution_health(
                     typer.echo(f"Skill '{skill_name}': HEALTHY")
             except ValueError as exc:
                 typer.echo(str(exc), err=True)
-                raise typer.Exit(code=1)
+                raise typer.Exit(code=1) from None
         else:
             reports = engine.diagnose_all()
             if not reports:
                 typer.echo("No skills to diagnose.")
                 return
 
-            typer.echo(f"{'Name':<30} {'Applied Rate':<15} {'Completion Rate':<18} {'Fallback Rate':<16} {'Verdict'}")
+            typer.echo(
+                f"{'Name':<30} {'Applied Rate':<15} {'Completion Rate':<18} {'Fallback Rate':<16} {'Verdict'}"  # noqa: E501
+            )
             typer.echo("-" * 95)
             for report in reports.values():
                 metrics = report.metrics
@@ -194,10 +196,12 @@ def evolution_fix(
         try:
             results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
             typer.echo(f"Fix evolution triggered (target: {skill_id}).")
-            typer.echo(f"Results: {len(results) if isinstance(results, list) else 1} evolution(s) processed.")
+            typer.echo(
+                f"Results: {len(results) if isinstance(results, list) else 1} evolution(s) processed."  # noqa: E501
+            )
         except Exception as exc:
             typer.echo(f"Fix failed: {exc}", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
 
 @evolution_app.command("promote")
@@ -231,4 +235,4 @@ def evolution_promote(
                 typer.echo(f"Promotion not completed for '{skill_id}'.")
         except Exception as exc:
             typer.echo(f"Promotion failed: {exc}", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None

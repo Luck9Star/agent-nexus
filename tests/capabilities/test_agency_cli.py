@@ -89,8 +89,8 @@ class TestAgencyCLI:
         registry = ExpertRegistry()
         registry.add(
             "security-expert",
-            {"name": "Security Expert", "capabilities": ["security_analysis"]},
-            ["security_analysis"],
+            {"name": "Security Expert", "capabilities": ["security_review", "threat_modeling"]},
+            ["security_review", "threat_modeling"],
         )
 
         composer = TaskComposer(registry=registry)

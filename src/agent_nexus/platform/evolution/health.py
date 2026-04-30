@@ -83,9 +83,7 @@ def build_health_suggestions(
                 f"despite high applied rate ({rates.applied_rate:.0%}): "
                 f"skill instructions may be incorrect or incomplete"
             ),
-            confidence=min(
-                rates.applied_rate * (1 - rates.completion_rate), 1.0
-            ),
+            confidence=min(rates.applied_rate * (1 - rates.completion_rate), 1.0),
         )
         # Keep the FIX with highest confidence
         if best_fix is None or fix2.confidence > best_fix.confidence:
@@ -96,16 +94,18 @@ def build_health_suggestions(
 
     # Rule 3: Moderate effectiveness
     if RULE_MODERATE_EFFECTIVE in eval_result.rules:
-        suggestions.append(EvolutionSuggestion(
-            evolution_type=EvolutionType.DERIVED,
-            target_skill_ids=[skill_id],
-            direction=(
-                f"Moderate effectiveness ({rates.effective_rate:.0%}): "
-                f"skill works sometimes but could be enhanced with "
-                f"better error handling or alternative approaches"
-            ),
-            confidence=min(1.0 - rates.effective_rate, 1.0),
-        ))
+        suggestions.append(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.DERIVED,
+                target_skill_ids=[skill_id],
+                direction=(
+                    f"Moderate effectiveness ({rates.effective_rate:.0%}): "
+                    f"skill works sometimes but could be enhanced with "
+                    f"better error handling or alternative approaches"
+                ),
+                confidence=min(1.0 - rates.effective_rate, 1.0),
+            )
+        )
 
     return suggestions
 
@@ -131,9 +131,7 @@ class HealthReport:
                 parts.append(f"  {key}: {val}")
         for s in self.suggestions:
             targets = ", ".join(s.target_skill_ids) or "(new)"
-            parts.append(
-                f"  -> [{s.evolution_type.value}] {targets}: {s.direction}"
-            )
+            parts.append(f"  -> [{s.evolution_type.value}] {targets}: {s.direction}")
         return "\n".join(parts)
 
 
@@ -233,12 +231,14 @@ class HealthChecker:
                 metrics["effective_rate"] = rates.effective_rate
                 metrics["fallback_rate"] = rates.fallback_rate
             else:
-                metrics.update({
-                    "applied_rate": 0.0,
-                    "completion_rate": 0.0,
-                    "effective_rate": 0.0,
-                    "fallback_rate": 0.0,
-                })
+                metrics.update(
+                    {
+                        "applied_rate": 0.0,
+                        "completion_rate": 0.0,
+                        "effective_rate": 0.0,
+                        "fallback_rate": 0.0,
+                    }
+                )
 
             reports[skill.id] = HealthReport(
                 skill_id=skill.id,
@@ -261,11 +261,7 @@ class HealthChecker:
         if not candidates:
             return {}
         reports = self.diagnose_skills(skills=candidates)
-        return {
-            sid: report
-            for sid, report in reports.items()
-            if not report.is_healthy
-        }
+        return {sid: report for sid, report in reports.items() if not report.is_healthy}
 
     def get_health_summary(self) -> dict[str, Any]:
         """Get a summary of overall skill health.
@@ -297,10 +293,7 @@ class HealthChecker:
             "fix_suggestions": fix_count,
             "derived_suggestions": derived_count,
             "captured_suggestions": captured_count,
-            "unhealthy_skills": [
-                r.skill_name for r in reports.values()
-                if not r.is_healthy
-            ],
+            "unhealthy_skills": [r.skill_name for r in reports.values() if not r.is_healthy],
         }
 
     @property

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re as _re
 import string as _string
 from dataclasses import dataclass, field
 
@@ -122,7 +121,9 @@ class Integrator:
                         logger.warning(
                             "Type mismatch for section '%s': existing=%s, new=%s; "
                             "converting to list",
-                            key, type(existing).__name__, type(value).__name__,
+                            key,
+                            type(existing).__name__,
+                            type(value).__name__,
                         )
                         converted: list[object] = (
                             existing if isinstance(existing, list) else [existing]
@@ -148,14 +149,14 @@ class Integrator:
                 for r in rec:
                     recommendations.append(f"{artifact.source_agent}: {r}")
         merged_sections["final_recommendation"] = (
-            " | ".join(recommendations) if recommendations
+            " | ".join(recommendations)
+            if recommendations
             else "No explicit recommendations from experts"
         )
 
         # Build decision summary
         merged_sections["decision_summary"] = (
-            f"Integrated {len(artifacts)} expert artifacts from: "
-            + ", ".join(source_agents)
+            f"Integrated {len(artifacts)} expert artifacts from: " + ", ".join(source_agents)
         )
 
         # Compute open_questions for missing expected sections
@@ -211,12 +212,56 @@ def _tokenize_risk(text: str) -> set[str]:
     stripped = lower.translate(str.maketrans(_string.punctuation, " " * len(_string.punctuation)))
     tokens = set(stripped.split())
     # Remove common stop words that don't add meaning
-    tokens -= {"the", "a", "an", "is", "are", "was", "were", "be", "been",
-               "being", "have", "has", "had", "do", "does", "did", "will",
-               "would", "could", "should", "may", "might", "shall", "can",
-               "to", "of", "in", "for", "on", "with", "at", "by", "from",
-               "and", "or", "but", "not", "no", "if", "it", "its", "this",
-               "that", "these", "those", "as", "into", "through"}
+    tokens -= {
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "can",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "at",
+        "by",
+        "from",
+        "and",
+        "or",
+        "but",
+        "not",
+        "no",
+        "if",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "as",
+        "into",
+        "through",
+    }
     return tokens
 
 
@@ -271,7 +316,7 @@ def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
     # If agents have completely disjoint risk sets, that's a potential conflict
     # only when agents share overlapping section keys (proxy for shared capabilities).
     if len(risk_sets) >= 2:
-        all_risk_token_sets = [_tokenize_risk(r) for risks in risk_sets.values() for r in risks]
+        [_tokenize_risk(r) for risks in risk_sets.values() for r in risks]
         # Compare risk descriptions across agents using token overlap
         agent_risk_tokens: dict[str, set[str]] = {}
         for agent_id, risks in risk_sets.items():
@@ -300,15 +345,19 @@ def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
             # Exclude synthetic/structural sections that Integrator.merge adds to
             # all artifacts (final_recommendation, decision_summary) — these inflate
             # the overlap check and cause false positives.
-            _structural_sections = frozenset({
-                "final_recommendation", "decision_summary", "recommendation",
-            })
+            _structural_sections = frozenset(
+                {
+                    "final_recommendation",
+                    "decision_summary",
+                    "recommendation",
+                }
+            )
             agent_section_keys: dict[str, set[str]] = {}
             for artifact in artifacts:
                 if artifact.source_agent in risk_sets:
-                    agent_section_keys[artifact.source_agent] = set(
-                        artifact.sections.keys()
-                    ) - _structural_sections
+                    agent_section_keys[artifact.source_agent] = (
+                        set(artifact.sections.keys()) - _structural_sections
+                    )
             section_sets = list(agent_section_keys.values())
             if section_sets:
                 shared = section_sets[0]

@@ -89,7 +89,7 @@ def config_validate() -> None:
         typer.echo("Config valid.")
     except Exception as exc:
         typer.echo(f"Config invalid: {exc}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     version = ConfigMigrator.check_version(config_path)
     if version != ConfigMigrator.TARGET_VERSION:

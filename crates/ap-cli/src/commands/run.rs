@@ -300,7 +300,7 @@ pub fn run_llm(
         ap_cli_backend::CLISetup::empty()
     };
 
-    if setup.registry.len() == 0 {
+    if setup.registry.is_empty() {
         anyhow::bail!(
             "No CLI backends configured. Add [cli_backends.<name>] sections to config.toml."
         );

@@ -9,7 +9,7 @@ import re
 import sqlite3
 import tempfile
 from collections.abc import Callable, Generator, Iterable
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -36,13 +36,17 @@ def to_class_name(agent_name: str) -> str:
     return "".join(part.capitalize() for part in agent_name.split("-"))
 
 
-def atomic_write(path: Path, content: str, *, prefix: str = ".write-", suffix: str = ".tmp") -> None:
+def atomic_write(
+    path: Path, content: str, *, prefix: str = ".write-", suffix: str = ".tmp"
+) -> None:
     """Write *content* to *path* atomically via temp file + ``os.replace``.
 
     Prevents corrupted files if the process crashes mid-write.
     """
     fd, tmp_path = tempfile.mkstemp(
-        dir=str(path.parent), prefix=prefix, suffix=suffix,
+        dir=str(path.parent),
+        prefix=prefix,
+        suffix=suffix,
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -51,10 +55,8 @@ def atomic_write(path: Path, content: str, *, prefix: str = ".write-", suffix: s
             os.fsync(fh.fileno())
         os.replace(tmp_path, str(path))
     except BaseException:
-        try:
+        with suppress(OSError):
             os.unlink(tmp_path)
-        except OSError:
-            pass
         raise
 
 
@@ -65,14 +67,16 @@ def now_iso() -> str:
 
 # Error types indicating agent process death (IPC/connection failures).
 # Shared between Router (producer) and Gateway (consumer).
-IPC_FATAL_ERROR_TYPES: frozenset[str] = frozenset({
-    "IPCConnectionError",
-    "IPCTimeoutError",
-    "IPCError",
-    "BrokenPipeError",
-    "ConnectionResetError",
-    "ProcessNotAliveError",
-})
+IPC_FATAL_ERROR_TYPES: frozenset[str] = frozenset(
+    {
+        "IPCConnectionError",
+        "IPCTimeoutError",
+        "IPCError",
+        "BrokenPipeError",
+        "ConnectionResetError",
+        "ProcessNotAliveError",
+    }
+)
 
 
 def make_error_result(error: str, error_type: str) -> dict[str, Any]:
@@ -140,6 +144,7 @@ def detect_cycles_dfs(
 
 _logger = logging.getLogger(__name__)
 
+
 @contextmanager
 def sqlite_connection(
     db_path: str | Path,
@@ -181,9 +186,7 @@ def sqlite_connection(
     if is_memory:
         # In-memory DB: reuse the persistent connection supplied by the caller.
         if persistent_conn is None:
-            raise ValueError(
-                "persistent_conn is required for :memory: databases"
-            )
+            raise ValueError("persistent_conn is required for :memory: databases")
         conn = persistent_conn
         if immediate and not conn.in_transaction:
             conn.execute("BEGIN IMMEDIATE")
@@ -191,9 +194,7 @@ def sqlite_connection(
             yield conn
             conn.commit()
         except Exception:
-            _logger.debug(
-                "DB commit failed in memory-DB context", exc_info=True
-            )
+            _logger.debug("DB commit failed in memory-DB context", exc_info=True)
             conn.rollback()
             raise
         return  # EARLY RETURN — don't fall through to file-based cleanup
@@ -209,9 +210,7 @@ def sqlite_connection(
         yield conn
         conn.commit()
     except Exception:
-        _logger.debug(
-            "DB commit failed in file-DB context", exc_info=True
-        )
+        _logger.debug("DB commit failed in file-DB context", exc_info=True)
         conn.rollback()
         raise
     finally:
@@ -230,6 +229,7 @@ def resolve_composition_path(caller_file: str) -> Path | None:
         caller_file: The ``__file__`` of the calling coordinator module.
     """
     import os
+
     caller_dir = Path(caller_file).parent
     agent_dir = os.environ.get("AGENT_DIR")
     if agent_dir:

@@ -7,23 +7,27 @@ different model strings and prompts.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
 try:
     import anthropic
-    import openai
 except ImportError:
     anthropic = None  # type: ignore[assignment]
+
+try:
+    import openai
+except ImportError:
     openai = None  # type: ignore[assignment]
 
 from agent_nexus.models.capability import ModelCapability, ModelCapabilityRegistry
-from agent_nexus.models.config import ProviderApiType
+from agent_nexus.models.config import ProviderApiType, ProviderConfig
 from agent_nexus.platform.config.loader import ConfigLoader
 from agent_nexus.platform.config.model_config import ModelConfigManager
 from agent_nexus.platform.config.model_db import ModelDBClient
@@ -88,6 +92,13 @@ class LLMClient:
         config_dir:
             Config directory override (default: ``~/.agent-nexus/``).
         """
+        # Pre-init all resource-holding attrs so __del__ is safe even if
+        # __init__ raises before reaching the normal init sites below.
+        self._http_client: httpx.Client | None = None
+        self._openai_sdk = None
+        self._anthropic_sdk = None
+        self._cli_backend = None
+
         loader = ConfigLoader(config_dir=config_dir)
         platform_config = loader.load_config()
         mgr = ModelConfigManager(platform_config)
@@ -107,8 +118,14 @@ class LLMClient:
 
         self._provider_name, self._model_name = mgr.parse_model_string(resolved)
         self._provider_config = mgr.get_provider_config(self._provider_name)
+
+        # Auto-detect CLI providers: if not in [models.providers.*], check [cli_backends.*]
+        if (
+            self._provider_name not in platform_config.models.providers
+            and self._provider_name in loader.load_cli_backends()
+        ):
+            self._provider_config = ProviderConfig(api=ProviderApiType.CLI)
         self._session_store = session_store
-        self._cli_backend = None
 
         if self._provider_config.api == ProviderApiType.CLI:
             self._api_key = ""
@@ -168,35 +185,41 @@ class LLMClient:
                     db_client.close()
 
                 if remote_data is not None:
-                    cap_default = self._capability_registry.get_provider_default(
+                    # Prefer model-level built-in data for fallback values,
+                    # then provider-level defaults.  This ensures custom
+                    # providers with unknown names still get reasonable
+                    # defaults instead of all-zero capabilities.
+                    cap_fallback = self._capability_registry.get(
+                        self._model_name,
+                    ) or self._capability_registry.get_provider_default(
                         self._provider_name,
                     )
                     enriched_cap = ModelCapability(
-                        model_id=remote_data.get("id", cap_default.model_id),
-                        provider=remote_data.get("provider", cap_default.provider),
+                        model_id=remote_data.get("id", cap_fallback.model_id),
+                        provider=remote_data.get("provider", cap_fallback.provider),
                         max_output_tokens=remote_data.get(
-                            "max_output_tokens", cap_default.max_output_tokens
+                            "max_output_tokens", cap_fallback.max_output_tokens
                         ),
                         context_window=remote_data.get(
-                            "context_window", cap_default.context_window
+                            "context_window", cap_fallback.context_window
                         ),
                         supports_vision=remote_data.get(
-                            "supports_vision", cap_default.supports_vision
+                            "supports_vision", cap_fallback.supports_vision
                         ),
                         supports_tool_use=remote_data.get(
-                            "supports_tool_use", cap_default.supports_tool_use
+                            "supports_tool_use", cap_fallback.supports_tool_use
                         ),
                         supports_temperature=remote_data.get(
-                            "supports_temperature", cap_default.supports_temperature
+                            "supports_temperature", cap_fallback.supports_temperature
                         ),
                         temperature_min=remote_data.get(
-                            "temperature_min", cap_default.temperature_min
+                            "temperature_min", cap_fallback.temperature_min
                         ),
                         temperature_max=remote_data.get(
-                            "temperature_max", cap_default.temperature_max
+                            "temperature_max", cap_fallback.temperature_max
                         ),
                         knowledge_cutoff=remote_data.get(
-                            "knowledge_cutoff", cap_default.knowledge_cutoff
+                            "knowledge_cutoff", cap_fallback.knowledge_cutoff
                         ),
                     )
                     self._capability_registry.set_override(
@@ -217,13 +240,6 @@ class LLMClient:
 
         # Store platform config for streaming resolution
         self._platform_config = platform_config
-
-        # Lazy-initialised persistent httpx.Client for connection reuse
-        self._http_client: httpx.Client | None = None
-
-        # Lazy-initialised SDK clients (created on first use)
-        self._openai_sdk: openai.OpenAI | None = None
-        self._anthropic_sdk: anthropic.Anthropic | None = None
 
     def _init_cli_backend(self, config_dir: Path | None) -> Any:
         """Create a GenericCLIBackend using BackendConfig from config.toml."""
@@ -289,7 +305,8 @@ class LLMClient:
             self._anthropic_sdk = None
 
     def __del__(self) -> None:
-        self.close()
+        with contextlib.suppress(Exception):
+            self.close()
 
     def __enter__(self) -> LLMClient:
         return self
@@ -356,9 +373,10 @@ class LLMClient:
                     _MAX_RETRIES,
                     exc,
                 )
-            # Exponential backoff: 1s, 2s, 4s
-            delay = _RETRY_BASE_DELAY * (2**attempt)
-            time.sleep(delay)
+            # Exponential backoff: 1s, 2s, 4s (skip on last attempt)
+            if attempt < _MAX_RETRIES - 1:
+                delay = _RETRY_BASE_DELAY * (2**attempt)
+                time.sleep(delay)
         raise last_exc or RuntimeError(f"{label}: all retries exhausted")
 
     def call(
@@ -370,7 +388,7 @@ class LLMClient:
         top_p: float | None = None,
         timeout: float | None = None,
         session_id: str | None = None,
-        response_format: str | None = None,
+        response_format: Literal["json"] | None = None,
     ) -> LLMResponse:
         """Call the LLM and return a structured response.
 
@@ -449,19 +467,20 @@ class LLMClient:
                     self._model_name,
                 )
         if top_p is not None:
-            if self._capability.supports_temperature:
-                payload["top_p"] = max(0.0, min(1.0, top_p))
-            else:
-                logger.warning(
-                    "Model '%s' does not support top_p — ignoring",
-                    self._model_name,
-                )
+            payload["top_p"] = max(0.0, min(1.0, top_p))
 
     def _should_stream(self) -> bool:
         """Resolve streaming mode: provider config -> global default -> True."""
         if self._provider_config.streaming is not None:
             return self._provider_config.streaming
         return self._platform_config.models.streaming_default
+
+    @staticmethod
+    def _restore_json_prefill(text: str, is_json: bool) -> str:
+        """Restore the JSON prefill '{' if Anthropic omitted it from the response."""
+        if is_json and text and not text.lstrip().startswith("{"):
+            return "{" + text
+        return text
 
     def _update_capability_from_response(self, actual_model: str) -> None:
         """Enrich capability data when the API returns a different model name."""
@@ -553,7 +572,7 @@ class LLMClient:
         temperature: float | None,
         top_p: float | None,
         timeout: float | None,
-        response_format: str | None = None,
+        response_format: Literal["json"] | None = None,
     ) -> tuple[str, str]:
         use_stream = self._should_stream()
 
@@ -573,7 +592,9 @@ class LLMClient:
 
         logger.info(
             "LLMClient._call_anthropic: model=%s stream=%s provider=%s",
-            self._model_name, use_stream, self._provider_name,
+            self._model_name,
+            use_stream,
+            self._provider_name,
         )
 
         messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
@@ -594,7 +615,7 @@ class LLMClient:
                 self._capability.temperature_min,
                 min(self._capability.temperature_max, temperature),
             )
-        if top_p is not None and self._capability.supports_temperature:
+        if top_p is not None:
             kwargs["top_p"] = max(0.0, min(1.0, top_p))
         if timeout is not None:
             kwargs["timeout"] = timeout
@@ -606,37 +627,51 @@ class LLMClient:
         if use_stream:
             text_parts: list[str] = []
             actual_model = self._model_name
-            with sdk.messages.create(stream=True, **kwargs) as stream:
-                for event in stream:
-                    if event.type == "message_start":
-                        actual_model = event.message.model or self._model_name
-                    elif event.type == "content_block_delta":
-                        text_parts.append(_extract_text_delta(event.delta))
-            text = "".join(text_parts)
-        else:
             try:
-                resp = sdk.messages.create(**kwargs)
-                actual_model = resp.model or self._model_name
-                text = "".join(
-                    block.text for block in resp.content if block.type == "text"
-                )
-            except ValueError as exc:
-                if "Streaming is required" not in str(exc):
-                    raise
-                logger.debug("Anthropic SDK requires streaming for this request, switching to stream mode")
-                text_parts: list[str] = []
-                actual_model = self._model_name
                 with sdk.messages.create(stream=True, **kwargs) as stream:
                     for event in stream:
                         if event.type == "message_start":
                             actual_model = event.message.model or self._model_name
                         elif event.type == "content_block_delta":
                             text_parts.append(_extract_text_delta(event.delta))
+            except Exception:
+                if not text_parts:
+                    raise
+                logger.warning(
+                    "Anthropic stream interrupted, returning partial text (%d chars)",
+                    len("".join(text_parts)),
+                )
+            text = "".join(text_parts)
+        else:
+            try:
+                resp = sdk.messages.create(**kwargs)
+                actual_model = resp.model or self._model_name
+                text = "".join(block.text for block in resp.content if block.type == "text")
+            except ValueError as exc:
+                if "Streaming" not in str(exc) and "streaming" not in str(exc).lower():
+                    raise
+                logger.debug(
+                    "Anthropic SDK requires streaming for this request, switching to stream mode"
+                )
+                text_parts: list[str] = []
+                actual_model = self._model_name
+                try:
+                    with sdk.messages.create(stream=True, **kwargs) as stream:
+                        for event in stream:
+                            if event.type == "message_start":
+                                actual_model = event.message.model or self._model_name
+                            elif event.type == "content_block_delta":
+                                text_parts.append(_extract_text_delta(event.delta))
+                except Exception:
+                    if not text_parts:
+                        raise
+                    logger.warning(
+                        "Anthropic stream interrupted, returning partial text (%d chars)",
+                        len("".join(text_parts)),
+                    )
                 text = "".join(text_parts)
 
-        # Restore the "{" we prefilled — Anthropic strips it from the response
-        if response_format == "json" and text and not text.startswith("{"):
-            text = "{" + text
+        text = self._restore_json_prefill(text, response_format == "json")
         return text, actual_model
 
     def _call_anthropic_raw(
@@ -647,7 +682,7 @@ class LLMClient:
         temperature: float | None,
         top_p: float | None,
         timeout: float | None,
-        response_format: str | None = None,
+        response_format: Literal["json"] | None = None,
     ) -> tuple[str, str]:
         """Fallback httpx-based Anthropic call (used when SDK init fails)."""
         base_url = self._provider_config.base_url.rstrip("/")
@@ -682,9 +717,7 @@ class LLMClient:
         text = "".join(
             block.get("text", "") for block in content_blocks if block.get("type") == "text"
         )
-        # Restore the "{" we prefilled — Anthropic strips it from the response
-        if response_format == "json" and text and not text.startswith("{"):
-            text = "{" + text
+        text = self._restore_json_prefill(text, response_format == "json")
         return text, actual_model
 
     def _call_openai(
@@ -695,7 +728,7 @@ class LLMClient:
         temperature: float | None,
         top_p: float | None,
         timeout: float | None,
-        response_format: str | None = None,
+        response_format: Literal["json"] | None = None,
     ) -> tuple[str, str]:
         use_stream = self._should_stream()
 
@@ -715,7 +748,9 @@ class LLMClient:
 
         logger.info(
             "LLMClient._call_openai: model=%s stream=%s provider=%s",
-            self._model_name, use_stream, self._provider_name,
+            self._model_name,
+            use_stream,
+            self._provider_name,
         )
 
         messages: list[dict[str, Any]] = [
@@ -733,7 +768,7 @@ class LLMClient:
                 self._capability.temperature_min,
                 min(self._capability.temperature_max, temperature),
             )
-        if top_p is not None and self._capability.supports_temperature:
+        if top_p is not None:
             kwargs["top_p"] = max(0.0, min(1.0, top_p))
         if response_format == "json":
             kwargs["response_format"] = {"type": "json_object"}
@@ -743,13 +778,21 @@ class LLMClient:
         if use_stream:
             text_parts: list[str] = []
             actual_model = self._model_name
-            with sdk.chat.completions.create(stream=True, **kwargs) as stream:
-                for chunk in stream:
-                    if chunk.model:
-                        actual_model = chunk.model
-                    delta = chunk.choices[0].delta if chunk.choices else None
-                    if delta and delta.content:
-                        text_parts.append(delta.content)
+            try:
+                with sdk.chat.completions.create(stream=True, **kwargs) as stream:
+                    for chunk in stream:
+                        if chunk.model:
+                            actual_model = chunk.model
+                        delta = chunk.choices[0].delta if chunk.choices else None
+                        if delta and delta.content:
+                            text_parts.append(delta.content)
+            except Exception:
+                if not text_parts:
+                    raise
+                logger.warning(
+                    "OpenAI stream interrupted, returning partial text (%d chars)",
+                    len("".join(text_parts)),
+                )
             return "".join(text_parts), actual_model
         else:
             resp = sdk.chat.completions.create(**kwargs)
@@ -765,7 +808,7 @@ class LLMClient:
         temperature: float | None,
         top_p: float | None,
         timeout: float | None,
-        response_format: str | None = None,
+        response_format: Literal["json"] | None = None,
     ) -> tuple[str, str]:
         """Fallback httpx-based OpenAI call (used when SDK init fails)."""
         base_url = self._provider_config.base_url.rstrip("/")

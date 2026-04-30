@@ -124,9 +124,7 @@ class IPCStream:
             raise IPCConnectionError("Agent stdout closed (EOF)")
 
         if len(raw) > _MAX_MESSAGE_SIZE:
-            raise IPCError(
-                f"Agent message too large ({len(raw)} bytes, max {_MAX_MESSAGE_SIZE})"
-            )
+            raise IPCError(f"Agent message too large ({len(raw)} bytes, max {_MAX_MESSAGE_SIZE})")
 
         # Whitespace-only lines (e.g. b"\n") indicate the agent sent no
         # payload — treat as connection issue rather than JSON error.
@@ -142,9 +140,7 @@ class IPCStream:
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError as exc:
-            raise IPCError(
-                f"Agent sent non-UTF-8 data ({len(raw)} bytes): {exc}"
-            ) from exc
+            raise IPCError(f"Agent sent non-UTF-8 data ({len(raw)} bytes): {exc}") from exc
 
         try:
             data = json.loads(text)
@@ -186,9 +182,9 @@ class IPCStream:
         # Drain any remaining stdout to avoid BrokenPipeError on the
         # agent side.  Upper bound prevents a misbehaving agent from
         # delaying close() indefinitely.
-        _MAX_DRAIN_CHUNKS = 64
+        _max_drain_chunks = 64
         try:
-            for _ in range(_MAX_DRAIN_CHUNKS):
+            for _ in range(_max_drain_chunks):
                 chunk = await asyncio.wait_for(self._stdout.read(4096), timeout=1.0)
                 if not chunk:
                     break
@@ -320,16 +316,14 @@ class IPCProtocol:
         deadline = loop.time() + timeout
         # Minimum per-receive timeout to avoid stream corruption from
         # prematurely interrupting a partial readline.
-        _MIN_RECEIVE_TIMEOUT: float = 1.0
+        _min_receive_timeout: float = 1.0
 
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
-                raise IPCTimeoutError(
-                    f"Timed out after {timeout:.1f}s waiting for final result"
-                )
+                raise IPCTimeoutError(f"Timed out after {timeout:.1f}s waiting for final result")
 
-            msg = await self.receive_result(timeout=max(remaining, _MIN_RECEIVE_TIMEOUT))
+            msg = await self.receive_result(timeout=max(remaining, _min_receive_timeout))
 
             # Optional task-id filter
             if task_id is not None and msg.task_id != task_id:
@@ -389,7 +383,8 @@ class IPCProtocol:
         except (TimeoutError, IPCError) as exc:
             logger.debug(
                 "Heartbeat failed for agent: [%s] %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             return False
 

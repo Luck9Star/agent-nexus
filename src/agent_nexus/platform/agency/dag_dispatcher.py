@@ -27,6 +27,12 @@ from .planner import CompositionDAG, DAGTask
 logger = logging.getLogger(__name__)
 
 
+def _safe_fail(graph: TaskGraph, task_id: str) -> None:
+    """Mark a task as failed, suppressing invalid-state errors."""
+    with contextlib.suppress(ValueError, RuntimeError):
+        graph.fail_task(task_id)
+
+
 # ---------------------------------------------------------------------------
 # Protocols
 # ---------------------------------------------------------------------------
@@ -61,6 +67,9 @@ class DispatchResult:
 
     failed: list[str] = field(default_factory=list)
     """IDs of tasks that failed."""
+
+    cancelled: list[str] = field(default_factory=list)
+    """IDs of tasks cancelled before execution (e.g. sibling fail-fast)."""
 
     errors: dict[str, str] = field(default_factory=dict)
     """task_id → error message for failed tasks."""
@@ -184,9 +193,9 @@ class DAGDispatcher:
         return self._pool
 
     def close(self) -> None:
-        """Shut down the thread pool (call when dispatching is complete)."""
+        """Shut down the thread pool, waiting for in-flight work."""
         if self._pool is not None:
-            self._pool.shutdown(wait=False)
+            self._pool.shutdown(wait=True)
             self._pool = None
 
     @property
@@ -235,9 +244,7 @@ class DAGDispatcher:
 
         result = DispatchResult()
         deadline = (
-            time.monotonic() + self._timeout_seconds
-            if self._timeout_seconds is not None
-            else None
+            time.monotonic() + self._timeout_seconds if self._timeout_seconds is not None else None
         )
 
         specialist_ids = {t.id for t in dag.specialist_tasks}
@@ -255,9 +262,7 @@ class DAGDispatcher:
 
             if deadline is not None and time.monotonic() > deadline:
                 result.timed_out = True
-                logger.warning(
-                    "DAGDispatch timed out after %ss", self._timeout_seconds
-                )
+                logger.warning("DAGDispatch timed out after %ss", self._timeout_seconds)
                 break
 
             ready = self._graph.get_ready_tasks()
@@ -266,9 +271,7 @@ class DAGDispatcher:
 
             if not ready_specialists:
                 # Check if there are still pending/blocked specialist tasks
-                all_specialists_in_graph = [
-                    self._graph.get_task(tid) for tid in specialist_ids
-                ]
+                all_specialists_in_graph = [self._graph.get_task(tid) for tid in specialist_ids]
                 pending_or_in_progress = [
                     t
                     for t in all_specialists_in_graph
@@ -279,22 +282,19 @@ class DAGDispatcher:
 
                 # Distinguish: tasks still IN_PROGRESS vs truly stuck PENDING
                 in_progress = [
-                    t for t in pending_or_in_progress
-                    if t.state == TaskState.IN_PROGRESS
+                    t for t in pending_or_in_progress if t.state == TaskState.IN_PROGRESS
                 ]
                 if in_progress:
                     # In synchronous mode, stale IN_PROGRESS tasks from a prior
                     # crash would cause an infinite loop. Fail them instead.
                     for t in in_progress:
-                        with contextlib.suppress(ValueError, RuntimeError):
-                            self._graph.fail_task(t.id)
+                        _safe_fail(self._graph, t.id)
                         result.failed.append(t.id)
                     break
 
                 # Only PENDING tasks remain but none are ready → blocked by failed deps
                 for t in pending_or_in_progress:
-                    with contextlib.suppress(ValueError, RuntimeError):
-                        self._graph.fail_task(t.id)
+                    _safe_fail(self._graph, t.id)
                     result.failed.append(t.id)
                 break
 
@@ -316,15 +316,11 @@ class DAGDispatcher:
                         result.timed_out = True
                         break
                     self._graph.start_task(task_item.id)
-                    future = pool.submit(
-                        self._run_executor, task_item, task_description
-                    )
+                    future = pool.submit(self._run_executor, task_item, task_description)
                     futures[future] = task_item
 
                 # Collect results — fail-fast on first error
-                for future in concurrent.futures.as_completed(
-                    futures, timeout=per_task_timeout
-                ):
+                for future in concurrent.futures.as_completed(futures, timeout=per_task_timeout):
                     task_item = futures[future]
                     try:
                         artifact, error = future.result()
@@ -337,8 +333,7 @@ class DAGDispatcher:
                         result.artifacts[task_item.id] = artifact
                         result.completed.append(task_item.id)
                     else:
-                        with contextlib.suppress(ValueError, RuntimeError):
-                            self._graph.fail_task(task_item.id)
+                        _safe_fail(self._graph, task_item.id)
                         result.errors[task_item.id] = error or "unknown error"
                         result.failed.append(task_item.id)
                         # Cancel remaining futures — fail fast
@@ -346,12 +341,11 @@ class DAGDispatcher:
                             f.cancel()
                         break
 
-                # Mark cancelled tasks as failed
-                for f, ti in futures.items():
+                # Mark cancelled tasks
+                for _f, ti in futures.items():
                     if ti.id not in result.completed and ti.id not in result.failed:
-                        with contextlib.suppress(ValueError, RuntimeError):
-                            self._graph.fail_task(ti.id)
-                        result.failed.append(ti.id)
+                        _safe_fail(self._graph, ti.id)
+                        result.cancelled.append(ti.id)
                         result.errors[ti.id] = "cancelled (sibling task failed)"
             else:
                 # Sequential execution (backward compatible)
@@ -363,8 +357,7 @@ class DAGDispatcher:
                         for tid in started_in_batch:
                             task = self._graph.get_task(tid)
                             if task is not None and task.state == TaskState.IN_PROGRESS:
-                                with contextlib.suppress(ValueError, RuntimeError):
-                                    self._graph.fail_task(tid)
+                                _safe_fail(self._graph, tid)
                                 result.failed.append(tid)
                         break
 
@@ -376,14 +369,13 @@ class DAGDispatcher:
                         result.artifacts[task_item.id] = artifact
                         result.completed.append(task_item.id)
                     else:
-                        with contextlib.suppress(ValueError, RuntimeError):
-                            self._graph.fail_task(task_item.id)
+                        _safe_fail(self._graph, task_item.id)
                         result.errors[task_item.id] = error or "unknown error"
                         result.failed.append(task_item.id)
                         break  # Fail-fast: don't start more tasks in batch
 
-            # Fail-fast: stop dispatching after any task failure
-            if result.failed:
+            # Fail-fast: stop dispatching after any task failure or cancellation
+            if result.failed or result.cancelled:
                 break
 
         # If the loop was terminated by the max_iterations guard (not a normal
@@ -403,8 +395,7 @@ class DAGDispatcher:
         for tid in specialist_ids:
             task = self._graph.get_task(tid)
             if task is not None and task.state == TaskState.IN_PROGRESS:
-                with contextlib.suppress(ValueError, RuntimeError):
-                    self._graph.fail_task(tid)
+                _safe_fail(self._graph, tid)
                 if tid not in failed_set:
                     result.failed.append(tid)
                     failed_set.add(tid)
@@ -421,8 +412,7 @@ class DAGDispatcher:
                 deps = task.blocked_by
                 if not deps:
                     # Independent task never started (e.g. after fail-fast)
-                    with contextlib.suppress(ValueError, RuntimeError):
-                        self._graph.fail_task(tid)
+                    _safe_fail(self._graph, tid)
                     if tid not in failed_set:
                         result.failed.append(tid)
                         failed_set.add(tid)
@@ -434,8 +424,7 @@ class DAGDispatcher:
                     for t in dep_tasks
                 )
                 if all_done:
-                    with contextlib.suppress(ValueError, RuntimeError):
-                        self._graph.fail_task(tid)
+                    _safe_fail(self._graph, tid)
                     if tid not in failed_set:
                         result.failed.append(tid)
                         failed_set.add(tid)

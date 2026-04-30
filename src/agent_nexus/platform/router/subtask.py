@@ -36,13 +36,9 @@ class SubtaskConfig:
                 f"SubtaskConfig.timeout_seconds must be >= 0.1, got {self.timeout_seconds}"
             )
         if self.max_retries < 0:
-            raise ValueError(
-                f"SubtaskConfig.max_retries must be >= 0, got {self.max_retries}"
-            )
+            raise ValueError(f"SubtaskConfig.max_retries must be >= 0, got {self.max_retries}")
         if self.max_parallel < 1:
-            raise ValueError(
-                f"SubtaskConfig.max_parallel must be >= 1, got {self.max_parallel}"
-            )
+            raise ValueError(f"SubtaskConfig.max_parallel must be >= 1, got {self.max_parallel}")
 
 
 class SubtaskController:
@@ -102,7 +98,16 @@ class SubtaskController:
             try:
                 return await self.run_with_timeout(coro_factory(), timeout=timeout)
             except BaseException as exc:
-                if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError, SystemExit, GeneratorExit, MemoryError)):
+                if isinstance(
+                    exc,
+                    (
+                        KeyboardInterrupt,
+                        asyncio.CancelledError,
+                        SystemExit,
+                        GeneratorExit,
+                        MemoryError,
+                    ),
+                ):
                     raise
                 last_exc = exc
                 logger.warning(
@@ -153,20 +158,25 @@ class SubtaskController:
                 # because their partial results may be useful.
                 if failed.is_set():
                     coro.close()
-                    results[index] = RuntimeError(
-                        "cancelled: another parallel task failed"
-                    )
+                    results[index] = RuntimeError("cancelled: another parallel task failed")
                     return
                 try:
                     results[index] = await coro
                 except BaseException as exc:
-                    if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError, SystemExit, GeneratorExit, MemoryError)):
+                    if isinstance(
+                        exc,
+                        (
+                            KeyboardInterrupt,
+                            asyncio.CancelledError,
+                            SystemExit,
+                            GeneratorExit,
+                            MemoryError,
+                        ),
+                    ):
                         raise
                     results[index] = exc
                     failed.set()
 
-        await asyncio.gather(
-            *(_guarded(i, c) for i, c in enumerate(coros))
-        )
+        await asyncio.gather(*(_guarded(i, c) for i, c in enumerate(coros)))
 
         return results

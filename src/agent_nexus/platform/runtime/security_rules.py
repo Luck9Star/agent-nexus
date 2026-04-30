@@ -99,10 +99,7 @@ class ImportRule(SecurityRule):
                                 rule_type="import",
                                 node_type="ImportFrom",
                                 code_snippet=f"from . import {alias.name}",
-                                message=(
-                                    f"Forbidden import: '{alias.name}' "
-                                    f"at line {node.lineno}"
-                                ),
+                                message=(f"Forbidden import: '{alias.name}' at line {node.lineno}"),
                             )
                         )
 
@@ -158,10 +155,7 @@ class FunctionRule(SecurityRule):
 
             # Also catch attribute-based calls: builtins.eval(...),
             # __builtins__.exec(...), etc.
-            if (
-                func_name in self.forbidden
-                and isinstance(node.func, ast.Attribute)
-            ):
+            if func_name in self.forbidden and isinstance(node.func, ast.Attribute):
                 violations.append(
                     SecurityViolation(
                         rule_type="function",
@@ -188,10 +182,7 @@ class FunctionRule(SecurityRule):
                         rule_type="function",
                         node_type="QualifiedCall",
                         code_snippet=ast.unparse(node),
-                        message=(
-                            f"Forbidden qualified call: "
-                            f"'{qualified}' at line {node.lineno}"
-                        ),
+                        message=(f"Forbidden qualified call: '{qualified}' at line {node.lineno}"),
                     )
                 )
 
@@ -223,16 +214,15 @@ class AttributeRule(SecurityRule):
     def check(self, node: ast.AST) -> list[SecurityViolation]:
         violations: list[SecurityViolation] = []
 
-        if isinstance(node, ast.Attribute):
-            if node.attr in self.forbidden:
-                violations.append(
-                    SecurityViolation(
-                        rule_type="attribute",
-                        node_type="Attribute",
-                        code_snippet=f".{node.attr}",
-                        message=f"Forbidden attribute access: '{node.attr}' at line {node.lineno}",
-                    )
+        if isinstance(node, ast.Attribute) and node.attr in self.forbidden:
+            violations.append(
+                SecurityViolation(
+                    rule_type="attribute",
+                    node_type="Attribute",
+                    code_snippet=f".{node.attr}",
+                    message=f"Forbidden attribute access: '{node.attr}' at line {node.lineno}",
                 )
+            )
 
         return violations
 

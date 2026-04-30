@@ -50,7 +50,7 @@ class TaskComposerResult:
     qa_passed: bool | None = None
     skipped_tasks: list[str] = field(default_factory=list)
     output_target: str | None = None
-    """Detected output destination from task intent (file path or ``'file'``)."""
+    """Detected output intent: ``None``, ``"file"`` (generic), or a specific file path."""
 
 
 # ---------------------------------------------------------------------------
@@ -58,10 +58,10 @@ class TaskComposerResult:
 # ---------------------------------------------------------------------------
 
 _SPECIFIC_PATH_PATTERNS: list[str] = [
-    r"输出到\s+(\S+\.md)",
-    r"output\s+to\s+(\S+\.md)",
-    r"save\s+to\s+(\S+\.md)",
-    r"写入\s+(\S+\.md)",
+    r"输出到\s+(\S+\.\w+)",
+    r"output\s+to\s+(\S+\.\w+)",
+    r"save\s+to\s+(\S+\.\w+)",
+    r"写入\s+(\S+\.\w+)",
 ]
 _GENERIC_FILE_PATTERNS: list[str] = [
     r"输出到\s*文件",
@@ -77,11 +77,16 @@ def detect_output_target(task: str) -> str | None:
     Returns a specific file path (e.g. ``"docs/review.md"``) or ``"file"``
     for generic "output to file" intent.  Returns ``None`` when no output
     intent is detected.
+
+    Extracted paths are sanitized: only forward slashes, alphanumeric
+    characters, hyphens, underscores, dots, and spaces are kept.
     """
     for pat in _SPECIFIC_PATH_PATTERNS:
         m = re.search(pat, task, re.IGNORECASE)
         if m:
-            return m.group(1)
+            raw = m.group(1)
+            sanitized = re.sub(r"[^A-Za-z0-9/_\-. ]", "", raw)
+            return sanitized
 
     for pat in _GENERIC_FILE_PATTERNS:
         if re.search(pat, task, re.IGNORECASE):
@@ -169,6 +174,7 @@ def infer_capabilities(task: str) -> list[str]:
     task_lower = task.lower()
     for keyword, caps in _TASK_CAPABILITY_MAP.items():
         if len(keyword) < 3:
+            logger.warning("Skipping short keyword '%s' (< 3 chars) in capability map", keyword)
             continue
         if re.search(rf"\b{re.escape(keyword)}\b", task_lower):
             matched.extend(caps)
@@ -260,7 +266,9 @@ class TaskComposer:
         )
         selected = self.selector.select(selection_request)
 
-        logger.info("TaskComposer: selected %d experts: %s", len(selected), [s.agent_id for s in selected])
+        logger.info(
+            "TaskComposer: selected %d experts: %s", len(selected), [s.agent_id for s in selected]
+        )
 
         if not selected:
             return TaskComposerResult(task=input.task, output_target=output_target)
@@ -318,12 +326,14 @@ class TaskComposer:
                 )
 
             # Propagate partial execution info: track which tasks failed/skipped
-            if dispatch_result.failed:
+            if dispatch_result.failed or dispatch_result.cancelled:
+                all_failed = dispatch_result.failed + dispatch_result.cancelled
                 logger.warning(
-                    "TaskComposer: %d of %d specialist tasks failed: %s",
+                    "TaskComposer: %d of %d specialist tasks failed (%d cancelled): %s",
                     len(dispatch_result.failed),
                     len(dag.specialist_tasks),
-                    dispatch_result.failed,
+                    len(dispatch_result.cancelled),
+                    all_failed,
                 )
                 # Log specific error messages for root cause diagnosis
                 for tid, err_msg in dispatch_result.errors.items():
@@ -333,6 +343,7 @@ class TaskComposer:
                         err_msg,
                     )
                 skipped.update(dispatch_result.failed)
+                skipped.update(dispatch_result.cancelled)
 
             # Preserve ordering: artifacts in the order they completed
             artifacts = list(dispatch_result.artifacts.values())
@@ -367,8 +378,8 @@ class TaskComposer:
                         continue
                     if all(dep in executed for dep in task.blocked_by):
                         try:
-                            executed.add(task.id)
                             artifact = executor(task.agent, input.task)
+                            executed.add(task.id)
                             artifacts.append(artifact)
                         except Exception:
                             logger.exception(
@@ -377,9 +388,6 @@ class TaskComposer:
                                 task.agent,
                             )
                             failed.add(task.id)
-                        else:
-                            # executed.add already done above before executor call
-                            pass
 
         if not artifacts:
             reason = "no specialists selected" if not selected else "all specialists failed"

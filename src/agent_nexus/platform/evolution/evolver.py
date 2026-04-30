@@ -106,9 +106,7 @@ class SkillEvolver:
         elif evo_type == EvolutionType.DERIVED:
             return self._evolve_derived(suggestion, trigger, task_id)
         elif evo_type == EvolutionType.CAPTURED:
-            return self._evolve_captured(
-                suggestion, trigger, task_id, capture_directory
-            )
+            return self._evolve_captured(suggestion, trigger, task_id, capture_directory)
         else:
             return EvolveResult(
                 success=False,
@@ -226,9 +224,7 @@ class SkillEvolver:
                 Any addressed entry NOT in this set is considered recovered
                 and will be pruned.
         """
-        recovered = [
-            k for k in self._addressed if k not in still_degraded_tool_keys
-        ]
+        recovered = [k for k in self._addressed if k not in still_degraded_tool_keys]
         for k in recovered:
             del self._addressed[k]
 
@@ -244,9 +240,7 @@ class SkillEvolver:
     ) -> EvolveResult:
         """In-place fix: same name, same directory, new version record."""
         if not suggestion.target_skill_ids:
-            return EvolveResult(
-                success=False, error="FIX requires exactly 1 parent"
-            )
+            return EvolveResult(success=False, error="FIX requires exactly 1 parent")
 
         if len(suggestion.target_skill_ids) != 1:
             return EvolveResult(
@@ -317,11 +311,7 @@ class SkillEvolver:
         # Determine new skill name
         first_parent = parents[0]
         is_merge = len(parents) > 1
-        new_name = (
-            f"{first_parent.name}-merged"
-            if is_merge
-            else f"{first_parent.name}-enhanced"
-        )
+        new_name = f"{first_parent.name}-merged" if is_merge else f"{first_parent.name}-enhanced"
         new_gen = max(p.lineage.generation for p in parents) + 1
         new_id = f"{new_name}__drv_{uuid.uuid4().hex[:8]}"
 
@@ -344,9 +334,7 @@ class SkillEvolver:
             total_fallbacks=0,
         )
 
-        result = self._store.evolve_skill(
-            new_record, [p.id for p in parents]
-        )
+        result = self._store.evolve_skill(new_record, [p.id for p in parents])
         if not result.success:
             return result
         return EvolveResult(success=True, new_record=new_record)

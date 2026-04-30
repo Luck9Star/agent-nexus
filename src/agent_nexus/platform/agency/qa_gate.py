@@ -76,9 +76,7 @@ class QAGate:
         for s in required_sections:
             if s in sections:
                 value = sections[s]
-                if value is None:
-                    empty_sections.append(s)
-                elif isinstance(value, str) and value.strip() == "":
+                if value is None or isinstance(value, str) and value.strip() == "":
                     empty_sections.append(s)
 
         all_missing = missing + empty_sections

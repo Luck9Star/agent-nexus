@@ -1,4 +1,5 @@
 """CLISessionStore — SQLite session persistence with WAL mode and triggers."""
+
 from __future__ import annotations
 
 import contextlib
@@ -125,10 +126,17 @@ class CLISessionStore:
         ).fetchall()
         return [r["name"] for r in rows]
 
-    _ALLOWED_PRAGMAS = frozenset({
-        "journal_mode", "busy_timeout", "synchronous", "foreign_keys",
-        "wal_autocheckpoint", "page_count", "freelist_count",
-    })
+    _ALLOWED_PRAGMAS = frozenset(
+        {
+            "journal_mode",
+            "busy_timeout",
+            "synchronous",
+            "foreign_keys",
+            "wal_autocheckpoint",
+            "page_count",
+            "freelist_count",
+        }
+    )
 
     def _pragma(self, key: str) -> str:
         if key not in self._ALLOWED_PRAGMAS:
@@ -221,9 +229,7 @@ class CLISessionStore:
     # -- Daily Stats --
 
     def get_daily_stats(self) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
-            "SELECT * FROM daily_stats ORDER BY date DESC"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM daily_stats ORDER BY date DESC").fetchall()
         return [dict(r) for r in rows]
 
     # -- Backend Health --

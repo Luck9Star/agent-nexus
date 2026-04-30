@@ -43,26 +43,8 @@ api = "ollama"
 streaming = true
 
 # ── CLI Backend Integration ──
-# These define CLI tools that can be used as LLM backends.
-# Used by both Python LLMClient (api = "cli") and Rust `agent-nexus llm`.
-
-[models.providers.claude-code]
-api = "cli"
-command = "claude"
-args = ["-p", "--bare", "--output-format", "json"]
-system_prompt_flag = "--system-prompt"
-session_flag = "--resume"
-output_format = "json"
-json_paths = { text = "result", model = "model", session_id = "session_id" }
-timeout_secs = 300
-
-[models.providers.codex]
-api = "cli"
-command = "codex"
-args = ["exec"]
-output_format = "text"
-text_patterns = { text = "(?s)(.*)" }
-timeout_secs = 300
+# CLI tools used as LLM backends. Shared by Python (via ConfigLoader)
+# and Rust (via CLIConfigFile serde). Single source of truth.
 
 [cli_backends.claude-code]
 command = "claude"

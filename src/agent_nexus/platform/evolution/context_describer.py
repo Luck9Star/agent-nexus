@@ -77,17 +77,11 @@ class EvolutionContextDescriber:
             return "[Evolution] No active skills"
 
         # Count evolved skills (origin is not IMPORTED)
-        evolved = sum(
-            1 for s in active if s.lineage.origin.value != "imported"
-        )
+        evolved = sum(1 for s in active if s.lineage.origin.value != "imported")
 
         # Compute aggregate effective rate (scoped to agent if available)
         m = metrics if metrics is not None else self._store.get_metrics(agent_name=self._agent_name)
-        eff_rate = (
-            m.total_completions / m.total_selections
-            if m.total_selections > 0
-            else 0.0
-        )
+        eff_rate = m.total_completions / m.total_selections if m.total_selections > 0 else 0.0
 
         return (
             f"[Evolution] {total_active} active skills, "
@@ -133,24 +127,16 @@ class EvolutionContextDescriber:
         reports = self._health.diagnose_skills(skills=active)
 
         lines: list[str] = ["[Evolution Skill Metrics]"]
-        lines.append(
-            "| Skill | Selections | Eff. Rate | Health |"
-        )
-        lines.append(
-            "|-------|-----------|-----------|--------|"
-        )
+        lines.append("| Skill | Selections | Eff. Rate | Health |")
+        lines.append("|-------|-----------|-----------|--------|")
 
         for skill in active:
             sel = skill.total_selections
             rates = SkillRates.from_record(skill)
             eff = rates.effective_rate if rates is not None else 0.0
             report = reports.get(skill.id)
-            health_status = (
-                "OK" if report and report.is_healthy else "WARN"
-            )
-            lines.append(
-                f"| {skill.name} | {sel} | {eff:.2f} | {health_status} |"
-            )
+            health_status = "OK" if report and report.is_healthy else "WARN"
+            lines.append(f"| {skill.name} | {sel} | {eff:.2f} | {health_status} |")
 
         return "\n".join(lines)
 
@@ -206,16 +192,12 @@ class EvolutionContextDescriber:
         # Section 3: Health diagnostics
         health_lines = self._build_health_diagnostics(active, reports)
         if health_lines:
-            parts.append(
-                "[Evolution Health]\n" + "\n".join(health_lines)
-            )
+            parts.append("[Evolution Health]\n" + "\n".join(health_lines))
 
         # Section 4: Recent judgment history
         judgment_lines = self._build_judgment_history(active)
         if judgment_lines:
-            parts.append(
-                "[Evolution History]\n" + "\n".join(judgment_lines)
-            )
+            parts.append("[Evolution History]\n" + "\n".join(judgment_lines))
 
         return "\n\n".join(parts)
 
@@ -223,9 +205,7 @@ class EvolutionContextDescriber:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _build_lineage_tree(
-        self, skills: list[SkillRecord]
-    ) -> list[str]:
+    def _build_lineage_tree(self, skills: list[SkillRecord]) -> list[str]:
         """Build a compact lineage tree representation."""
         lines: list[str] = []
 
@@ -240,18 +220,10 @@ class EvolutionContextDescriber:
             # Build ancestry chain
             ancestors = ancestry_map.get(skill.id, [])
             if ancestors:
-                chain = " -> ".join(
-                    f"{a.name}(g{a.lineage.generation})"
-                    for a in ancestors
-                )
-                lines.append(
-                    f"{skill.name} (g{gen}, {origin_tag}): "
-                    f"{chain}"
-                )
+                chain = " -> ".join(f"{a.name}(g{a.lineage.generation})" for a in ancestors)
+                lines.append(f"{skill.name} (g{gen}, {origin_tag}): {chain}")
             else:
-                lines.append(
-                    f"{skill.name} (g{gen}, {origin_tag})"
-                )
+                lines.append(f"{skill.name} (g{gen}, {origin_tag})")
 
         return lines
 
@@ -271,9 +243,7 @@ class EvolutionContextDescriber:
             rates = SkillRates.from_record(skill)
             eff = rates.effective_rate if rates is not None else 0.0
             report = reports.get(skill.id)
-            health_status = (
-                "OK" if report and report.is_healthy else "WARN"
-            )
+            health_status = "OK" if report and report.is_healthy else "WARN"
             lines.append(
                 f"| {skill.name} | {skill.version} "
                 f"| {skill.lineage.origin.value} "
@@ -298,23 +268,16 @@ class EvolutionContextDescriber:
             if report is None or report.is_healthy:
                 continue
 
-            lines.append(
-                f"- {skill.name}: UNHEALTHY"
-            )
+            lines.append(f"- {skill.name}: UNHEALTHY")
             for suggestion in report.suggestions:
-                targets = (
-                    ", ".join(suggestion.target_skill_ids) or "(new)"
-                )
+                targets = ", ".join(suggestion.target_skill_ids) or "(new)"
                 lines.append(
-                    f"  [{suggestion.evolution_type.value}] "
-                    f"{targets}: {suggestion.direction}"
+                    f"  [{suggestion.evolution_type.value}] {targets}: {suggestion.direction}"
                 )
 
         return lines
 
-    def _build_judgment_history(
-        self, skills: list[SkillRecord]
-    ) -> list[str]:
+    def _build_judgment_history(self, skills: list[SkillRecord]) -> list[str]:
         """Build recent judgment history for L2 context."""
         lines: list[str] = []
         history_limit = 5  # Per skill, to keep within budget

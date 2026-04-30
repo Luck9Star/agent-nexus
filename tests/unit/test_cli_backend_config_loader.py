@@ -10,24 +10,23 @@ CLI_CONFIG = """
 [models]
 default = "claude-code:sonnet"
 
-[models.providers.claude-code]
-api = "cli"
+[models.providers.openai]
+api = "openai-compatible"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+
+[cli_backends.claude-code]
 command = "claude"
 args = ["-p"]
 output_format = "json"
 output_format_flag = "--output-format"
 
-[models.providers.claude-code.json_paths]
+[cli_backends.claude-code.json_paths]
 text = "result"
 session_id = "session_id"
 model = "model"
 input_tokens = "usage.input_tokens"
 output_tokens = "usage.output_tokens"
-
-[models.providers.openai]
-api = "openai-compatible"
-base_url = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"
 
 [cli_routing]
 default = "claude-code"

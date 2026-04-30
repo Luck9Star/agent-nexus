@@ -1,4 +1,5 @@
 """GenericCLIBackend — config-driven CLI subprocess invocation."""
+
 from __future__ import annotations
 
 import logging
@@ -69,6 +70,12 @@ class GenericCLIBackend:
         session_id: str | None = None,
         timeout: float | None = None,
     ) -> CLIResult:
+        if not self.is_available():
+            return CLIResult(
+                text="", model="", returncode=-1,
+                raw_stderr=f"Command not found: {self._config.command}",
+                duration_ms=0,
+            )
         args = self.build_args(system_prompt, user_message, session_id)
         effective_timeout = timeout or self._config.timeout_secs
         start = time.monotonic()
@@ -76,15 +83,19 @@ class GenericCLIBackend:
             proc = subprocess.Popen(
                 [self._config.command, *args],
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
         except OSError:
             duration_ms = int((time.monotonic() - start) * 1000)
             logger.exception("CLI '%s' failed to start", self._config.command)
             return CLIResult(
-                text="", model="",
+                text="",
+                model="",
                 raw_stderr="CLI process error",
-                returncode=-1, duration_ms=duration_ms,
+                returncode=-1,
+                duration_ms=duration_ms,
             )
 
         try:
@@ -99,23 +110,31 @@ class GenericCLIBackend:
             duration_ms = int((time.monotonic() - start) * 1000)
             logger.warning(
                 "CLI '%s' timed out after %ss, killed process",
-                self._config.command, effective_timeout,
+                self._config.command,
+                effective_timeout,
             )
             return CLIResult(
-                text="", model="",
+                text="",
+                model="",
                 raw_stderr=f"CLI timed out after {effective_timeout}s",
-                returncode=-1, duration_ms=duration_ms,
+                returncode=-1,
+                duration_ms=duration_ms,
             )
 
         duration_ms = int((time.monotonic() - start) * 1000)
         if proc.returncode != 0:
             logger.warning(
-                "CLI '%s' exited with code %d", self._config.command, proc.returncode,
+                "CLI '%s' exited with code %d",
+                self._config.command,
+                proc.returncode,
             )
             return CLIResult(
-                text="", model="",
-                raw_stdout=stdout, raw_stderr=stderr,
-                returncode=proc.returncode, duration_ms=duration_ms,
+                text="",
+                model="",
+                raw_stdout=stdout,
+                raw_stderr=stderr,
+                returncode=proc.returncode,
+                duration_ms=duration_ms,
             )
         result = self._parse_output(stdout, stderr)
         result.duration_ms = duration_ms

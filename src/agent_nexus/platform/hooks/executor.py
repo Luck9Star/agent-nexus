@@ -15,6 +15,7 @@ Hooks are loaded from:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import fnmatch
 import json
 import logging
@@ -163,9 +164,12 @@ class HookExecutor:
         for hook in candidates:
             if not hook.enabled:
                 continue
-            if matcher is not None and hook.matcher is not None:
-                if not fnmatch.fnmatch(matcher, hook.matcher):
-                    continue
+            if (
+                matcher is not None
+                and hook.matcher is not None
+                and not fnmatch.fnmatch(matcher, hook.matcher)
+            ):
+                continue
             # hook.matcher is None means "match everything"
             result.append(hook)
         return result
@@ -346,14 +350,10 @@ class HookExecutor:
         except Exception as exc:
             duration_ms = (time.monotonic() - start) * 1000
             if proc is not None:
-                try:
+                with contextlib.suppress(ProcessLookupError):
                     proc.kill()
-                except ProcessLookupError:
-                    pass
-                try:
+                with contextlib.suppress(ProcessLookupError):
                     await proc.wait()
-                except ProcessLookupError:
-                    pass
             return HookExecution(
                 hook=hook,
                 passed=False,

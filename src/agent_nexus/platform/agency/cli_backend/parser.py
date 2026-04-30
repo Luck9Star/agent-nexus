@@ -1,4 +1,5 @@
 """CLI output parser — JSON path extraction and text regex parsing."""
+
 from __future__ import annotations
 
 import json
