@@ -7,27 +7,28 @@ import from agency).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from agent_nexus.platform.agency.cli_backend.types import (
-    BackendConfig as _BackendConfig,
-)
-from agent_nexus.platform.agency.cli_backend.types import (
-    JsonPathConfig as _JsonPathConfig,
-)
-from agent_nexus.platform.agency.cli_backend.types import (
-    RoutingConfig as _RoutingConfig,
-)
-from agent_nexus.platform.agency.cli_backend.types import (
-    TextPatternConfig as _TextPatternConfig,
-)
 from agent_nexus.platform.config.defaults import DEFAULT_PIPELINE_TIMEOUT
 
+if TYPE_CHECKING:
+    from agent_nexus.platform.agency.cli_backend.types import (
+        BackendConfig,
+        RoutingConfig,
+    )
 
-def _parse_backend_config(name: str, raw: dict[str, Any]) -> _BackendConfig:
+
+def _parse_backend_config(name: str, raw: dict[str, Any]) -> BackendConfig:
+    """Parse backend config. Import is lazy to avoid circular dependency."""
+    from agent_nexus.platform.agency.cli_backend.types import (
+        BackendConfig,
+        JsonPathConfig,
+        TextPatternConfig,
+    )
+
     json_paths_raw = raw.get("json_paths", {})
     json_paths = (
-        _JsonPathConfig(
+        JsonPathConfig(
             text=json_paths_raw.get("text"),
             session_id=json_paths_raw.get("session_id"),
             model=json_paths_raw.get("model"),
@@ -35,20 +36,20 @@ def _parse_backend_config(name: str, raw: dict[str, Any]) -> _BackendConfig:
             output_tokens=json_paths_raw.get("output_tokens"),
         )
         if isinstance(json_paths_raw, dict)
-        else _JsonPathConfig()
+        else JsonPathConfig()
     )
 
     text_patterns_raw = raw.get("text_patterns", {})
     text_patterns = (
-        _TextPatternConfig(
+        TextPatternConfig(
             session_id=text_patterns_raw.get("session_id"),
             model=text_patterns_raw.get("model"),
         )
         if isinstance(text_patterns_raw, dict)
-        else _TextPatternConfig()
+        else TextPatternConfig()
     )
 
-    return _BackendConfig(
+    return BackendConfig(
         command=raw.get("command", name),
         args=raw.get("args", []),
         system_prompt_flag=raw.get("system_prompt_flag", "--system-prompt"),
@@ -64,9 +65,9 @@ def _parse_backend_config(name: str, raw: dict[str, Any]) -> _BackendConfig:
 
 def load_backend_configs_from_providers(
     providers: dict[str, dict[str, Any]],
-) -> dict[str, _BackendConfig]:
+) -> dict[str, BackendConfig]:
     """Extract BackendConfig for providers with api = "cli"."""
-    result: dict[str, _BackendConfig] = {}
+    result: dict[str, BackendConfig] = {}
     for name, raw in providers.items():
         if not isinstance(raw, dict):
             continue
@@ -78,9 +79,9 @@ def load_backend_configs_from_providers(
 
 def load_backend_configs_from_cli_backends(
     cli_backends: dict[str, dict[str, Any]],
-) -> dict[str, _BackendConfig]:
+) -> dict[str, BackendConfig]:
     """Parse [cli_backends.<name>] sections into BackendConfig instances."""
-    result: dict[str, _BackendConfig] = {}
+    result: dict[str, BackendConfig] = {}
     for name, raw in cli_backends.items():
         if not isinstance(raw, dict):
             continue
@@ -88,9 +89,11 @@ def load_backend_configs_from_cli_backends(
     return result
 
 
-def load_routing_config(raw: dict[str, Any]) -> _RoutingConfig:
+def load_routing_config(raw: dict[str, Any]) -> RoutingConfig:
     """Parse [cli_routing] section into RoutingConfig."""
-    return _RoutingConfig(
+    from agent_nexus.platform.agency.cli_backend.types import RoutingConfig
+
+    return RoutingConfig(
         default=raw.get("default", ""),
         fallback_enabled=raw.get("fallback_enabled", True),
         fallback_chain=raw.get("fallback_chain", []),

@@ -8,7 +8,6 @@ different model strings and prompts.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,9 +28,6 @@ except ImportError:
 from agent_nexus.models.capability import ModelCapability, ModelCapabilityRegistry
 from agent_nexus.models.config import ProviderApiType, ProviderConfig
 from agent_nexus.models.errors import AgentNexusError
-from agent_nexus.platform.config.loader import ConfigLoader
-from agent_nexus.platform.config.model_config import ModelConfigManager
-from agent_nexus.platform.config.model_db import ModelDBClient
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +90,11 @@ class LLMClient:
         capability_registry: ModelCapabilityRegistry | None = None,
         session_store: Any | None = None,
     ) -> None:
-        """Initialise the client.
+        """Initialise the client (backward-compatible entry point).
+
+        When called with a ``model_string`` or ``stage``, delegates config
+        resolution to :meth:`from_config`.  This preserves the original
+        API while keeping the constructor logic minimal.
 
         Parameters
         ----------
@@ -111,7 +111,101 @@ class LLMClient:
         self._http_client: httpx.Client | None = None
         self._openai_sdk = None
         self._anthropic_sdk = None
-        self._cli_backend = None
+        self._cli_backend: Any = None
+
+        # Pre-init all data attrs that from_config assigns.  Without these
+        # declarations the type checker cannot see the attributes on the class,
+        # and __del__ / properties may fail if from_config raises partway.
+        self._provider_name: str = ""
+        self._model_name: str = ""
+        self._provider_config: ProviderConfig = ProviderConfig()
+        self._api_key: str = ""
+        self._session_store: Any | None = session_store
+        self._capability_registry: ModelCapabilityRegistry = (
+            capability_registry if capability_registry is not None else ModelCapabilityRegistry()
+        )
+        self._capability: ModelCapability = ModelCapability(
+            model_id="",
+            provider="",
+            max_output_tokens=0,
+            context_window=0,
+            supports_vision=False,
+            supports_tool_use=False,
+            supports_temperature=False,
+            temperature_min=0.0,
+            temperature_max=0.0,
+            knowledge_cutoff="",
+        )
+        self._platform_config: Any = None
+
+        # Delegate to from_config for config resolution, then apply the
+        # resolved values to self.  This keeps __init__ thin while
+        # preserving backward compatibility.
+        type(self).from_config(
+            model_string=model_string,
+            stage=stage,
+            config_dir=config_dir,
+            capability_registry=capability_registry,
+            session_store=session_store,
+            _instance=self,
+        )
+
+    @classmethod
+    def from_config(
+        cls,
+        model_string: str | None = None,
+        stage: str | None = None,
+        config_dir: Path | None = None,
+        capability_registry: ModelCapabilityRegistry | None = None,
+        session_store: Any | None = None,
+        *,
+        _instance: LLMClient | None = None,
+    ) -> LLMClient:
+        """Create or initialise an LLMClient from config string.
+
+        Resolves all settings from ``config.toml``, detects the provider
+        type, fetches model capabilities, and resolves API keys.  This
+        is the preferred way to create an LLMClient when you have a
+        model string or stage name.
+
+        When ``_instance`` is provided (internal use by ``__init__``),
+        the resolved values are applied to that instance instead of
+        creating a new one.  This preserves backward compatibility with
+        the ``LLMClient(model_string=...)`` calling convention.
+
+        Parameters
+        ----------
+        model_string:
+            Explicit ``provider:model`` string.  Takes priority.
+        stage:
+            Pipeline stage name (e.g. ``"planning"``).  Resolved via
+            ``[models.stages]`` config, falls back to default.
+        config_dir:
+            Config directory override (default: ``~/.agent-nexus/``).
+        capability_registry:
+            Shared registry to avoid duplicate ModelDB fetches.
+        session_store:
+            Optional session store for conversation continuity.
+
+        Returns:
+            A fully initialised :class:`LLMClient`.
+        """
+        inst = _instance if _instance is not None else cls.__new__(cls)
+
+        # Ensure resource-holding attrs are pre-initialised when creating a
+        # fresh instance via from_config() (not via __init__ which already
+        # sets them).  When _instance is provided, these are already set.
+        if _instance is None:
+            inst._http_client = None
+            inst._openai_sdk = None
+            inst._anthropic_sdk = None
+            inst._cli_backend = None
+
+        # Lazy imports to break circular import cycle:
+        #   config.loader -> config.config_templates -> agency -> agency.llm_client -> config.loader
+        from agent_nexus.platform.config.loader import ConfigLoader
+        from agent_nexus.platform.config.model_config import ModelConfigManager
+        from agent_nexus.platform.config.model_db import ModelDBClient
 
         loader = ConfigLoader(config_dir=config_dir)
         platform_config = loader.load_config()
@@ -130,43 +224,41 @@ class LLMClient:
                 "or pass model_string explicitly"
             )
 
-        self._provider_name, self._model_name = mgr.parse_model_string(resolved)
-        self._provider_config = mgr.get_provider_config(self._provider_name)
+        inst._provider_name, inst._model_name = mgr.parse_model_string(resolved)
+        inst._provider_config = mgr.get_provider_config(inst._provider_name)
 
         # Auto-detect CLI providers: if not in [models.providers.*], check [cli_backends.*]
         if (
-            self._provider_name not in platform_config.models.providers
-            and self._provider_name in loader.load_cli_backends()
+            inst._provider_name not in platform_config.models.providers
+            and inst._provider_name in loader.load_cli_backends()
         ):
-            self._provider_config = ProviderConfig(api=ProviderApiType.CLI)
-        self._session_store = session_store
+            inst._provider_config = ProviderConfig(api=ProviderApiType.CLI)
+        inst._session_store = session_store
 
-        if self._provider_config.api == ProviderApiType.CLI:
-            self._api_key = ""
-            self._cli_backend = self._init_cli_backend(config_dir)
+        if inst._provider_config.api == ProviderApiType.CLI:
+            inst._api_key = ""
+            inst._cli_backend = inst._init_cli_backend(config_dir)
         else:
-            self._api_key = mgr.resolve_api_key(self._provider_name)
+            inst._api_key = mgr.resolve_api_key(inst._provider_name)
 
-            if not self._api_key:
+            if not inst._api_key:
                 raise ValueError(
-                    f"API key for provider '{self._provider_name}' is empty. "
+                    f"API key for provider '{inst._provider_name}' is empty. "
                     f"Set the environment variable referenced in config.toml."
                 )
 
         # CLI providers with no model name skip capability lookup — the CLI
         # itself decides which model to use, so registry/ModelDB lookups are
         # unnecessary and just produce noisy warnings for empty model strings.
-        is_cli_no_model = self._provider_config.api == ProviderApiType.CLI and not self._model_name
+        is_cli_no_model = inst._provider_config.api == ProviderApiType.CLI and not inst._model_name
 
         if capability_registry is not None:
-            self._capability_registry = capability_registry
+            inst._capability_registry = capability_registry
         else:
-            self._capability_registry = ModelCapabilityRegistry()
+            inst._capability_registry = ModelCapabilityRegistry()
 
         if is_cli_no_model:
-            # CLI backends manage their own model params — this capability
-            # is never consumed (call() short-circuits to _call_cli).
-            self._capability = ModelCapability(
+            inst._capability = ModelCapability(
                 model_id="",
                 provider="",
                 max_output_tokens=0,
@@ -183,12 +275,12 @@ class LLMClient:
             #   1. Already enriched in shared registry → reuse (no warning).
             #   2. ModelDB remote lookup → build capability from remote data.
             #   3. Built-in registry.get() → may warn (appropriate: both sources failed).
-            if self._capability_registry.is_enriched(self._model_name):
-                self._capability = self._capability_registry.get(self._model_name)
+            if inst._capability_registry.is_enriched(inst._model_name):
+                inst._capability = inst._capability_registry.get(inst._model_name)
             else:
                 db_client = ModelDBClient()
                 try:
-                    remote_data = db_client.fetch_model(self._model_name)
+                    remote_data = db_client.fetch_model(inst._model_name)
                 except Exception:
                     logger.debug(
                         "ModelDB fetch failed, using built-in capability data",
@@ -199,14 +291,10 @@ class LLMClient:
                     db_client.close()
 
                 if remote_data is not None:
-                    # Prefer model-level built-in data for fallback values,
-                    # then provider-level defaults.  This ensures custom
-                    # providers with unknown names still get reasonable
-                    # defaults instead of all-zero capabilities.
-                    cap_fallback = self._capability_registry.get(
-                        self._model_name,
-                    ) or self._capability_registry.get_provider_default(
-                        self._provider_name,
+                    cap_fallback = inst._capability_registry.get(
+                        inst._model_name,
+                    ) or inst._capability_registry.get_provider_default(
+                        inst._provider_name,
                     )
                     enriched_cap = ModelCapability(
                         model_id=remote_data.get("id", cap_fallback.model_id),
@@ -236,29 +324,31 @@ class LLMClient:
                             "knowledge_cutoff", cap_fallback.knowledge_cutoff
                         ),
                     )
-                    self._capability_registry.set_override(
-                        self._model_name,
+                    inst._capability_registry.set_override(
+                        inst._model_name,
                         enriched_cap,
                     )
-                    self._capability = enriched_cap
+                    inst._capability = enriched_cap
                 else:
-                    self._capability = self._capability_registry.get(self._model_name)
+                    inst._capability = inst._capability_registry.get(inst._model_name)
 
         logger.info(
             "LLMClient initialized: provider=%s model=%s api=%s max_output_tokens=%d",
-            self._provider_name,
-            self._model_name or "(cli)",
-            self._provider_config.api,
-            self._capability.max_output_tokens,
+            inst._provider_name,
+            inst._model_name or "(cli)",
+            inst._provider_config.api,
+            inst._capability.max_output_tokens,
         )
 
-        # Store platform config for streaming resolution
-        self._platform_config = platform_config
+        inst._platform_config = platform_config
+
+        return inst
 
     def _init_cli_backend(self, config_dir: Path | None) -> Any:
         """Create a GenericCLIBackend using BackendConfig from config.toml."""
         from agent_nexus.platform.agency.cli_backend.base import GenericCLIBackend
         from agent_nexus.platform.agency.cli_backend.types import BackendConfig
+        from agent_nexus.platform.config.loader import ConfigLoader
 
         loader = ConfigLoader(config_dir=config_dir)
         cli_backends = loader.load_cli_backends()
@@ -319,8 +409,10 @@ class LLMClient:
             self._anthropic_sdk = None
 
     def __del__(self) -> None:
-        with contextlib.suppress(Exception):
+        try:
             self.close()
+        except Exception:
+            logger.debug("Error closing LLMClient in __del__", exc_info=True)
 
     def __enter__(self) -> LLMClient:
         return self
@@ -490,6 +582,72 @@ class LLMClient:
             return "{" + text
         return text
 
+    @staticmethod
+    def _build_anthropic_messages(p: _LLMCallParams) -> list[dict[str, Any]]:
+        """Build Anthropic-format message list with optional JSON prefill."""
+        messages: list[dict[str, Any]] = [{"role": "user", "content": p.user_message}]
+        if p.response_format == "json":
+            messages.append({"role": "assistant", "content": "{"})
+        return messages
+
+    def _build_anthropic_base_kwargs(self, p: _LLMCallParams) -> dict[str, Any]:
+        """Build Anthropic base kwargs dict (model, max_tokens, system, messages).
+
+        Sampling params (temperature, top_p) and timeout are added to the
+        returned dict but are *not* applied to the SDK streaming calls that
+        pass them separately.
+        """
+        messages = self._build_anthropic_messages(p)
+        kwargs: dict[str, Any] = {
+            "model": self._model_name,
+            "max_tokens": p.max_tokens or self._capability.max_output_tokens,
+            "system": p.system_prompt,
+            "messages": messages,
+        }
+        if p.temperature is not None and self._capability.supports_temperature:
+            kwargs["temperature"] = max(
+                self._capability.temperature_min,
+                min(self._capability.temperature_max, p.temperature),
+            )
+        if p.top_p is not None:
+            kwargs["top_p"] = max(0.0, min(1.0, p.top_p))
+        if p.timeout is not None:
+            kwargs["timeout"] = p.timeout
+        return kwargs
+
+    @staticmethod
+    def _build_openai_messages(p: _LLMCallParams) -> list[dict[str, Any]]:
+        """Build OpenAI-format message list (system + user)."""
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": p.system_prompt},
+            {"role": "user", "content": p.user_message},
+        ]
+        return messages
+
+    def _build_openai_base_kwargs(self, p: _LLMCallParams) -> dict[str, Any]:
+        """Build OpenAI base kwargs dict (model, messages, max_tokens).
+
+        Sampling params and response_format are included.
+        """
+        messages = self._build_openai_messages(p)
+        kwargs: dict[str, Any] = {
+            "model": self._model_name,
+            "messages": messages,
+            "max_tokens": p.max_tokens or self._capability.max_output_tokens,
+        }
+        if p.temperature is not None and self._capability.supports_temperature:
+            kwargs["temperature"] = max(
+                self._capability.temperature_min,
+                min(self._capability.temperature_max, p.temperature),
+            )
+        if p.top_p is not None:
+            kwargs["top_p"] = max(0.0, min(1.0, p.top_p))
+        if p.response_format == "json":
+            kwargs["response_format"] = {"type": "json_object"}
+        if p.timeout is not None:
+            kwargs["timeout"] = p.timeout
+        return kwargs
+
     def _update_capability_from_response(self, actual_model: str) -> None:
         """Enrich capability data when the API returns a different model name."""
         if actual_model == self._model_name:
@@ -523,7 +681,11 @@ class LLMClient:
         timeout: float | None,
     ) -> LLMResponse:
         """Execute a CLI backend call and return an LLMResponse."""
-        result = self._cli_backend.call(
+        if self._cli_backend is None:
+            raise RuntimeError("CLI backend not available")
+        backend = self._cli_backend
+
+        result = backend.call(
             system_prompt,
             user_message,
             session_id=session_id,
@@ -532,7 +694,7 @@ class LLMClient:
 
         if result.returncode != 0:
             raise LLMCallError(
-                f"CLI backend '{self._cli_backend.name}' exited with code {result.returncode}: "
+                f"CLI backend '{backend.name}' exited with code {result.returncode}: "
                 f"{result.raw_stderr[:500]}"
             )
 
@@ -544,7 +706,7 @@ class LLMClient:
             self._session_store.record_execution(
                 task_id="",
                 backend_type="cli",
-                backend_name=self._cli_backend.name,
+                backend_name=backend.name,
                 model=result.model or self._model_name,
                 session_id=result.session_id,
                 input_tokens=result.input_tokens,
@@ -556,7 +718,7 @@ class LLMClient:
                 self._session_store.save_session(
                     CLISessionRecord(
                         session_id=result.session_id,
-                        backend_name=self._cli_backend.name,
+                        backend_name=backend.name,
                         model=result.model or self._model_name,
                     )
                 )
@@ -588,28 +750,7 @@ class LLMClient:
             self._provider_name,
         )
 
-        messages: list[dict[str, Any]] = [{"role": "user", "content": p.user_message}]
-
-        # Prefill trick for JSON: start assistant response with "{" to
-        # strongly guide the model into producing a JSON object.
-        if p.response_format == "json":
-            messages.append({"role": "assistant", "content": "{"})
-
-        kwargs: dict[str, Any] = {
-            "model": self._model_name,
-            "max_tokens": p.max_tokens or self._capability.max_output_tokens,
-            "system": p.system_prompt,
-            "messages": messages,
-        }
-        if p.temperature is not None and self._capability.supports_temperature:
-            kwargs["temperature"] = max(
-                self._capability.temperature_min,
-                min(self._capability.temperature_max, p.temperature),
-            )
-        if p.top_p is not None:
-            kwargs["top_p"] = max(0.0, min(1.0, p.top_p))
-        if p.timeout is not None:
-            kwargs["timeout"] = p.timeout
+        kwargs = self._build_anthropic_base_kwargs(p)
 
         def _extract_text_delta(delta: Any) -> str:
             """Extract text from a content_block_delta, skipping ThinkingDelta."""
@@ -676,19 +817,7 @@ class LLMClient:
             "content-type": "application/json",
         }
 
-        messages: list[dict[str, Any]] = [{"role": "user", "content": p.user_message}]
-
-        # Prefill trick for JSON: start assistant response with "{" to
-        # strongly guide the model into producing a JSON object.
-        if p.response_format == "json":
-            messages.append({"role": "assistant", "content": "{"})
-
-        payload: dict[str, Any] = {
-            "model": self._model_name,
-            "max_tokens": p.max_tokens or self._capability.max_output_tokens,
-            "system": p.system_prompt,
-            "messages": messages,
-        }
+        payload = self._build_anthropic_base_kwargs(p)
         self._apply_sampling_params(payload, p.temperature, p.top_p)
 
         # NOTE: asyncio.run() requires no running event loop in the current thread.
@@ -722,27 +851,7 @@ class LLMClient:
             self._provider_name,
         )
 
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": p.system_prompt},
-            {"role": "user", "content": p.user_message},
-        ]
-
-        kwargs: dict[str, Any] = {
-            "model": self._model_name,
-            "messages": messages,
-            "max_tokens": p.max_tokens or self._capability.max_output_tokens,
-        }
-        if p.temperature is not None and self._capability.supports_temperature:
-            kwargs["temperature"] = max(
-                self._capability.temperature_min,
-                min(self._capability.temperature_max, p.temperature),
-            )
-        if p.top_p is not None:
-            kwargs["top_p"] = max(0.0, min(1.0, p.top_p))
-        if p.response_format == "json":
-            kwargs["response_format"] = {"type": "json_object"}
-        if p.timeout is not None:
-            kwargs["timeout"] = p.timeout
+        kwargs = self._build_openai_base_kwargs(p)
 
         if use_stream:
             text_parts: list[str] = []
@@ -779,14 +888,7 @@ class LLMClient:
             "content-type": "application/json",
         }
 
-        payload: dict[str, Any] = {
-            "model": self._model_name,
-            "messages": [
-                {"role": "system", "content": p.system_prompt},
-                {"role": "user", "content": p.user_message},
-            ],
-            "max_tokens": p.max_tokens or self._capability.max_output_tokens,
-        }
+        payload = self._build_openai_base_kwargs(p)
         self._apply_sampling_params(payload, p.temperature, p.top_p)
 
         if p.response_format == "json":

@@ -91,6 +91,7 @@ fn multi_provider_config() -> PlatformConfig {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key_env: "OPENAI_API_KEY".to_string(),
             api: ProviderApiType::OpenaiCompatible,
+            streaming: None,
         },
     );
     providers.insert(
@@ -99,6 +100,7 @@ fn multi_provider_config() -> PlatformConfig {
             base_url: "https://api.anthropic.com".to_string(),
             api_key_env: "ANTHROPIC_API_KEY".to_string(),
             api: ProviderApiType::AnthropicMessages,
+            streaming: None,
         },
     );
     providers.insert(
@@ -107,6 +109,7 @@ fn multi_provider_config() -> PlatformConfig {
             base_url: "http://localhost:11434/v1".to_string(),
             api_key_env: String::new(),
             api: ProviderApiType::Ollama,
+            streaming: None,
         },
     );
     providers.insert(
@@ -115,6 +118,7 @@ fn multi_provider_config() -> PlatformConfig {
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key_env: "DEEPSEEK_API_KEY".to_string(),
             api: ProviderApiType::OpenaiCompatible,
+            streaming: None,
         },
     );
     PlatformConfig {
@@ -122,6 +126,7 @@ fn multi_provider_config() -> PlatformConfig {
         models: ModelConfig {
             default: "openai:gpt-4o".to_string(),
             stages: std::collections::HashMap::new(),
+            streaming_default: true,
             providers,
         },
         runtime: Default::default(),

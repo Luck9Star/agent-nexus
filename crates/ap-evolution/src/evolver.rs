@@ -34,6 +34,9 @@ pub enum EvolverError {
 
     #[error("Store error: {0}")]
     Store(#[from] crate::store::StoreError),
+
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
 }
 
 /// Skill evolver — holds a reference to the store and applies evolution.
@@ -136,6 +139,86 @@ impl SkillEvolver {
                 error
             ),
         })
+    }
+
+    /// Derived evolution: create a new skill derived from observed patterns.
+    ///
+    /// Python has `evolve_derived` — stub in Rust until full implementation.
+    ///
+    /// # Errors
+    /// Always returns `EvolverError::NotImplemented` in the current version.
+    pub fn evolve_derived(
+        &self,
+        _skill_name: &str,
+        _derivation_context: &str,
+    ) -> Result<EvolutionOutcome, EvolverError> {
+        Err(EvolverError::NotImplemented(
+            "derived evolution not yet supported in Rust".into(),
+        ))
+    }
+
+    /// Captured evolution: evolve a skill from captured interaction data.
+    ///
+    /// Python has `evolve_captured` — stub in Rust until full implementation.
+    ///
+    /// # Errors
+    /// Always returns `EvolverError::NotImplemented` in the current version.
+    pub fn evolve_captured(
+        &self,
+        _skill_name: &str,
+        _captured_data: &str,
+    ) -> Result<EvolutionOutcome, EvolverError> {
+        Err(EvolverError::NotImplemented(
+            "captured evolution not yet supported in Rust".into(),
+        ))
+    }
+
+    /// Process tool degradation: handle a skill whose tools have degraded.
+    ///
+    /// Python has `process_tool_degradation` — stub in Rust until full implementation.
+    ///
+    /// # Errors
+    /// Always returns `EvolverError::NotImplemented` in the current version.
+    pub fn process_tool_degradation(
+        &self,
+        _skill_name: &str,
+        _degraded_tool: &str,
+    ) -> Result<EvolutionOutcome, EvolverError> {
+        Err(EvolverError::NotImplemented(
+            "tool degradation processing not yet supported in Rust".into(),
+        ))
+    }
+
+    /// Process metric check: evolve based on metric thresholds.
+    ///
+    /// Python has `process_metric_check` — stub in Rust until full implementation.
+    ///
+    /// # Errors
+    /// Always returns `EvolverError::NotImplemented` in the current version.
+    pub fn process_metric_check(
+        &self,
+        _skill_name: &str,
+        _metric_name: &str,
+        _metric_value: f64,
+    ) -> Result<EvolutionOutcome, EvolverError> {
+        Err(EvolverError::NotImplemented(
+            "metric check processing not yet supported in Rust".into(),
+        ))
+    }
+
+    /// Prune recovered tools: remove tools that have recovered from degradation.
+    ///
+    /// Python has `prune_recovered_tools` — stub in Rust until full implementation.
+    ///
+    /// # Errors
+    /// Always returns `EvolverError::NotImplemented` in the current version.
+    pub fn prune_recovered_tools(
+        &self,
+        _skill_name: &str,
+    ) -> Result<EvolutionOutcome, EvolverError> {
+        Err(EvolverError::NotImplemented(
+            "recovered tool pruning not yet supported in Rust".into(),
+        ))
     }
 }
 

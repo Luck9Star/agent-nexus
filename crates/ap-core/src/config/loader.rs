@@ -155,6 +155,7 @@ impl ConfigLoader {
                 default: merged_default,
                 providers: merged_providers,
                 stages: merged_stages,
+                streaming_default: crate::models::config::default_streaming(),
             },
             sources: merged_sources,
         }

@@ -22,6 +22,8 @@ pub struct ProviderConfig {
     pub api_key_env: String,
     #[serde(default)]
     pub api: ProviderApiType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub streaming: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -32,10 +34,16 @@ pub struct ModelConfig {
     pub providers: std::collections::HashMap<String, ProviderConfig>,
     #[serde(default)]
     pub stages: std::collections::HashMap<String, String>,
+    #[serde(default = "default_streaming")]
+    pub streaming_default: bool,
 }
 
 fn default_model() -> String {
     "openai:gpt-4o".to_string()
+}
+
+pub(crate) fn default_streaming() -> bool {
+    true
 }
 
 /// Built-in provider defaults shared between [`ModelConfig::default`] and [`crate::config::loader::apply_builtin_providers`].
@@ -47,31 +55,37 @@ pub(crate) fn default_providers() -> std::collections::HashMap<String, ProviderC
         base_url: String::new(),
         api_key_env: "OPENAI_API_KEY".into(),
         api: ProviderApiType::OpenaiCompatible,
+        streaming: None,
     });
     providers.insert("anthropic".into(), ProviderConfig {
         base_url: String::new(),
         api_key_env: "ANTHROPIC_API_KEY".into(),
         api: ProviderApiType::AnthropicMessages,
+        streaming: None,
     });
     providers.insert("deepseek".into(), ProviderConfig {
         base_url: "https://api.deepseek.com/v1".into(),
         api_key_env: "DEEPSEEK_API_KEY".into(),
         api: ProviderApiType::OpenaiCompatible,
+        streaming: None,
     });
     providers.insert("minimax".into(), ProviderConfig {
         base_url: String::new(),
         api_key_env: "MINIMAX_API_KEY".into(),
         api: ProviderApiType::OpenaiCompatible,
+        streaming: None,
     });
     providers.insert("qwen".into(), ProviderConfig {
         base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
         api_key_env: "DASHSCOPE_API_KEY".into(),
         api: ProviderApiType::OpenaiCompatible,
+        streaming: None,
     });
     providers.insert("ollama".into(), ProviderConfig {
         base_url: "http://localhost:11434/v1".into(),
         api_key_env: String::new(),
         api: ProviderApiType::Ollama,
+        streaming: None,
     });
     providers
 }
@@ -82,6 +96,7 @@ impl Default for ModelConfig {
             default: default_model(),
             providers: default_providers(),
             stages: std::collections::HashMap::new(),
+            streaming_default: default_streaming(),
         }
     }
 }
@@ -92,16 +107,20 @@ pub struct RuntimeConfig {
     pub python_path: String,
     #[serde(default = "default_uv")]
     pub uv_path: String,
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
 }
 
 fn default_python() -> String { "python3".to_string() }
 fn default_uv() -> String { "uv".to_string() }
+fn default_log_level() -> String { "INFO".to_string() }
 
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             python_path: default_python(),
             uv_path: default_uv(),
+            log_level: default_log_level(),
         }
     }
 }

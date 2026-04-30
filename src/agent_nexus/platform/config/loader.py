@@ -285,6 +285,10 @@ class ConfigLoader:
         logger.debug("Config dir ensured: %s", self.config_dir)
         return self.config_dir
 
+    def invalidate_cache(self) -> None:
+        """Clear the cached config so the next load re-reads config.toml."""
+        self._config_cache = None
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

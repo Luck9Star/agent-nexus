@@ -219,6 +219,7 @@ class IPCProtocol:
     def __init__(self, stream: IPCStream) -> None:
         self._stream = stream
         self._peek_buffer: deque[AgentToPlatform] = deque()
+        self._discarded_count: int = 0
 
     @property
     def stream(self) -> IPCStream:
@@ -234,9 +235,12 @@ class IPCProtocol:
         message is discarded to make room (FIFO eviction).
         """
         if len(self._peek_buffer) >= self._MAX_PEEK_BUFFER_SIZE:
+            self._discarded_count += 1
             logger.warning(
-                "IPC peek buffer reached max size (%d); discarding oldest message",
+                "IPC peek buffer reached max size (%d); "
+                "discarding oldest message (total discarded: %d)",
                 self._MAX_PEEK_BUFFER_SIZE,
+                self._discarded_count,
             )
             self._peek_buffer.popleft()
         self._peek_buffer.append(msg)

@@ -45,10 +45,10 @@ timeout = 120
 markers = [
     "unit: fast, isolated unit tests (no I/O, no network)",
     "integration: tests spanning multiple modules with real I/O",
-    "e2e: full end-to-end tests requiring external services",
+    "e2e: end-to-end subsystem tests (runs by default, no external services)",
     "capability: agent capability contract tests",
     "capability_release: release acceptance tests (requires --run-release)",
-    "requires_api: real LLM API call tests (requires --run-api)",
+    "requires_api: requires real API/network access (needs --run-e2e)",
 ]
 
 [tool.ruff]

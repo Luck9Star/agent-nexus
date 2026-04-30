@@ -17,12 +17,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fnmatch
+import ipaddress
 import json
 import logging
 import shlex
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from agent_nexus.models.hooks import (
     AggregatedHookResult,
@@ -33,6 +35,21 @@ from agent_nexus.models.hooks import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _is_private_url(url: str) -> bool:
+    """Block requests to private/internal IP ranges."""
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        return False
+    try:
+        ip = ipaddress.ip_address(hostname)
+        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+    except ValueError:
+        # hostname is a domain, not IP — allow but block known internal endpoints
+        blocked_hostnames = {"localhost", "metadata.google.internal", "metadata.internal"}
+        return hostname.lower() in blocked_hostnames
 
 
 class HookExecutor:
@@ -390,6 +407,15 @@ class HookExecutor:
                 error=f"HTTP hook URL has unsupported scheme (only http/https): {hook.url}",
             )
 
+        # SSRF guard: block private/internal IP ranges
+        if _is_private_url(hook.url):
+            return HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error=f"HTTP hook URL targets private/internal address: {hook.url}",
+            )
+
         payload = {
             "event": hook.event,
             "context": context,
@@ -420,7 +446,7 @@ class HookExecutor:
                 hook=hook,
                 passed=passed,
                 blocked=(not passed and hook.block_on_failure),
-                output=resp.text[:1024] or None,
+                output=resp.text[:256] or None,
                 error=None if passed else f"HTTP {resp.status_code}: {resp.text[:512]}",
                 duration_ms=round(duration_ms, 2),
             )
@@ -444,13 +470,14 @@ class HookExecutor:
     async def _execute_prompt(
         self,
         hook: HookDefinition,
-        context: dict[str, Any],
+        _context: dict[str, Any],
     ) -> HookExecution:
         """Execute a PROMPT hook (placeholder).
 
         For POC: returns ``{"ok": true}`` with the prompt text as output.
         Production would call a small LLM model here.
         """
+        logger.warning("Prompt hook type is not yet implemented, returning unconditional pass")
         start = time.monotonic()
         output = hook.prompt or "PROMPT hook (no prompt text)"
         duration_ms = (time.monotonic() - start) * 1000
@@ -465,13 +492,14 @@ class HookExecutor:
     async def _execute_agent(
         self,
         hook: HookDefinition,
-        context: dict[str, Any],
+        _context: dict[str, Any],
     ) -> HookExecution:
         """Execute an AGENT hook (placeholder).
 
         For POC: returns ``{"ok": true}`` with the prompt text as output.
         Production would call a large LLM model here.
         """
+        logger.warning("Agent hook type is not yet implemented, returning unconditional pass")
         start = time.monotonic()
         output = hook.prompt or "AGENT hook (no prompt text)"
         duration_ms = (time.monotonic() - start) * 1000

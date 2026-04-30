@@ -362,7 +362,7 @@ def _run_wizard(config_path: Path) -> None:
         prov_section["api_key_env"] = key_env
     if api_key and key_env:
         typer.echo(
-            f"  Note: API key stored. Add to shell profile: export {key_env}={api_key[:4]}..."
+            f"  Note: API key stored. Add to shell profile: export {key_env}=****"
         )
     if api_type != "openai-compatible":
         prov_section["api"] = api_type

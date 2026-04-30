@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import logging
+from collections.abc import Sequence
 from typing import ClassVar
 
 from agent_nexus.models.runtime import SecurityViolation
@@ -77,6 +78,7 @@ _DEFAULT_FORBIDDEN_QUALIFIED_CALLS: dict[str, set[str]] = {
 }
 
 _DEFAULT_FORBIDDEN_ATTRIBUTES = [
+    "__class__",  # class object access → __mro__/__subclasses__ escape chain
     "__subclasses__",
     "__globals__",
     "__code__",
@@ -129,7 +131,7 @@ class SecurityChecker:
         ),
     ]
 
-    def __init__(self, rules: list[SecurityRule] | None = None) -> None:
+    def __init__(self, rules: Sequence[SecurityRule] | None = None) -> None:
         """Initialize SecurityChecker with specified rules.
 
         Args:

@@ -5,7 +5,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use ap_core::models::ipc::{
-    AgentToPlatform, AgentToPlatformType, IPCMessage, MessageDirection, PlatformToAgent,
+    AgentToPlatform, AgentToPlatformType, IPCMessage, IpcPayload, MessageDirection, PlatformToAgent,
     PlatformToAgentType,
 };
 
@@ -85,7 +85,7 @@ fn bench_ipc_deserialize(c: &mut Criterion) {
 fn bench_ipc_message_roundtrip(c: &mut Criterion) {
     let msg = IPCMessage {
         direction: MessageDirection::PlatformToAgent,
-        payload: serde_json::to_value(make_platform_to_agent()).unwrap(),
+        payload: IpcPayload::PlatformToAgent(make_platform_to_agent()),
     };
 
     c.bench_function("ipc/message_roundtrip", |b| {

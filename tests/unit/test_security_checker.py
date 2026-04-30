@@ -144,15 +144,15 @@ class TestSecurityCheckerCheckCode:
 # ============================================================================
 
 
-class TestClassAllowed:
-    """Accessing __class__ should NOT be a violation by default."""
+class TestClassBlocked:
+    """Accessing __class__ IS a violation (blocks __mro__/__subclasses__ escape chain)."""
 
-    def test_class_attribute_allowed(self) -> None:
+    def test_class_attribute_blocked(self) -> None:
         checker = SecurityChecker()
         violations = checker.check_code("x = obj.__class__.__name__\n")
-        # __class__ should NOT be in violations (removed from default list)
         attr_violations = [v for v in violations if v.rule_type == "attribute"]
-        assert len(attr_violations) == 0
+        assert len(attr_violations) == 1
+        assert "__class__" in attr_violations[0].message
 
     def test_dangerous_attributes_still_blocked(self) -> None:
         checker = SecurityChecker()

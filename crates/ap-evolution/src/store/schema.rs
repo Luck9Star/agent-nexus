@@ -4,7 +4,20 @@
 //! 6 tables + 11 indexes.
 
 /// Complete DDL for the evolution database.
+///
+/// Tables shared with Python: `skill_records`, `skill_lineage_parents`,
+/// `execution_analyses`, `skill_judgments`.
+///
+/// Rust-only extensions (not present in Python evolution store):
+/// - `_meta` — schema version tracking for migration support.
+/// - `context_budget_log` — Rust-side context budget observability.
+/// - `agent_records` — Rust-side agent metadata cache.
+///
+/// When opening a database created by the Python implementation, these
+/// Rust-only tables are created by `CREATE TABLE IF NOT EXISTS` so no
+/// error occurs. The migration path is always forward-compatible.
 pub const SCHEMA_SQL: &str = r"
+-- Rust-only extension: schema version tracking (not in Python).
 CREATE TABLE IF NOT EXISTS _meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -65,6 +78,7 @@ CREATE TABLE IF NOT EXISTS skill_judgments (
 CREATE INDEX IF NOT EXISTS idx_sj_skill ON skill_judgments(skill_id);
 CREATE INDEX IF NOT EXISTS idx_sj_analysis ON skill_judgments(analysis_id);
 
+-- Rust-only extension: context budget observability (not in Python).
 CREATE TABLE IF NOT EXISTS context_budget_log (
     id TEXT PRIMARY KEY,
     agent_name TEXT NOT NULL,
@@ -78,6 +92,7 @@ CREATE INDEX IF NOT EXISTS idx_cbl_agent ON context_budget_log(agent_name);
 CREATE INDEX IF NOT EXISTS idx_cbl_agent_created
     ON context_budget_log(agent_name, created_at DESC);
 
+-- Rust-only extension: agent metadata cache (not in Python).
 CREATE TABLE IF NOT EXISTS agent_records (
     agent_id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,

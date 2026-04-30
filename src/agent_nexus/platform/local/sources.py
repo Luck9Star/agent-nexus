@@ -237,7 +237,7 @@ class SourceManager:
 
         # Invalidate the loader's config cache so it picks up the changes
         if self._loader is not None:
-            self._loader._config_cache = None
+            self._loader.invalidate_cache()
 
         try:
             self._cache_mtime = os.path.getmtime(self._path)

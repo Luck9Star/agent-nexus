@@ -11,6 +11,7 @@ runtime (TaskGraph + ProcessManager).
 
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 import contextlib
 import logging
@@ -326,6 +327,18 @@ class DAGDispatcher:
         self._cleanup_stale_tasks(specialist_ids, result)
 
         return result
+
+    async def adispatch(self, dag: CompositionDAG, task_description: str) -> DispatchResult:
+        """Async wrapper for :meth:`dispatch` — prevents event loop blocking.
+
+        When the agency pipeline runs inside an ``asyncio`` event loop, calling
+        the synchronous :meth:`dispatch` would block the loop because it uses
+        ``ThreadPoolExecutor`` internally.  This wrapper offloads the work to a
+        thread via ``asyncio.to_thread`` so the event loop stays responsive.
+
+        Parameters are identical to :meth:`dispatch`.
+        """
+        return await asyncio.to_thread(self.dispatch, dag, task_description)
 
     def _dispatch_parallel(
         self,

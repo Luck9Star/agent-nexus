@@ -21,8 +21,8 @@ def _make_llm_client(
 ):
     """Create an LLMClient with mocked config for testing."""
     with (
-        patch("agent_nexus.platform.agency.llm_client.ConfigLoader") as MockLoader,  # noqa: N806
-        patch("agent_nexus.platform.agency.llm_client.ModelDBClient"),
+        patch("agent_nexus.platform.config.loader.ConfigLoader") as MockLoader,  # noqa: N806
+        patch("agent_nexus.platform.config.model_db.ModelDBClient"),
     ):
         platform_cfg = PlatformConfig(
             runtime=RuntimeConfig(),
@@ -119,8 +119,8 @@ class TestCallAnthropicSDK:
 
     def _make_anthropic_client(self, streaming=True):
         with (
-            patch("agent_nexus.platform.agency.llm_client.ConfigLoader") as MockLoader,  # noqa: N806
-            patch("agent_nexus.platform.agency.llm_client.ModelDBClient"),
+            patch("agent_nexus.platform.config.loader.ConfigLoader") as MockLoader,  # noqa: N806
+            patch("agent_nexus.platform.config.model_db.ModelDBClient"),
         ):
             platform_cfg = PlatformConfig(
                 runtime=RuntimeConfig(),
