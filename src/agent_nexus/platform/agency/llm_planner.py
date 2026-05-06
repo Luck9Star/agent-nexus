@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from .json_parse import robust_json_parse
 from .task_composer import infer_capabilities
+from .token_counter import StructuredPrompt, TokenCounter
 
 if TYPE_CHECKING:
     from .llm_client import LLMClient
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_MAX_PLANNING_PROMPT_CHARS = 50_000
+_MAX_PLANNING_TOKENS = 50_000
 
 
 @dataclass
@@ -74,6 +75,7 @@ class LLMPlanner:
         self._registry = registry
         self._client = client
         self._temperature = temperature
+        self._token_counter = TokenCounter()
 
     @classmethod
     def fallback_count(cls) -> int:
@@ -152,12 +154,26 @@ class LLMPlanner:
             name = profile.get("name", profile.get("id", "unknown"))
             expert_summary.append(f"- {name}: {', '.join(caps)}")
 
-        prompt = (
+        prompt = StructuredPrompt()
+        prompt.add(
+            "角色定义",
             "You are a task decomposition specialist. Given a user task and a pool of "
             "available experts, analyze the task and determine which capabilities are "
-            "required.\n\n"
-            f"Available capabilities: {', '.join(sorted(all_caps))}\n\n"
-            f"Available experts:\n" + "\n".join(expert_summary) + "\n\n"
+            "required.",
+            priority=1,
+        )
+        prompt.add(
+            "可用能力",
+            f"Available capabilities: {', '.join(sorted(all_caps))}",
+            priority=2,
+        )
+        prompt.add(
+            "可用专家",
+            "\n".join(expert_summary),
+            priority=3,
+        )
+        prompt.add(
+            "输出格式",
             "Respond with ONLY a JSON object (no markdown fences):\n"
             "{\n"
             '  "capabilities": ["cap1", "cap2"],\n'
@@ -166,11 +182,12 @@ class LLMPlanner:
             "}\n\n"
             "The capabilities must come from the available capabilities list above. "
             "The focus_hints should guide each expert on what to focus on. "
-            'Use "parallel" unless the task clearly requires sequential execution.'
+            'Use "parallel" unless the task clearly requires sequential execution.',
+            priority=2,
         )
-        if len(prompt) > _MAX_PLANNING_PROMPT_CHARS:
-            prompt = prompt[:_MAX_PLANNING_PROMPT_CHARS] + "\n[...truncated]"
-        return prompt
+
+        prompt.trim_to(_MAX_PLANNING_TOKENS, self._token_counter)
+        return prompt.render()
 
     def _keyword_fallback(self, task: str) -> PlannerOutput:
         """Fall back to keyword-based capability inference."""

@@ -33,6 +33,7 @@ from fastmcp import FastMCP
 
 from agent_nexus.models.agent import AgentManifest
 from agent_nexus.platform.gateway.deferred_registry import DeferredAgentRegistry
+from agent_nexus.platform.gateway.schema_transformer import SchemaTransformer
 from agent_nexus.platform.gateway.tool_adapter import (
     McpToolAdapter,
     remove_all_locks,
@@ -46,42 +47,6 @@ if TYPE_CHECKING:
     from agent_nexus.platform.router.router import PlatformRouter
 
 logger = logging.getLogger(__name__)
-
-# Pre-computed JSON Schema → Python type mapping (used by _build_params)
-_JSON_SCHEMA_TYPE_MAP: dict[str, type] = {
-    "integer": int,
-    "number": float,
-    "boolean": bool,
-    "array": list,
-    "object": dict,
-}
-
-
-def _resolve_json_schema_type(prop_def: dict) -> tuple[type, bool]:
-    """Resolve a JSON Schema property definition to a Python type.
-
-    Handles ``anyOf`` / ``oneOf`` (nullable types) by extracting the
-    first non-null type and returning an ``Optional`` annotation.
-
-    Returns:
-        ``(py_type, is_nullable)`` tuple.
-    """
-    type_str = prop_def.get("type")
-    if isinstance(type_str, str):
-        py_type = _JSON_SCHEMA_TYPE_MAP.get(type_str, str)
-        return py_type, False
-
-    # Handle anyOf / oneOf (e.g. [{"type": "string"}, {"type": "null"}])
-    for combiner_key in ("anyOf", "oneOf"):
-        variants = prop_def.get(combiner_key)
-        if isinstance(variants, list):
-            non_null = [v for v in variants if isinstance(v, dict) and v.get("type") != "null"]
-            has_null = any(isinstance(v, dict) and v.get("type") == "null" for v in variants)
-            if non_null:
-                inner = _JSON_SCHEMA_TYPE_MAP.get(non_null[0].get("type", ""), str)
-                return inner, bool(has_null)
-
-    return str, False
 
 
 # ---------------------------------------------------------------------------
@@ -475,28 +440,34 @@ class MCPGateway:
         params: list[inspect.Parameter] = []
         annotations: dict[str, Any] = {}
 
+        transformer = SchemaTransformer(schema)
         for prop_name, prop_def in properties.items():
             if not isinstance(prop_def, dict):
                 continue
-            py_type, is_nullable = _resolve_json_schema_type(prop_def)
-            effective_type = py_type | None if is_nullable else py_type  # type: ignore[assignment]
-            annotations[prop_name] = effective_type
+            py_type = transformer.resolve(prop_def, name=prop_name)
+            annotations[prop_name] = py_type
 
             if prop_name in required:
                 params.append(
                     inspect.Parameter(
                         prop_name,
                         inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        annotation=effective_type,
+                        annotation=py_type,
                     )
                 )
             else:
-                default = prop_def.get("default")
+                has_default = "default" in prop_def
+                if has_default:
+                    default = prop_def["default"]
+                else:
+                    default = None
+                    py_type = py_type | None  # type: ignore[assignment]
+                annotations[prop_name] = py_type
                 params.append(
                     inspect.Parameter(
                         prop_name,
                         inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        annotation=effective_type,
+                        annotation=py_type,
                         default=default,
                     )
                 )

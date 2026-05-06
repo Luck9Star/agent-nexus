@@ -28,6 +28,12 @@ except ImportError:
 from agent_nexus.models.capability import ModelCapability, ModelCapabilityRegistry
 from agent_nexus.models.config import ProviderApiType, ProviderConfig
 from agent_nexus.models.errors import AgentNexusError
+from agent_nexus.platform.agency.hooks import (
+    CallContext,
+    CallResult,
+    HookEvent,
+    HookManager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +143,7 @@ class LLMClient:
             knowledge_cutoff="",
         )
         self._platform_config: Any = None
+        self._hooks: HookManager = HookManager()
 
         # Delegate to from_config for config resolution, then apply the
         # resolved values to self.  This keeps __init__ thin while
@@ -434,6 +441,11 @@ class LLMClient:
         return self._capability
 
     @property
+    def hooks(self) -> HookManager:
+        """Access the hook manager for this client."""
+        return self._hooks
+
+    @property
     def supports_vision(self) -> bool:
         """Whether the resolved model supports vision/image inputs."""
         return self._capability.supports_vision
@@ -522,31 +534,68 @@ class LLMClient:
         -------
         LLMResponse
         """
-        if self._provider_config.api == ProviderApiType.CLI:
-            return self._call_cli(system_prompt, user_message, session_id, timeout)
+        import time
 
-        params = _LLMCallParams(
+        ctx = CallContext(
+            model=self._model_name,
             system_prompt=system_prompt,
             user_message=user_message,
-            max_tokens=max_tokens,
             temperature=temperature,
-            top_p=top_p,
-            timeout=timeout,
             response_format=response_format,
+            timeout=timeout,
         )
+        self._hooks.dispatch(HookEvent.BEFORE_CALL, ctx=ctx)
 
-        if self._provider_config.api == ProviderApiType.ANTHROPIC_MESSAGES:
-            text, actual_model = self._call_anthropic(params)
-        else:
-            text, actual_model = self._call_openai(params)
+        start = time.monotonic()
+        try:
+            cli_resp: LLMResponse | None = None
+            if self._provider_config.api == ProviderApiType.CLI:
+                cli_resp = self._call_cli(
+                    ctx.system_prompt, ctx.user_message, session_id, ctx.timeout
+                )
+                text, actual_model = cli_resp.text, cli_resp.model
+            else:
+                params = _LLMCallParams(
+                    system_prompt=ctx.system_prompt,
+                    user_message=ctx.user_message,
+                    max_tokens=max_tokens,
+                    temperature=ctx.temperature,
+                    top_p=top_p,
+                    timeout=ctx.timeout,
+                    response_format=ctx.response_format,
+                )
+                if self._provider_config.api == ProviderApiType.ANTHROPIC_MESSAGES:
+                    text, actual_model = self._call_anthropic(params)
+                else:
+                    text, actual_model = self._call_openai(params)
 
-        self._update_capability_from_response(actual_model)
+            self._update_capability_from_response(actual_model)
 
-        return LLMResponse(
-            text=text,
-            model=actual_model,
-            provider=self._provider_name,
-        )
+            latency_ms = (time.monotonic() - start) * 1000
+            result = CallResult(
+                content=text,
+                model=actual_model,
+                input_tokens=None,
+                output_tokens=None,
+                latency_ms=latency_ms,
+            )
+            self._hooks.dispatch(HookEvent.AFTER_CALL, ctx=ctx, result=result)
+
+            if cli_resp is not None:
+                return LLMResponse(
+                    text=text,
+                    model=actual_model,
+                    provider=self._provider_name,
+                    metadata=cli_resp.metadata,
+                )
+            return LLMResponse(
+                text=text,
+                model=actual_model,
+                provider=self._provider_name,
+            )
+        except Exception as e:
+            self._hooks.dispatch(HookEvent.ON_ERROR, ctx=ctx, error=e)
+            raise
 
     def _apply_sampling_params(
         self,

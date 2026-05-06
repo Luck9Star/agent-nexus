@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from .integrator import IntegratedArtifact
 from .json_parse import robust_json_parse
 from .qa_gate import QAGate, QAGateInput, QAGateResult
+from .token_counter import StructuredPrompt, TokenCounter
 
 if TYPE_CHECKING:
     from .llm_client import LLMClient
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Minimum score threshold for LLM QA pass
 _PASS_THRESHOLD = 0.6
-_MAX_EVAL_PROMPT_CHARS = 50_000
+_MAX_EVAL_TOKENS = 50_000
 
 
 class LLMQualityGate:
@@ -49,6 +50,7 @@ class LLMQualityGate:
         self._pass_threshold = pass_threshold
         self._structural_trust_floor = structural_trust_floor
         self._temperature = temperature
+        self._token_counter = TokenCounter()
 
     @classmethod
     def fallback_count(cls) -> int:
@@ -153,13 +155,18 @@ class LLMQualityGate:
             "  }\n"
             "}"
         )
-        user_message = (
-            f"Original task: {task}\n\n"
-            f"Experts consulted: {', '.join(integrated.source_agents)}\n\n"
-            f"Synthesized output:\n{sections_preview}"
+
+        user_prompt = StructuredPrompt()
+        user_prompt.add("原始任务", f"Original task: {task}", priority=1)
+        user_prompt.add(
+            "专家列表",
+            f"Experts consulted: {', '.join(integrated.source_agents)}",
+            priority=2,
         )
-        if len(user_message) > _MAX_EVAL_PROMPT_CHARS:
-            user_message = user_message[:_MAX_EVAL_PROMPT_CHARS] + "\n[...truncated]"
+        user_prompt.add("综合输出", f"Synthesized output:\n{sections_preview}", priority=5)
+
+        user_prompt.trim_to(_MAX_EVAL_TOKENS, self._token_counter)
+        user_message = user_prompt.render()
 
         response = self._client.call(
             system_prompt=system_prompt,
