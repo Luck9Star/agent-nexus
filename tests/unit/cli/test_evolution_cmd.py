@@ -30,6 +30,7 @@ def _make_mock_engine():
     mock_store.get_all_skills.return_value = []
     mock_store.get_ancestry.return_value = []
     from agent_nexus.models.evolution import EvolutionMetrics
+
     mock_store.get_metrics.return_value = EvolutionMetrics(
         total_selections=100,
         total_applied=80,
@@ -98,7 +99,9 @@ class TestPromotePathTraversalRejection:
         assert result.exit_code != 0
         assert "invalid" in result.output.lower()
 
-    def test_promote_accepts_valid_skill_id(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_promote_accepts_valid_skill_id(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Valid skill IDs pass the traversal guard."""
         config_dir = tmp_path / ".agent-nexus"
         config_dir.mkdir()

@@ -75,14 +75,16 @@ class TestArray:
 class TestObjectModel:
     def test_flat_object(self):
         t = _make_transformer()
-        model = t.resolve({
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "age": {"type": "integer"},
-            },
-            "required": ["name"],
-        })
+        model = t.resolve(
+            {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "age": {"type": "integer"},
+                },
+                "required": ["name"],
+            }
+        )
         assert issubclass(model, BaseModel)
         # Required field 'name' should accept str
         instance = model(name="Alice")
@@ -90,25 +92,29 @@ class TestObjectModel:
 
     def test_optional_field_gets_none_default(self):
         t = _make_transformer()
-        model = t.resolve({
-            "type": "object",
-            "properties": {
-                "id": {"type": "integer"},
-                "label": {"type": "string"},
-            },
-            "required": ["id"],
-        })
+        model = t.resolve(
+            {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "label": {"type": "string"},
+                },
+                "required": ["id"],
+            }
+        )
         instance = model(id=1)
         assert instance.label is None  # type: ignore[attr-defined]
 
     def test_field_with_explicit_default(self):
         t = _make_transformer()
-        model = t.resolve({
-            "type": "object",
-            "properties": {
-                "status": {"type": "string", "default": "active"},
-            },
-        })
+        model = t.resolve(
+            {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "default": "active"},
+                },
+            }
+        )
         instance = model()
         assert instance.status == "active"  # type: ignore[attr-defined]
 
@@ -212,20 +218,22 @@ class TestAllOf:
     def test_all_of_merges_inline_properties(self):
         """allOf merges inline sub-schemas into one model."""
         t = _make_transformer()
-        model = t.resolve({
-            "allOf": [
-                {
-                    "type": "object",
-                    "properties": {"id": {"type": "integer"}},
-                    "required": ["id"],
-                },
-                {
-                    "type": "object",
-                    "properties": {"name": {"type": "string"}},
-                    "required": ["name"],
-                },
-            ],
-        })
+        model = t.resolve(
+            {
+                "allOf": [
+                    {
+                        "type": "object",
+                        "properties": {"id": {"type": "integer"}},
+                        "required": ["id"],
+                    },
+                    {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                        "required": ["name"],
+                    },
+                ],
+            }
+        )
         assert issubclass(model, BaseModel)
         instance = model(id=1, name="test")
         assert instance.id == 1  # type: ignore[attr-defined]
@@ -259,6 +267,7 @@ class TestNullable:
         result = t.resolve({"$ref": "#/$defs/Item", "nullable": True})
         # Result should be BaseModel | None (or None | BaseModel)
         import typing
+
         args = typing.get_args(result)
         assert len(args) == 2
         non_null = [a for a in args if a is not type(None)]
@@ -346,11 +355,13 @@ class TestResolveModel:
     def test_resolve_model_object(self):
         """resolve_model on object schema returns BaseModel directly."""
         t = _make_transformer()
-        model = t.resolve_model({
-            "type": "object",
-            "properties": {"x": {"type": "integer"}},
-            "required": ["x"],
-        })
+        model = t.resolve_model(
+            {
+                "type": "object",
+                "properties": {"x": {"type": "integer"}},
+                "required": ["x"],
+            }
+        )
         assert issubclass(model, BaseModel)
         assert model(x=42).x == 42  # type: ignore[attr-defined]
 
@@ -369,10 +380,12 @@ class TestFallback:
     def test_properties_without_type_builds_object(self):
         """Schema with properties but no explicit type builds object model."""
         t = _make_transformer()
-        model = t.resolve({
-            "properties": {
-                "key": {"type": "string"},
-            },
-            "required": ["key"],
-        })
+        model = t.resolve(
+            {
+                "properties": {
+                    "key": {"type": "string"},
+                },
+                "required": ["key"],
+            }
+        )
         assert issubclass(model, BaseModel)

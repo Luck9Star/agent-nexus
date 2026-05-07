@@ -84,10 +84,13 @@ class TestHookManagerDispatch:
 
         mgr = HookManager()
         for event in HookEvent:
+
             def _make_handler(e: HookEvent):
                 def handler(**kwargs):
                     received.append(e)
+
                 return handler
+
             mgr.register(event, _make_handler(event))
 
         for event in HookEvent:

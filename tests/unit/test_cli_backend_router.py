@@ -1,4 +1,5 @@
 """Unit tests for CLIRouter — 4-strategy routing with fallback chain."""
+
 from __future__ import annotations
 
 from unittest.mock import patch

@@ -150,9 +150,11 @@ class TestStructuredPromptWithProviders:
         task_prov.update(["Task A", "Task B"])
         registry.register("tasks", task_prov, priority=5)
 
-        expert_prov = ExpertListProvider([
-            {"name": "reviewer", "capabilities": ["code-review", "security"]},
-        ])
+        expert_prov = ExpertListProvider(
+            [
+                {"name": "reviewer", "capabilities": ["code-review", "security"]},
+            ]
+        )
         registry.register("experts", expert_prov, priority=3)
 
         feedback_prov = ReflectionFeedbackProvider()

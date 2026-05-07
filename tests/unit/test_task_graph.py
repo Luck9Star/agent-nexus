@@ -536,7 +536,6 @@ class TestTaskGraphInMemory:
         assert tg.detect_cycles() == []
 
 
-
 # ============================================================================
 # Coverage gap tests: fail_task not-found, parallel groups non-existent dep
 # warning, cyclic break branch, _get_task_conn_required raise,
@@ -565,8 +564,7 @@ class TestParallelGroupsNonExistentDep:
         # Manually insert a dep pointing to a non-existent task
         conn = sqlite3.connect(str(task_graph._db_path))
         conn.execute(
-            "INSERT INTO task_dependencies (task_id, blocked_by_id) "
-            "VALUES ('B', 'ghost_task')"
+            "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES ('B', 'ghost_task')"
         )
         conn.commit()
         conn.close()
@@ -592,21 +590,14 @@ class TestParallelGroupsCyclicBreak:
 
         # Create cycle: X->Y->X via raw SQL
         conn = sqlite3.connect(str(task_graph._db_path))
-        conn.execute(
-            "INSERT INTO task_dependencies (task_id, blocked_by_id) "
-            "VALUES ('X', 'Y')"
-        )
-        conn.execute(
-            "INSERT INTO task_dependencies (task_id, blocked_by_id) "
-            "VALUES ('Y', 'X')"
-        )
+        conn.execute("INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES ('X', 'Y')")
+        conn.execute("INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES ('Y', 'X')")
         conn.commit()
         conn.close()
 
         # Neither X nor Y can be scheduled -- both have unresolvable deps
         groups = task_graph.get_parallel_groups()
         assert len(groups) == 0
-
 
 
 class TestGetTaskConnRequiredRaises:
@@ -662,18 +653,14 @@ class TestInMemoryRollback:
         tg.start_task("R1")
 
         # Corrupt the state so the read-back in _get_task_conn_required fails
-        tg._mem_conn.execute(
-            "UPDATE tasks SET state = 'invalid_state' WHERE id = 'R1'"
-        )
+        tg._mem_conn.execute("UPDATE tasks SET state = 'invalid_state' WHERE id = 'R1'")
         tg._mem_conn.commit()
 
         with pytest.raises(ValueError, match="invalid_state"):
             tg.complete_task("R1")
 
         # After rollback the UPDATE to 'completed' was rolled back
-        row = tg._mem_conn.execute(
-            "SELECT state FROM tasks WHERE id = 'R1'"
-        ).fetchone()
+        row = tg._mem_conn.execute("SELECT state FROM tasks WHERE id = 'R1'").fetchone()
         assert row is not None
         assert row[0] == "invalid_state"
 
@@ -694,7 +681,8 @@ class TestWouldCreateCycleDFS:
         conn.close()
 
     def test_can_reach_target_through_chain(
-        self, task_graph: TaskGraph,
+        self,
+        task_graph: TaskGraph,
     ) -> None:
         """_can_reach follows dep chain and returns True when target found."""
         import sqlite3
@@ -706,8 +694,7 @@ class TestWouldCreateCycleDFS:
         conn = sqlite3.connect(str(task_graph._db_path))
         # Add dep from A to "fake_target" manually
         conn.execute(
-            "INSERT INTO task_dependencies (task_id, blocked_by_id) "
-            "VALUES ('A', 'fake_target')"
+            "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES ('A', 'fake_target')"
         )
         conn.commit()
 
@@ -772,11 +759,10 @@ class TestAddTaskCycleCheckWithBlockedBy:
         # Actually the simplest way: use raw SQL to set up the back-edge
         # so _would_create_cycle returns True on the next add_task.
         import sqlite3
+
         conn = sqlite3.connect(str(task_graph._db_path))
         # Make A blocked_by D (creating A->D->C->B->A cycle via raw SQL)
-        conn.execute(
-            "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES ('A', 'D')"
-        )
+        conn.execute("INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES ('A', 'D')")
         conn.commit()
         conn.close()
 
@@ -803,10 +789,9 @@ class TestAddTaskCycleCheckWithBlockedBy:
 
         # Now use raw SQL to add a reverse dep: R -> "NEW"
         import sqlite3
+
         conn = sqlite3.connect(str(task_graph._db_path))
-        conn.execute(
-            "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES ('R', 'NEW')"
-        )
+        conn.execute("INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES ('R', 'NEW')")
         conn.commit()
         conn.close()
 
@@ -878,10 +863,38 @@ class TestTaskGraphClose:
         tg = TaskGraph(Path(":memory:"))
         tg.add_task(_make_task("A"))
         tg.close()
-        # After close, _mem_conn is None so _conn() falls through to
-        # file-based path which will fail on ":memory:" string as a path
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError, match="TaskGraph is closed"):
             tg.get_task("A")
+
+    def test_closed_flag_set(self) -> None:
+        tg = TaskGraph(Path(":memory:"))
+        assert not tg._closed
+        tg.close()
+        assert tg._closed
+
+    @pytest.mark.asyncio
+    async def test_aclose_waits_for_inflight(self) -> None:
+        tg = TaskGraph(Path(":memory:"))
+        tg.add_task(_make_task("A"))
+        # Start an async read, then close — aclose should wait
+        result = await tg.aget_task("A")
+        assert result is not None
+        await tg.aclose()
+        assert tg._closed
+        with pytest.raises(RuntimeError, match="TaskGraph is closed"):
+            await tg.aget_task("A")
+
+    @pytest.mark.asyncio
+    async def test_async_lock_serialises_concurrent_reads(self) -> None:
+        tg = TaskGraph(Path(":memory:"))
+        tg.add_task(_make_task("A"))
+        # Two concurrent reads should both succeed safely
+        import asyncio
+
+        results = await asyncio.gather(tg.aget_task("A"), tg.aget_snapshot())
+        assert results[0] is not None
+        assert len(results[1].tasks) == 1
+        await tg.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -897,9 +910,7 @@ class TestCorruptTaskRow:
         tg.add_task(_make_task("good"))
         # Manually corrupt a row: insert invalid state string
         with tg._conn(immediate=True) as conn:
-            conn.execute(
-                "UPDATE tasks SET state = 'INVALID_STATE' WHERE id = 'good'"
-            )
+            conn.execute("UPDATE tasks SET state = 'INVALID_STATE' WHERE id = 'good'")
         with pytest.raises(ValueError, match="INVALID_STATE"):
             tg.get_task("good")
 
@@ -907,9 +918,7 @@ class TestCorruptTaskRow:
         tg = TaskGraph(tmp_path / "test.db")
         tg.add_task(_make_task("v1"))
         with tg._conn(immediate=True) as conn:
-            conn.execute(
-                "UPDATE tasks SET vars = 'not-json{{{}}' WHERE id = 'v1'"
-            )
+            conn.execute("UPDATE tasks SET vars = 'not-json{{{}}' WHERE id = 'v1'")
         with pytest.raises(Exception):
             tg.get_task("v1")
 
@@ -918,9 +927,7 @@ class TestCorruptTaskRow:
         tg = TaskGraph(tmp_path / "test.db")
         tg.add_task(_make_task("batch-bad"))
         with tg._conn(immediate=True) as conn:
-            conn.execute(
-                "UPDATE tasks SET state = 'TOTALLY_INVALID' WHERE id = 'batch-bad'"
-            )
+            conn.execute("UPDATE tasks SET state = 'TOTALLY_INVALID' WHERE id = 'batch-bad'")
         # Both get_snapshot and get_parallel_groups use _rows_to_tasks (batch).
         # Use get_parallel_groups which calls _rows_to_tasks internally.
         with pytest.raises(ValueError, match="TOTALLY_INVALID"):
@@ -959,6 +966,7 @@ class TestSchemaInitTransaction:
         """Verify executescript is NOT used in task_graph.py."""
         import inspect
         from agent_nexus.platform.orchestration.task_graph import TaskGraph as TG
+
         source = inspect.getsource(TG)
         assert "executescript" not in source
 

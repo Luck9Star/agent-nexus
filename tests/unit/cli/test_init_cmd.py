@@ -36,7 +36,9 @@ class TestDoctor:
         assert "config" in output_lower
         assert "pass" in output_lower or "fail" in output_lower
 
-    def test_doctor_reports_missing_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_doctor_reports_missing_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         config_dir = tmp_path / ".agent-nexus"
         config_dir.mkdir()
         monkeypatch.setenv("AGENT_NEXUS_HOME", str(config_dir))
@@ -47,7 +49,9 @@ class TestDoctor:
 
 
 class TestInit:
-    def test_init_creates_config_dir_and_files(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_init_creates_config_dir_and_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         config_dir = tmp_path / "fresh-home"
         monkeypatch.setenv("AGENT_NEXUS_HOME", str(config_dir))
 
@@ -70,7 +74,9 @@ class TestInit:
 
 
 class TestEnv:
-    def test_env_outputs_environment_info(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_env_outputs_environment_info(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         config_dir = tmp_path / ".agent-nexus"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text('schema_version = "1.0"\n')

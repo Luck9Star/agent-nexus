@@ -34,12 +34,14 @@ def _make_artifacts():
 def test_llm_integrator_synthesizes():
     mock_client = MagicMock()
     mock_client.call.return_value = LLMResponse(
-        text=json.dumps({
-            "summary": "Combined analysis reveals both security and architecture concerns",
-            "recommendations": ["Use parameterized queries", "Introduce interfaces"],
-            "conflicts": [],
-            "gaps": [],
-        }),
+        text=json.dumps(
+            {
+                "summary": "Combined analysis reveals both security and architecture concerns",
+                "recommendations": ["Use parameterized queries", "Introduce interfaces"],
+                "conflicts": [],
+                "gaps": [],
+            }
+        ),
         model="test-model",
         provider="test",
     )

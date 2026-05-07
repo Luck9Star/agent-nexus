@@ -16,6 +16,7 @@ from agent_nexus.platform.evolution.promotion import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _skill(
     id: str = "sk-1",
     name: str = "good-skill",
@@ -59,6 +60,7 @@ def _candidate(**overrides) -> PromotionCandidate:
 # find_candidates
 # ---------------------------------------------------------------------------
 
+
 class TestFindCandidates:
     def test_finds_eligible_skills(self):
         skill = _skill()
@@ -89,10 +91,24 @@ class TestFindCandidates:
         assert promoter.find_candidates() == []
 
     def test_multiple_candidates(self):
-        s1 = _skill(id="s1", name="a", selections=60, applied=55,
-                     completions=50, fallbacks=5, directory="skills/a")
-        s2 = _skill(id="s2", name="b", selections=10, applied=5,
-                     completions=3, fallbacks=2, directory="skills/b")
+        s1 = _skill(
+            id="s1",
+            name="a",
+            selections=60,
+            applied=55,
+            completions=50,
+            fallbacks=5,
+            directory="skills/a",
+        )
+        s2 = _skill(
+            id="s2",
+            name="b",
+            selections=10,
+            applied=5,
+            completions=3,
+            fallbacks=2,
+            directory="skills/b",
+        )
         store = _make_store([s1, s2])
         promoter = AgentPromoter(store)
         candidates = promoter.find_candidates()
@@ -103,6 +119,7 @@ class TestFindCandidates:
 # ---------------------------------------------------------------------------
 # promote
 # ---------------------------------------------------------------------------
+
 
 class TestPromote:
     def test_creates_agent_files(self, tmp_path):
@@ -146,6 +163,7 @@ class TestPromote:
 # ---------------------------------------------------------------------------
 # _generate_manifest / _generate_entry_point / _generate_skill_md
 # ---------------------------------------------------------------------------
+
 
 class TestGenerationHelpers:
     def test_manifest_has_promotion_metadata(self):
@@ -199,6 +217,7 @@ class TestGenerationHelpers:
 # ---------------------------------------------------------------------------
 # store property
 # ---------------------------------------------------------------------------
+
 
 class TestStoreProperty:
     def test_store_returns_underlying_store(self):
@@ -264,6 +283,7 @@ class TestPromotionPartialRollback:
 
         # Make the second write (agent.py) fail
         from agent_nexus.platform.evolution.promotion import _atomic_write as real_write
+
         call_count = 0
 
         def _failing_write(path, content):
@@ -273,7 +293,9 @@ class TestPromotionPartialRollback:
                 raise OSError("disk full")
             return real_write(path, content)
 
-        with patch("agent_nexus.platform.evolution.promotion._atomic_write", side_effect=_failing_write):
+        with patch(
+            "agent_nexus.platform.evolution.promotion._atomic_write", side_effect=_failing_write
+        ):
             result = promoter.promote(candidate)
 
         assert result.success is False
@@ -295,7 +317,9 @@ class TestPromotionPartialRollback:
         agent_dir = agents_root / "good-skill"
         assert not agent_dir.exists()
 
-        with patch("agent_nexus.platform.evolution.promotion._atomic_write", side_effect=OSError("fail")):
+        with patch(
+            "agent_nexus.platform.evolution.promotion._atomic_write", side_effect=OSError("fail")
+        ):
             result = promoter.promote(candidate)
 
         assert result.success is False

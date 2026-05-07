@@ -18,6 +18,7 @@ from agent_nexus.models.context import (
 # ContextLevel enum
 # ---------------------------------------------------------------------------
 
+
 class TestContextLevel:
     def test_members(self):
         assert set(ContextLevel) == {
@@ -46,6 +47,7 @@ class TestContextLevel:
 # ---------------------------------------------------------------------------
 # ContextBudget
 # ---------------------------------------------------------------------------
+
 
 class TestContextBudget:
     def test_defaults_match_docs(self):
@@ -92,6 +94,7 @@ class TestContextBudget:
 # TokenUsage
 # ---------------------------------------------------------------------------
 
+
 class TestTokenUsage:
     def test_defaults(self):
         tu = TokenUsage()
@@ -133,6 +136,7 @@ class TestTokenUsage:
 # ---------------------------------------------------------------------------
 # TokenUsage.check_budget()
 # ---------------------------------------------------------------------------
+
 
 class TestTokenUsageCheckBudget:
     def test_within_budget(self):
@@ -195,6 +199,7 @@ class TestTokenUsageCheckBudget:
 # ContextBudgetLogEntry
 # ---------------------------------------------------------------------------
 
+
 class TestContextBudgetLogEntry:
     def test_construction_with_required_fields(self):
         entry = ContextBudgetLogEntry(
@@ -240,9 +245,7 @@ class TestContextBudgetLogEntry:
         assert entry.total_tokens == 700
 
     def test_frozen(self):
-        entry = ContextBudgetLogEntry(
-            log_id="log-1", agent_id="a", session_id="s"
-        )
+        entry = ContextBudgetLogEntry(log_id="log-1", agent_id="a", session_id="s")
         with pytest.raises(ValidationError):
             entry.log_id = "changed"
 
@@ -494,15 +497,23 @@ class TestContextBudgetLogEntryTokenValidation:
 
     def test_zero_tokens_accepted(self):
         entry = ContextBudgetLogEntry(
-            log_id="l", agent_id="a", session_id="s",
-            prompt_tokens=0, completion_tokens=0, total_tokens=0,
+            log_id="l",
+            agent_id="a",
+            session_id="s",
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
         )
         assert entry.prompt_tokens == 0
         assert entry.total_tokens == 0
 
     def test_positive_tokens_accepted(self):
         entry = ContextBudgetLogEntry(
-            log_id="l", agent_id="a", session_id="s",
-            prompt_tokens=100, completion_tokens=50, total_tokens=150,
+            log_id="l",
+            agent_id="a",
+            session_id="s",
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
         )
         assert entry.prompt_tokens == 100

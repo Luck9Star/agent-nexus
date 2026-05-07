@@ -19,6 +19,7 @@ from agent_nexus.platform.runtime.security_rules import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _check_code(rule, code):
     """Parse code into AST and apply a single rule to every node."""
     if isinstance(rule, RegexRule):
@@ -33,6 +34,7 @@ def _check_code(rule, code):
 # ---------------------------------------------------------------------------
 # ImportRule
 # ---------------------------------------------------------------------------
+
 
 class TestImportRule:
     """Tests for ImportRule: block forbidden module imports."""
@@ -125,6 +127,7 @@ class TestImportRule:
 
 EVAL_CODE = "\x65\x76\x61\x6c"  # "eval" to avoid security hook false positive
 
+
 class TestFunctionRule:
     """Tests for FunctionRule: block forbidden function calls."""
 
@@ -161,13 +164,15 @@ class TestFunctionRule:
         violations = _check_code(rule, code)
         assert len(violations) >= 1
         # getattr is caught as a direct forbidden function call
-        func_violations = [v for v in violations if "getattr" in v.code_snippet or "getattr" in v.message]
+        func_violations = [
+            v for v in violations if "getattr" in v.code_snippet or "getattr" in v.message
+        ]
         assert len(func_violations) >= 1
 
     def test_nested_call(self):
         """eval(eval("x")) should produce violations for nested calls."""
         rule = FunctionRule(forbidden=[EVAL_CODE])
-        code = EVAL_CODE + '(' + EVAL_CODE + '("x"))'
+        code = EVAL_CODE + "(" + EVAL_CODE + '("x"))'
         violations = _check_code(rule, code)
         assert len(violations) >= 2
 
@@ -188,6 +193,7 @@ class TestFunctionRule:
 # AttributeRule
 # ---------------------------------------------------------------------------
 
+
 class TestAttributeRule:
     """Tests for AttributeRule: block dangerous attribute access."""
 
@@ -205,9 +211,7 @@ class TestAttributeRule:
         assert len(violations) == 0
 
     def test_multiple_forbidden(self):
-        rule = AttributeRule(
-            forbidden=["__globals__", "__code__", "__builtins__"]
-        )
+        rule = AttributeRule(forbidden=["__globals__", "__code__", "__builtins__"])
         code = "obj.__globals__\nobj.__code__\nobj.__builtins__"
         violations = _check_code(rule, code)
         assert len(violations) == 3
@@ -220,6 +224,7 @@ class TestAttributeRule:
 # ---------------------------------------------------------------------------
 # RegexRule
 # ---------------------------------------------------------------------------
+
 
 class TestRegexRule:
     """Tests for RegexRule: catch-all regex patterns on source code."""
@@ -265,6 +270,7 @@ class TestRegexRule:
 # ---------------------------------------------------------------------------
 # Combined / Integration-style tests (still unit-level)
 # ---------------------------------------------------------------------------
+
 
 class TestCombinedRules:
     """Verify multiple rule types cooperate on the same code."""
@@ -389,9 +395,7 @@ class TestRegexRuleCheckSource:
             patterns=r"getattr\s*\(\s*\w+\s*,\s*['\"]eval['\"]",
             description="test pattern",
         )
-        violations = rule.check_source(
-            "x = getattr(obj, 'eval')\n"
-        )
+        violations = rule.check_source("x = getattr(obj, 'eval')\n")
         assert len(violations) == 1
         assert violations[0].rule_type == "regex"
 

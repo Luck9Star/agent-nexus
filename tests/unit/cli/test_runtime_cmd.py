@@ -97,7 +97,9 @@ class TestPathTraversalRejection:
         assert result.exit_code != 0
         assert "invalid" in result.output.lower()
 
-    def test_valid_name_accepted_for_logs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_valid_name_accepted_for_logs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Valid names are not rejected by the validation guard."""
         config_dir = tmp_path / ".agent-nexus"
         config_dir.mkdir()

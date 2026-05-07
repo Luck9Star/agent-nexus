@@ -20,23 +20,30 @@ from agent_nexus.platform.orchestration.ipc import _ipc_lock_registry
 # Construction / naming
 # ---------------------------------------------------------------------------
 
+
 class TestMcpToolAdapterInit:
     def test_basic_construction(self) -> None:
-        adapter = McpToolAdapter("my-server", {
-            "name": "search",
-            "description": "Search documents",
-            "inputSchema": {"type": "object", "properties": {"q": {"type": "string"}}},
-        })
+        adapter = McpToolAdapter(
+            "my-server",
+            {
+                "name": "search",
+                "description": "Search documents",
+                "inputSchema": {"type": "object", "properties": {"q": {"type": "string"}}},
+            },
+        )
         assert adapter.server_name == "my_server"
         assert adapter.tool_name == "search"
         assert adapter.full_name == "mcp__my_server__search"
         assert adapter.description == "Search documents"
 
     def test_name_sanitization(self) -> None:
-        adapter = McpToolAdapter("my-server/v2", {
-            "name": "do-thing!",
-            "description": "",
-        })
+        adapter = McpToolAdapter(
+            "my-server/v2",
+            {
+                "name": "do-thing!",
+                "description": "",
+            },
+        )
         assert adapter.server_name == "my_server_v2"
         assert adapter.tool_name == "do_thing_"
         assert adapter.full_name == "mcp__my_server_v2__do_thing_"
@@ -64,12 +71,18 @@ class TestMcpToolAdapterInit:
 # get_tool_definition
 # ---------------------------------------------------------------------------
 
+
 class TestMcpToolAdapterDefinition:
     def test_definition_shape(self) -> None:
         schema = {"type": "object", "properties": {"x": {"type": "int"}}}
-        adapter = McpToolAdapter("agent", {
-            "name": "compute", "description": "Compute", "inputSchema": schema,
-        })
+        adapter = McpToolAdapter(
+            "agent",
+            {
+                "name": "compute",
+                "description": "Compute",
+                "inputSchema": schema,
+            },
+        )
         defn = adapter.get_tool_definition()
         assert defn["name"] == "mcp__agent__compute"
         assert defn["description"] == "Compute"
@@ -84,6 +97,7 @@ class TestMcpToolAdapterDefinition:
 # ---------------------------------------------------------------------------
 # execute
 # ---------------------------------------------------------------------------
+
 
 def _make_handle(alive: bool = True) -> MagicMock:
     handle = MagicMock()
@@ -161,6 +175,7 @@ class TestMcpToolAdapterExecute:
 # lock management
 # ---------------------------------------------------------------------------
 
+
 class TestMcpToolAdapterLocks:
     def test_remove_lock(self) -> None:
         """remove_lock no longer pops from registry for serialization safety."""
@@ -178,9 +193,11 @@ class TestMcpToolAdapterLocks:
         remove_all_locks()
         assert len(_ipc_lock_registry) == 0
 
+
 # ---------------------------------------------------------------------------
 # iter102 regression: tool_schema missing 'name' key
 # ---------------------------------------------------------------------------
+
 
 class TestMcpToolAdapterNameValidation:
     def test_missing_name_raises_value_error(self):

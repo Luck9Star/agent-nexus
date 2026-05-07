@@ -99,18 +99,10 @@ def _make_definition(
     """Create a minimal OrchestrationDefinition for testing."""
     if agents is None:
         agents = {
-            "explorer": DSLAgent(
-                name="explorer", description="Explore", role="explore"
-            ),
-            "planner": DSLAgent(
-                name="planner", description="Plan", role="plan"
-            ),
-            "worker1": DSLAgent(
-                name="worker1", description="Work", role="worker"
-            ),
-            "verifier": DSLAgent(
-                name="verifier", description="Verify", role="verification"
-            ),
+            "explorer": DSLAgent(name="explorer", description="Explore", role="explore"),
+            "planner": DSLAgent(name="planner", description="Plan", role="plan"),
+            "worker1": DSLAgent(name="worker1", description="Work", role="worker"),
+            "verifier": DSLAgent(name="verifier", description="Verify", role="verification"),
         }
     if tasks is None:
         tasks = [
@@ -171,7 +163,6 @@ class TestWorkflowContext:
         assert ctx.phase_results == {WorkflowPhase.research: "data"}
         assert ctx.current_phase == WorkflowPhase.synthesis
         assert ctx.task_graph is tg
-
 
 
 # ============================================================================
@@ -350,9 +341,7 @@ class TestSubtaskController:
         async def make_coro(val):
             return val
 
-        results = await ctrl.run_parallel(
-            [make_coro("a"), make_coro("b"), make_coro("c")]
-        )
+        results = await ctrl.run_parallel([make_coro("a"), make_coro("b"), make_coro("c")])
         assert results == ["a", "b", "c"]
 
     @pytest.mark.asyncio
@@ -408,9 +397,7 @@ class TestSubtaskController:
             current -= 1
             return "done"
 
-        results = await ctrl.run_parallel(
-            [tracked() for _ in range(6)]
-        )
+        results = await ctrl.run_parallel([tracked() for _ in range(6)])
         assert len(results) == 6
         assert peak <= 2  # max_parallel=2
 
@@ -462,33 +449,25 @@ class TestBuildPhaseMessage:
     """Tests for PlatformRouter._build_phase_message static method."""
 
     def test_research_feeds_synthesis(self) -> None:
-        msg = PlatformRouter._build_phase_message(
-            WorkflowPhase.research, "found X"
-        )
+        msg = PlatformRouter._build_phase_message(WorkflowPhase.research, "found X")
         assert "Research Results" in msg
         assert "found X" in msg
         assert "implementation plan" in msg
 
     def test_synthesis_feeds_implementation(self) -> None:
-        msg = PlatformRouter._build_phase_message(
-            WorkflowPhase.synthesis, "plan: do Y"
-        )
+        msg = PlatformRouter._build_phase_message(WorkflowPhase.synthesis, "plan: do Y")
         assert "Implementation Plan" in msg
         assert "plan: do Y" in msg
         assert "Execute the above plan" in msg
 
     def test_implementation_feeds_verification(self) -> None:
-        msg = PlatformRouter._build_phase_message(
-            WorkflowPhase.implementation, "built Z"
-        )
+        msg = PlatformRouter._build_phase_message(WorkflowPhase.implementation, "built Z")
         assert "Implementation Output" in msg
         assert "built Z" in msg
         assert "Verify" in msg
 
     def test_verification_returns_raw(self) -> None:
-        msg = PlatformRouter._build_phase_message(
-            WorkflowPhase.verification, "all good"
-        )
+        msg = PlatformRouter._build_phase_message(WorkflowPhase.verification, "all good")
         assert msg == "all good"
 
 
@@ -574,9 +553,7 @@ class TestRouteToAtomic:
     @pytest.mark.asyncio
     async def test_ipc_exception_returns_error_dict(self) -> None:
         handle = _make_agent_handle()
-        handle.ipc.receive_until_result = AsyncMock(
-            side_effect=RuntimeError("pipe broken")
-        )
+        handle.ipc.receive_until_result = AsyncMock(side_effect=RuntimeError("pipe broken"))
         pm = _make_process_manager(agents={"agent-a": handle})
         router = PlatformRouter(process_manager=pm)
 
@@ -592,9 +569,7 @@ class TestRouteToAtomic:
         router = PlatformRouter(process_manager=pm)
 
         await router.route_to_atomic("agent-a", "hello", "conv-1")
-        handle.ipc.send_chat.assert_awaited_once_with(
-            "hello", conversation_id="conv-1"
-        )
+        handle.ipc.send_chat.assert_awaited_once_with("hello", conversation_id="conv-1")
 
     @pytest.mark.asyncio
     async def test_failed_status_response(self) -> None:
@@ -606,8 +581,9 @@ class TestRouteToAtomic:
         assert result["success"] is False
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("status", ["COMPLETED", "Completed", None],
-                             ids=["uppercase", "mixed", "none"])
+    @pytest.mark.parametrize(
+        "status", ["COMPLETED", "Completed", None], ids=["uppercase", "mixed", "none"]
+    )
     async def test_status_variants_accepted(self, status) -> None:
         """External agents may send uppercase/mixed/missing status — all succeed."""
         handle = _make_agent_handle(response_status=status)
@@ -635,6 +611,7 @@ class TestRouteChat:
         assert conv_id is not None
         # UUID format check
         import uuid
+
         uuid.UUID(conv_id)  # raises ValueError if not a valid UUID
 
     @pytest.mark.asyncio
@@ -644,9 +621,7 @@ class TestRouteChat:
         router = PlatformRouter(process_manager=pm)
 
         await router.route_chat("a", "hi", conversation_id="fixed-id")
-        handle.ipc.send_chat.assert_awaited_once_with(
-            "hi", conversation_id="fixed-id"
-        )
+        handle.ipc.send_chat.assert_awaited_once_with("hi", conversation_id="fixed-id")
 
 
 class TestRouteComposite:
@@ -672,12 +647,8 @@ class TestRouteComposite:
         definition = _make_definition()
 
         mock_tg = MagicMock()
-        with patch(
-            "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg
-        ):
-            result = await router.route_composite(
-                definition, "build feature X", "conv-1"
-            )
+        with patch("agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg):
+            result = await router.route_composite(definition, "build feature X", "conv-1")
 
         assert result.success is True
         assert result.completed_phases == 4
@@ -703,9 +674,7 @@ class TestRouteComposite:
         definition = _make_definition()
 
         mock_tg = MagicMock()
-        with patch(
-            "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg
-        ):
+        with patch("agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg):
             result = await router.route_composite(definition, "test", "conv-1")
 
         assert result.success is False
@@ -736,9 +705,7 @@ class TestRouteComposite:
         definition = _make_definition()
 
         mock_tg = MagicMock()
-        with patch(
-            "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg
-        ):
+        with patch("agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg):
             result = await router.route_composite(definition, "test", "conv-1")
 
         # Parallel phases don't raise on agent error -- they aggregate warnings
@@ -767,9 +734,7 @@ class TestRouteComposite:
         definition = _make_definition()
 
         mock_tg = MagicMock()
-        with patch(
-            "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg
-        ):
+        with patch("agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg):
             result = await router.route_composite(definition, "test", "conv-1")
 
         assert result.success is False
@@ -790,9 +755,7 @@ class TestRouteComposite:
         router = PlatformRouter(process_manager=pm)
         definition = _make_definition()
 
-        with patch(
-            "agent_nexus.platform.router.router.TaskGraph", return_value=MagicMock()
-        ):
+        with patch("agent_nexus.platform.router.router.TaskGraph", return_value=MagicMock()):
             r1 = await router.route_composite(definition, "first", "conv-1")
             r2 = await router.route_composite(definition, "second", "conv-2")
 
@@ -819,9 +782,7 @@ class TestRouteComposite:
         definition = _make_definition()
 
         mock_tg = MagicMock()
-        with patch(
-            "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg
-        ):
+        with patch("agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg):
             result = await router.route_composite(definition, "test", "conv-1")
 
         assert result.success is False
@@ -849,9 +810,7 @@ class TestRouteComposite:
         definition = _make_definition()
 
         mock_tg = MagicMock()
-        with patch(
-            "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg
-        ):
+        with patch("agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg):
             result = await router.route_composite(definition, "test", "conv-1")
 
         # Workflow succeeds overall (parallel errors are warnings)
@@ -873,9 +832,7 @@ class TestRouteComposite:
         router = PlatformRouter(process_manager=pm)
 
         mock_tg = MagicMock()
-        with patch(
-            "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg
-        ):
+        with patch("agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg):
             result = await router.route_composite(definition, "test", "conv-1")
 
         # First phase raises RuntimeError for no agents; workflow fails
@@ -1055,7 +1012,6 @@ class TestStopAll:
         pm.stop_all.assert_awaited_once()
 
 
-
 # ============================================================================
 # Merged from iteration 16: Router empty phase failure
 # ============================================================================
@@ -1080,9 +1036,7 @@ class TestRouterEmptyPhaseFails:
         mock_ctx.task_graph = mock_tg
 
         with pytest.raises(RuntimeError, match="No agents available"):
-            await router._execute_phase(
-                mock_ctx, WorkflowPhase.research, definition, "test"
-            )
+            await router._execute_phase(mock_ctx, WorkflowPhase.research, definition, "test")
 
 
 # ============================================================================
@@ -1108,6 +1062,7 @@ class TestRouterParallelConversationId:
         router._process_manager = mock_pm  # type: ignore[attr-defined]
         router._task_graph = MagicMock()  # type: ignore[attr-defined]
         router._subtask = MagicMock()
+
         async def mock_run_with_retry(coro_factory, timeout):  # pyright: ignore[reportUnusedParameter]
             return await coro_factory()
 
@@ -1271,7 +1226,10 @@ class TestExecuteSingleAgentErrorWrapping:
         ids=["timeout", "connection"],
     )
     async def test_non_ipc_errors_wrapped_as_agent_execution_error(
-        self, recv_side_effect, match_str, expected_error_type,
+        self,
+        recv_side_effect,
+        match_str,
+        expected_error_type,
     ) -> None:
         """Non-IPC receive errors are wrapped in AgentExecutionError for retry."""
         from agent_nexus.platform.router.router import AgentExecutionError
@@ -1289,9 +1247,7 @@ class TestExecuteSingleAgentErrorWrapping:
         mock_pm.get_agent.return_value = handle
 
         with pytest.raises(AgentExecutionError, match=match_str) as exc_info:
-            await router._execute_single_agent(
-                "test-agent", "hello", conversation_id="c1"
-            )
+            await router._execute_single_agent("test-agent", "hello", conversation_id="c1")
         assert exc_info.value.error_type == expected_error_type
 
     @pytest.mark.asyncio
@@ -1305,7 +1261,10 @@ class TestExecuteSingleAgentErrorWrapping:
         ids=["ipctimeout-recv", "ipcconn-recv", "ipc-send"],
     )
     async def test_ipc_exceptions_propagate_directly(
-        self, ipc_exc_cls, ipc_msg, side_effect_on,
+        self,
+        ipc_exc_cls,
+        ipc_msg,
+        side_effect_on,
     ) -> None:
         """IPC-specific exceptions propagate directly (not wrapped)."""
         mock_pm = MagicMock()
@@ -1320,16 +1279,12 @@ class TestExecuteSingleAgentErrorWrapping:
             handle.ipc.receive_until_result = AsyncMock()
         else:
             handle.ipc.send_chat = AsyncMock()
-            handle.ipc.receive_until_result = AsyncMock(
-                side_effect=ipc_exc_cls(ipc_msg)
-            )
+            handle.ipc.receive_until_result = AsyncMock(side_effect=ipc_exc_cls(ipc_msg))
 
         mock_pm.get_agent.return_value = handle
 
         with pytest.raises(ipc_exc_cls, match=ipc_msg):
-            await router._execute_single_agent(
-                "test-agent", "hello", conversation_id="c1"
-            )
+            await router._execute_single_agent("test-agent", "hello", conversation_id="c1")
 
 
 # ============================================================================
@@ -1367,7 +1322,8 @@ class TestSubtaskCancelledError:
         controller = SubtaskController()
         with pytest.raises(asyncio.CancelledError, match="first cancel"):
             await controller.run_with_retry(
-                cancel_then_succeed, max_retries=2,
+                cancel_then_succeed,
+                max_retries=2,
             )
         # Should have stopped at first attempt, not retried
         assert attempt == 1
@@ -1417,7 +1373,8 @@ class TestSubtaskSystemExit:
         controller = SubtaskController()
         with pytest.raises(SystemExit):
             await controller.run_with_retry(
-                exit_then_succeed, max_retries=2,
+                exit_then_succeed,
+                max_retries=2,
             )
         assert attempt == 1
 
@@ -1437,7 +1394,8 @@ class TestSubtaskSystemExit:
         controller = SubtaskController()
         with pytest.raises(GeneratorExit):
             await controller.run_with_retry(
-                gen_exit_then_succeed, max_retries=2,
+                gen_exit_then_succeed,
+                max_retries=2,
             )
         assert attempt == 1
 
@@ -1457,7 +1415,8 @@ class TestSubtaskSystemExit:
         controller = SubtaskController()
         with pytest.raises(MemoryError, match="out of memory"):
             await controller.run_with_retry(
-                oom_then_succeed, max_retries=2,
+                oom_then_succeed,
+                max_retries=2,
             )
         assert attempt == 1
 
@@ -1468,7 +1427,7 @@ class TestSubtaskSystemExit:
 
 
 class TestWorkflowContextClose:
-    """WorkflowContext.close() must set task_graph to None."""
+    """WorkflowContext.close() and aclose() must set task_graph to None."""
 
     def test_close_sets_task_graph_none(self) -> None:
         ctx = WorkflowContext(
@@ -1492,6 +1451,31 @@ class TestWorkflowContextClose:
         )
         assert ctx.task_graph is not None
         ctx.close()
+        assert ctx.task_graph is None
+
+    @pytest.mark.asyncio
+    async def test_aclose_with_task_graph(self, tmp_path) -> None:
+        from agent_nexus.platform.orchestration.task_graph import TaskGraph
+
+        tg = TaskGraph(Path(":memory:"))
+        ctx = WorkflowContext(
+            conversation_id="c1",
+            message="hi",
+            agent_name="test",
+            task_graph=tg,
+        )
+        assert ctx.task_graph is not None
+        await ctx.aclose()
+        assert ctx.task_graph is None
+
+    @pytest.mark.asyncio
+    async def test_aclose_without_task_graph(self) -> None:
+        ctx = WorkflowContext(
+            conversation_id="c1",
+            message="hi",
+            agent_name="test",
+        )
+        await ctx.aclose()
         assert ctx.task_graph is None
 
 
@@ -1519,9 +1503,7 @@ class TestRouteCompositeTaskGraphSetupFailure:
         mock_tg = MagicMock()
         mock_tg.add_tasks.side_effect = RuntimeError("DB locked")
 
-        with patch(
-            "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg
-        ):
+        with patch("agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg):
             result = await router.route_composite(definition, "test", "conv-1")
 
         assert result.success is False
@@ -1541,9 +1523,7 @@ class TestRouteCompositeTaskGraphSetupFailure:
         mock_tg = MagicMock()
         mock_tg.add_tasks.side_effect = ValueError("bad task")
 
-        with patch(
-            "agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg
-        ):
+        with patch("agent_nexus.platform.router.router.TaskGraph", return_value=mock_tg):
             result = await router.route_composite(definition, "test", "conv-1")
 
         assert result.phase_results == {}
@@ -1582,9 +1562,7 @@ class TestRouteCompositeOverallTimeout:
                 0.0,  # instant timeout
             ),
         ):
-            result = await router.route_composite(
-                definition, "test timeout", "conv-1"
-            )
+            result = await router.route_composite(definition, "test timeout", "conv-1")
 
         assert result.success is False
         assert result.error is not None
@@ -1660,9 +1638,7 @@ class TestRouteToAtomicSendChatError:
         """send_chat succeeding but receive failing still returns error dict."""
         handle = _make_agent_handle()
         handle.ipc.send_chat = AsyncMock()  # succeeds
-        handle.ipc.receive_until_result = AsyncMock(
-            side_effect=RuntimeError("recv fail")
-        )
+        handle.ipc.receive_until_result = AsyncMock(side_effect=RuntimeError("recv fail"))
 
         pm = _make_process_manager(agents={"agent-a": handle})
         router = PlatformRouter(process_manager=pm)
@@ -1842,7 +1818,6 @@ class TestGetToolsRegistryPath:
         router._composite_defs = {}
         router._subtask = SubtaskController()
 
-
         mock_registry = MagicMock()
         mock_registry.get_tools_for_llm.return_value = [
             {"name": "mcp__agent__tool_a"},
@@ -1893,7 +1868,9 @@ class TestGetToolsErrorResponse:
     """iter110b regression: get_tools skips ERROR responses with warning."""
 
     @pytest.mark.asyncio
-    async def test_error_response_skipped_with_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+    async def test_error_response_skipped_with_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Agent returning ERROR type during tool discovery is skipped with a warning log."""
         h = _make_agent_handle(name="a1")
         mock_resp = MagicMock()
@@ -1929,9 +1906,7 @@ class TestExecutePhaseTaskGraphNone:
         mock_ctx.task_graph = None
 
         with pytest.raises(RuntimeError, match="TaskGraph not initialized"):
-            await router._execute_phase(
-                mock_ctx, WorkflowPhase.research, definition, "test"
-            )
+            await router._execute_phase(mock_ctx, WorkflowPhase.research, definition, "test")
 
 
 class TestExecutePhaseFallbackAgent:
@@ -1941,9 +1916,7 @@ class TestExecutePhaseFallbackAgent:
     async def test_fallback_first_agent_for_synthesis(self) -> None:
         """When no 'plan' role agent exists, first available agent is used."""
         agents = {
-            "worker1": _make_agent_handle(
-                name="worker1", response_content="fallback plan"
-            ),
+            "worker1": _make_agent_handle(name="worker1", response_content="fallback plan"),
         }
         pm = _make_process_manager(agents=agents)
         router = PlatformRouter(process_manager=pm)
@@ -1953,9 +1926,7 @@ class TestExecutePhaseFallbackAgent:
             goal="test",
             agent_name="test-agent",
             agents={
-                "worker1": DSLAgent(
-                    name="worker1", description="Explore", role="explore"
-                ),
+                "worker1": DSLAgent(name="worker1", description="Explore", role="explore"),
             },
             tasks=[DSLTask(id="t1", description="Explore", agent="worker1")],
             tool_loading=DSLToolLoading(),
@@ -1973,9 +1944,7 @@ class TestExecutePhaseFallbackAgent:
     @pytest.mark.asyncio
     async def test_fallback_root_task_agents_for_research(self) -> None:
         """Research phase with no 'explore' agents uses root task agents."""
-        handle = _make_agent_handle(
-            name="only-agent", response_content="research done"
-        )
+        handle = _make_agent_handle(name="only-agent", response_content="research done")
         pm = _make_process_manager(agents={"only-agent": handle})
         router = PlatformRouter(process_manager=pm)
 
@@ -1985,9 +1954,7 @@ class TestExecutePhaseFallbackAgent:
             goal="test",
             agent_name="test-agent",
             agents={
-                "only-agent": DSLAgent(
-                    name="only-agent", description="Plan", role="plan"
-                ),
+                "only-agent": DSLAgent(name="only-agent", description="Plan", role="plan"),
             },
             tasks=[task_item],
             tool_loading=DSLToolLoading(),
@@ -1997,9 +1964,7 @@ class TestExecutePhaseFallbackAgent:
         mock_ctx.task_graph = MagicMock()
 
         # Research phase -- no 'explore' agents, falls back to root task agents
-        result = await router._execute_phase(
-            mock_ctx, WorkflowPhase.research, definition, "test"
-        )
+        result = await router._execute_phase(mock_ctx, WorkflowPhase.research, definition, "test")
         assert "research done" in result
 
 
@@ -2015,11 +1980,8 @@ class TestExecuteSingleAgentHandleNotFound:
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
 
-
         with pytest.raises(AgentExecutionError, match="not found or not alive"):
-            await router._execute_single_agent(
-                "ghost-agent", "hello", conversation_id="c1"
-            )
+            await router._execute_single_agent("ghost-agent", "hello", conversation_id="c1")
 
     @pytest.mark.asyncio
     async def test_dead_handle_raises_agent_execution_error(self) -> None:
@@ -2032,11 +1994,8 @@ class TestExecuteSingleAgentHandleNotFound:
         router = PlatformRouter.__new__(PlatformRouter)
         router._pm = mock_pm
 
-
         with pytest.raises(AgentExecutionError, match="not found or not alive"):
-            await router._execute_single_agent(
-                "dead-agent", "hello", conversation_id="c1"
-            )
+            await router._execute_single_agent("dead-agent", "hello", conversation_id="c1")
 
 
 class TestTopologicalSortTasks:
@@ -2132,6 +2091,7 @@ class TestTopologicalSortTasks:
 # iter100 regression: _phase_to_role forward compatibility
 # ---------------------------------------------------------------------------
 
+
 class TestPhaseToRoleForwardCompat:
     def test_unknown_phase_returns_worker(self):
         """mapping.get(phase, "worker") prevents KeyError on future phases."""
@@ -2180,9 +2140,7 @@ class TestCompositeOverallTimeout:
             short_timeout,
         ):
             with patch.object(router, "_execute_phase", side_effect=_hanging_phase):
-                with patch.object(
-                    router, "_build_phase_message", return_value="msg"
-                ):
+                with patch.object(router, "_build_phase_message", return_value="msg"):
                     definition = OrchestrationDefinition(
                         goal="test",
                         agent_name="test-agent",
@@ -2192,9 +2150,7 @@ class TestCompositeOverallTimeout:
                         tasks=[DSLTask(id="t1", description="d", agent="a")],
                         tool_loading=DSLToolLoading(),
                     )
-                    result = await router.route_composite(
-                        definition, "test", "conv-1"
-                    )
+                    result = await router.route_composite(definition, "test", "conv-1")
 
         assert result.success is False
         assert result.error is not None
@@ -2209,9 +2165,7 @@ class TestCompositeOverallTimeout:
         )
         from agent_nexus.platform.router.router import _DEFAULT_COMPOSITE_TIMEOUT
 
-        assert _DEFAULT_COMPOSITE_TIMEOUT == DEFAULT_IPC_EXECUTE_TIMEOUT * len(
-            _PHASE_ORDER
-        )
+        assert _DEFAULT_COMPOSITE_TIMEOUT == DEFAULT_IPC_EXECUTE_TIMEOUT * len(_PHASE_ORDER)
 
 
 # ---------------------------------------------------------------------------
@@ -2237,6 +2191,7 @@ class TestTopologicalSortCycleFallback:
 
 # iter122 regression: route_chat empty string validation
 
+
 class TestRouteChatEmptyStringGuard:
     """route_chat rejects empty agent_name and message."""
 
@@ -2257,9 +2212,7 @@ class TestRouteChatEmptyStringGuard:
     @pytest.mark.asyncio
     async def test_empty_message_rejected(self) -> None:
         handle = _make_agent_handle()
-        router = PlatformRouter(
-            process_manager=_make_process_manager(agents={"a": handle})
-        )
+        router = PlatformRouter(process_manager=_make_process_manager(agents={"a": handle}))
         result = await router.route_chat("a", "")
         assert result["success"] is False
         assert "message" in result["error"]
@@ -2267,9 +2220,7 @@ class TestRouteChatEmptyStringGuard:
     @pytest.mark.asyncio
     async def test_whitespace_message_rejected(self) -> None:
         handle = _make_agent_handle()
-        router = PlatformRouter(
-            process_manager=_make_process_manager(agents={"a": handle})
-        )
+        router = PlatformRouter(process_manager=_make_process_manager(agents={"a": handle}))
         result = await router.route_chat("a", "   ")
         assert result["success"] is False
         assert "message" in result["error"]
@@ -2364,9 +2315,7 @@ class TestUnifiedIpcLock:
         adapter = McpToolAdapter("shared-agent", {"name": "test-tool"})
 
         # Start route_to_atomic (will block on send_chat)
-        task1 = asyncio.create_task(
-            router.route_to_atomic("shared-agent", "msg1", "c1")
-        )
+        task1 = asyncio.create_task(router.route_to_atomic("shared-agent", "msg1", "c1"))
         # Give it time to acquire the lock and enter send_chat
         await asyncio.sleep(0.05)
         assert call_order == ["started"]
@@ -2411,7 +2360,8 @@ class TestErrorTypeConsistency:
         """Agent not alive returns error_type='ProcessNotAliveError'."""
         from agent_nexus.platform.router.router import PlatformRouter
         from agent_nexus.platform.orchestration.process_manager import (
-            AgentHandle, ProcessManager,
+            AgentHandle,
+            ProcessManager,
         )
         from unittest.mock import MagicMock
 

@@ -77,9 +77,7 @@ class TestDagTaskConversion:
         assert item.agent == "agency.security"
 
     def test_preserves_blocked_by(self) -> None:
-        dag_task = DAGTask(
-            id="impl", agent="agency.coder", output="code", blocked_by=["arch"]
-        )
+        dag_task = DAGTask(id="impl", agent="agency.coder", output="code", blocked_by=["arch"])
         item = dag_task_to_task_item(dag_task, "implement it")
         assert item.blocked_by == ["arch"]
 
@@ -109,44 +107,56 @@ class TestLoadDagIntoGraph:
     """Load 3 specialist tasks -> graph has 3 ready tasks, integrate/validate excluded."""
 
     def test_three_specialists_loaded(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-            DAGTask(id="s3", agent="a3", output="o3"),
-            DAGTask(id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"),
-            DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+                DAGTask(id="s3", agent="a3", output="o3"),
+                DAGTask(
+                    id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"
+                ),
+                DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         items = load_dag_into_graph(dag, "test task", graph)
         assert len(items) == 3
         assert {i.id for i in items} == {"s1", "s2", "s3"}
 
     def test_graph_has_ready_tasks(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-            DAGTask(id="s3", agent="a3", output="o3"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+                DAGTask(id="s3", agent="a3", output="o3"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         load_dag_into_graph(dag, "test", graph)
         ready = graph.get_ready_tasks()
         assert len(ready) == 3
 
     def test_integrate_not_in_graph(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(
+                    id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"
+                ),
+            ]
+        )
         graph = TaskGraph(":memory:")
         items = load_dag_into_graph(dag, "test", graph)
         assert all(i.id != "integrate" for i in items)
         assert graph.get_task("integrate") is None
 
     def test_validate_not_in_graph(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         items = load_dag_into_graph(dag, "test", graph)
         assert all(i.id != "validate" for i in items)
@@ -163,10 +173,12 @@ class TestLoadDagWithDependencies:
     """Tasks with blocked_by -> only unblocked tasks are ready."""
 
     def test_blocked_task_not_ready(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="a", agent="a1", output="o1"),
-            DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="a", agent="a1", output="o1"),
+                DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
+            ]
+        )
         graph = TaskGraph(":memory:")
         load_dag_into_graph(dag, "test", graph)
         ready = graph.get_ready_tasks()
@@ -175,9 +187,11 @@ class TestLoadDagWithDependencies:
         assert "b" not in ready_ids
 
     def test_unblocked_task_is_ready(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="free", agent="a1", output="o1"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="free", agent="a1", output="o1"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         load_dag_into_graph(dag, "test", graph)
         ready = graph.get_ready_tasks()
@@ -195,10 +209,12 @@ class TestSimpleDispatch:
     """2 parallel tasks -> both complete, artifacts collected."""
 
     def test_both_complete(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "build it")
@@ -206,10 +222,12 @@ class TestSimpleDispatch:
         assert len(result.failed) == 0
 
     def test_artifacts_collected(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "build it")
@@ -219,9 +237,11 @@ class TestSimpleDispatch:
         assert result.artifacts["s2"].source_agent == "a2"
 
     def test_no_timeout(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "test")
@@ -238,20 +258,24 @@ class TestSequentialDispatch:
     """Task B blocked_by Task A -> A completes first, then B."""
 
     def test_both_complete_sequentially(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="a", agent="a1", output="o1"),
-            DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="a", agent="a1", output="o1"),
+                DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "sequential work")
         assert set(result.completed) == {"a", "b"}
 
     def test_artifact_for_both(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="a", agent="a1", output="o1"),
-            DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="a", agent="a1", output="o1"),
+                DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "sequential work")
@@ -270,22 +294,26 @@ class TestMixedParallelSequential:
 
     def test_all_complete(self) -> None:
         # s1 and s2 are parallel; s3 is blocked by s1
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-            DAGTask(id="s3", agent="a3", output="o3", blocked_by=["s1"]),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+                DAGTask(id="s3", agent="a3", output="o3", blocked_by=["s1"]),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "mixed work")
         assert set(result.completed) == {"s1", "s2", "s3"}
 
     def test_no_failures(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-            DAGTask(id="s3", agent="a3", output="o3", blocked_by=["s1"]),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+                DAGTask(id="s3", agent="a3", output="o3", blocked_by=["s1"]),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "mixed work")
@@ -310,10 +338,12 @@ class TestFailedExecutor:
                 raise RuntimeError("boom")
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="good", agent="good_agent", output="o1"),
-            DAGTask(id="bad", agent="bad_agent", output="o2"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="good", agent="good_agent", output="o1"),
+                DAGTask(id="bad", agent="bad_agent", output="o2"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, selective_executor)
         result = dispatcher.dispatch(dag, "partial fail")
@@ -325,10 +355,12 @@ class TestFailedExecutor:
                 raise RuntimeError("boom")
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="good", agent="good_agent", output="o1"),
-            DAGTask(id="bad", agent="bad_agent", output="o2"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="good", agent="good_agent", output="o1"),
+                DAGTask(id="bad", agent="bad_agent", output="o2"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, selective_executor)
         result = dispatcher.dispatch(dag, "partial fail")
@@ -346,30 +378,36 @@ class TestAllFail:
     """All executors fail -> DispatchResult.failed has all IDs, no artifacts."""
 
     def test_all_in_failed(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-            DAGTask(id="s3", agent="a3", output="o3"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+                DAGTask(id="s3", agent="a3", output="o3"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _fail_executor)
         result = dispatcher.dispatch(dag, "everything fails")
         assert set(result.failed) == {"s1", "s2", "s3"}
 
     def test_no_artifacts(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _fail_executor)
         result = dispatcher.dispatch(dag, "everything fails")
         assert len(result.artifacts) == 0
 
     def test_no_completed(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _fail_executor)
         result = dispatcher.dispatch(dag, "everything fails")
@@ -386,26 +424,26 @@ class TestTimeout:
     """Set timeout_seconds=0.01 with slow executor -> timed_out=True."""
 
     def test_timed_out_flag(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="slow1", agent="a1", output="o1"),
-            DAGTask(id="slow2", agent="a2", output="o2"),
-            DAGTask(id="slow3", agent="a3", output="o3"),
-        ])
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(
-            graph, _slow_executor, timeout_seconds=0.01
+        dag = _build_dag(
+            [
+                DAGTask(id="slow1", agent="a1", output="o1"),
+                DAGTask(id="slow2", agent="a2", output="o2"),
+                DAGTask(id="slow3", agent="a3", output="o3"),
+            ]
         )
+        graph = TaskGraph(":memory:")
+        dispatcher = DAGDispatcher(graph, _slow_executor, timeout_seconds=0.01)
         result = dispatcher.dispatch(dag, "will timeout")
         assert result.timed_out is True
 
     def test_timeout_with_no_completions_possible(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-        ])
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(
-            graph, _slow_executor, timeout_seconds=0.01
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+            ]
         )
+        graph = TaskGraph(":memory:")
+        dispatcher = DAGDispatcher(graph, _slow_executor, timeout_seconds=0.01)
         result = dispatcher.dispatch(dag, "will timeout")
         assert result.timed_out is True
 
@@ -426,11 +464,13 @@ class TestMaxParallelRespected:
             execution_order.append(profile_id)
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-            DAGTask(id="s3", agent="a3", output="o3"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+                DAGTask(id="s3", agent="a3", output="o3"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, tracking_executor, max_batch_size=1)
         result = dispatcher.dispatch(dag, "sequential test")
@@ -438,10 +478,12 @@ class TestMaxParallelRespected:
 
     def test_max_batch_size_1_executes_one_at_a_time(self) -> None:
         """With max_batch_size=1, only 1 task executes per round."""
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor, max_batch_size=1)
         result = dispatcher.dispatch(dag, "one at a time")
@@ -469,10 +511,14 @@ class TestEmptyDag:
 
     def test_only_integrate_validate(self) -> None:
         """DAG with only integrate/validate tasks -> empty specialist_tasks."""
-        dag = _build_dag([
-            DAGTask(id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"),
-            DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(
+                    id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"
+                ),
+                DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "only fixed tasks")
@@ -490,10 +536,12 @@ class TestTaskGraphStates:
     """After dispatch, check each task's state in TaskGraph is correct."""
 
     def test_completed_tasks_have_completed_state(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         dispatcher.dispatch(dag, "state check")
@@ -503,9 +551,11 @@ class TestTaskGraphStates:
         assert t2 is not None and t2.state == TaskState.COMPLETED
 
     def test_failed_tasks_have_failed_state(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _fail_executor)
         dispatcher.dispatch(dag, "fail check")
@@ -518,10 +568,12 @@ class TestTaskGraphStates:
                 raise RuntimeError("nope")
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="ok", agent="ok_agent", output="o1"),
-            DAGTask(id="fail", agent="fail_agent", output="o2"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="ok", agent="ok_agent", output="o1"),
+                DAGTask(id="fail", agent="fail_agent", output="o2"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, selective)
         dispatcher.dispatch(dag, "mixed states")
@@ -546,9 +598,11 @@ class TestDispatchWithExpertExecutorProtocol:
             artifact_type="lambda_result",
             sections={"task_desc": task},
         )
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, executor)
         result = dispatcher.dispatch(dag, "lambda test")
@@ -563,9 +617,11 @@ class TestDispatchWithExpertExecutorProtocol:
             received["task"] = task
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="s1", agent="my.special.agent", output="o1"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="my.special.agent", output="o1"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, capturing_executor)
         dispatcher.dispatch(dag, "check args")
@@ -588,10 +644,12 @@ class TestStuckDependencyFailure:
                 raise RuntimeError("upstream fails")
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="upstream", agent="a1", output="o1"),
-            DAGTask(id="downstream", agent="a2", output="o2", blocked_by=["upstream"]),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="upstream", agent="a1", output="o1"),
+                DAGTask(id="downstream", agent="a2", output="o2", blocked_by=["upstream"]),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, selective)
         result = dispatcher.dispatch(dag, "cascading failure")
@@ -604,10 +662,12 @@ class TestStuckDependencyFailure:
                 raise RuntimeError("upstream fails")
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="upstream", agent="a1", output="o1"),
-            DAGTask(id="downstream", agent="a2", output="o2", blocked_by=["upstream"]),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="upstream", agent="a1", output="o1"),
+                DAGTask(id="downstream", agent="a2", output="o2", blocked_by=["upstream"]),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, selective)
         result = dispatcher.dispatch(dag, "cascading failure")
@@ -631,10 +691,14 @@ class TestSpecialistTasksOnly:
             dispatched_agents.append(profile_id)
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(
+                    id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"
+                ),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, tracking)
         result = dispatcher.dispatch(dag, "filter test")
@@ -649,10 +713,12 @@ class TestSpecialistTasksOnly:
             dispatched_agents.append(profile_id)
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, tracking)
         result = dispatcher.dispatch(dag, "filter test")
@@ -666,11 +732,15 @@ class TestSpecialistTasksOnly:
             dispatched_ids.append(profile_id)
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"),
-            DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(
+                    id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"
+                ),
+                DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, tracking)
         result = dispatcher.dispatch(dag, "filter test")
@@ -690,12 +760,16 @@ class TestDispatcherReuseGraph:
 
     def test_second_dispatch_independent(self) -> None:
         graph = TaskGraph(":memory:")
-        dag1 = _build_dag([
-            DAGTask(id="d1_s1", agent="a1", output="o1"),
-        ])
-        dag2 = _build_dag([
-            DAGTask(id="d2_s1", agent="b1", output="o1"),
-        ])
+        dag1 = _build_dag(
+            [
+                DAGTask(id="d1_s1", agent="a1", output="o1"),
+            ]
+        )
+        dag2 = _build_dag(
+            [
+                DAGTask(id="d2_s1", agent="b1", output="o1"),
+            ]
+        )
         dispatcher = DAGDispatcher(graph, _ok_executor)
         r1 = dispatcher.dispatch(dag1, "first")
         r2 = dispatcher.dispatch(dag2, "second")
@@ -710,10 +784,12 @@ class TestMaxParallelZero:
     """max_batch_size=0 should be clamped to 1."""
 
     def test_zero_clamped_to_one(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor, max_batch_size=0)
         result = dispatcher.dispatch(dag, "zero parallel")
@@ -725,9 +801,11 @@ class TestMaxParallelNegative:
     """max_batch_size=-1 should be clamped to 1."""
 
     def test_negative_clamped_to_one(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor, max_batch_size=-5)
         result = dispatcher.dispatch(dag, "negative parallel")
@@ -747,16 +825,16 @@ class TestTimeoutMidBatch:
             time.sleep(0.02)  # Small delay per task
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-            DAGTask(id="s3", agent="a3", output="o3"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+                DAGTask(id="s3", agent="a3", output="o3"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         # Timeout shorter than 3 tasks * 0.02s each
-        dispatcher = DAGDispatcher(
-            graph, counting_slow, max_batch_size=1, timeout_seconds=0.03
-        )
+        dispatcher = DAGDispatcher(graph, counting_slow, max_batch_size=1, timeout_seconds=0.03)
         result = dispatcher.dispatch(dag, "mid-batch timeout")
         assert result.timed_out is True
         # At least 1 should have completed, fewer than 3
@@ -769,24 +847,28 @@ class TestDiamondDependency:
     """Diamond: A -> B, A -> C, B+C -> D. All should complete."""
 
     def test_diamond_all_complete(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="a", agent="a1", output="o1"),
-            DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
-            DAGTask(id="c", agent="a3", output="o3", blocked_by=["a"]),
-            DAGTask(id="d", agent="a4", output="o4", blocked_by=["b", "c"]),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="a", agent="a1", output="o1"),
+                DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
+                DAGTask(id="c", agent="a3", output="o3", blocked_by=["a"]),
+                DAGTask(id="d", agent="a4", output="o4", blocked_by=["b", "c"]),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "diamond deps")
         assert set(result.completed) == {"a", "b", "c", "d"}
 
     def test_diamond_artifact_count(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="a", agent="a1", output="o1"),
-            DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
-            DAGTask(id="c", agent="a3", output="o3", blocked_by=["a"]),
-            DAGTask(id="d", agent="a4", output="o4", blocked_by=["b", "c"]),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="a", agent="a1", output="o1"),
+                DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
+                DAGTask(id="c", agent="a3", output="o3", blocked_by=["a"]),
+                DAGTask(id="d", agent="a4", output="o4", blocked_by=["b", "c"]),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "diamond deps")
@@ -798,9 +880,11 @@ class TestSingleTask:
     """Minimal: single task DAG."""
 
     def test_single_task_completes(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="only", agent="a1", output="o1"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="only", agent="a1", output="o1"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "one task")
@@ -814,11 +898,13 @@ class TestChainedFailure:
     """Chain: A -> B -> C. If A fails, both B and C should be failed."""
 
     def test_full_chain_failure(self) -> None:
-        dag = _build_dag([
-            DAGTask(id="a", agent="a1", output="o1"),
-            DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
-            DAGTask(id="c", agent="a3", output="o3", blocked_by=["b"]),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="a", agent="a1", output="o1"),
+                DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
+                DAGTask(id="c", agent="a3", output="o3", blocked_by=["b"]),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _fail_executor)
         result = dispatcher.dispatch(dag, "chain fail")
@@ -857,12 +943,14 @@ class TestMaxBatchSizeSemantics:
             call_count["n"] += 1
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-            DAGTask(id="s3", agent="a3", output="o3"),
-            DAGTask(id="s4", agent="a4", output="o4"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+                DAGTask(id="s3", agent="a3", output="o3"),
+                DAGTask(id="s4", agent="a4", output="o4"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, tracking, max_batch_size=2)
         result = dispatcher.dispatch(dag, "batch test")
@@ -874,3 +962,35 @@ class TestMaxBatchSizeSemantics:
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         assert dispatcher._max_batch_size == 3
+
+
+class TestDAGDispatcherCleanup:
+    """DAGDispatcher resource cleanup — close() and __del__ safety."""
+
+    def test_close_shuts_down_pool(self) -> None:
+        graph = TaskGraph(":memory:")
+        dispatcher = DAGDispatcher(graph, _ok_executor, concurrent=True)
+        # Force pool creation by triggering a concurrent dispatch path
+        assert dispatcher._pool is None
+        dispatcher.close()
+        assert dispatcher._pool is None
+        graph.close()
+
+    def test_del_with_active_pool_does_not_crash(self) -> None:
+        graph = TaskGraph(":memory:")
+        dispatcher = DAGDispatcher(graph, _ok_executor, concurrent=True)
+        # Simulate pool being created but never closed
+        import concurrent.futures
+
+        dispatcher._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        # __del__ should not crash
+        dispatcher.__del__()
+        assert dispatcher._pool is None
+        graph.close()
+
+    def test_close_idempotent(self) -> None:
+        graph = TaskGraph(":memory:")
+        dispatcher = DAGDispatcher(graph, _ok_executor)
+        dispatcher.close()
+        dispatcher.close()  # second close is a no-op
+        graph.close()

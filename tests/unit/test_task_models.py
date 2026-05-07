@@ -12,6 +12,7 @@ from agent_nexus.models.task import TaskGraphSnapshot, TaskItem, TaskState
 # TaskState enum
 # ---------------------------------------------------------------------------
 
+
 class TestTaskState:
     def test_members(self):
         assert set(TaskState) == {
@@ -39,6 +40,7 @@ class TestTaskState:
 # ---------------------------------------------------------------------------
 # TaskItem
 # ---------------------------------------------------------------------------
+
 
 class TestTaskItem:
     def test_construction_with_required_fields(self):
@@ -157,6 +159,7 @@ class TestTaskItem:
 # ---------------------------------------------------------------------------
 # TaskGraphSnapshot
 # ---------------------------------------------------------------------------
+
 
 class TestTaskItemSelfReference:
     """TaskItem must reject self-referencing blocked_by (guaranteed deadlock)."""

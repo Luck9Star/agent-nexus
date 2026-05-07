@@ -93,11 +93,16 @@ class TaskGraph:
         For ``:memory:`` databases, a persistent connection is kept alive
         so that all operations share the same in-memory store.  File-based
         databases open a new connection per operation (original behaviour).
+
+        An ``asyncio.Lock`` serialises all async access to prevent TOCTOU
+        races on the shared in-memory connection.
         """
         self._db_path = db_path
         self._mem_conn: sqlite3.Connection | None = None
+        self._closed = False
+        self._async_lock = asyncio.Lock()
         if str(self._db_path) == ":memory:":
-            self._mem_conn = sqlite3.connect(":memory:")
+            self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
         self._init_db()
 
     def _init_db(self) -> None:
@@ -116,7 +121,11 @@ class TaskGraph:
         Closes the in-memory SQLite connection (if any).  File-based
         databases are already closed per-operation by ``_conn()`` so
         this is a no-op for them.
+
+        Sets a ``_closed`` flag to prevent use-after-close errors from
+        in-flight async operations.
         """
+        self._closed = True
         if self._mem_conn is not None:
             self._mem_conn.close()
             self._mem_conn = None
@@ -140,7 +149,11 @@ class TaskGraph:
 
         Delegates to :func:`sqlite_connection` for standardised setup,
         teardown, and transaction handling.
+
+        Raises ``RuntimeError`` if the graph has been closed.
         """
+        if self._closed:
+            raise RuntimeError("TaskGraph is closed")
         with sqlite_connection(
             self._db_path,
             immediate=immediate,
@@ -573,28 +586,39 @@ class TaskGraph:
             return TaskGraphSnapshot(tasks=tasks, parallel_groups=group_ids)
 
     # ------------------------------------------------------------------
-    # Async wrappers — offload sync SQLite calls to a worker thread
+    # Async wrappers — serialised via _async_lock to prevent TOCTOU races
+    # on the shared in-memory connection.
     # ------------------------------------------------------------------
 
+    async def aclose(self) -> None:
+        """Async close — waits for any in-flight async ops to complete."""
+        async with self._async_lock:
+            self.close()
+
     async def aget_task(self, task_id: str) -> TaskItem | None:
-        """Async wrapper — avoids blocking the event loop."""
-        return await asyncio.to_thread(self.get_task, task_id)
+        """Async wrapper — serialised to prevent TOCTOU on in-memory DB."""
+        async with self._async_lock:
+            return await asyncio.to_thread(self.get_task, task_id)
 
     async def aget_ready_tasks(self) -> list[TaskItem]:
-        """Async wrapper — avoids blocking the event loop."""
-        return await asyncio.to_thread(self.get_ready_tasks)
+        """Async wrapper — serialised to prevent TOCTOU on in-memory DB."""
+        async with self._async_lock:
+            return await asyncio.to_thread(self.get_ready_tasks)
 
     async def aget_blocked_tasks(self) -> list[TaskItem]:
-        """Async wrapper — avoids blocking the event loop."""
-        return await asyncio.to_thread(self.get_blocked_tasks)
+        """Async wrapper — serialised to prevent TOCTOU on in-memory DB."""
+        async with self._async_lock:
+            return await asyncio.to_thread(self.get_blocked_tasks)
 
     async def aget_parallel_groups(self) -> list[list[TaskItem]]:
-        """Async wrapper — avoids blocking the event loop."""
-        return await asyncio.to_thread(self.get_parallel_groups)
+        """Async wrapper — serialised to prevent TOCTOU on in-memory DB."""
+        async with self._async_lock:
+            return await asyncio.to_thread(self.get_parallel_groups)
 
     async def aget_snapshot(self) -> TaskGraphSnapshot:
-        """Async wrapper — avoids blocking the event loop."""
-        return await asyncio.to_thread(self.get_snapshot)
+        """Async wrapper — serialised to prevent TOCTOU on in-memory DB."""
+        async with self._async_lock:
+            return await asyncio.to_thread(self.get_snapshot)
 
     def clear(self) -> None:
         """Clear all tasks (for testing).

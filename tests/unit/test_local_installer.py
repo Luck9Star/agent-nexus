@@ -20,8 +20,10 @@ from agent_nexus.platform.local.installer import (
 
 def _make_entry() -> LockfileEntry:
     return LockfileEntry(
-        version="1.0.0", source="official",
-        commit_sha="a" * 40, agent_type=AgentType.ATOMIC,
+        version="1.0.0",
+        source="official",
+        commit_sha="a" * 40,
+        agent_type=AgentType.ATOMIC,
     )
 
 
@@ -40,6 +42,7 @@ def _make_installer(tmp_path: Path) -> tuple[GitInstaller, MagicMock, MagicMock]
 # ---------------------------------------------------------------------------
 # _url_to_source_name helper
 # ---------------------------------------------------------------------------
+
 
 class TestUrlToSourceName:
     def test_extracts_repo_name(self) -> None:
@@ -61,6 +64,7 @@ class TestUrlToSourceName:
 # install
 # ---------------------------------------------------------------------------
 
+
 class TestInstallerInstall:
     @pytest.mark.asyncio
     async def test_install_rejects_invalid_name(self, tmp_path: Path) -> None:
@@ -79,14 +83,15 @@ class TestInstallerInstall:
     async def test_install_with_direct_source_url(self, tmp_path: Path) -> None:
         inst, _, lf = _make_installer(tmp_path)
         # Patch internals to avoid actual git/venv operations
-        with patch.object(inst, "_sparse_clone", new_callable=AsyncMock) as mock_clone, \
-             patch.object(inst, "_validate_agent_package", return_value=([], {})), \
-             patch.object(inst, "_create_venv", new_callable=AsyncMock, return_value=None), \
-             patch.object(inst, "_get_commit_sha", new_callable=AsyncMock, return_value="a" * 40), \
-             patch("shutil.copytree"), \
-             patch("shutil.rmtree"), \
-             patch.object(Path, "exists", return_value=True):
-
+        with (
+            patch.object(inst, "_sparse_clone", new_callable=AsyncMock) as mock_clone,
+            patch.object(inst, "_validate_agent_package", return_value=([], {})),
+            patch.object(inst, "_create_venv", new_callable=AsyncMock, return_value=None),
+            patch.object(inst, "_get_commit_sha", new_callable=AsyncMock, return_value="a" * 40),
+            patch("shutil.copytree"),
+            patch("shutil.rmtree"),
+            patch.object(Path, "exists", return_value=True),
+        ):
             agent_dir = tmp_path / "cache" / "repos" / "abc" / "packages" / "test-agent"
             agent_dir.mkdir(parents=True, exist_ok=True)
             (agent_dir / "agent-manifest.yaml").write_text(
@@ -100,12 +105,11 @@ class TestInstallerInstall:
             dest = inst._agents_dir / "test-agent"
             dest.mkdir(parents=True, exist_ok=True)
             (dest / "agent-manifest.yaml").write_text(
-                "name: test-agent\nversion: 1.0.0\ntype: atomic\ndescription: test\n", encoding="utf-8"
+                "name: test-agent\nversion: 1.0.0\ntype: atomic\ndescription: test\n",
+                encoding="utf-8",
             )
 
-            entry = await inst.install(
-                "test-agent", source_url="https://example.com/repo.git"
-            )
+            entry = await inst.install("test-agent", source_url="https://example.com/repo.git")
             assert entry is not None
             lf.add_entry_by_name.assert_called_once()
 
@@ -122,12 +126,15 @@ class TestInstallerInstall:
 
         dest = inst._agents_dir / "test-agent"
 
-        with patch.object(inst, "_sparse_clone", new_callable=AsyncMock, return_value=agent_dir), \
-             patch.object(inst, "_validate_agent_package", return_value=([], {})), \
-             patch.object(inst, "_read_manifest", return_value=None), \
-             patch.object(inst, "_create_venv", new_callable=AsyncMock, side_effect=OSError("venv boom")), \
-             patch.object(inst, "_get_commit_sha", new_callable=AsyncMock, return_value="a" * 40):
-
+        with (
+            patch.object(inst, "_sparse_clone", new_callable=AsyncMock, return_value=agent_dir),
+            patch.object(inst, "_validate_agent_package", return_value=([], {})),
+            patch.object(inst, "_read_manifest", return_value=None),
+            patch.object(
+                inst, "_create_venv", new_callable=AsyncMock, side_effect=OSError("venv boom")
+            ),
+            patch.object(inst, "_get_commit_sha", new_callable=AsyncMock, return_value="a" * 40),
+        ):
             with pytest.raises(OSError, match="venv boom"):
                 await inst.install("test-agent", source_url="https://example.com/repo.git")
 
@@ -143,9 +150,10 @@ class TestInstallerInstall:
 
         dest = inst._agents_dir / "test-agent"
 
-        with patch.object(inst, "_sparse_clone", new_callable=AsyncMock, return_value=agent_dir), \
-             patch.object(inst, "_validate_agent_package", return_value=(["missing SKILL.md"], {})):
-
+        with (
+            patch.object(inst, "_sparse_clone", new_callable=AsyncMock, return_value=agent_dir),
+            patch.object(inst, "_validate_agent_package", return_value=(["missing SKILL.md"], {})),
+        ):
             with pytest.raises(InstallationError, match="validation failed"):
                 await inst.install("test-agent", source_url="https://example.com/repo.git")
 
@@ -156,6 +164,7 @@ class TestInstallerInstall:
 # ---------------------------------------------------------------------------
 # uninstall
 # ---------------------------------------------------------------------------
+
 
 class TestInstallerUninstall:
     @pytest.mark.asyncio
@@ -191,8 +200,10 @@ class TestInstallerUninstall:
     async def test_uninstall_refuses_venv_outside_allowed_dir(self, tmp_path: Path) -> None:
         inst, _, lf = _make_installer(tmp_path)
         entry = LockfileEntry(
-            version="1.0.0", source="official",
-            commit_sha="a" * 40, agent_type=AgentType.ATOMIC,
+            version="1.0.0",
+            source="official",
+            commit_sha="a" * 40,
+            agent_type=AgentType.ATOMIC,
             venv_path="/tmp/malicious/path",
         )
         lf.pop_entry.return_value = entry
@@ -207,6 +218,7 @@ class TestInstallerUninstall:
 # ---------------------------------------------------------------------------
 # update / get_installed_version
 # ---------------------------------------------------------------------------
+
 
 class TestInstallerUpdate:
     @pytest.mark.asyncio
@@ -233,6 +245,7 @@ class TestInstallerGetVersion:
 # ---------------------------------------------------------------------------
 # install — manifest validation
 # ---------------------------------------------------------------------------
+
 
 class TestInstallerManifestValidation:
     """Regression: invalid manifest data raises InstallationError, not ValidationError."""
@@ -263,13 +276,14 @@ class TestInstallerManifestValidation:
         # AgentManifest(**manifest_dict) validation.
         bad_manifest = {"name": "has spaces", "version": "1.0.0", "type": "atomic"}
 
-        with patch.object(inst, "_sparse_clone", new_callable=AsyncMock, return_value=agent_dir), \
-             patch.object(inst, "_validate_agent_package", return_value=([], bad_manifest)), \
-             patch.object(inst, "_create_venv", new_callable=AsyncMock, return_value=None), \
-             patch.object(inst, "_get_commit_sha", new_callable=AsyncMock, return_value="a" * 40), \
-             patch("shutil.copytree"), \
-             patch("shutil.rmtree"):
-
+        with (
+            patch.object(inst, "_sparse_clone", new_callable=AsyncMock, return_value=agent_dir),
+            patch.object(inst, "_validate_agent_package", return_value=([], bad_manifest)),
+            patch.object(inst, "_create_venv", new_callable=AsyncMock, return_value=None),
+            patch.object(inst, "_get_commit_sha", new_callable=AsyncMock, return_value="a" * 40),
+            patch("shutil.copytree"),
+            patch("shutil.rmtree"),
+        ):
             # AgentManifest(**bad_manifest) fails validation, wrapped in InstallationError
             with pytest.raises(InstallationError, match="invalid manifest data"):
                 await inst.install(
@@ -281,6 +295,7 @@ class TestInstallerManifestValidation:
 # ---------------------------------------------------------------------------
 # validation
 # ---------------------------------------------------------------------------
+
 
 class TestInstallerValidation:
     def test_validate_rejects_missing_manifest(self, tmp_path: Path) -> None:
@@ -327,6 +342,7 @@ class TestInstallerValidation:
 # ---------------------------------------------------------------------------
 # cache path
 # ---------------------------------------------------------------------------
+
 
 class TestInstallerCachePath:
     def test_cache_path_is_deterministic(self, tmp_path: Path) -> None:
@@ -511,7 +527,8 @@ class TestSubprocessFDLeakFix:
 
     @pytest.mark.asyncio
     async def test_create_venv_kills_proc_on_pip_install_communicate_error(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Second subprocess (uv pip install) communicate() error kills proc."""
         inst, _, _ = _make_installer(tmp_path)
@@ -563,9 +580,7 @@ class TestReadManifestPropagation:
         inst, _, _ = _make_installer(tmp_path)
         agent_dir = tmp_path / "agent"
         agent_dir.mkdir()
-        (agent_dir / "agent-manifest.yaml").write_text(
-            "{{invalid yaml: [}", encoding="utf-8"
-        )
+        (agent_dir / "agent-manifest.yaml").write_text("{{invalid yaml: [}", encoding="utf-8")
 
         with pytest.raises(InstallationError, match="Failed to read manifest"):
             inst._read_manifest(agent_dir)

@@ -203,9 +203,7 @@ class TestInstall:
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
-            installer_instance.install = AsyncMock(
-                side_effect=RuntimeError("clone failed")
-            )
+            installer_instance.install = AsyncMock(side_effect=RuntimeError("clone failed"))
 
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _install("bad-agent", "1.0.0", "https://example.com/repo", False)
@@ -272,9 +270,7 @@ class TestUninstall:
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
-            installer_instance.uninstall = AsyncMock(
-                side_effect=RuntimeError("disk error")
-            )
+            installer_instance.uninstall = AsyncMock(side_effect=RuntimeError("disk error"))
 
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _uninstall("my-agent")
@@ -384,16 +380,12 @@ class TestUpdate:
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
-            installer_instance.update = AsyncMock(
-                side_effect=Exception("AgentNotFoundError")
-            )
+            installer_instance.update = AsyncMock(side_effect=Exception("AgentNotFoundError"))
 
             # Import the real AgentNotFoundError and use it
             from agent_nexus.platform.local.installer import AgentNotFoundError
 
-            installer_instance.update = AsyncMock(
-                side_effect=AgentNotFoundError("missing-agent")
-            )
+            installer_instance.update = AsyncMock(side_effect=AgentNotFoundError("missing-agent"))
 
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _update("missing-agent", all_agents=False)
@@ -413,9 +405,7 @@ class TestUpdate:
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             installer_instance = GitInstallerCls.return_value
-            installer_instance.update = AsyncMock(
-                side_effect=RuntimeError("network timeout")
-            )
+            installer_instance.update = AsyncMock(side_effect=RuntimeError("network timeout"))
 
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _update("my-agent", all_agents=False)
@@ -519,11 +509,7 @@ class TestInfo:
         lockfile_mock.get_entry.return_value = entry
 
         manifest_content = (
-            "description: A helpful agent.\n"
-            "run_modes:\n"
-            "  - mcp\n"
-            "  - cli\n"
-            "model_tier: standard\n"
+            "description: A helpful agent.\nrun_modes:\n  - mcp\n  - cli\nmodel_tier: standard\n"
         )
 
         with (
@@ -583,9 +569,7 @@ class TestSourcesSubApp:
 
     def test_sources_list_no_sources(self) -> None:
         """sources list with no sources prints 'No sources configured'."""
-        with patch(
-            "agent_nexus.platform.local.cli.sources_cmd._init_managers"
-        ) as mock_init:
+        with patch("agent_nexus.platform.local.cli.sources_cmd._init_managers") as mock_init:
             mock_lockfile = MagicMock()
             mock_sources = MagicMock()
             mock_sources.list_sources.return_value = []
@@ -600,9 +584,7 @@ class TestSourcesSubApp:
 
     def test_sources_remove_not_found(self) -> None:
         """sources remove nonexistent source exits with error."""
-        with patch(
-            "agent_nexus.platform.local.cli.sources_cmd._init_managers"
-        ) as mock_init:
+        with patch("agent_nexus.platform.local.cli.sources_cmd._init_managers") as mock_init:
             mock_sources = MagicMock()
             mock_sources.remove_source.return_value = False
             mock_init.return_value = (MagicMock(), MagicMock(), mock_sources, Path("/tmp"))
@@ -643,6 +625,7 @@ class TestRunMcpMode:
         ):
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 from agent_nexus.platform.local.cli._lifecycle import _run
+
                 await _run("missing-agent", "mcp", "stdio")
 
         assert exc_info.value.exit_code == 1
@@ -658,10 +641,14 @@ class TestRunMcpMode:
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch(
+                "agent_nexus.platform.local.supervisor.AgentSupervisor",
+                return_value=supervisor_mock,
+            ),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "mcp", "stdio")
 
@@ -679,11 +666,15 @@ class TestRunMcpMode:
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch(
+                "agent_nexus.platform.local.supervisor.AgentSupervisor",
+                return_value=supervisor_mock,
+            ),
             patch("agent_nexus.platform.local.cli._lifecycle.os.execvpe") as mock_exec,
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             await _run("test-agent", "mcp", "stdio")
 
         mock_exec.assert_called_once()
@@ -712,13 +703,20 @@ class TestRunRouterMode:
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
-            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch(
+                "agent_nexus.platform.orchestration.process_manager.ProcessManager",
+                return_value=pm_mock,
+            ),
+            patch(
+                "agent_nexus.platform.local.supervisor.AgentSupervisor",
+                return_value=supervisor_mock,
+            ),
             patch("agent_nexus.platform.gateway.gateway.MCPGateway", return_value=gateway_mock),
             patch("agent_nexus.platform.router.router.PlatformRouter", return_value=MagicMock()),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             await _run("test-agent", "router", "sse")
 
         gateway_mock.run_sse.assert_called_once()
@@ -740,13 +738,20 @@ class TestRunRouterMode:
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
-            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch(
+                "agent_nexus.platform.orchestration.process_manager.ProcessManager",
+                return_value=pm_mock,
+            ),
+            patch(
+                "agent_nexus.platform.local.supervisor.AgentSupervisor",
+                return_value=supervisor_mock,
+            ),
             patch("agent_nexus.platform.gateway.gateway.MCPGateway", return_value=gateway_mock),
             patch("agent_nexus.platform.router.router.PlatformRouter", return_value=MagicMock()),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             await _run("test-agent", "router", "stdio")
 
         gateway_mock.run_stdio.assert_called_once()
@@ -763,11 +768,18 @@ class TestRunRouterMode:
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
-            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch(
+                "agent_nexus.platform.orchestration.process_manager.ProcessManager",
+                return_value=pm_mock,
+            ),
+            patch(
+                "agent_nexus.platform.local.supervisor.AgentSupervisor",
+                return_value=supervisor_mock,
+            ),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             with pytest.raises(click.exceptions.Exit):
                 await _run("test-agent", "router", "stdio")
 
@@ -788,11 +800,18 @@ class TestRunCliMode:
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
-            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch(
+                "agent_nexus.platform.orchestration.process_manager.ProcessManager",
+                return_value=pm_mock,
+            ),
+            patch(
+                "agent_nexus.platform.local.supervisor.AgentSupervisor",
+                return_value=supervisor_mock,
+            ),
             patch("agent_nexus.platform.local.cli._lifecycle.os.execvpe") as mock_exec,
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             await _run("test-agent", "cli", "stdio")
 
         mock_exec.assert_called_once()
@@ -815,11 +834,18 @@ class TestRunCliMode:
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
-            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch(
+                "agent_nexus.platform.orchestration.process_manager.ProcessManager",
+                return_value=pm_mock,
+            ),
+            patch(
+                "agent_nexus.platform.local.supervisor.AgentSupervisor",
+                return_value=supervisor_mock,
+            ),
             patch("agent_nexus.platform.local.cli._lifecycle.os.execvpe") as mock_exec,
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             await _run("test-agent", "cli", "stdio", ["analyze", "template.docx"])
 
         call_args = mock_exec.call_args[0]
@@ -837,11 +863,18 @@ class TestRunCliMode:
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
-            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch(
+                "agent_nexus.platform.orchestration.process_manager.ProcessManager",
+                return_value=pm_mock,
+            ),
+            patch(
+                "agent_nexus.platform.local.supervisor.AgentSupervisor",
+                return_value=supervisor_mock,
+            ),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "cli", "stdio")
 
@@ -860,12 +893,22 @@ class TestRunCliMode:
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
-            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli._lifecycle.os.execvpe", side_effect=FileNotFoundError("not found")),
+            patch(
+                "agent_nexus.platform.orchestration.process_manager.ProcessManager",
+                return_value=pm_mock,
+            ),
+            patch(
+                "agent_nexus.platform.local.supervisor.AgentSupervisor",
+                return_value=supervisor_mock,
+            ),
+            patch(
+                "agent_nexus.platform.local.cli._lifecycle.os.execvpe",
+                side_effect=FileNotFoundError("not found"),
+            ),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "cli", "stdio")
 
@@ -886,6 +929,7 @@ class TestRunUnknownMode:
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "bogus", "stdio")
 
@@ -908,10 +952,14 @@ class TestSearchAgents:
 
         with (
             patch("agent_nexus.platform.local.sources.SourceManager", return_value=sources_mock),
-            patch("agent_nexus.platform.local.cli._lifecycle._get_config_dir", return_value=Path("/tmp/cfg")),
+            patch(
+                "agent_nexus.platform.local.cli._lifecycle._get_config_dir",
+                return_value=Path("/tmp/cfg"),
+            ),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             from agent_nexus.platform.local.cli._lifecycle import _search
+
             await _search("nonexistent")
 
         calls = _echo_calls(echo_mock)
@@ -934,10 +982,14 @@ class TestSearchAgents:
 
         with (
             patch("agent_nexus.platform.local.sources.SourceManager", return_value=sources_mock),
-            patch("agent_nexus.platform.local.cli._lifecycle._get_config_dir", return_value=Path("/tmp/cfg")),
+            patch(
+                "agent_nexus.platform.local.cli._lifecycle._get_config_dir",
+                return_value=Path("/tmp/cfg"),
+            ),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             from agent_nexus.platform.local.cli._lifecycle import _search
+
             await _search("doc")
 
         calls = _echo_calls(echo_mock)
@@ -952,10 +1004,14 @@ class TestSearchAgents:
 
         with (
             patch("agent_nexus.platform.local.sources.SourceManager", return_value=sources_mock),
-            patch("agent_nexus.platform.local.cli._lifecycle._get_config_dir", return_value=Path("/tmp/cfg")),
+            patch(
+                "agent_nexus.platform.local.cli._lifecycle._get_config_dir",
+                return_value=Path("/tmp/cfg"),
+            ),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             from agent_nexus.platform.local.cli._lifecycle import _search
+
             await _search("anything")
 
         calls = _echo_calls(echo_mock)
@@ -1028,9 +1084,7 @@ class TestInitManagers:
         config_dir = tmp_path / "new_config"
         config_dir.mkdir()
 
-        with patch(
-            "agent_nexus.platform.config.loader.ConfigLoader"
-        ) as MockLoader:
+        with patch("agent_nexus.platform.config.loader.ConfigLoader") as MockLoader:
             mock_loader_instance = MagicMock()
             MockLoader.return_value = mock_loader_instance
 
@@ -1153,7 +1207,9 @@ class TestRunRouterModeImportError:
         mocks, lockfile_mock, _, _ = _mock_managers()
         lockfile_mock.get_entry.return_value = _make_lockfile_entry()
 
-        original_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else builtins.__import__
+        original_import = (
+            __builtins__["__import__"] if isinstance(__builtins__, dict) else builtins.__import__
+        )
 
         def blocking_import(name, *args, **kwargs):
             if name == "agent_nexus.platform.gateway.gateway":
@@ -1166,13 +1222,13 @@ class TestRunRouterModeImportError:
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo") as echo_mock,
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "router", "stdio")
 
         assert exc_info.value.exit_code == 1
         calls = _echo_calls(echo_mock)
         assert any("Router mode requires" in c for c in calls)
-
 
 
 # ============================================================================
@@ -1185,7 +1241,9 @@ class TestUninstallCLICommand:
 
     def test_uninstall_command_invokes_async(self) -> None:
         """The uninstall CLI command calls _uninstall via asyncio.run."""
-        with patch("agent_nexus.platform.local.cli._lifecycle._uninstall", new_callable=AsyncMock) as mock_uninstall:
+        with patch(
+            "agent_nexus.platform.local.cli._lifecycle._uninstall", new_callable=AsyncMock
+        ) as mock_uninstall:
             result = runner.invoke(app, ["uninstall", "my-agent"])
             assert mock_uninstall.called
             assert mock_uninstall.call_args[0][0] == "my-agent"
@@ -1201,7 +1259,9 @@ class TestUpdateCLICommand:
 
     def test_update_command_invokes_async(self) -> None:
         """The update CLI command calls _update via asyncio.run with a name."""
-        with patch("agent_nexus.platform.local.cli._lifecycle._update", new_callable=AsyncMock) as mock_update:
+        with patch(
+            "agent_nexus.platform.local.cli._lifecycle._update", new_callable=AsyncMock
+        ) as mock_update:
             result = runner.invoke(app, ["update", "my-agent"])
             assert mock_update.called
             call_args = mock_update.call_args[0]
@@ -1210,7 +1270,9 @@ class TestUpdateCLICommand:
 
     def test_update_all_command_invokes_async(self) -> None:
         """The update --all CLI command calls _update with all_agents=True."""
-        with patch("agent_nexus.platform.local.cli._lifecycle._update", new_callable=AsyncMock) as mock_update:
+        with patch(
+            "agent_nexus.platform.local.cli._lifecycle._update", new_callable=AsyncMock
+        ) as mock_update:
             result = runner.invoke(app, ["update", "--all"])
             assert mock_update.called
             call_args = mock_update.call_args[0]
@@ -1232,7 +1294,10 @@ class TestRunFinallyStopsAgent:
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch(
+                "agent_nexus.platform.local.supervisor.AgentSupervisor",
+                return_value=supervisor_mock,
+            ),
             patch(
                 "agent_nexus.platform.local.cli._lifecycle.os.execvpe",
                 side_effect=FileNotFoundError("not found"),
@@ -1240,6 +1305,7 @@ class TestRunFinallyStopsAgent:
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "mcp", "stdio")
 
@@ -1261,13 +1327,20 @@ class TestRunFinallyStopsAgent:
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
-            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
+            patch(
+                "agent_nexus.platform.orchestration.process_manager.ProcessManager",
+                return_value=pm_mock,
+            ),
+            patch(
+                "agent_nexus.platform.local.supervisor.AgentSupervisor",
+                return_value=supervisor_mock,
+            ),
             patch("agent_nexus.platform.gateway.gateway.MCPGateway", return_value=gateway_mock),
             patch("agent_nexus.platform.router.router.PlatformRouter", return_value=MagicMock()),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             with pytest.raises(RuntimeError, match="network error"):
                 await _run("test-agent", "router", "sse")
 
@@ -1286,12 +1359,22 @@ class TestRunFinallyStopsAgent:
 
         with (
             patch("agent_nexus.platform.local.cli._lifecycle._init_managers", return_value=mocks),
-            patch("agent_nexus.platform.orchestration.process_manager.ProcessManager", return_value=pm_mock),
-            patch("agent_nexus.platform.local.supervisor.AgentSupervisor", return_value=supervisor_mock),
-            patch("agent_nexus.platform.local.cli._lifecycle.os.execvpe", side_effect=OSError("permission denied")),
+            patch(
+                "agent_nexus.platform.orchestration.process_manager.ProcessManager",
+                return_value=pm_mock,
+            ),
+            patch(
+                "agent_nexus.platform.local.supervisor.AgentSupervisor",
+                return_value=supervisor_mock,
+            ),
+            patch(
+                "agent_nexus.platform.local.cli._lifecycle.os.execvpe",
+                side_effect=OSError("permission denied"),
+            ),
             patch("agent_nexus.platform.local.cli._lifecycle.typer.echo"),
         ):
             from agent_nexus.platform.local.cli._lifecycle import _run
+
             with pytest.raises(click.exceptions.Exit) as exc_info:
                 await _run("test-agent", "cli", "stdio")
 
@@ -1340,7 +1423,9 @@ class TestPathTraversalRejection:
 
     def test_sources_add_rejects_file_url(self) -> None:
         """sources add rejects file:// URLs."""
-        result = runner.invoke(app, ["sources", "add", "--name", "evil", "--url", "file:///etc/passwd"])
+        result = runner.invoke(
+            app, ["sources", "add", "--name", "evil", "--url", "file:///etc/passwd"]
+        )
         assert result.exit_code != 0
 
     # --- valid names still work ---
@@ -1384,9 +1469,7 @@ class TestJsonOutput:
 
     def test_list_json(self) -> None:
         """list --json outputs valid JSON array."""
-        with patch(
-            "agent_nexus.platform.local.cli._lifecycle._init_managers"
-        ) as mock_init:
+        with patch("agent_nexus.platform.local.cli._lifecycle._init_managers") as mock_init:
             entry = _make_entry()
             mock_lockfile = MagicMock()
             mock_lockfile.load.return_value = Lockfile(agents={"doc-filler": entry})
@@ -1399,9 +1482,7 @@ class TestJsonOutput:
 
     def test_list_json_empty(self) -> None:
         """list --json with no agents outputs empty JSON array."""
-        with patch(
-            "agent_nexus.platform.local.cli._lifecycle._init_managers"
-        ) as mock_init:
+        with patch("agent_nexus.platform.local.cli._lifecycle._init_managers") as mock_init:
             mock_lockfile = MagicMock()
             mock_lockfile.load.return_value = Lockfile(agents={})
             mock_init.return_value = (MagicMock(), mock_lockfile, MagicMock(), Path("/tmp"))

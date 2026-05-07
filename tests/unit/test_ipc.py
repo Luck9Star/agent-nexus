@@ -96,7 +96,9 @@ class TestIPCStreamSend:
         await stream.send(msg)
         mock_stdin.drain.assert_awaited_once()
 
-    async def test_send_excludes_none_fields(self, stream: IPCStream, mock_stdin: MagicMock) -> None:
+    async def test_send_excludes_none_fields(
+        self, stream: IPCStream, mock_stdin: MagicMock
+    ) -> None:
         """send() excludes None fields from JSON output."""
         msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
         await stream.send(msg)
@@ -225,9 +227,7 @@ class TestIPCProtocolSendTask:
 
 
 class TestIPCProtocolSendDataReference:
-    async def test_send_data_reference(
-        self, protocol: IPCProtocol, mock_stdin: MagicMock
-    ) -> None:
+    async def test_send_data_reference(self, protocol: IPCProtocol, mock_stdin: MagicMock) -> None:
         """send_data_reference() creates DATA_REFERENCE with ref_id and summary."""
         await protocol.send_data_reference(
             ref_id="var://output/123",
@@ -715,54 +715,38 @@ class TestIPCContentMaxLength:
     """IPC text fields are capped at 65536 characters to prevent memory issues."""
 
     def test_platform_to_agent_content_within_limit(self):
-        msg = PlatformToAgent(
-            type=PlatformToAgentType.CHAT, content="x" * 65536
-        )
+        msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="x" * 65536)
         assert len(msg.content) == 65536
 
     def test_platform_to_agent_content_exceeds_limit(self):
         with pytest.raises(ValidationError, match="at most 65536 characters"):
-            PlatformToAgent(
-                type=PlatformToAgentType.CHAT, content="x" * 65537
-            )
+            PlatformToAgent(type=PlatformToAgentType.CHAT, content="x" * 65537)
 
     def test_agent_to_platform_content_within_limit(self):
-        msg = AgentToPlatform(
-            type=AgentToPlatformType.RESULT, content="x" * 65536
-        )
+        msg = AgentToPlatform(type=AgentToPlatformType.RESULT, content="x" * 65536)
         assert len(msg.content) == 65536
 
     def test_agent_to_platform_content_exceeds_limit(self):
         with pytest.raises(ValidationError, match="at most 65536 characters"):
-            AgentToPlatform(
-                type=AgentToPlatformType.RESULT, content="x" * 65537
-            )
+            AgentToPlatform(type=AgentToPlatformType.RESULT, content="x" * 65537)
 
     def test_agent_to_platform_message_within_limit(self):
-        msg = AgentToPlatform(
-            type=AgentToPlatformType.PROGRESS, message="x" * 65536
-        )
+        msg = AgentToPlatform(type=AgentToPlatformType.PROGRESS, message="x" * 65536)
         assert msg.message is not None
         assert len(msg.message) == 65536
 
     def test_agent_to_platform_message_exceeds_limit(self):
         with pytest.raises(ValidationError, match="at most 65536 characters"):
-            AgentToPlatform(
-                type=AgentToPlatformType.PROGRESS, message="x" * 65537
-            )
+            AgentToPlatform(type=AgentToPlatformType.PROGRESS, message="x" * 65537)
 
     def test_agent_to_platform_error_within_limit(self):
-        msg = AgentToPlatform(
-            type=AgentToPlatformType.ERROR, error="x" * 65536
-        )
+        msg = AgentToPlatform(type=AgentToPlatformType.ERROR, error="x" * 65536)
         assert msg.error is not None
         assert len(msg.error) == 65536
 
     def test_agent_to_platform_error_exceeds_limit(self):
         with pytest.raises(ValidationError, match="at most 65536 characters"):
-            AgentToPlatform(
-                type=AgentToPlatformType.ERROR, error="x" * 65537
-            )
+            AgentToPlatform(type=AgentToPlatformType.ERROR, error="x" * 65537)
 
     def test_empty_content_still_valid(self):
         """Empty string is within the limit and remains valid."""
@@ -1071,9 +1055,7 @@ class TestIPCSendDrainRuntimeError:
         """RuntimeError('Transport is closing') during drain is wrapped as IPCConnectionError."""
         mock_stdin = MagicMock()
         mock_stdin.write = MagicMock()
-        mock_stdin.drain = AsyncMock(
-            side_effect=RuntimeError("Transport is closing")
-        )
+        mock_stdin.drain = AsyncMock(side_effect=RuntimeError("Transport is closing"))
         mock_stdout = MagicMock()
 
         stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)

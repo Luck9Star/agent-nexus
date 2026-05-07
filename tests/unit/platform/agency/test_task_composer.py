@@ -161,9 +161,7 @@ class TestTaskComposerWithTaskGraph:
                 },
             )
 
-        result = composer.run(
-            inp, expert_executor=mock_executor, task_graph=graph
-        )
+        result = composer.run(inp, expert_executor=mock_executor, task_graph=graph)
 
         assert isinstance(result, TaskComposerResult)
         assert result.selected_agents is not None

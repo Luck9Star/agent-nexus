@@ -1,4 +1,5 @@
 """Unit tests for CLI config template loading from config.toml."""
+
 from __future__ import annotations
 
 from agent_nexus.platform.agency.cli_backend.config_templates import (

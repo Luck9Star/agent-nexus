@@ -18,6 +18,7 @@ from agent_nexus.models.config import (
 # ProviderApiType enum
 # ---------------------------------------------------------------------------
 
+
 class TestProviderApiType:
     def test_members(self):
         assert set(ProviderApiType) == {
@@ -44,6 +45,7 @@ class TestProviderApiType:
 # ---------------------------------------------------------------------------
 # ProviderConfig
 # ---------------------------------------------------------------------------
+
 
 class TestProviderConfig:
     def test_defaults(self):
@@ -94,6 +96,7 @@ class TestProviderConfig:
 # ---------------------------------------------------------------------------
 # ModelConfig
 # ---------------------------------------------------------------------------
+
 
 class TestModelConfig:
     def test_defaults(self):
@@ -151,6 +154,7 @@ class TestModelConfig:
 # RuntimeConfig
 # ---------------------------------------------------------------------------
 
+
 class TestRuntimeConfig:
     def test_defaults(self):
         cfg = RuntimeConfig()
@@ -171,6 +175,7 @@ class TestRuntimeConfig:
 # ---------------------------------------------------------------------------
 # PlatformConfig
 # ---------------------------------------------------------------------------
+
 
 class TestPlatformConfig:
     def test_defaults(self):

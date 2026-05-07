@@ -101,6 +101,7 @@ class TestIPythonExecutorTimeout:
         cancellation internally.
         """
         import asyncio as _aio
+
         shared_executor.inject("_aio", _aio)
         result = await shared_executor.execute("await _aio.sleep(3)", timeout=0.3)
         assert result.success is False
@@ -166,9 +167,7 @@ class TestExecutorUsesToThread:
         """Timeout should fire even for synchronous CPU-bound code."""
         # time.sleep is synchronous and blocks -- to_thread lets the event
         # loop cancel the wrapper on timeout
-        result = await shared_executor.execute(
-            "import time; time.sleep(2)", timeout=0.2
-        )
+        result = await shared_executor.execute("import time; time.sleep(2)", timeout=0.2)
         assert result.success is False
         assert "timed out" in (result.error or "").lower()
 
@@ -184,9 +183,7 @@ class TestRequireShellConcurrency:
         executor = IPythonExecutor()
         try:
             # Launch many concurrent _require_shell calls
-            shells = await asyncio.gather(
-                *[executor._require_shell() for _ in range(10)]
-            )
+            shells = await asyncio.gather(*[executor._require_shell() for _ in range(10)])
             # All results must be the exact same object
             assert all(s is shells[0] for s in shells)
             assert executor._shell is not None
@@ -415,9 +412,7 @@ class TestTimedOutFlag:
         executor = IPythonExecutor()
         try:
             # Execute code that will timeout
-            result = await executor.execute(
-                "import time; time.sleep(2)", timeout=0.2
-            )
+            result = await executor.execute("import time; time.sleep(2)", timeout=0.2)
             assert result.success is False
             assert executor._timed_out is True
 
@@ -524,6 +519,7 @@ class TestDoubleCheckAfterLock:
 
             class ShellSettingLock:
                 """A lock that pre-creates the shell when acquired."""
+
                 def __init__(self, real_lock, executor_ref):
                     self._real_lock = real_lock
                     self._executor = executor_ref
@@ -554,7 +550,8 @@ class TestErrorBeforeExecPath:
 
     @pytest.mark.asyncio
     async def test_return_outside_function_triggers_error_before_exec(
-        self, shared_executor,
+        self,
+        shared_executor,
     ) -> None:
         """'return' outside function passes security check but triggers error_before_exec."""
         result = await shared_executor.execute("return 42")
@@ -733,13 +730,12 @@ class TestCancelledErrorHandling:
 
         executor = IPythonExecutor()
         try:
+
             async def cancel_after_delay(task):
                 await asyncio.sleep(0.05)
                 task.cancel()
 
-            task = asyncio.create_task(
-                executor.execute("import time; time.sleep(2)", timeout=10)
-            )
+            task = asyncio.create_task(executor.execute("import time; time.sleep(2)", timeout=10))
             asyncio.create_task(cancel_after_delay(task))
 
             with pytest.raises(asyncio.CancelledError):
@@ -788,6 +784,7 @@ class TestThreadContaminationAfterTimeout:
 
             def finish_thread():
                 import time
+
                 time.sleep(0.1)
                 executor._exec_done.set()
 
@@ -894,13 +891,12 @@ class TestExecDoneTiming:
         executor = IPythonExecutor()
         try:
             # Use a short sleep so the thread finishes quickly after timeout
-            result = await executor.execute(
-                "import time; time.sleep(1)", timeout=0.3
-            )
+            result = await executor.execute("import time; time.sleep(1)", timeout=0.3)
             assert result.success is False
             # _exec_done may still be cleared (thread running)
             # Wait long enough for the 1s sleep to complete
             import time
+
             time.sleep(1.5)
             assert executor._exec_done.is_set()
         finally:
@@ -923,10 +919,9 @@ class TestStderrCapture:
         checker blocking the import.
         """
         import sys as _sys
+
         shared_executor.inject("_test_sys", _sys)
-        result = await shared_executor.execute(
-            '_test_sys.stderr.write("error msg\\n")'
-        )
+        result = await shared_executor.execute('_test_sys.stderr.write("error msg\\n")')
         assert result.success is True
         assert "error msg" in result.output
 
@@ -934,6 +929,7 @@ class TestStderrCapture:
     async def test_stderr_included_in_error_on_failure(self, shared_executor) -> None:
         """Code that errors after writing to stderr includes stderr in result.error."""
         import sys as _sys
+
         shared_executor.inject("_test_sys", _sys)
         result = await shared_executor.execute(
             '_test_sys.stderr.write("before crash\\n"); raise RuntimeError("boom")'

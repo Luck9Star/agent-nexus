@@ -15,6 +15,7 @@ from agent_nexus.platform.evolution.thresholds import (
 # Threshold constant values (docs/04 Section 6)
 # ---------------------------------------------------------------------------
 
+
 class TestThresholdConstants:
     """Verify the single source of truth matches docs/04 spec."""
 
@@ -92,8 +93,10 @@ class TestThresholdInvariants:
     def test_all_thresholds_summarizable(self):
         """Sanity: exactly 5 thresholds exported."""
         from agent_nexus.platform.evolution import thresholds as mod
+
         exported = [
-            v for k, v in vars(mod).items()
+            v
+            for k, v in vars(mod).items()
             if k.startswith("_") and not k.startswith("__") and isinstance(v, float)
         ]
         assert len(exported) == 5

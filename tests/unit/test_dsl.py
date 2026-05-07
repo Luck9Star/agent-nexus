@@ -412,12 +412,18 @@ agent = "a"
 class TestValidate:
     def _make_definition_with_warnings(self, **overrides) -> OrchestrationDefinition:
         """Build a definition that may generate warnings."""
-        agents = overrides.get("agents", {
-            "a1": DSLAgent(name="a1", description="Agent 1"),
-        })
-        tasks = overrides.get("tasks", [
-            DSLTask(id="T1", description="Task", agent="a1"),
-        ])
+        agents = overrides.get(
+            "agents",
+            {
+                "a1": DSLAgent(name="a1", description="Agent 1"),
+            },
+        )
+        tasks = overrides.get(
+            "tasks",
+            [
+                DSLTask(id="T1", description="Task", agent="a1"),
+            ],
+        )
         return OrchestrationDefinition(
             goal="Test",
             agent_name="test",

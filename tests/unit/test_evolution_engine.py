@@ -16,6 +16,7 @@ from agent_nexus.models.evolution import EvolutionType
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_store() -> MagicMock:
     store = MagicMock()
     store.get_active_skills.return_value = []
@@ -41,6 +42,7 @@ def _make_ctx(**overrides) -> EvolutionContext:
 # Constructor + properties
 # ---------------------------------------------------------------------------
 
+
 class TestInit:
     def test_creates_sub_components(self):
         store = _make_store()
@@ -63,6 +65,7 @@ class TestInit:
 # ---------------------------------------------------------------------------
 # evolve() routing
 # ---------------------------------------------------------------------------
+
 
 class TestEvolvePostAnalysis:
     def test_post_analysis_returns_analysis_result(self):
@@ -92,6 +95,7 @@ class TestEvolvePostAnalysis:
         store = _make_store()
         engine = EvolutionEngine(store)
         import pytest  # pyright: ignore[reportMissingImports]
+
         with pytest.raises(ValueError, match="ctx"):
             engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS)
 
@@ -110,6 +114,7 @@ class TestEvolveToolDegradation:
         store = _make_store()
         engine = EvolutionEngine(store)
         import pytest  # pyright: ignore[reportMissingImports]
+
         with pytest.raises(ValueError, match="tool_key"):
             engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION)
 
@@ -127,6 +132,7 @@ class TestEvolveUnknownTrigger:
         store = _make_store()
         engine = EvolutionEngine(store)
         import pytest  # pyright: ignore[reportMissingImports]
+
         with pytest.raises(ValueError, match="Unknown trigger"):
             engine.evolve(trigger="bogus")  # type: ignore[arg-type]
 
@@ -135,11 +141,18 @@ class TestEvolveUnknownTrigger:
 # Convenience methods
 # ---------------------------------------------------------------------------
 
+
 class TestCheckHealth:
     def test_delegates_to_health_checker(self):
         store = _make_store()
-        skill = SkillRecord(id="sk-1", name="s1", total_selections=10,
-                            total_applied=6, total_completions=1, total_fallbacks=5)
+        skill = SkillRecord(
+            id="sk-1",
+            name="s1",
+            total_selections=10,
+            total_applied=6,
+            total_completions=1,
+            total_fallbacks=5,
+        )
         store.get_skill_record.return_value = skill
         engine = EvolutionEngine(store)
         suggestions = engine.check_health("sk-1")
@@ -150,6 +163,7 @@ class TestCheckHealth:
         store.get_skill_record.return_value = None
         engine = EvolutionEngine(store)
         import pytest  # pyright: ignore[reportMissingImports]
+
         with pytest.raises(ValueError, match="Skill not found"):
             engine.check_health("missing")
 
@@ -171,8 +185,10 @@ class TestPromoteCandidate:
         store = _make_store()
         engine = EvolutionEngine(store)
         candidate = PromotionCandidate(
-            skill_id="sk-1", skill_name="good-skill",
-            effective_rate=0.9, total_selections=100,
+            skill_id="sk-1",
+            skill_name="good-skill",
+            effective_rate=0.9,
+            total_selections=100,
             directory="skills/good",
             reason="high performance",
         )
@@ -185,14 +201,17 @@ class TestShouldCompact:
         store = _make_store()
         engine = EvolutionEngine(store)
         from agent_nexus.models.context import TokenUsage
+
         ctx = AgentContext(
-            agent_id="a1", session_id="s1",
+            agent_id="a1",
+            session_id="s1",
             token_usage=TokenUsage(prompt_tokens=10, completion_tokens=10),
         )
         assert engine.should_compact(ctx) is False
 
 
 # iter122 regression: min_selections minimum guard
+
 
 class TestEvolveMinSelections:
     """evolve(metric_check) clamps min_selections to max(n, 1)."""

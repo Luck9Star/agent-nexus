@@ -254,7 +254,4 @@ class TestResolveApiKeyLogging:
 
         assert result == ""
         # Check that our new "No API key found" warning was logged
-        assert any(
-            "No API key found" in str(call)
-            for call in mock_warn.call_args_list
-        )
+        assert any("No API key found" in str(call) for call in mock_warn.call_args_list)

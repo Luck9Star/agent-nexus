@@ -1,4 +1,5 @@
 """End-to-end integration test for CLI backend: config -> LLMClient -> LLMResponse."""
+
 from __future__ import annotations
 
 import json
@@ -42,19 +43,19 @@ class TestCLIBackendE2E:
         return_value="/usr/bin/claude",
     )
     @patch("agent_nexus.platform.agency.cli_backend.base.subprocess.Popen")
-    def test_config_to_llm_response(
-        self, mock_popen, mock_which, tmp_path: Path
-    ):
+    def test_config_to_llm_response(self, mock_popen, mock_which, tmp_path: Path):
         """Full pipeline: config.toml -> ConfigLoader -> LLMClient -> LLMResponse."""
         (tmp_path / "config.toml").write_text(CLI_E2E_CONFIG)
         mock_proc = MagicMock()
         mock_proc.communicate.return_value = (
-            json.dumps({
-                "result": "E2E test passed",
-                "session_id": "sess-e2e",
-                "model": "claude-sonnet-4-20250514",
-                "usage": {"input_tokens": 200, "output_tokens": 100},
-            }),
+            json.dumps(
+                {
+                    "result": "E2E test passed",
+                    "session_id": "sess-e2e",
+                    "model": "claude-sonnet-4-20250514",
+                    "usage": {"input_tokens": 200, "output_tokens": 100},
+                }
+            ),
             "",
         )
         mock_proc.returncode = 0
@@ -66,10 +67,15 @@ class TestCLIBackendE2E:
         # Pre-populate capability registry to avoid network calls
         registry = ModelCapabilityRegistry()
         cap = ModelCapability(
-            model_id="sonnet", provider="anthropic",
-            max_output_tokens=16384, context_window=200000,
-            supports_vision=True, supports_tool_use=True,
-            supports_temperature=True, temperature_min=0.0, temperature_max=1.0,
+            model_id="sonnet",
+            provider="anthropic",
+            max_output_tokens=16384,
+            context_window=200000,
+            supports_vision=True,
+            supports_tool_use=True,
+            supports_temperature=True,
+            temperature_min=0.0,
+            temperature_max=1.0,
             knowledge_cutoff="2025-04",
         )
         registry.set_override("sonnet", cap)
@@ -109,9 +115,7 @@ class TestCLIBackendE2E:
         return_value="/usr/bin/claude",
     )
     @patch("agent_nexus.platform.agency.cli_backend.base.subprocess.run")
-    def test_session_store_records_execution(
-        self, mock_run, mock_which, tmp_path: Path
-    ):
+    def test_session_store_records_execution(self, mock_run, mock_which, tmp_path: Path):
         """SessionStore records executions when wired into LLMClient."""
         from agent_nexus.platform.agency.cli_backend.session_store import CLISessionStore
 
@@ -128,11 +132,13 @@ class TestCLIBackendE2E:
             duration_ms=1500,
             status="success",
         )
-        store.save_session(CLISessionRecord(
-            session_id="sess-e2e",
-            backend_name="claude-code",
-            model="claude-sonnet-4-20250514",
-        ))
+        store.save_session(
+            CLISessionRecord(
+                session_id="sess-e2e",
+                backend_name="claude-code",
+                model="claude-sonnet-4-20250514",
+            )
+        )
         session = store.get_session("sess-e2e")
         assert session is not None
         assert session.backend_name == "claude-code"

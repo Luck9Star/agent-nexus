@@ -17,6 +17,7 @@ from agent_nexus.platform.skills.loader import SkillLoader
 # parse_file — I/O edge cases
 # ---------------------------------------------------------------------------
 
+
 class TestParseFileEdgeCases:
     def test_utf8_content(self, tmp_path: Path):
         f = tmp_path / "SKILL.md"
@@ -43,6 +44,7 @@ class TestParseFileEdgeCases:
 # ---------------------------------------------------------------------------
 # parse_string — YAML edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestParseStringYamlEdgeCases:
     def test_scalar_triggers_wrapped_in_list(self):
@@ -76,6 +78,7 @@ class TestParseStringYamlEdgeCases:
 # load_agent_skills — recursive scanning and error resilience
 # ---------------------------------------------------------------------------
 
+
 class TestLoadAgentSkillsRecursive:
     def test_nested_directories(self, tmp_path: Path):
         deep = tmp_path / "a" / "b" / "c"
@@ -93,7 +96,8 @@ class TestLoadAgentSkillsRecursive:
         agent_dir = tmp_path / "agent"
         agent_dir.mkdir()
         (agent_dir / "SKILL.md").write_text(
-            "---\nname: real\nagent_type: atomic\n---\nbody", encoding="utf-8",
+            "---\nname: real\nagent_type: atomic\n---\nbody",
+            encoding="utf-8",
         )
         (agent_dir / "README.md").write_text("not a skill", encoding="utf-8")
         (agent_dir / "NOTES.md").write_text("also not a skill", encoding="utf-8")
@@ -106,7 +110,8 @@ class TestLoadAgentSkillsRecursive:
         good_dir = tmp_path / "good"
         good_dir.mkdir()
         (good_dir / "SKILL.md").write_text(
-            "---\nname: ok\nagent_type: atomic\n---\nbody", encoding="utf-8",
+            "---\nname: ok\nagent_type: atomic\n---\nbody",
+            encoding="utf-8",
         )
         loader = SkillLoader()
         with pytest.MonkeyPatch.context() as mp:
@@ -141,6 +146,7 @@ class TestLoadAgentSkillsRecursive:
 # ---------------------------------------------------------------------------
 # _split_body_resources — fenced code block edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestSplitBodyResourcesFenced:
     def test_code_block_with_language_tag(self):
@@ -186,6 +192,7 @@ class TestBuildMetadataNonStringTriggers:
 
 
 # iter122 regression: triggers type coercion
+
 
 class TestTriggersTypeCoercion:
     """SkillLoader coerces non-list triggers to list of strings."""

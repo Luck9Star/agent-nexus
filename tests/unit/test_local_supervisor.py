@@ -17,8 +17,10 @@ from agent_nexus.platform.local.supervisor import (
 
 def _make_entry() -> LockfileEntry:
     return LockfileEntry(
-        version="1.0.0", source="official",
-        commit_sha="a" * 40, agent_type=AgentType.ATOMIC,
+        version="1.0.0",
+        source="official",
+        commit_sha="a" * 40,
+        agent_type=AgentType.ATOMIC,
     )
 
 
@@ -38,9 +40,7 @@ def _make_supervisor(tmp_path: Path) -> tuple[AgentSupervisor, MagicMock, MagicM
 
     cfg = MagicMock()
     cfg.config_dir = tmp_path
-    cfg.load_config.return_value = MagicMock(
-        models=MagicMock(default="gpt-4", providers={})
-    )
+    cfg.load_config.return_value = MagicMock(models=MagicMock(default="gpt-4", providers={}))
 
     sup = AgentSupervisor(pm, lf, cfg, config_dir=tmp_path)
     return sup, pm, lf, cfg
@@ -49,6 +49,7 @@ def _make_supervisor(tmp_path: Path) -> tuple[AgentSupervisor, MagicMock, MagicM
 # ---------------------------------------------------------------------------
 # RestartTracker
 # ---------------------------------------------------------------------------
+
 
 class TestRestartTracker:
     def test_should_retry_when_under_max(self) -> None:
@@ -77,6 +78,7 @@ class TestRestartTracker:
 # ---------------------------------------------------------------------------
 # AgentSupervisor
 # ---------------------------------------------------------------------------
+
 
 class TestSupervisorStartAll:
     @pytest.mark.asyncio
@@ -242,9 +244,7 @@ class TestSupervisorBuildEnv:
     def test_build_env_includes_model(self, tmp_path: Path) -> None:
         sup, _, _, cfg = _make_supervisor(tmp_path)
         entry = _make_entry()
-        cfg.load_config.return_value = MagicMock(
-            models=MagicMock(default="gpt-4", providers={})
-        )
+        cfg.load_config.return_value = MagicMock(models=MagicMock(default="gpt-4", providers={}))
         env = sup._build_env("test", entry)
         assert env.get("AGENT_MODEL") == "gpt-4"
 

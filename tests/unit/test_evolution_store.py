@@ -66,10 +66,16 @@ class TestSaveAndGetAgentRecord:
     def test_save_overwrites_existing(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         store.save_agent_record(
-            agent_id="a1", name="original", type="atomic", skill_ids=["s1"],
+            agent_id="a1",
+            name="original",
+            type="atomic",
+            skill_ids=["s1"],
         )
         store.save_agent_record(
-            agent_id="a1", name="updated", type="composite", skill_ids=["s1", "s2"],
+            agent_id="a1",
+            name="updated",
+            type="composite",
+            skill_ids=["s1", "s2"],
         )
         record = store.get_agent_record("a1")
         assert record is not None
@@ -80,11 +86,17 @@ class TestSaveAndGetAgentRecord:
     def test_save_preserves_metrics_on_overwrite(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         store.save_agent_record(
-            agent_id="a1", name="agent", type="atomic", skill_ids=["s1"],
+            agent_id="a1",
+            name="agent",
+            type="atomic",
+            skill_ids=["s1"],
         )
         store.update_agent_metrics("a1", 0.85, 5.0, 1200.0)
         store.save_agent_record(
-            agent_id="a1", name="agent", type="atomic", skill_ids=["s1", "s2"],
+            agent_id="a1",
+            name="agent",
+            type="atomic",
+            skill_ids=["s1", "s2"],
         )
         record = store.get_agent_record("a1")
         assert record is not None
@@ -96,13 +108,19 @@ class TestSaveAndGetAgentRecord:
     def test_save_preserves_created_at(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         store.save_agent_record(
-            agent_id="a1", name="agent", type="atomic", skill_ids=[],
+            agent_id="a1",
+            name="agent",
+            type="atomic",
+            skill_ids=[],
         )
         original = store.get_agent_record("a1")
         assert original is not None
         original_created = original["created_at"]
         store.save_agent_record(
-            agent_id="a1", name="agent-v2", type="atomic", skill_ids=[],
+            agent_id="a1",
+            name="agent-v2",
+            type="atomic",
+            skill_ids=[],
         )
         updated = store.get_agent_record("a1")
         assert updated is not None
@@ -317,7 +335,7 @@ class TestEvolutionStoreCounterPreservation:
         loaded = store.get_skill_record("s1")
         assert loaded is not None
         assert loaded.total_selections == 18  # 10 + 5 (sel+appl) + 3 (sel only)
-        assert loaded.total_applied == 13    # 8 + 5
+        assert loaded.total_applied == 13  # 8 + 5
 
     def test_save_new_record_inserts_normally(self, tmp_path: Path) -> None:
         """New records insert without any counter issues."""
@@ -428,9 +446,21 @@ class TestMalformedSnapshot:
                 "total_completions, total_fallbacks, created_at, updated_at) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    sid, "test-skill", "1.0.0", "imported", 0,
-                    "", snapshot_json, "/tmp", 1,
-                    0, 0, 0, 0, now, now,
+                    sid,
+                    "test-skill",
+                    "1.0.0",
+                    "imported",
+                    0,
+                    "",
+                    snapshot_json,
+                    "/tmp",
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    now,
+                    now,
                 ),
             )
         return sid
@@ -444,7 +474,7 @@ class TestMalformedSnapshot:
 
     def test_list_snapshot(self, tmp_path: Path) -> None:
         store = self._make_store(tmp_path)
-        sid = self._save_raw(store, '[1, 2, 3]')
+        sid = self._save_raw(store, "[1, 2, 3]")
         record = store.get_skill_record(sid)
         assert record is not None
         assert record.lineage.content_snapshot is None
@@ -708,9 +738,7 @@ class TestEvolveSkillIdCollision:
         """
         store = _make_store(tmp_path)
 
-        parent = self._make_record(
-            skill_id="parent-1", name="parent", origin=SkillOrigin.IMPORTED
-        )
+        parent = self._make_record(skill_id="parent-1", name="parent", origin=SkillOrigin.IMPORTED)
         store.save_skill_record(parent)
         assert store.get_skill_record("parent-1").is_active is True
 
@@ -820,10 +848,14 @@ class TestGetAnalysesForTask:
         store = _make_store(tmp_path)
 
         store.record_analysis(
-            task_id="t1", agent_name="a1", analysis_text="first pass",
+            task_id="t1",
+            agent_name="a1",
+            analysis_text="first pass",
         )
         store.record_analysis(
-            task_id="t1", agent_name="a2", analysis_text="second pass",
+            task_id="t1",
+            agent_name="a2",
+            analysis_text="second pass",
         )
 
         analyses = store.get_analyses_for_task("t1")
@@ -1060,12 +1092,10 @@ class TestGetAncestry:
         # Manually create a cycle: a -> b, b -> a in lineage parents
         with store._conn(immediate=True) as conn:
             conn.execute(
-                "INSERT INTO skill_lineage_parents (skill_id, parent_id) "
-                "VALUES ('a', 'b')"
+                "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES ('a', 'b')"
             )
             conn.execute(
-                "INSERT INTO skill_lineage_parents (skill_id, parent_id) "
-                "VALUES ('b', 'a')"
+                "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES ('b', 'a')"
             )
 
         # Should terminate and return exactly the two records
@@ -1114,9 +1144,21 @@ class TestInvalidLineageOrigin:
                 "total_completions, total_fallbacks, created_at, updated_at) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    sid, "test-skill", "1.0.0", origin, 0,
-                    "", "{}", "/tmp", 1,
-                    0, 0, 0, 0, now, now,
+                    sid,
+                    "test-skill",
+                    "1.0.0",
+                    origin,
+                    0,
+                    "",
+                    "{}",
+                    "/tmp",
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    now,
+                    now,
                 ),
             )
         return sid
@@ -1169,9 +1211,7 @@ class TestJudgmentsBatchEvenLimit:
     window function ensures each skill gets its own quota.
     """
 
-    def _seed_judgments(
-        self, store: EvolutionStore, skill_id: str, count: int
-    ) -> None:
+    def _seed_judgments(self, store: EvolutionStore, skill_id: str, count: int) -> None:
         """Insert *count* judgment rows for *skill_id*."""
         import uuid
         from datetime import datetime, timezone
@@ -1198,19 +1238,25 @@ class TestJudgmentsBatchEvenLimit:
                     (str(uuid.uuid4()), analysis_id, skill_id),
                 )
 
-    def test_even_distribution_with_unbalanced_data(
-        self, tmp_path: Path
-    ) -> None:
+    def test_even_distribution_with_unbalanced_data(self, tmp_path: Path) -> None:
         """High-frequency skill doesn't crowd out low-frequency skill."""
         store = EvolutionStore(tmp_path / "evo.db")
-        store.save_skill_record(SkillRecord(
-            id="hi", name="hi", version="1.0",
-            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
-        ))
-        store.save_skill_record(SkillRecord(
-            id="lo", name="lo", version="1.0",
-            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
-        ))
+        store.save_skill_record(
+            SkillRecord(
+                id="hi",
+                name="hi",
+                version="1.0",
+                lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+            )
+        )
+        store.save_skill_record(
+            SkillRecord(
+                id="lo",
+                name="lo",
+                version="1.0",
+                lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+            )
+        )
 
         self._seed_judgments(store, "hi", 90)
         self._seed_judgments(store, "lo", 10)
@@ -1222,14 +1268,22 @@ class TestJudgmentsBatchEvenLimit:
     def test_respects_limit_per_skill(self, tmp_path: Path) -> None:
         """Each skill is independently capped at limit_per_skill."""
         store = EvolutionStore(tmp_path / "evo.db")
-        store.save_skill_record(SkillRecord(
-            id="s1", name="s1", version="1.0",
-            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
-        ))
-        store.save_skill_record(SkillRecord(
-            id="s2", name="s2", version="1.0",
-            lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
-        ))
+        store.save_skill_record(
+            SkillRecord(
+                id="s1",
+                name="s1",
+                version="1.0",
+                lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+            )
+        )
+        store.save_skill_record(
+            SkillRecord(
+                id="s2",
+                name="s2",
+                version="1.0",
+                lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
+            )
+        )
 
         self._seed_judgments(store, "s1", 100)
         self._seed_judgments(store, "s2", 100)
@@ -1269,7 +1323,9 @@ class TestGetAncestryBatch:
             name="skill-p",
             version="1.0.0",
             lineage=SkillLineage(
-                origin=SkillOrigin.FIXED, generation=1, parent_skill_ids=["gp"],
+                origin=SkillOrigin.FIXED,
+                generation=1,
+                parent_skill_ids=["gp"],
             ),
             directory="skills/test",
             is_active=True,
@@ -1281,7 +1337,9 @@ class TestGetAncestryBatch:
             name="skill-c",
             version="1.0.0",
             lineage=SkillLineage(
-                origin=SkillOrigin.FIXED, generation=2, parent_skill_ids=["p"],
+                origin=SkillOrigin.FIXED,
+                generation=2,
+                parent_skill_ids=["p"],
             ),
             directory="skills/test",
             is_active=True,
@@ -1370,12 +1428,10 @@ class TestGetAncestryBatch:
         store.save_skill_record(self._make_record("b", 1))
         with store._conn(immediate=True) as conn:
             conn.execute(
-                "INSERT INTO skill_lineage_parents (skill_id, parent_id) "
-                "VALUES ('a', 'b')"
+                "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES ('a', 'b')"
             )
             conn.execute(
-                "INSERT INTO skill_lineage_parents (skill_id, parent_id) "
-                "VALUES ('b', 'a')"
+                "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES ('b', 'a')"
             )
 
         result = store.get_ancestry_batch(["a"], max_depth=100)
@@ -1455,9 +1511,7 @@ class TestConnResourceCleanup:
     def test_begin_immediate_failure_closes_connection(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
 
-        patcher, closes = self._make_failing_connect(
-            "BEGIN", "database is locked"
-        )
+        patcher, closes = self._make_failing_connect("BEGIN", "database is locked")
         with patcher:
             with pytest.raises(sqlite3.OperationalError, match="database is locked"):
                 with store._conn(immediate=True) as _:
@@ -1496,9 +1550,7 @@ class TestBatchRowResilience:
 
         # Corrupt one row's updated_at field directly in DB
         with store._conn(immediate=True) as conn:
-            conn.execute(
-                "UPDATE skill_records SET updated_at = 'NOT-A-DATE' WHERE id = 'good-1'"
-            )
+            conn.execute("UPDATE skill_records SET updated_at = 'NOT-A-DATE' WHERE id = 'good-1'")
 
         # get_active_skills should return 1 good record, skip 1 corrupt
         skills = store.get_active_skills()
@@ -1511,9 +1563,7 @@ class TestBatchRowResilience:
         store.save_skill_record(self._make_record("b"))
 
         with store._conn(immediate=True) as conn:
-            conn.execute(
-                "UPDATE skill_records SET created_at = '' WHERE id = 'a'"
-            )
+            conn.execute("UPDATE skill_records SET created_at = '' WHERE id = 'a'")
 
         skills = store.get_all_skills()
         assert len(skills) == 1
@@ -1523,12 +1573,16 @@ class TestBatchRowResilience:
         store = _make_store(tmp_path)
         # Both records share the same name so get_versions returns both
         rec1 = SkillRecord(
-            id="v1", name="my-skill", version="1.0",
+            id="v1",
+            name="my-skill",
+            version="1.0",
             lineage=SkillLineage(origin=SkillOrigin.CAPTURED, generation=0),
             directory="",
         )
         rec2 = SkillRecord(
-            id="v2", name="my-skill", version="1.1",
+            id="v2",
+            name="my-skill",
+            version="1.1",
             lineage=SkillLineage(origin=SkillOrigin.CAPTURED, generation=1),
             directory="",
         )
@@ -1536,9 +1590,7 @@ class TestBatchRowResilience:
         store.save_skill_record(rec2)
 
         with store._conn(immediate=True) as conn:
-            conn.execute(
-                "UPDATE skill_records SET updated_at = 'bogus' WHERE id = 'v1'"
-            )
+            conn.execute("UPDATE skill_records SET updated_at = 'bogus' WHERE id = 'v1'")
 
         versions = store.get_versions("my-skill")
         assert len(versions) == 1
@@ -1594,24 +1646,28 @@ class TestRecordAnalysisCounterInvariants:
                 task_id="t1",
                 agent_name="tester",
                 analysis_text="test",
-                judgments=[{
-                    "skill_id": "s1",
-                    "selected": False,
-                    "applied": False,
-                    "fell_back": True,
-                }],
+                judgments=[
+                    {
+                        "skill_id": "s1",
+                        "selected": False,
+                        "applied": False,
+                        "fell_back": True,
+                    }
+                ],
             )
         # fell_back WITH selected but WITHOUT applied is VALID (tried, failed, fell back)
         store.record_analysis(
             task_id="t2",
             agent_name="tester",
             analysis_text="test",
-            judgments=[{
-                "skill_id": "s1",
-                "selected": True,
-                "applied": False,
-                "fell_back": True,
-            }],
+            judgments=[
+                {
+                    "skill_id": "s1",
+                    "selected": True,
+                    "applied": False,
+                    "fell_back": True,
+                }
+            ],
         )
         judgments = store.get_judgments_for_skill("s1")
         assert len(judgments) == 1
@@ -1624,11 +1680,13 @@ class TestRecordAnalysisCounterInvariants:
                 task_id="t1",
                 agent_name="tester",
                 analysis_text="test",
-                judgments=[{
-                    "skill_id": "s1",
-                    "selected": False,
-                    "applied": True,
-                }],
+                judgments=[
+                    {
+                        "skill_id": "s1",
+                        "selected": False,
+                        "applied": True,
+                    }
+                ],
             )
 
     def test_valid_counters_succeed(self, tmp_path: Path) -> None:
@@ -1639,13 +1697,15 @@ class TestRecordAnalysisCounterInvariants:
             task_id="t1",
             agent_name="tester",
             analysis_text="test",
-            judgments=[{
-                "skill_id": "s1",
-                "selected": True,
-                "applied": True,
-                "completed": True,
-                "fell_back": True,
-            }],
+            judgments=[
+                {
+                    "skill_id": "s1",
+                    "selected": True,
+                    "applied": True,
+                    "completed": True,
+                    "fell_back": True,
+                }
+            ],
         )
         judgments = store.get_judgments_for_skill("s1")
         assert len(judgments) == 1
@@ -1819,6 +1879,7 @@ class TestStoreSchemaInitTransaction:
         """Verify executescript is NOT used in store.py."""
         import inspect
         from agent_nexus.platform.evolution.store import EvolutionStore as ES
+
         source = inspect.getsource(ES)
         assert "executescript" not in source
 
@@ -1842,9 +1903,7 @@ class TestIncrementCountersRowcount:
 class TestSaveSkillRecordPreservesActive:
     """Verify save_skill_record ON CONFLICT preserves is_active."""
 
-    def test_save_does_not_reactivate_deactivated_skill(
-        self, tmp_path: Path
-    ) -> None:
+    def test_save_does_not_reactivate_deactivated_skill(self, tmp_path: Path) -> None:
         """Re-saving a deactivated skill record should NOT reactivate it."""
         store = _make_store(tmp_path)
         # Save initial record
@@ -1936,7 +1995,8 @@ class TestEvolveSkillParentNotFound:
             directory="skills/test",
         )
         result = store.evolve_skill(
-            new_record, parent_skill_ids=["nonexistent-parent"],
+            new_record,
+            parent_skill_ids=["nonexistent-parent"],
         )
 
         assert result.success is False
@@ -1946,7 +2006,8 @@ class TestEvolveSkillParentNotFound:
         assert store.get_skill_record("evolved-orphan") is None
 
     def test_partial_parent_missing_aborts_fix_evolution(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """If one of multiple parents is missing, abort the whole FIX."""
         store = _make_store(tmp_path)

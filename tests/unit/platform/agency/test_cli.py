@@ -25,9 +25,12 @@ class TestImportExpertsCommand:
                 cli,
                 [
                     "import-experts",
-                    "--vendor-path", str(_VENDOR_DIR),
-                    "--allowlist", str(_ALLOWLIST_PATH),
-                    "--output-dir", tmpdir,
+                    "--vendor-path",
+                    str(_VENDOR_DIR),
+                    "--allowlist",
+                    str(_ALLOWLIST_PATH),
+                    "--output-dir",
+                    tmpdir,
                     "--dry-run",
                 ],
             )
@@ -41,9 +44,12 @@ class TestImportExpertsCommand:
                 cli,
                 [
                     "import-experts",
-                    "--vendor-path", str(_VENDOR_DIR),
-                    "--allowlist", str(_ALLOWLIST_PATH),
-                    "--output-dir", tmpdir,
+                    "--vendor-path",
+                    str(_VENDOR_DIR),
+                    "--allowlist",
+                    str(_ALLOWLIST_PATH),
+                    "--output-dir",
+                    tmpdir,
                 ],
             )
             assert result.exit_code == 0, f"CLI error: {result.output}"
@@ -62,10 +68,14 @@ class TestPlanCompositionCommand:
             cli,
             [
                 "plan-composition",
-                "--task", "Design a system architecture",
-                "--mode", "plan",
-                "--vendor-path", str(_VENDOR_DIR),
-                "--allowlist", str(_ALLOWLIST_PATH),
+                "--task",
+                "Design a system architecture",
+                "--mode",
+                "plan",
+                "--vendor-path",
+                str(_VENDOR_DIR),
+                "--allowlist",
+                str(_ALLOWLIST_PATH),
             ],
         )
         assert result.exit_code == 0, f"CLI error: {result.output}"
@@ -79,22 +89,28 @@ class TestValidateOutputCommand:
     def test_validate_output_passes(self, tmp_path: Path) -> None:
         runner = CliRunner()
         output_file = tmp_path / "output.json"
-        output_file.write_text(json.dumps({
-            "sections": {
-                "context": "test",
-                "assumptions": [],
-                "proposed_design": "test",
-                "tradeoffs": [],
-                "risks": [],
-                "next_steps": [],
-            }
-        }))
+        output_file.write_text(
+            json.dumps(
+                {
+                    "sections": {
+                        "context": "test",
+                        "assumptions": [],
+                        "proposed_design": "test",
+                        "tradeoffs": [],
+                        "risks": [],
+                        "next_steps": [],
+                    }
+                }
+            )
+        )
         result = runner.invoke(
             cli,
             [
                 "validate-output",
-                "--output-file", str(output_file),
-                "--required-sections", "context,assumptions,proposed_design,tradeoffs,risks,next_steps",
+                "--output-file",
+                str(output_file),
+                "--required-sections",
+                "context,assumptions,proposed_design,tradeoffs,risks,next_steps",
             ],
         )
         assert result.exit_code == 0, f"CLI error: {result.output}"
@@ -108,8 +124,10 @@ class TestValidateOutputCommand:
             cli,
             [
                 "validate-output",
-                "--output-file", str(output_file),
-                "--required-sections", "context,risks,next_steps",
+                "--output-file",
+                str(output_file),
+                "--required-sections",
+                "context,risks,next_steps",
             ],
         )
         assert result.exit_code != 0 or "missing" in result.output.lower()
@@ -122,13 +140,20 @@ class TestValidateOutputCommand:
             cli,
             [
                 "validate-output",
-                "--output-file", str(output_file),
-                "--required-sections", "summary",
-                "--task-type", "code_change",
+                "--output-file",
+                str(output_file),
+                "--required-sections",
+                "summary",
+                "--task-type",
+                "code_change",
             ],
         )
         # code_change should trigger GitNexus gate failure
-        assert "gitnexus" in result.output.lower() or result.exit_code != 0 or "failed" in result.output.lower()
+        assert (
+            "gitnexus" in result.output.lower()
+            or result.exit_code != 0
+            or "failed" in result.output.lower()
+        )
 
 
 @pytest.mark.timeout(30)
@@ -141,8 +166,10 @@ class TestListExpertsCommand:
             cli,
             [
                 "list-experts",
-                "--vendor-path", str(_VENDOR_DIR),
-                "--allowlist", str(_ALLOWLIST_PATH),
+                "--vendor-path",
+                str(_VENDOR_DIR),
+                "--allowlist",
+                str(_ALLOWLIST_PATH),
             ],
         )
         assert result.exit_code == 0, f"CLI error: {result.output}"
@@ -156,8 +183,10 @@ class TestListExpertsCommand:
             cli,
             [
                 "list-experts",
-                "--vendor-path", str(_VENDOR_DIR),
-                "--allowlist", str(_ALLOWLIST_PATH),
+                "--vendor-path",
+                str(_VENDOR_DIR),
+                "--allowlist",
+                str(_ALLOWLIST_PATH),
             ],
         )
         assert result.exit_code == 0, f"CLI error: {result.output}"
@@ -170,8 +199,10 @@ class TestListExpertsCommand:
             cli,
             [
                 "list-experts",
-                "--vendor-path", "/nonexistent/path",
-                "--allowlist", str(_ALLOWLIST_PATH),
+                "--vendor-path",
+                "/nonexistent/path",
+                "--allowlist",
+                str(_ALLOWLIST_PATH),
             ],
         )
         assert result.exit_code != 0
@@ -189,9 +220,12 @@ class TestCheckProfilesCommand:
                 cli,
                 [
                     "import-experts",
-                    "--vendor-path", str(_VENDOR_DIR),
-                    "--allowlist", str(_ALLOWLIST_PATH),
-                    "--output-dir", tmpdir,
+                    "--vendor-path",
+                    str(_VENDOR_DIR),
+                    "--allowlist",
+                    str(_ALLOWLIST_PATH),
+                    "--output-dir",
+                    tmpdir,
                 ],
             )
             assert import_result.exit_code == 0

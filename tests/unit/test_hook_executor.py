@@ -316,9 +316,7 @@ class TestCommandHook:
     async def test_command_hook_non_allowed_command_rejected(self) -> None:
         """Command not in allowlist is rejected even when allowlist is non-empty."""
         hook = _cmd_hook(command="rm -rf /")
-        executor = HookExecutor(
-            hooks=[hook], allowed_commands=["echo", "cat"]
-        )
+        executor = HookExecutor(hooks=[hook], allowed_commands=["echo", "cat"])
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.results[0].passed is False
@@ -558,9 +556,7 @@ class TestCommandHookProcessCleanup:
                 side_effect=RuntimeError("simulated subprocess failure")
             )
             mock_proc.kill = Mock()
-            mock_proc.wait = AsyncMock(
-                side_effect=ProcessLookupError("already dead")
-            )
+            mock_proc.wait = AsyncMock(side_effect=ProcessLookupError("already dead"))
             mock_proc.returncode = None
             mock_sp.return_value = mock_proc
 
@@ -763,9 +759,7 @@ class TestTimeoutKillFailure:
         with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
             mock_proc = AsyncMock()
             # communicate() will time out
-            mock_proc.communicate = AsyncMock(
-                side_effect=asyncio.TimeoutError()
-            )
+            mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
             # kill() raises -- this is the branch we want
             mock_proc.kill = Mock(side_effect=RuntimeError("kill failed"))
             mock_proc.wait = AsyncMock()
@@ -797,9 +791,7 @@ class TestCancelledError:
         with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
             mock_proc = AsyncMock()
             # communicate raises CancelledError (BaseException)
-            mock_proc.communicate = AsyncMock(
-                side_effect=asyncio.CancelledError()
-            )
+            mock_proc.communicate = AsyncMock(side_effect=asyncio.CancelledError())
             mock_proc.kill = Mock()
             mock_proc.wait = AsyncMock()
             mock_proc.returncode = None
@@ -820,9 +812,7 @@ class TestCancelledError:
 
         with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
             mock_proc = AsyncMock()
-            mock_proc.communicate = AsyncMock(
-                side_effect=asyncio.CancelledError()
-            )
+            mock_proc.communicate = AsyncMock(side_effect=asyncio.CancelledError())
             mock_proc.kill = Mock(side_effect=RuntimeError("cannot kill"))
             mock_proc.wait = AsyncMock()
             mock_proc.returncode = None
@@ -851,6 +841,7 @@ class TestEmptyCommandAfterSplit:
 
 
 # iter122 regression: SSRF scheme validation
+
 
 class TestHTTPHookSSRF:
     """HTTP hooks reject non-http/https URL schemes."""

@@ -332,9 +332,7 @@ class TestCheckPathSensitive:
         for target in targets:
             traversal = os.path.relpath(target)
             d = checker.check_path("file_read", traversal)
-            assert not d.allowed, (
-                f"Traversal '{traversal}' (→ {target}) should be blocked"
-            )
+            assert not d.allowed, f"Traversal '{traversal}' (→ {target}) should be blocked"
             assert "sensitive" in d.reason.lower()
 
 
@@ -511,37 +509,45 @@ class TestPathRuleRecursiveGlob:
 
     def test_recursive_glob_deny(self) -> None:
         """PathRule with /tmp/** pattern denies nested paths."""
-        checker = PermissionChecker(PermissionConfig(
-            mode=PermissionMode.FULL_AUTO,
-            path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.DENY)],
-        ))
+        checker = PermissionChecker(
+            PermissionConfig(
+                mode=PermissionMode.FULL_AUTO,
+                path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.DENY)],
+            )
+        )
         d = checker.check_path("file_read", "/tmp/secrets/deep/nested/key.pem")
         assert not d.allowed
 
     def test_recursive_glob_write(self) -> None:
         """PathRule with /data/** WRITE pattern allows write to nested paths."""
-        checker = PermissionChecker(PermissionConfig(
-            mode=PermissionMode.FULL_AUTO,
-            path_rules=[PathRule(pattern="/data/**", access=PathAccess.WRITE)],
-        ))
+        checker = PermissionChecker(
+            PermissionConfig(
+                mode=PermissionMode.FULL_AUTO,
+                path_rules=[PathRule(pattern="/data/**", access=PathAccess.WRITE)],
+            )
+        )
         d = checker.check_path("file_write", "/data/projects/myapp/config.json")
         assert d.allowed
 
     def test_recursive_glob_read_blocks_write_tool(self) -> None:
         """PathRule with /docs/** READ pattern blocks write tool on nested paths."""
-        checker = PermissionChecker(PermissionConfig(
-            mode=PermissionMode.FULL_AUTO,
-            path_rules=[PathRule(pattern="/docs/**", access=PathAccess.READ)],
-        ))
+        checker = PermissionChecker(
+            PermissionConfig(
+                mode=PermissionMode.FULL_AUTO,
+                path_rules=[PathRule(pattern="/docs/**", access=PathAccess.READ)],
+            )
+        )
         d = checker.check_path("file_write", "/docs/archive/old/report.txt")
         assert not d.allowed
 
     def test_recursive_glob_does_not_match_unrelated(self) -> None:
         """PathRule with /tmp/** does not affect /home paths."""
-        checker = PermissionChecker(PermissionConfig(
-            mode=PermissionMode.FULL_AUTO,
-            path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.DENY)],
-        ))
+        checker = PermissionChecker(
+            PermissionConfig(
+                mode=PermissionMode.FULL_AUTO,
+                path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.DENY)],
+            )
+        )
         d = checker.check_path("file_read", "/home/user/file.txt")
         assert d.allowed
 
@@ -650,6 +656,7 @@ class TestApplyPathAccessFallback:
         # Create a mock PathAccess that is not in the known set
         class FakeAccess:
             """Fake enum value that won't match any real PathAccess."""
+
             def __eq__(self, other):
                 # Never equals any real PathAccess
                 return False

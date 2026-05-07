@@ -200,6 +200,7 @@ blocked_by = ["task-nonexistent"]
 # Helper
 # ---------------------------------------------------------------------------
 
+
 def _load_definition(toml_content: str):
     """Parse TOML content into an OrchestrationDefinition."""
     dsl = OrchestrationDSL()
@@ -312,24 +313,42 @@ async def test_cycle_detection_via_task_graph(task_graph: TaskGraph) -> None:
     now = datetime.now(timezone.utc)
 
     # Add A (no deps)
-    task_graph.add_task(TaskItem(
-        id="A", description="Step A", agent="agent-1",
-        state=TaskState.PENDING, created_at=now, updated_at=now,
-    ))
+    task_graph.add_task(
+        TaskItem(
+            id="A",
+            description="Step A",
+            agent="agent-1",
+            state=TaskState.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+    )
     # Add B (blocked by A)
-    task_graph.add_task(TaskItem(
-        id="B", description="Step B", agent="agent-2",
-        blocked_by=["A"], state=TaskState.PENDING,
-        created_at=now, updated_at=now,
-    ))
+    task_graph.add_task(
+        TaskItem(
+            id="B",
+            description="Step B",
+            agent="agent-2",
+            blocked_by=["A"],
+            state=TaskState.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+    )
     # Adding C (blocked by B) that also creates A -> B -> C -> A cycle
     # should fail because C tries to depend on a task not yet added
     # So add C first without cycle, then try to add a D that closes the cycle
-    task_graph.add_task(TaskItem(
-        id="C", description="Step C", agent="agent-3",
-        blocked_by=["B"], state=TaskState.PENDING,
-        created_at=now, updated_at=now,
-    ))
+    task_graph.add_task(
+        TaskItem(
+            id="C",
+            description="Step C",
+            agent="agent-3",
+            blocked_by=["B"],
+            state=TaskState.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+    )
 
     # Now try to add D that is blocked by C AND would close cycle back to A
     # by adding a task that A depends on (i.e., A -> ... -> C -> D -> A)
@@ -350,9 +369,13 @@ async def test_cycle_detection_via_task_graph(task_graph: TaskGraph) -> None:
     # Model-level validator catches self-reference at TaskItem creation time
     with pytest.raises(Exception, match="cannot block itself"):
         TaskItem(
-            id="D", description="Self-loop", agent="agent-1",
-            blocked_by=["D"], state=TaskState.PENDING,
-            created_at=now, updated_at=now,
+            id="D",
+            description="Self-loop",
+            agent="agent-1",
+            blocked_by=["D"],
+            state=TaskState.PENDING,
+            created_at=now,
+            updated_at=now,
         )
 
     # Test that adding a task that closes a back-edge is caught.
@@ -388,15 +411,27 @@ async def test_task_failure(task_graph: TaskGraph) -> None:
     now = datetime.now(timezone.utc)
 
     # A -> B (B depends on A)
-    task_graph.add_task(TaskItem(
-        id="A", description="Task A", agent="agent-1",
-        state=TaskState.PENDING, created_at=now, updated_at=now,
-    ))
-    task_graph.add_task(TaskItem(
-        id="B", description="Task B", agent="agent-2",
-        blocked_by=["A"], state=TaskState.PENDING,
-        created_at=now, updated_at=now,
-    ))
+    task_graph.add_task(
+        TaskItem(
+            id="A",
+            description="Task A",
+            agent="agent-1",
+            state=TaskState.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    task_graph.add_task(
+        TaskItem(
+            id="B",
+            description="Task B",
+            agent="agent-2",
+            blocked_by=["A"],
+            state=TaskState.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+    )
 
     # Only A is ready
     ready = task_graph.get_ready_tasks()
@@ -460,20 +495,38 @@ async def test_task_graph_snapshot(task_graph: TaskGraph) -> None:
     now = datetime.now(timezone.utc)
 
     # Add 3 tasks: A -> B -> C
-    task_graph.add_task(TaskItem(
-        id="A", description="Task A", agent="agent-1",
-        state=TaskState.PENDING, created_at=now, updated_at=now,
-    ))
-    task_graph.add_task(TaskItem(
-        id="B", description="Task B", agent="agent-2",
-        blocked_by=["A"], state=TaskState.PENDING,
-        created_at=now, updated_at=now,
-    ))
-    task_graph.add_task(TaskItem(
-        id="C", description="Task C", agent="agent-3",
-        blocked_by=["B"], state=TaskState.PENDING,
-        created_at=now, updated_at=now,
-    ))
+    task_graph.add_task(
+        TaskItem(
+            id="A",
+            description="Task A",
+            agent="agent-1",
+            state=TaskState.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    task_graph.add_task(
+        TaskItem(
+            id="B",
+            description="Task B",
+            agent="agent-2",
+            blocked_by=["A"],
+            state=TaskState.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    task_graph.add_task(
+        TaskItem(
+            id="C",
+            description="Task C",
+            agent="agent-3",
+            blocked_by=["B"],
+            state=TaskState.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+    )
 
     # Start and complete A
     task_graph.start_task("A")

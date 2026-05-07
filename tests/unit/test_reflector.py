@@ -118,12 +118,14 @@ class TestLLMReflector:
         client = MagicMock()
         reflector = LLMReflector(client)
 
-        json_text = json.dumps({
-            "sufficient": True,
-            "reason": "looks good",
-            "feedback": "",
-            "next_queries": ["q1"],
-        })
+        json_text = json.dumps(
+            {
+                "sufficient": True,
+                "reason": "looks good",
+                "feedback": "",
+                "next_queries": ["q1"],
+            }
+        )
         result = reflector._parse_reflection(json_text)
         assert result.sufficient is True
         assert result.reason == "looks good"

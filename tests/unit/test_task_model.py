@@ -178,6 +178,7 @@ class TestTaskItemFieldConstraints:
 # iter100 regression: TaskState.BLOCKED removed
 # ---------------------------------------------------------------------------
 
+
 class TestTaskStateBlockedRemoved:
     def test_blocked_not_in_enum(self):
         """BLOCKED was a dead member never used in src/ — removed."""

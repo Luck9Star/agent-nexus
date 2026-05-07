@@ -22,6 +22,7 @@ from agent_nexus.models.distribution import (
 # SourceType enum
 # ---------------------------------------------------------------------------
 
+
 class TestSourceType:
     def test_members(self):
         assert set(SourceType) == {
@@ -44,6 +45,7 @@ class TestSourceType:
 # InstallationStatus enum
 # ---------------------------------------------------------------------------
 
+
 class TestInstallationStatus:
     def test_members(self):
         assert set(InstallationStatus) == {
@@ -65,6 +67,7 @@ class TestInstallationStatus:
 # ---------------------------------------------------------------------------
 # SourceEntry
 # ---------------------------------------------------------------------------
+
 
 class TestSourceEntry:
     def test_full_construction(self):
@@ -126,6 +129,7 @@ class TestSourceEntryValidation:
 # ---------------------------------------------------------------------------
 # LockfileEntry
 # ---------------------------------------------------------------------------
+
 
 class TestLockfileEntry:
     def test_construction_with_required_fields(self):
@@ -296,6 +300,7 @@ class TestLockfileEntryCommitShaValidation:
 # Lockfile
 # ---------------------------------------------------------------------------
 
+
 class TestLockfile:
     def test_defaults(self):
         lf = Lockfile()
@@ -354,6 +359,7 @@ class TestLockfile:
 # PackageSource
 # ---------------------------------------------------------------------------
 
+
 class TestPackageSource:
     def test_construction(self):
         ps = PackageSource(
@@ -392,9 +398,7 @@ class TestPackageSourceValidation:
     """PackageSource git-URL validation (mirrors SourceEntry)."""
 
     def test_git_type_with_url_succeeds(self):
-        ps = PackageSource(
-            name="official", url="https://github.com/user/repo.git"
-        )
+        ps = PackageSource(name="official", url="https://github.com/user/repo.git")
         assert ps.url == "https://github.com/user/repo.git"
 
     def test_git_type_empty_url_rejected(self):
@@ -413,6 +417,7 @@ class TestPackageSourceValidation:
 # ---------------------------------------------------------------------------
 # IndexEntry
 # ---------------------------------------------------------------------------
+
 
 class TestIndexEntry:
     def test_construction(self):

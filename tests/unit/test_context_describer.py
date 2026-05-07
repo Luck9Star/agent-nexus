@@ -87,9 +87,7 @@ def _make_health_report(
     }
     if sel > 0:
         metrics["applied_rate"] = applied / sel
-        metrics["completion_rate"] = (
-            completions / applied if applied > 0 else 0.0
-        )
+        metrics["completion_rate"] = completions / applied if applied > 0 else 0.0
         metrics["effective_rate"] = completions / sel
         metrics["fallback_rate"] = fallbacks / sel
 
@@ -129,7 +127,8 @@ def _mock_store(
     # get_ancestry_batch(skill_ids, max_depth) — batch fetch used by
     # _build_lineage_tree
     def mock_ancestry_batch(
-        skill_ids: list[str], max_depth: int = 10,
+        skill_ids: list[str],
+        max_depth: int = 10,
     ) -> dict[str, list[SkillRecord]]:
         if not ancestry_map:
             return {}
@@ -145,7 +144,8 @@ def _mock_store(
 
     # get_judgments_batch(skill_ids, limit_per_skill) — batch fetch
     def mock_judgments_batch(
-        skill_ids: set[str], limit_per_skill: int = 50,
+        skill_ids: set[str],
+        limit_per_skill: int = 50,
     ) -> dict[str, list[dict]]:
         if not judgments_map:
             return {}
@@ -182,14 +182,16 @@ class TestL0Context:
     def test_with_skills(self) -> None:
         """L0 with active skills returns summary with count, evolved count, eff rate."""
         r1 = _make_record(
-            "s1", "alpha",
+            "s1",
+            "alpha",
             origin=SkillOrigin.IMPORTED,
             selections=100,
             applied=80,
             completions=70,
         )
         r2 = _make_record(
-            "s2", "beta",
+            "s2",
+            "beta",
             origin=SkillOrigin.FIXED,
             selections=50,
             applied=40,
@@ -272,26 +274,38 @@ class TestL1Context:
     def test_with_skills_table(self) -> None:
         """L1 returns a markdown table with per-skill metrics."""
         r1 = _make_record(
-            "s1", "alpha",
+            "s1",
+            "alpha",
             selections=100,
             applied=80,
             completions=70,
             fallbacks=5,
         )
         r2 = _make_record(
-            "s2", "beta",
+            "s2",
+            "beta",
             selections=200,
             applied=150,
             completions=100,
             fallbacks=30,
         )
         report1 = _make_health_report(
-            "s1", "alpha", is_healthy=True,
-            selections=100, applied=80, completions=70, fallbacks=5,
+            "s1",
+            "alpha",
+            is_healthy=True,
+            selections=100,
+            applied=80,
+            completions=70,
+            fallbacks=5,
         )
         report2 = _make_health_report(
-            "s2", "beta", is_healthy=False,
-            selections=200, applied=150, completions=100, fallbacks=30,
+            "s2",
+            "beta",
+            is_healthy=False,
+            selections=200,
+            applied=150,
+            completions=100,
+            fallbacks=30,
             suggestions=[
                 EvolutionSuggestion(
                     evolution_type=EvolutionType.FIX,
@@ -306,7 +320,8 @@ class TestL1Context:
         )
         # Patch HealthChecker so diagnose_skills returns our fixed reports
         with patch.object(
-            HealthChecker, "diagnose_skills",
+            HealthChecker,
+            "diagnose_skills",
             return_value={"s1": report1, "s2": report2},
         ):
             describer = EvolutionContextDescriber(store)
@@ -339,7 +354,8 @@ class TestL1Context:
             metrics=EvolutionMetrics(),
         )
         with patch.object(
-            HealthChecker, "diagnose_skills",
+            HealthChecker,
+            "diagnose_skills",
             return_value={"s1": healthy},
         ):
             describer = EvolutionContextDescriber(store)
@@ -397,7 +413,8 @@ class TestL2Context:
     def test_full_output(self) -> None:
         """L2 returns all four sections: lineage, details, health, history."""
         r = _make_record(
-            "s1", "my-skill",
+            "s1",
+            "my-skill",
             origin=SkillOrigin.FIXED,
             generation=1,
             parent_ids=["p1"],
@@ -408,9 +425,13 @@ class TestL2Context:
         )
         parent = _make_record("p1", "my-skill", generation=0)
         unhealthy_report = _make_health_report(
-            "s1", "my-skill",
+            "s1",
+            "my-skill",
             is_healthy=False,
-            selections=100, applied=80, completions=70, fallbacks=10,
+            selections=100,
+            applied=80,
+            completions=70,
+            fallbacks=10,
             suggestions=[
                 EvolutionSuggestion(
                     evolution_type=EvolutionType.FIX,
@@ -446,7 +467,8 @@ class TestL2Context:
             judgments_map={"s1": judgments},
         )
         with patch.object(
-            HealthChecker, "diagnose_skills",
+            HealthChecker,
+            "diagnose_skills",
             return_value={"s1": unhealthy_report},
         ):
             describer = EvolutionContextDescriber(store)
@@ -503,16 +525,21 @@ class TestL2Context:
     def test_healthy_skill_no_health_section(self) -> None:
         """L2 healthy skills do not generate health warnings or health section."""
         r = _make_record(
-            "s1", "healthy-skill",
+            "s1",
+            "healthy-skill",
             selections=100,
             applied=80,
             completions=70,
             fallbacks=5,
         )
         healthy_report = _make_health_report(
-            "s1", "healthy-skill",
+            "s1",
+            "healthy-skill",
             is_healthy=True,
-            selections=100, applied=80, completions=70, fallbacks=5,
+            selections=100,
+            applied=80,
+            completions=70,
+            fallbacks=5,
         )
         store = _mock_store(
             active_skills=[r],
@@ -520,7 +547,8 @@ class TestL2Context:
             judgments_map={"s1": []},
         )
         with patch.object(
-            HealthChecker, "diagnose_skills",
+            HealthChecker,
+            "diagnose_skills",
             return_value={"s1": healthy_report},
         ):
             describer = EvolutionContextDescriber(store)
@@ -535,20 +563,38 @@ class TestL2Context:
     def test_mixed_health_contains_health_section(self) -> None:
         """L2 with at least one unhealthy skill includes the health section."""
         r_healthy = _make_record(
-            "s1", "good",
-            selections=100, applied=80, completions=70, fallbacks=5,
+            "s1",
+            "good",
+            selections=100,
+            applied=80,
+            completions=70,
+            fallbacks=5,
         )
         r_unhealthy = _make_record(
-            "s2", "bad",
-            selections=100, applied=80, completions=20, fallbacks=5,
+            "s2",
+            "bad",
+            selections=100,
+            applied=80,
+            completions=20,
+            fallbacks=5,
         )
         healthy_report = _make_health_report(
-            "s1", "good", is_healthy=True,
-            selections=100, applied=80, completions=70, fallbacks=5,
+            "s1",
+            "good",
+            is_healthy=True,
+            selections=100,
+            applied=80,
+            completions=70,
+            fallbacks=5,
         )
         unhealthy_report = _make_health_report(
-            "s2", "bad", is_healthy=False,
-            selections=100, applied=80, completions=20, fallbacks=5,
+            "s2",
+            "bad",
+            is_healthy=False,
+            selections=100,
+            applied=80,
+            completions=20,
+            fallbacks=5,
             suggestions=[
                 EvolutionSuggestion(
                     evolution_type=EvolutionType.FIX,
@@ -563,7 +609,8 @@ class TestL2Context:
             judgments_map={"s1": [], "s2": []},
         )
         with patch.object(
-            HealthChecker, "diagnose_skills",
+            HealthChecker,
+            "diagnose_skills",
             return_value={"s1": healthy_report, "s2": unhealthy_report},
         ):
             describer = EvolutionContextDescriber(store)
@@ -577,7 +624,9 @@ class TestL2Context:
         """L2 without judgments omits the history section."""
         r = _make_record("s1", "new-skill", selections=0)
         healthy_report = _make_health_report(
-            "s1", "new-skill", is_healthy=True,
+            "s1",
+            "new-skill",
+            is_healthy=True,
         )
         store = _mock_store(
             active_skills=[r],
@@ -585,7 +634,8 @@ class TestL2Context:
             judgments_map={"s1": []},
         )
         with patch.object(
-            HealthChecker, "diagnose_skills",
+            HealthChecker,
+            "diagnose_skills",
             return_value={"s1": healthy_report},
         ):
             describer = EvolutionContextDescriber(store)
@@ -602,7 +652,8 @@ class TestL2Context:
     def test_lineage_tree_no_ancestors(self) -> None:
         """L2 skill with no ancestors shows only its own info."""
         r = _make_record(
-            "s1", "root-skill",
+            "s1",
+            "root-skill",
             origin=SkillOrigin.CAPTURED,
             generation=0,
         )
@@ -614,7 +665,8 @@ class TestL2Context:
             judgments_map={"s1": []},
         )
         with patch.object(
-            HealthChecker, "diagnose_skills",
+            HealthChecker,
+            "diagnose_skills",
             return_value={"s1": healthy_report},
         ):
             describer = EvolutionContextDescriber(store)
@@ -627,7 +679,8 @@ class TestL2Context:
     def test_detail_table_columns(self) -> None:
         """L2 detail table contains expected columns."""
         r = _make_record(
-            "s1", "my-skill",
+            "s1",
+            "my-skill",
             version="2.1.0",
             origin=SkillOrigin.DERIVED,
             generation=3,
@@ -637,8 +690,13 @@ class TestL2Context:
             fallbacks=5,
         )
         healthy_report = _make_health_report(
-            "s1", "my-skill", is_healthy=True,
-            selections=50, applied=40, completions=30, fallbacks=5,
+            "s1",
+            "my-skill",
+            is_healthy=True,
+            selections=50,
+            applied=40,
+            completions=30,
+            fallbacks=5,
         )
         store = _mock_store(
             active_skills=[r],
@@ -646,7 +704,8 @@ class TestL2Context:
             judgments_map={"s1": []},
         )
         with patch.object(
-            HealthChecker, "diagnose_skills",
+            HealthChecker,
+            "diagnose_skills",
             return_value={"s1": healthy_report},
         ):
             describer = EvolutionContextDescriber(store)
@@ -661,14 +720,15 @@ class TestL2Context:
         assert "50" in result  # selections
         assert "40" in result  # applied
         assert "30" in result  # completions
-        assert "5" in result   # fallbacks
+        assert "5" in result  # fallbacks
         # Effective rate 30/50 = 0.60
         assert "0.60" in result
 
     def test_skill_with_no_ancestors(self) -> None:
         """_build_lineage_tree else-branch: skill with empty ancestry list."""
         r = _make_record(
-            "s-noanc", "orphan-skill",
+            "s-noanc",
+            "orphan-skill",
             origin=SkillOrigin.IMPORTED,
             generation=1,
             parent_ids=[],
@@ -678,9 +738,7 @@ class TestL2Context:
             metrics=EvolutionMetrics(),
             ancestry_map={"s-noanc": []},
         )
-        with patch(
-            "agent_nexus.platform.evolution.context_describer.HealthChecker"
-        ) as hc_cls:
+        with patch("agent_nexus.platform.evolution.context_describer.HealthChecker") as hc_cls:
             hc_cls.return_value = _mock_health_checker(
                 {"s-noanc": _make_health_report("s-noanc", "orphan-skill", True)}
             )

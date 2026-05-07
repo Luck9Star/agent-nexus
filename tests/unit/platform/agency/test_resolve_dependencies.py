@@ -71,9 +71,7 @@ class TestResolveDependencies:
         review_task = next(t for t in dag.specialist_tasks if t.id == "review")
         assert review_task.blocked_by == []
 
-    def test_all_specialists_block_integrate(
-        self, planner: DynamicCompositePlanner
-    ) -> None:
+    def test_all_specialists_block_integrate(self, planner: DynamicCompositePlanner) -> None:
         """Integrate must be blocked by all specialist tasks regardless of deps."""
         subtasks = [
             _subtask("a", ["system_design"]),
@@ -83,9 +81,7 @@ class TestResolveDependencies:
         integrate = next(t for t in dag.tasks if t.id == "integrate")
         assert set(integrate.blocked_by) == {"a", "b"}
 
-    def test_validate_blocked_by_integrate(
-        self, planner: DynamicCompositePlanner
-    ) -> None:
+    def test_validate_blocked_by_integrate(self, planner: DynamicCompositePlanner) -> None:
         subtasks = [_subtask("x", ["system_design"])]
         dag = planner.resolve_dependencies(subtasks, composition_name="test")
         validate = next(t for t in dag.tasks if t.id == "validate")
@@ -130,9 +126,7 @@ class TestResolveDependencies:
 
     def test_max_parallel_custom(self, planner: DynamicCompositePlanner) -> None:
         subtasks = [_subtask("a", ["system_design"])]
-        dag = planner.resolve_dependencies(
-            subtasks, composition_name="test", max_parallel=5
-        )
+        dag = planner.resolve_dependencies(subtasks, composition_name="test", max_parallel=5)
         assert dag.max_parallel == 5
 
     def test_no_self_dependency(self, planner: DynamicCompositePlanner) -> None:

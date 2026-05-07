@@ -509,7 +509,9 @@ class TestImportAllFileOutput:
             output_path = Path(tmpdir)
             json_files = sorted(output_path.glob("*.json"))
             json_ids = [f.stem for f in json_files]
-            assert len(json_files) == 16, f"Expected 16 JSON files, got {len(json_files)}: {json_ids}"
+            assert len(json_files) == 16, (
+                f"Expected 16 JSON files, got {len(json_files)}: {json_ids}"
+            )
 
     def test_normalized_md_files_written(self):
         """normalized/<id>.md files exist for each agent."""
@@ -542,6 +544,7 @@ class TestImportAllFileOutput:
             assert lock_path.is_file(), "source.lock.yaml not created"
 
             import yaml
+
             with lock_path.open() as f:
                 lock_data = yaml.safe_load(f)
 
@@ -586,8 +589,16 @@ class TestImportAllFileOutput:
         import json
 
         required_keys = {
-            "id", "name", "source", "profile", "capabilities", "routing",
-            "runtime", "permissions", "output_contract", "quality",
+            "id",
+            "name",
+            "source",
+            "profile",
+            "capabilities",
+            "routing",
+            "runtime",
+            "permissions",
+            "output_contract",
+            "quality",
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -756,7 +767,27 @@ class TestYAMLSerialization:
         """Strings with any trigger character are double-quoted."""
         from agent_nexus.platform.agency.importer import _yaml_quote
 
-        for char in (":", "#", "{", "}", "[", "]", ",", "&", "*", "?", "|", "-", "<", ">", "=", "!", "%", "@", "`"):
+        for char in (
+            ":",
+            "#",
+            "{",
+            "}",
+            "[",
+            "]",
+            ",",
+            "&",
+            "*",
+            "?",
+            "|",
+            "-",
+            "<",
+            ">",
+            "=",
+            "!",
+            "%",
+            "@",
+            "`",
+        ):
             result = _yaml_quote(f"hello{char}world")
             assert result.startswith('"'), f"Char {char!r} should trigger quoting"
 
@@ -775,7 +806,7 @@ class TestYAMLSerialization:
 
         data = {
             "version": 1,
-            "name": "test \"agent\"",
+            "name": 'test "agent"',
             "items": ["alpha", "beta"],
             "nested": {"key": "value with : special # chars"},
             "empty": None,
@@ -964,7 +995,9 @@ class TestCapabilityInference:
         from agent_nexus.platform.agency.task_composer import infer_capabilities
 
         caps = infer_capabilities("insecurity measurement")
-        assert "security_review" not in caps, f"security_review should not be in {caps} for 'insecurity'"
+        assert "security_review" not in caps, (
+            f"security_review should not be in {caps} for 'insecurity'"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -998,7 +1031,9 @@ class TestPlannerResolveDependencies:
         dag = planner.resolve_dependencies(subtasks, composition_name="dep-test", max_parallel=2)
         # task-b's caps are a subset of task-a's, so task-b depends on task-a
         task_b = next(t for t in dag.tasks if t.id == "task-b")
-        assert "task-a" in task_b.blocked_by, f"task-b should be blocked by task-a, got {task_b.blocked_by}"
+        assert "task-a" in task_b.blocked_by, (
+            f"task-b should be blocked by task-a, got {task_b.blocked_by}"
+        )
 
     def test_integrate_and_validate_appended(self):
         """integrate and validate tasks are always appended."""

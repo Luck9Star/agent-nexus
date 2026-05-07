@@ -85,12 +85,8 @@ def test_allowlist_entry_schema():
         )
 
         # Explicitly check capabilities is a non-empty list
-        assert isinstance(entry["capabilities"], list), (
-            f"entry #{i} capabilities is not a list"
-        )
-        assert len(entry["capabilities"]) > 0, (
-            f"entry #{i} capabilities list is empty"
-        )
+        assert isinstance(entry["capabilities"], list), f"entry #{i} capabilities is not a list"
+        assert len(entry["capabilities"]) > 0, f"entry #{i} capabilities list is empty"
 
 
 # ===================================================================

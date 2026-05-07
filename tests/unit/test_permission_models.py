@@ -18,6 +18,7 @@ from agent_nexus.models.permission import (
 # PermissionMode enum
 # ---------------------------------------------------------------------------
 
+
 class TestPermissionMode:
     def test_members(self):
         assert set(PermissionMode) == {
@@ -45,6 +46,7 @@ class TestPermissionMode:
 # PathAccess enum
 # ---------------------------------------------------------------------------
 
+
 class TestPathAccess:
     def test_members(self):
         assert set(PathAccess) == {
@@ -64,6 +66,7 @@ class TestPathAccess:
 # ---------------------------------------------------------------------------
 # PathRule
 # ---------------------------------------------------------------------------
+
 
 class TestPathRule:
     def test_construction_with_pattern(self):
@@ -110,6 +113,7 @@ class TestPathRule:
 # ---------------------------------------------------------------------------
 # PermissionConfig
 # ---------------------------------------------------------------------------
+
 
 class TestPermissionConfig:
     def test_defaults(self):
@@ -186,6 +190,7 @@ class TestPermissionConfig:
 # ---------------------------------------------------------------------------
 # PermissionDecision
 # ---------------------------------------------------------------------------
+
 
 class TestPermissionDecision:
     def test_allowed_decision_defaults(self):

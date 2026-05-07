@@ -75,8 +75,12 @@ blocked_by = []
         db_path = tmp_path / "cycle.db"
         tg = TaskGraph(str(db_path))
 
-        t1 = TaskItem(id="t1", description="A", agent="a", state=TaskState.PENDING, blocked_by=["t2"])
-        t2 = TaskItem(id="t2", description="B", agent="b", state=TaskState.PENDING, blocked_by=["t1"])
+        t1 = TaskItem(
+            id="t1", description="A", agent="a", state=TaskState.PENDING, blocked_by=["t2"]
+        )
+        t2 = TaskItem(
+            id="t2", description="B", agent="b", state=TaskState.PENDING, blocked_by=["t1"]
+        )
 
         with pytest.raises(ValueError, match="[Cc]ycle|cycle"):
             tg.add_tasks([t1, t2])

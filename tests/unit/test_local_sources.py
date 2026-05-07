@@ -37,9 +37,12 @@ class TestSourceManagerInit:
 
     def test_init_loads_valid_file(self, tmp_path: Path) -> None:
         path = tmp_path / "sources.yaml"
-        _write_sources(path, [
-            {"name": "my-src", "type": "git", "url": "https://example.com/r.git"},
-        ])
+        _write_sources(
+            path,
+            [
+                {"name": "my-src", "type": "git", "url": "https://example.com/r.git"},
+            ],
+        )
         sm = SourceManager(path)
         names = [s.name for s in sm.list_sources()]
         assert "my-src" in names
@@ -178,9 +181,12 @@ class TestSourceGetOfficial:
 
     def test_get_official_returns_none_when_absent(self, tmp_path: Path) -> None:
         path = tmp_path / "sources.yaml"
-        _write_sources(path, [
-            {"name": "private", "type": "git", "url": "https://example.com/r.git"},
-        ])
+        _write_sources(
+            path,
+            [
+                {"name": "private", "type": "git", "url": "https://example.com/r.git"},
+            ],
+        )
         sm = SourceManager(path)
         assert sm.get_official_source() is None
 
@@ -188,6 +194,7 @@ class TestSourceGetOfficial:
 # ---------------------------------------------------------------------------
 # iter102 regression: bare dict subscript → .get() with validation
 # ---------------------------------------------------------------------------
+
 
 class TestSourceEntryValidation:
     """Source entries with missing required fields produce clear errors."""
@@ -201,7 +208,9 @@ class TestSourceEntryValidation:
         assert len(sm._sources) == 1
         assert sm._sources[0].name == "official"
 
-    def _write_index(self, tmp_path: Path, url: str, agents: list[dict]) -> tuple[Path, SourceEntry]:
+    def _write_index(
+        self, tmp_path: Path, url: str, agents: list[dict]
+    ) -> tuple[Path, SourceEntry]:
         """Write index.yaml at the correct cache path for a given URL."""
         src = SourceEntry(name="test", type="git", url=url, branch="main")
         digest = hashlib.sha256(url.encode()).hexdigest()[:12]
@@ -212,27 +221,39 @@ class TestSourceEntryValidation:
 
     def test_index_entry_missing_name_skipped(self, tmp_path: Path) -> None:
         sm = SourceManager(tmp_path / "sources.yaml")
-        _, src = self._write_index(tmp_path, "https://example.com/r.git", [
-            {"version": "1.0", "type": "atomic"},
-        ])
+        _, src = self._write_index(
+            tmp_path,
+            "https://example.com/r.git",
+            [
+                {"version": "1.0", "type": "atomic"},
+            ],
+        )
         entries = sm._load_source_index(src)
         assert entries is not None
         assert len(entries) == 0
 
     def test_index_entry_missing_version_skipped(self, tmp_path: Path) -> None:
         sm = SourceManager(tmp_path / "sources.yaml")
-        _, src = self._write_index(tmp_path, "https://example.com/r2.git", [
-            {"name": "test", "type": "atomic"},
-        ])
+        _, src = self._write_index(
+            tmp_path,
+            "https://example.com/r2.git",
+            [
+                {"name": "test", "type": "atomic"},
+            ],
+        )
         entries = sm._load_source_index(src)
         assert entries is not None
         assert len(entries) == 0
 
     def test_index_entry_missing_type_skipped(self, tmp_path: Path) -> None:
         sm = SourceManager(tmp_path / "sources.yaml")
-        _, src = self._write_index(tmp_path, "https://example.com/r3.git", [
-            {"name": "test", "version": "1.0"},
-        ])
+        _, src = self._write_index(
+            tmp_path,
+            "https://example.com/r3.git",
+            [
+                {"name": "test", "version": "1.0"},
+            ],
+        )
         entries = sm._load_source_index(src)
         assert entries is not None
         assert len(entries) == 0
@@ -257,50 +278,99 @@ class TestSearchAgents:
         return sm, src
 
     def test_search_finds_by_name(self, tmp_path: Path) -> None:
-        sm, _ = self._setup_index(tmp_path, "https://example.com/s1.git", [
-            {"name": "code-reviewer", "version": "1.0", "type": "atomic",
-             "description": "Reviews code", "tags": ["code", "review"]},
-        ])
+        sm, _ = self._setup_index(
+            tmp_path,
+            "https://example.com/s1.git",
+            [
+                {
+                    "name": "code-reviewer",
+                    "version": "1.0",
+                    "type": "atomic",
+                    "description": "Reviews code",
+                    "tags": ["code", "review"],
+                },
+            ],
+        )
         results = sm.search_agents("code-reviewer")
         assert len(results) == 1
         assert results[0][1].name == "code-reviewer"
 
     def test_search_finds_by_description(self, tmp_path: Path) -> None:
-        sm, _ = self._setup_index(tmp_path, "https://example.com/s2.git", [
-            {"name": "my-agent", "version": "1.0", "type": "atomic",
-             "description": "Security vulnerability scanner", "tags": []},
-        ])
+        sm, _ = self._setup_index(
+            tmp_path,
+            "https://example.com/s2.git",
+            [
+                {
+                    "name": "my-agent",
+                    "version": "1.0",
+                    "type": "atomic",
+                    "description": "Security vulnerability scanner",
+                    "tags": [],
+                },
+            ],
+        )
         results = sm.search_agents("vulnerability")
         assert len(results) == 1
 
     def test_search_finds_by_tag(self, tmp_path: Path) -> None:
-        sm, _ = self._setup_index(tmp_path, "https://example.com/s3.git", [
-            {"name": "tool-agent", "version": "1.0", "type": "atomic",
-             "description": "A tool", "tags": ["testing", "automation"]},
-        ])
+        sm, _ = self._setup_index(
+            tmp_path,
+            "https://example.com/s3.git",
+            [
+                {
+                    "name": "tool-agent",
+                    "version": "1.0",
+                    "type": "atomic",
+                    "description": "A tool",
+                    "tags": ["testing", "automation"],
+                },
+            ],
+        )
         results = sm.search_agents("automation")
         assert len(results) == 1
 
     def test_search_case_insensitive(self, tmp_path: Path) -> None:
-        sm, _ = self._setup_index(tmp_path, "https://example.com/s4.git", [
-            {"name": "Doc-Filler", "version": "1.0", "type": "atomic",
-             "description": "Fills documents", "tags": []},
-        ])
+        sm, _ = self._setup_index(
+            tmp_path,
+            "https://example.com/s4.git",
+            [
+                {
+                    "name": "Doc-Filler",
+                    "version": "1.0",
+                    "type": "atomic",
+                    "description": "Fills documents",
+                    "tags": [],
+                },
+            ],
+        )
         results = sm.search_agents("doc-filler")
         assert len(results) == 1
 
     def test_search_no_match_returns_empty(self, tmp_path: Path) -> None:
-        sm, _ = self._setup_index(tmp_path, "https://example.com/s5.git", [
-            {"name": "my-agent", "version": "1.0", "type": "atomic",
-             "description": "Does things", "tags": []},
-        ])
+        sm, _ = self._setup_index(
+            tmp_path,
+            "https://example.com/s5.git",
+            [
+                {
+                    "name": "my-agent",
+                    "version": "1.0",
+                    "type": "atomic",
+                    "description": "Does things",
+                    "tags": [],
+                },
+            ],
+        )
         results = sm.search_agents("nonexistent-query")
         assert results == []
 
     def test_search_returns_source_entry(self, tmp_path: Path) -> None:
-        sm, src = self._setup_index(tmp_path, "https://example.com/s6.git", [
-            {"name": "found-agent", "version": "1.0", "type": "atomic"},
-        ])
+        sm, src = self._setup_index(
+            tmp_path,
+            "https://example.com/s6.git",
+            [
+                {"name": "found-agent", "version": "1.0", "type": "atomic"},
+            ],
+        )
         results = sm.search_agents("found")
         assert len(results) == 1
         assert results[0][0].name == "test"

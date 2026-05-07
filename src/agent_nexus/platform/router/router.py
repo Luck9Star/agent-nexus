@@ -227,7 +227,7 @@ class PlatformRouter:
             last_error_type = type(exc).__name__
             logger.error(last_error, exc_info=exc)
             try:
-                ctx.close()
+                await ctx.aclose()
             except Exception:
                 logger.debug("Failed to close context after TaskGraph error", exc_info=True)
             return WorkflowResult(
@@ -281,7 +281,7 @@ class PlatformRouter:
                 logger.error(last_error)
         finally:
             try:
-                ctx.close()
+                await ctx.aclose()
             except Exception:
                 logger.debug("Failed to close context after composite workflow", exc_info=True)
 

@@ -16,9 +16,7 @@ def test_resolve_stage_model_returns_stage_override():
 
 
 def test_resolve_stage_model_falls_back_to_default():
-    config = PlatformConfig(
-        models=ModelConfig(default="openai:gpt-4o", stages={})
-    )
+    config = PlatformConfig(models=ModelConfig(default="openai:gpt-4o", stages={}))
     mgr = ModelConfigManager(config)
     assert mgr.resolve_stage_model("planning") == "openai:gpt-4o"
 

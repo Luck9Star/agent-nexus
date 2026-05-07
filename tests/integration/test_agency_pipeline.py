@@ -82,7 +82,9 @@ class TestImporterOutput:
     def test_each_profile_has_required_keys(self, importer_profiles):
         required = {"id", "expert_profile", "normalized_prompt", "source_md", "output_contract"}
         for pkg in importer_profiles:
-            assert required.issubset(pkg.keys()), f"Missing keys in {pkg['id']}: {required - set(pkg.keys())}"
+            assert required.issubset(pkg.keys()), (
+                f"Missing keys in {pkg['id']}: {required - set(pkg.keys())}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +295,12 @@ class TestQAGateValidation:
             }
         }
         required_sections = [
-            "context", "assumptions", "proposed_design",
-            "tradeoffs", "risks", "next_steps",
+            "context",
+            "assumptions",
+            "proposed_design",
+            "tradeoffs",
+            "risks",
+            "next_steps",
         ]
 
         gate_input = QAGateInput(

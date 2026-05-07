@@ -15,6 +15,7 @@ from agent_nexus.platform.evolution.thresholds import SkillRates
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _skill(
     id: str = "sk-1",
     name: str = "test-skill",
@@ -42,6 +43,7 @@ def _make_store(skills: list[SkillRecord] | None = None) -> MagicMock:
 # ---------------------------------------------------------------------------
 # check_health -- three threshold rules
 # ---------------------------------------------------------------------------
+
 
 class TestCheckHealth:
     """Verify the three rules from docs/04 Section 6."""
@@ -141,6 +143,7 @@ class TestCheckHealth:
 # HealthReport.summary
 # ---------------------------------------------------------------------------
 
+
 class TestHealthReport:
     def test_summary_healthy(self):
         report = HealthReport(
@@ -213,6 +216,7 @@ class TestHealthReport:
 # diagnose_all / diagnose_skills
 # ---------------------------------------------------------------------------
 
+
 class TestDiagnoseSkills:
     def test_diagnose_all_returns_reports_for_active_skills(self):
         skills = [
@@ -277,11 +281,14 @@ class TestDiagnoseSkills:
 # get_unhealthy
 # ---------------------------------------------------------------------------
 
+
 class TestGetUnhealthy:
     def test_filters_healthy_out(self):
         skills = [
             _skill(id="ok", name="ok-skill", selections=10, applied=9, completions=8, fallbacks=1),
-            _skill(id="bad", name="bad-skill", selections=10, applied=3, completions=2, fallbacks=1),
+            _skill(
+                id="bad", name="bad-skill", selections=10, applied=3, completions=2, fallbacks=1
+            ),
         ]
         store = _make_store(skills)
         checker = HealthChecker(store)
@@ -310,6 +317,7 @@ class TestGetUnhealthy:
 # get_health_summary
 # ---------------------------------------------------------------------------
 
+
 class TestGetHealthSummary:
     def test_summary_counts(self):
         skills = [
@@ -337,6 +345,7 @@ class TestGetHealthSummary:
 # store property
 # ---------------------------------------------------------------------------
 
+
 class TestStoreProperty:
     def test_store_returns_underlying_store(self):
         store = _make_store()
@@ -348,12 +357,17 @@ class TestStoreProperty:
 # iter100 regression: get_health_summary includes CAPTURED count
 # ---------------------------------------------------------------------------
 
+
 class TestHealthSummaryCaptured:
     def test_summary_includes_captured_suggestions_key(self):
         """get_health_summary must count CAPTURED type suggestions."""
         captured_skill = _skill(
-            id="sk-cap", name="captured-skill",
-            selections=10, applied=8, completions=7, fallbacks=0,
+            id="sk-cap",
+            name="captured-skill",
+            selections=10,
+            applied=8,
+            completions=7,
+            fallbacks=0,
         )
         store = _make_store([captured_skill])
         checker = HealthChecker(store)
@@ -366,12 +380,14 @@ class TestHealthSummaryCaptured:
             rates: SkillRates | None = None,
         ) -> list[EvolutionSuggestion]:
             if skill_record.id == "sk-cap":
-                return [EvolutionSuggestion(
-                    evolution_type=EvolutionType.CAPTURED,
-                    target_skill_ids=[skill_record.id],
-                    direction="test captured",
-                    confidence=0.8,
-                )]
+                return [
+                    EvolutionSuggestion(
+                        evolution_type=EvolutionType.CAPTURED,
+                        target_skill_ids=[skill_record.id],
+                        direction="test captured",
+                        confidence=0.8,
+                    )
+                ]
             return original(skill_record, rates=rates)
 
         checker.check_health = patched  # type: ignore[assignment]

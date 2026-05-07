@@ -16,6 +16,7 @@ from agent_nexus.platform.runtime.describer import TieredRuntimeDescriber
 # l0_context
 # ---------------------------------------------------------------------------
 
+
 class TestL0Context:
     """Tests for TieredRuntimeDescriber.l0_context()."""
 
@@ -51,6 +52,7 @@ class TestL0Context:
 # l1_context
 # ---------------------------------------------------------------------------
 
+
 class TestL1Context:
     """Tests for TieredRuntimeDescriber.l1_context()."""
 
@@ -77,9 +79,7 @@ class TestL1Context:
         assert result == ""
 
     def test_with_functions_and_types(self, shared_runtime) -> None:
-        shared_runtime.inject_function(
-            Function(name="transform", description="Transform data")
-        )
+        shared_runtime.inject_function(Function(name="transform", description="Transform data"))
         shared_runtime.inject_type(RuntimeType(name="Config", description="Configuration"))
         describer = TieredRuntimeDescriber(shared_runtime)
         result = describer.l1_context()
@@ -90,6 +90,7 @@ class TestL1Context:
 # ---------------------------------------------------------------------------
 # l2_context
 # ---------------------------------------------------------------------------
+
 
 class TestL2Context:
     """Tests for TieredRuntimeDescriber.l2_context()."""
@@ -127,6 +128,7 @@ class TestL2Context:
 # ---------------------------------------------------------------------------
 # l3_value
 # ---------------------------------------------------------------------------
+
 
 class TestL3Value:
     """Tests for TieredRuntimeDescriber.l3_value()."""

@@ -19,6 +19,7 @@ from agent_nexus.platform.runtime.describer import TieredRuntimeDescriber
 # inject_variable
 # ---------------------------------------------------------------------------
 
+
 class TestInjectVariable:
     """Tests for PythonRuntime.inject_variable()."""
 
@@ -45,6 +46,7 @@ class TestInjectVariable:
 # inject_function
 # ---------------------------------------------------------------------------
 
+
 class TestInjectFunction:
     """Tests for PythonRuntime.inject_function()."""
 
@@ -63,6 +65,7 @@ class TestInjectFunction:
 # ---------------------------------------------------------------------------
 # inject_callable
 # ---------------------------------------------------------------------------
+
 
 class TestInjectCallable:
     """Tests for PythonRuntime.inject_callable()."""
@@ -101,6 +104,7 @@ class TestInjectCallable:
 # inject_type
 # ---------------------------------------------------------------------------
 
+
 class TestInjectType:
     """Tests for PythonRuntime.inject_type()."""
 
@@ -124,6 +128,7 @@ class TestInjectType:
 # ---------------------------------------------------------------------------
 # execute
 # ---------------------------------------------------------------------------
+
 
 class TestExecute:
     """Tests for PythonRuntime.execute()."""
@@ -151,11 +156,14 @@ class TestExecute:
 # describe_variables
 # ---------------------------------------------------------------------------
 
+
 class TestDescribeVariables:
     """Tests for PythonRuntime.describe_variables()."""
 
     def test_with_variables(self, shared_runtime) -> None:
-        shared_runtime.inject_variable(Variable(name="count", description="Counter", type_name="int"))
+        shared_runtime.inject_variable(
+            Variable(name="count", description="Counter", type_name="int")
+        )
         desc = shared_runtime.describe_variables()
         assert "count" in desc
         assert "Counter" in desc
@@ -167,6 +175,7 @@ class TestDescribeVariables:
 # ---------------------------------------------------------------------------
 # describe_functions
 # ---------------------------------------------------------------------------
+
 
 class TestDescribeFunctions:
     """Tests for PythonRuntime.describe_functions()."""
@@ -195,6 +204,7 @@ class TestDescribeFunctions:
 # ---------------------------------------------------------------------------
 # describe_types
 # ---------------------------------------------------------------------------
+
 
 class TestDescribeTypes:
     """Tests for PythonRuntime.describe_types() at various detail levels."""
@@ -255,6 +265,7 @@ class TestDescribeTypes:
 # _format_signature
 # ---------------------------------------------------------------------------
 
+
 class TestFormatSignature:
     """Tests for PythonRuntime._format_signature()."""
 
@@ -290,8 +301,20 @@ class TestIPythonInternalsNoDuplicates:
 
     def test_contains_expected_keys(self) -> None:
         """All expected IPython internal keys are present."""
-        expected = {"In", "Out", "exit", "quit", "get_ipython",
-                    "_", "__", "___", "_ih", "_oh", "_sh", "_dh"}
+        expected = {
+            "In",
+            "Out",
+            "exit",
+            "quit",
+            "get_ipython",
+            "_",
+            "__",
+            "___",
+            "_ih",
+            "_oh",
+            "_sh",
+            "_dh",
+        }
         assert _IPYTHON_INTERNALS == expected
 
 
@@ -612,9 +635,7 @@ class TestSecurityCheckerAdditionalBlocks:
         """__bases__ allows MRO chain traversal → sandbox escape."""
         runtime = PythonRuntime()
         try:
-            result = await runtime.execute(
-                "x = ().__class__.__bases__"
-            )
+            result = await runtime.execute("x = ().__class__.__bases__")
             assert result.success is False
             assert result.error is not None
             assert "security violation" in result.error.lower()
@@ -627,9 +648,7 @@ class TestSecurityCheckerAdditionalBlocks:
         """__mro__ exposes class hierarchy → sandbox escape."""
         runtime = PythonRuntime()
         try:
-            result = await runtime.execute(
-                "x = str.__mro__"
-            )
+            result = await runtime.execute("x = str.__mro__")
             assert result.success is False
             assert result.error is not None
             assert "security violation" in result.error.lower()

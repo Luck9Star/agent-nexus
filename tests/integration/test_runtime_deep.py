@@ -94,7 +94,8 @@ class TestConcurrentExecutionReal:
 
     @pytest.mark.asyncio
     async def test_concurrent_mutation_shared_variable(
-        self, executor: IPythonExecutor,
+        self,
+        executor: IPythonExecutor,
     ) -> None:
         """Concurrent writes to same variable are serialized by _exec_lock."""
         # Pre-inject a shared list
@@ -117,7 +118,8 @@ class TestConcurrentExecutionReal:
 
     @pytest.mark.asyncio
     async def test_sequential_execution_preserves_order(
-        self, executor: IPythonExecutor,
+        self,
+        executor: IPythonExecutor,
     ) -> None:
         """Sequential executions preserve variable assignment order."""
         await executor.execute("x = 1")
@@ -130,9 +132,7 @@ class TestConcurrentExecutionReal:
     async def test_inject_during_execution(self, executor: IPythonExecutor) -> None:
         """Injecting while execution is running is safe (queued or direct)."""
         # Start a slow execution
-        task = asyncio.create_task(
-            executor.execute("import time; time.sleep(0.3); x = 1")
-        )
+        task = asyncio.create_task(executor.execute("import time; time.sleep(0.3); x = 1"))
 
         # Inject while it's running (should be queued or applied after)
         await asyncio.sleep(0.05)
@@ -155,7 +155,8 @@ class TestCallableInjectionReal:
 
     @pytest.mark.asyncio
     async def test_callable_injection_and_invocation(
-        self, executor: IPythonExecutor,
+        self,
+        executor: IPythonExecutor,
     ) -> None:
         """Injected callable can be invoked in user code."""
         executor.inject("add", lambda a, b: a + b)
@@ -165,7 +166,8 @@ class TestCallableInjectionReal:
 
     @pytest.mark.asyncio
     async def test_callable_exception_propagates(
-        self, executor: IPythonExecutor,
+        self,
+        executor: IPythonExecutor,
     ) -> None:
         """Exception in injected callable propagates as execution error.
 
@@ -179,7 +181,8 @@ class TestCallableInjectionReal:
 
     @pytest.mark.asyncio
     async def test_callable_with_closure_over_injected(
-        self, executor: IPythonExecutor,
+        self,
+        executor: IPythonExecutor,
     ) -> None:
         """Lambda closure over injected variables works."""
         executor.inject("add_base", lambda x: x + 10)
@@ -216,9 +219,7 @@ class TestSecurityBypassRealExecution:
     @pytest.mark.asyncio
     async def test_subprocess_run_blocked(self, executor: IPythonExecutor) -> None:
         """subprocess.run() must be blocked by qualified-call rule."""
-        result = await executor.execute(
-            "import subprocess; subprocess.run(['ls'])"
-        )
+        result = await executor.execute("import subprocess; subprocess.run(['ls'])")
         assert result.success is False
         assert "security violation" in result.error.lower()
 
@@ -231,27 +232,26 @@ class TestSecurityBypassRealExecution:
 
     @pytest.mark.asyncio
     async def test_builtins_subscript_exec_blocked(
-        self, executor: IPythonExecutor,
+        self,
+        executor: IPythonExecutor,
     ) -> None:
         """__builtins__['exec']('code') must be blocked."""
-        result = await executor.execute(
-            "__builtins__['exec']('print(1)')"
-        )
+        result = await executor.execute("__builtins__['exec']('print(1)')")
         assert result.success is False
 
     @pytest.mark.asyncio
     async def test_getattr_dynamic_eval_blocked(
-        self, executor: IPythonExecutor,
+        self,
+        executor: IPythonExecutor,
     ) -> None:
         """getattr(obj, 'eval') dynamic dispatch must be blocked."""
-        result = await executor.execute(
-            "getattr(__builtins__, 'eval')('1+1')"
-        )
+        result = await executor.execute("getattr(__builtins__, 'eval')('1+1')")
         assert result.success is False
 
     @pytest.mark.asyncio
     async def test_type_three_arg_class_creation_blocked(
-        self, executor: IPythonExecutor,
+        self,
+        executor: IPythonExecutor,
     ) -> None:
         """type('X', bases, dict) sandbox escape must be blocked."""
         result = await executor.execute("type('Evil', (), {'x': 1})")
@@ -259,7 +259,8 @@ class TestSecurityBypassRealExecution:
 
     @pytest.mark.asyncio
     async def test_mro_chain_traversal_blocked(
-        self, executor: IPythonExecutor,
+        self,
+        executor: IPythonExecutor,
     ) -> None:
         """str.__mro__ chain traversal must be blocked."""
         result = await executor.execute("str.__mro__")
@@ -285,33 +286,25 @@ class TestSecurityBypassRealExecution:
 
     @pytest.mark.asyncio
     async def test_safe_code_still_works(
-        self, executor: IPythonExecutor,
+        self,
+        executor: IPythonExecutor,
     ) -> None:
         """Legitimate safe code still executes after all security rules."""
-        result = await executor.execute(
-            "x = [i**2 for i in range(10)]\n"
-            "total = sum(x)"
-        )
+        result = await executor.execute("x = [i**2 for i in range(10)]\ntotal = sum(x)")
         assert result.success is True
         assert executor.get("total") == 285
 
     @pytest.mark.asyncio
     async def test_json_import_allowed(self, executor: IPythonExecutor) -> None:
         """import json is allowed (safe stdlib module)."""
-        result = await executor.execute(
-            "import json\n"
-            "data = json.dumps({'key': 'value'})"
-        )
+        result = await executor.execute("import json\ndata = json.dumps({'key': 'value'})")
         assert result.success is True
         assert executor.get("data") == '{"key": "value"}'
 
     @pytest.mark.asyncio
     async def test_math_import_allowed(self, executor: IPythonExecutor) -> None:
         """import math is allowed."""
-        result = await executor.execute(
-            "import math\n"
-            "result = math.sqrt(144)"
-        )
+        result = await executor.execute("import math\nresult = math.sqrt(144)")
         assert result.success is True
         assert executor.get("result") == 12.0
 
@@ -385,7 +378,8 @@ class TestLifecycleEdgeCases:
 
     @pytest.mark.asyncio
     async def test_namespace_keys_excludes_underscore_prefix(
-        self, executor: IPythonExecutor,
+        self,
+        executor: IPythonExecutor,
     ) -> None:
         """Variables starting with _ are excluded from namespace_keys."""
         await executor.execute("_private = 1\npublic = 2")

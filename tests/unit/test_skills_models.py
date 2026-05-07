@@ -16,8 +16,11 @@ from agent_nexus.platform.skills.models import (
 
 def _meta(**overrides: object) -> SkillMetadata:
     defaults: dict[str, object] = dict(
-        name="test", agent_type="atomic",
-        triggers=[], capabilities=[], model_config={},
+        name="test",
+        agent_type="atomic",
+        triggers=[],
+        capabilities=[],
+        model_config={},
     )
     defaults.update(overrides)
     return SkillMetadata(**defaults)  # pyright: ignore[reportArgumentType]
@@ -26,6 +29,7 @@ def _meta(**overrides: object) -> SkillMetadata:
 # ---------------------------------------------------------------------------
 # Frozen dataclass equality and hashing
 # ---------------------------------------------------------------------------
+
 
 class TestFrozenSemantics:
     def test_equal_metadata(self):
@@ -57,6 +61,7 @@ class TestFrozenSemantics:
 # ---------------------------------------------------------------------------
 # Tier method — combined scenarios
 # ---------------------------------------------------------------------------
+
 
 class TestTierMethodCombinations:
     def test_tier0_with_empty_triggers_no_triggers_line(self):
@@ -103,7 +108,10 @@ class TestTierMethodCombinations:
     def test_raw_preserved(self):
         raw_text = "---\nname: t\nagent_type: a\n---\nbody"
         skill = ParsedSkill(
-            metadata=_meta(), body=None, resources=None, raw=raw_text,
+            metadata=_meta(),
+            body=None,
+            resources=None,
+            raw=raw_text,
         )
         assert skill.raw == raw_text
 
@@ -111,6 +119,7 @@ class TestTierMethodCombinations:
 # ---------------------------------------------------------------------------
 # Default factory isolation
 # ---------------------------------------------------------------------------
+
 
 class TestDefaultFactoryIsolation:
     def test_metadata_extra_independent(self):

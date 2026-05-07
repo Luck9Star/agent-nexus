@@ -170,9 +170,7 @@ class TestConfigLoader:
         """
         custom_dir = tmp_path / "custom-home"
         custom_dir.mkdir()
-        monkeypatch.setattr(
-            "agent_nexus.platform.config.loader.DEFAULT_CONFIG_DIR", custom_dir
-        )
+        monkeypatch.setattr("agent_nexus.platform.config.loader.DEFAULT_CONFIG_DIR", custom_dir)
 
         loader = ConfigLoader()
         assert loader.config_dir == custom_dir
@@ -433,9 +431,7 @@ class TestModelConfigManager:
         result = mgr.resolve_api_key(provider)
         assert result == "sk-deepseek-obj"
 
-    def test_resolve_api_key_string_lookup_fallback(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_resolve_api_key_string_lookup_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """String lookup with no api_key_env falls back to well-known env vars."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic-fallback")
         provider = ProviderConfig()  # no api_key_env set
@@ -469,10 +465,7 @@ class TestModelConfigManager:
 
         assert result == ""
         # Two warnings expected: "Provider not found" + "No API key found"
-        assert any(
-            "No API key found" in str(call)
-            for call in mock_warning.call_args_list
-        )
+        assert any("No API key found" in str(call) for call in mock_warning.call_args_list)
 
 
 # ============================================================================
@@ -524,9 +517,7 @@ class TestConfigLoaderProviderApiTypeValidation:
         config_dir = tmp_path / "config"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text(
-            '[models.providers.bad]\n'
-            'api = "invalid_type"\n'
-            'base_url = "http://localhost"\n'
+            '[models.providers.bad]\napi = "invalid_type"\nbase_url = "http://localhost"\n'
         )
         loader = ConfigLoader(config_dir=config_dir)
         config = loader.load_config()
@@ -541,7 +532,7 @@ class TestConfigLoaderProviderApiTypeValidation:
         # Write a config with each valid api type
         lines = []
         for i, pt in enumerate(ProviderApiType):
-            lines.append(f'[models.providers.p{i}]')
+            lines.append(f"[models.providers.p{i}]")
             lines.append(f'api = "{pt.value}"')
             lines.append(f'base_url = "http://localhost/{i}"')
         (config_dir / "config.toml").write_text("\n".join(lines) + "\n")
@@ -567,9 +558,7 @@ class TestConfigLoaderProviderApiTypeValidation:
 
         config_dir = tmp_path / "config"
         config_dir.mkdir()
-        (config_dir / "config.toml").write_text(
-            "[section\nkey = value\n", encoding="utf-8"
-        )
+        (config_dir / "config.toml").write_text("[section\nkey = value\n", encoding="utf-8")
         loader = ConfigLoader(config_dir=config_dir)
         with pytest.raises(toml.TomlDecodeError):
             loader.load_config()
@@ -645,9 +634,7 @@ class TestConfigLoaderProvidersValidation:
         """When [models].providers is a list instead of dict, it is ignored."""
         _write_config(
             tmp_path,
-            '[models]\n'
-            'default = "openai:gpt-4o"\n'
-            'providers = ["not", "a", "dict"]\n',
+            '[models]\ndefault = "openai:gpt-4o"\nproviders = ["not", "a", "dict"]\n',
         )
         loader = ConfigLoader(config_dir=tmp_path)
         config = loader.load_config()

@@ -323,9 +323,7 @@ class TestDeferredRegistryRegistration:
         assert len(registry.list_core_agents()) == 1
         assert len(registry.list_deferred_agents()) == 1
 
-    def test_register_with_start_command(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    def test_register_with_start_command(self, registry: DeferredAgentRegistry) -> None:
         manifest = _make_manifest("cmd-agent")
         registry.register_agent(
             manifest,
@@ -372,9 +370,7 @@ class TestDeferredRegistryGetAgent:
     def test_get_unknown_agent(self, registry: DeferredAgentRegistry) -> None:
         assert registry.get_agent_info("nonexistent") is None
 
-    def test_reregister_same_name_replaces_tier(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    def test_reregister_same_name_replaces_tier(self, registry: DeferredAgentRegistry) -> None:
         """Re-registering the same name as a different tier replaces the old entry."""
         registry.register_agent(_make_manifest("x"), deferred=False)
         # x is in core
@@ -399,16 +395,12 @@ class TestDeferredRegistryActivate:
     """Tests for DeferredAgentRegistry.activate_agent()."""
 
     @pytest.mark.asyncio
-    async def test_activate_unknown_raises(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    async def test_activate_unknown_raises(self, registry: DeferredAgentRegistry) -> None:
         with pytest.raises(KeyError, match="not registered"):
             await registry.activate_agent("nonexistent")
 
     @pytest.mark.asyncio
-    async def test_activate_deferred_no_subprocess(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    async def test_activate_deferred_no_subprocess(self, registry: DeferredAgentRegistry) -> None:
         """Activating a deferred agent with no start_command gets placeholder."""
         manifest = _make_manifest("no-cmd")
         registry.register_agent(manifest, deferred=True, start_command=[])
@@ -418,9 +410,7 @@ class TestDeferredRegistryActivate:
         assert "message" in schemas[0]["inputSchema"]["properties"]
 
     @pytest.mark.asyncio
-    async def test_activate_creates_tool_adapters(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    async def test_activate_creates_tool_adapters(self, registry: DeferredAgentRegistry) -> None:
         manifest = _make_manifest("adapter-agent")
         registry.register_agent(manifest, deferred=True, start_command=[])
         await registry.activate_agent("adapter-agent")
@@ -453,9 +443,7 @@ class TestDeferredRegistryActivate:
         assert len(schemas) >= 1  # at least the fallback chat tool
 
     @pytest.mark.asyncio
-    async def test_activate_core_already_activated(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    async def test_activate_core_already_activated(self, registry: DeferredAgentRegistry) -> None:
         """Activating a core agent that already has schemas returns them."""
         manifest = _make_manifest("core-ok")
         registry.register_agent(manifest, deferred=False)
@@ -477,9 +465,7 @@ class TestDeferredRegistryGetToolsForLLM:
     def test_empty_registry(self, registry: DeferredAgentRegistry) -> None:
         assert registry.get_tools_for_llm() == []
 
-    def test_core_agent_tools_included(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    def test_core_agent_tools_included(self, registry: DeferredAgentRegistry) -> None:
         manifest = _make_manifest("core-agent")
         registry.register_agent(manifest, deferred=False)
         info = registry.get_agent_info("core-agent")
@@ -488,9 +474,7 @@ class TestDeferredRegistryGetToolsForLLM:
         tools = registry.get_tools_for_llm()
         assert len(tools) == 2
 
-    def test_core_agent_no_tools_skipped(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    def test_core_agent_no_tools_skipped(self, registry: DeferredAgentRegistry) -> None:
         manifest = _make_manifest("empty-core")
         registry.register_agent(manifest, deferred=False)
         info = registry.get_agent_info("empty-core")
@@ -501,12 +485,8 @@ class TestDeferredRegistryGetToolsForLLM:
         assert tools == []
 
     @pytest.mark.asyncio
-    async def test_activated_deferred_tools_included(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
-        registry.register_agent(
-            _make_manifest("deferred"), deferred=True, start_command=[]
-        )
+    async def test_activated_deferred_tools_included(self, registry: DeferredAgentRegistry) -> None:
+        registry.register_agent(_make_manifest("deferred"), deferred=True, start_command=[])
         await registry.activate_agent("deferred")
         tools = registry.get_tools_for_llm()
         assert len(tools) >= 1
@@ -521,12 +501,8 @@ class TestDeferredRegistryGetToolAdapter:
     """Tests for DeferredAgentRegistry.get_tool_adapter()."""
 
     @pytest.mark.asyncio
-    async def test_find_adapter_by_full_name(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
-        registry.register_agent(
-            _make_manifest("srv"), deferred=True, start_command=[]
-        )
+    async def test_find_adapter_by_full_name(self, registry: DeferredAgentRegistry) -> None:
+        registry.register_agent(_make_manifest("srv"), deferred=True, start_command=[])
         await registry.activate_agent("srv")
         adapters = registry._tool_adapters["srv"]
         full_name = adapters[0].full_name
@@ -534,9 +510,7 @@ class TestDeferredRegistryGetToolAdapter:
         assert found is not None
         assert found.full_name == full_name
 
-    def test_find_nonexistent_adapter(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    def test_find_nonexistent_adapter(self, registry: DeferredAgentRegistry) -> None:
         assert registry.get_tool_adapter("mcp__nope__tool") is None
 
 
@@ -563,9 +537,7 @@ class TestDeferredRegistryBuildManifest:
         assert "2 tools" in text
 
     @pytest.mark.asyncio
-    async def test_activated_deferred_manifest(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    async def test_activated_deferred_manifest(self, registry: DeferredAgentRegistry) -> None:
         registry.register_agent(
             _make_manifest("active", description="Active agent"),
             deferred=True,
@@ -576,13 +548,9 @@ class TestDeferredRegistryBuildManifest:
         assert "active" in text
         assert "activated" in text
 
-    def test_multiline_description_truncated(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    def test_multiline_description_truncated(self, registry: DeferredAgentRegistry) -> None:
         desc = "Line one\nLine two\nLine three"
-        registry.register_agent(
-            _make_manifest("multi", description=desc), deferred=True
-        )
+        registry.register_agent(_make_manifest("multi", description=desc), deferred=True)
         text = registry.build_manifest()
         # Only first line should appear (up to 80 chars)
         assert "Line one" in text
@@ -654,9 +622,7 @@ class TestMCPGatewayRegisterAgent:
     @pytest.mark.asyncio
     async def test_register_multiple(self, gateway: MCPGateway) -> None:
         for i in range(3):
-            await gateway.register_agent(
-                _make_manifest(f"agent-{i}"), deferred=True
-            )
+            await gateway.register_agent(_make_manifest(f"agent-{i}"), deferred=True)
         assert len(gateway.registry.list_deferred_agents()) == 3
 
 
@@ -669,9 +635,7 @@ class TestMCPGatewayRegisterAgentTools:
     """Tests for MCPGateway._register_agent_tools()."""
 
     @pytest.mark.asyncio
-    async def test_register_tools_creates_adapters(
-        self, gateway: MCPGateway
-    ) -> None:
+    async def test_register_tools_creates_adapters(self, gateway: MCPGateway) -> None:
         manifest = _make_manifest("tool-agent")
         await gateway.register_agent(manifest, deferred=True, start_command=[])
         await gateway.registry.activate_agent("tool-agent")
@@ -702,6 +666,7 @@ class TestMCPGatewayRegisterAgentTools:
 
         # Directly set up the state: agent is registered, info has a live handle.
         from agent_nexus.platform.gateway.deferred_registry import AgentInfo
+
         mock_handle = MagicMock()
         mock_handle.is_alive = True
         info = gateway.registry.get_agent_info("skip-agent")
@@ -728,9 +693,7 @@ class TestMCPGatewayMakeToolFunc:
     """Tests for MCPGateway._make_tool_func()."""
 
     @pytest.mark.asyncio
-    async def test_func_returns_error_if_no_handle(
-        self, gateway: MCPGateway
-    ) -> None:
+    async def test_func_returns_error_if_no_handle(self, gateway: MCPGateway) -> None:
         schema = _make_tool_schema("tool")
         adapter = McpToolAdapter(server_name="nope", tool_schema=schema)
         func = gateway._make_tool_func(adapter)
@@ -739,9 +702,7 @@ class TestMCPGatewayMakeToolFunc:
         assert "not available" in result
 
     @pytest.mark.asyncio
-    async def test_func_delegates_to_adapter(
-        self, gateway: MCPGateway
-    ) -> None:
+    async def test_func_delegates_to_adapter(self, gateway: MCPGateway) -> None:
         # Use a name without hyphens so sanitized name == registry key
         manifest = _make_manifest("run_agent")
         await gateway.register_agent(manifest, deferred=False)
@@ -756,7 +717,6 @@ class TestMCPGatewayMakeToolFunc:
         mock_handle.ipc.receive_until_result.return_value = response
         info.handle = mock_handle
 
-
         schema = _make_tool_schema("tool")
         adapter = McpToolAdapter(server_name="run_agent", tool_schema=schema)
         # Manually inject adapter
@@ -767,9 +727,7 @@ class TestMCPGatewayMakeToolFunc:
         assert result == "tool output"
 
     @pytest.mark.asyncio
-    async def test_func_handles_ipc_failure_gracefully(
-        self, gateway: MCPGateway
-    ) -> None:
+    async def test_func_handles_ipc_failure_gracefully(self, gateway: MCPGateway) -> None:
         """IPC error between is_alive check and execute returns error string."""
         manifest = _make_manifest("crash_agent")
         await gateway.register_agent(manifest, deferred=False)
@@ -789,9 +747,7 @@ class TestMCPGatewayMakeToolFunc:
         assert "Error" in result
         assert "IPC failed" in result
 
-    async def test_func_propagates_programming_errors(
-        self, gateway: MCPGateway
-    ) -> None:
+    async def test_func_propagates_programming_errors(self, gateway: MCPGateway) -> None:
         """Programming errors (TypeError, AttributeError) propagate
         instead of being swallowed as IPC errors."""
         manifest = _make_manifest("prog_err_agent")
@@ -820,19 +776,13 @@ class TestMCPGatewayCoreTools:
     """Tests for MCPGateway core tool methods."""
 
     @pytest.mark.asyncio
-    async def test_search_and_activate_no_match(
-        self, gateway: MCPGateway
-    ) -> None:
+    async def test_search_and_activate_no_match(self, gateway: MCPGateway) -> None:
         result = await gateway._search_and_activate("nonexistent")
         assert "No matching agents found" in result
 
     @pytest.mark.asyncio
-    async def test_search_and_activate_match(
-        self, gateway: MCPGateway
-    ) -> None:
-        manifest = _make_manifest(
-            "test-agent", description="A test agent for searching"
-        )
+    async def test_search_and_activate_match(self, gateway: MCPGateway) -> None:
+        manifest = _make_manifest("test-agent", description="A test agent for searching")
         await gateway.register_agent(manifest, deferred=True, start_command=[])
         result = await gateway._search_and_activate("test")
         assert "test-agent" in result
@@ -866,9 +816,7 @@ class TestMCPGatewayCoreTools:
         assert "dormant" in result
 
     @pytest.mark.asyncio
-    async def test_agent_info_with_activated_tools(
-        self, gateway: MCPGateway
-    ) -> None:
+    async def test_agent_info_with_activated_tools(self, gateway: MCPGateway) -> None:
         await gateway.register_agent(
             _make_manifest("act-agent", description="Active agent"),
             deferred=True,
@@ -897,14 +845,10 @@ class TestMCPGatewayRun:
     async def test_run_sse_default(self, gateway: MCPGateway) -> None:
         with patch.object(gateway._mcp, "run") as mock_run:
             await gateway.run_sse()
-            mock_run.assert_called_once_with(
-                transport="sse", host="127.0.0.1", port=8080
-            )
+            mock_run.assert_called_once_with(transport="sse", host="127.0.0.1", port=8080)
 
     @pytest.mark.asyncio
-    async def test_stop(
-        self, gateway: MCPGateway, process_manager: MagicMock
-    ) -> None:
+    async def test_stop(self, gateway: MCPGateway, process_manager: MagicMock) -> None:
         await gateway.stop()
         process_manager.stop_all.assert_awaited_once()
 
@@ -1024,9 +968,7 @@ class TestMcpToolAdapterAffirmativeStatus:
     async def test_ambiguous_status_not_success(self, status: str) -> None:
         adapter = _make_bare_adapter()
         handle = _make_mock_handle_for_status()
-        response = AgentToPlatform(
-            type=AgentToPlatformType.RESULT, status=status, content="..."
-        )
+        response = AgentToPlatform(type=AgentToPlatformType.RESULT, status=status, content="...")
         handle.ipc.receive_until_result = AsyncMock(return_value=response)
         result = await adapter.execute(handle, {})
         assert result["success"] is False
@@ -1318,9 +1260,9 @@ class TestMcpToolAdapterIPCLock:
             # The first receive must complete before the second starts.
             # Without the lock, the second send_chat could happen before
             # the first receive_until_result completes.
-            assert call_order.index("receive_end") < call_order.index(
-                "receive_start_2"
-            ), f"Concurrent calls interleaved: {call_order}"
+            assert call_order.index("receive_end") < call_order.index("receive_start_2"), (
+                f"Concurrent calls interleaved: {call_order}"
+            )
         finally:
             remove_all_locks()
 
@@ -1334,12 +1276,16 @@ class TestMcpToolAdapterIPCLock:
 
         handle_a = _mock_agent_handle("agent-a", alive=True)
         handle_a.ipc.receive_until_result.return_value = AgentToPlatform(
-            type=AgentToPlatformType.RESULT, content="a", status="completed",
+            type=AgentToPlatformType.RESULT,
+            content="a",
+            status="completed",
         )
 
         handle_b = _mock_agent_handle("agent-b", alive=True)
         handle_b.ipc.receive_until_result.return_value = AgentToPlatform(
-            type=AgentToPlatformType.RESULT, content="b", status="completed",
+            type=AgentToPlatformType.RESULT,
+            content="b",
+            status="completed",
         )
 
         remove_all_locks()
@@ -1748,7 +1694,9 @@ class TestInvokeExecutionError:
 
         # Make execute return a failure
         with patch.object(
-            adapter, "execute", new_callable=AsyncMock,
+            adapter,
+            "execute",
+            new_callable=AsyncMock,
             return_value={"success": False, "error": "task blew up"},
         ):
             func = gw._make_tool_func(adapter)
@@ -1777,7 +1725,9 @@ class TestInvokeExecutionError:
         gw.registry._tool_adapters["nokey-agent"] = [adapter]
 
         with patch.object(
-            adapter, "execute", new_callable=AsyncMock,
+            adapter,
+            "execute",
+            new_callable=AsyncMock,
             return_value={"success": False},
         ):
             func = gw._make_tool_func(adapter)
@@ -1846,6 +1796,7 @@ class TestDeferredRegistryFetchAgentTools:
         manifest = _make_manifest("json-agent")
         handle = _mock_agent_handle("json-agent", alive=True)
         import json
+
         tool_list = [{"name": "parsed_tool"}]
         response = AgentToPlatform(
             type=AgentToPlatformType.RESULT,
@@ -1981,7 +1932,9 @@ class TestDeadAgentToolNameCleanup:
         # Phase 2: agent comes back alive, re-register with new adapter
         alive_handle = _mock_agent_handle("restart-agent", alive=True)
         response = AgentToPlatform(
-            type=AgentToPlatformType.RESULT, content="42", status="completed",
+            type=AgentToPlatformType.RESULT,
+            content="42",
+            status="completed",
         )
         alive_handle.ipc.receive_until_result.return_value = response
         info.handle = alive_handle
@@ -2080,9 +2033,7 @@ class TestFetchAgentToolsErrorResponse:
             )
         )
 
-        info = AgentInfo(
-            name="error-with-content", manifest=manifest, handle=handle
-        )
+        info = AgentInfo(name="error-with-content", manifest=manifest, handle=handle)
         result = await registry._fetch_agent_tools(info)
 
         assert len(result) == 1
@@ -2135,7 +2086,9 @@ class TestInvokeIPCExceptionToolNameCleanup:
 
         # Make adapter.execute raise (simulates transport-layer failure)
         with patch.object(
-            adapter_x, "execute", new_callable=AsyncMock,
+            adapter_x,
+            "execute",
+            new_callable=AsyncMock,
             side_effect=BrokenPipeError("Connection lost"),
         ):
             func = gw._make_tool_func(adapter_x)
@@ -2171,7 +2124,9 @@ class TestInvokeIPCExceptionToolNameCleanup:
 
         # Trigger IPC exception
         with patch.object(
-            adapter, "execute", new_callable=AsyncMock,
+            adapter,
+            "execute",
+            new_callable=AsyncMock,
             side_effect=ConnectionResetError("Reset"),
         ):
             func = gw._make_tool_func(adapter)
@@ -2183,7 +2138,9 @@ class TestInvokeIPCExceptionToolNameCleanup:
         adapter2 = McpToolAdapter("ipc-retry-agent", _make_tool_schema("compute", "Compute"))
         alive_handle2 = _mock_agent_handle("ipc-retry-agent", alive=True)
         alive_handle2.ipc.receive_until_result.return_value = AgentToPlatform(
-            type=AgentToPlatformType.RESULT, content="ok", status="completed",
+            type=AgentToPlatformType.RESULT,
+            content="ok",
+            status="completed",
         )
         info.handle = alive_handle2
         info.tool_schemas = [{"name": "compute", "description": "Compute"}]
@@ -2204,8 +2161,8 @@ class TestDeferredRegistryValidateToolSchemas:
     def test_non_dict_schema_skipped(self) -> None:
         # _validate_tool_schemas is a staticmethod — call directly
         schemas = [
-            "not-a-dict",   # string — should be skipped
-            42,             # int — should be skipped
+            "not-a-dict",  # string — should be skipped
+            42,  # int — should be skipped
             {"name": "valid_tool", "description": "OK", "inputSchema": {"type": "object"}},
         ]
         valid = DeferredAgentRegistry._validate_tool_schemas(schemas)
@@ -2238,20 +2195,24 @@ class TestDeferredRegistryNonDictSchema:
 
     def test_skips_string_schema_entry(self) -> None:
         """String entries in tool schema list are skipped."""
-        result = DeferredAgentRegistry._validate_tool_schemas([
-            "not a dict",
-            {"name": "valid", "inputSchema": {"type": "object"}},
-            None,
-        ])
+        result = DeferredAgentRegistry._validate_tool_schemas(
+            [
+                "not a dict",
+                {"name": "valid", "inputSchema": {"type": "object"}},
+                None,
+            ]
+        )
         assert len(result) == 1
         assert result[0]["name"] == "valid"
 
     def test_skips_list_schema_entry(self) -> None:
         """List entries in tool schema list are skipped."""
-        result = DeferredAgentRegistry._validate_tool_schemas([
-            ["nested", "list"],
-            {"name": "ok", "inputSchema": {"type": "object"}},
-        ])
+        result = DeferredAgentRegistry._validate_tool_schemas(
+            [
+                ["nested", "list"],
+                {"name": "ok", "inputSchema": {"type": "object"}},
+            ]
+        )
         assert len(result) == 1
 
 
@@ -2292,9 +2253,7 @@ class TestGatewayIPCCleanup:
     tool_adapter.execute() returns error_type indicating IPC failure."""
 
     @pytest.mark.asyncio
-    async def test_ipc_connection_error_triggers_cleanup(
-        self, gateway: MCPGateway
-    ) -> None:
+    async def test_ipc_connection_error_triggers_cleanup(self, gateway: MCPGateway) -> None:
         """BrokenPipeError in result dict triggers registration cleanup."""
         manifest = _make_manifest("clean_agent")
         await gateway.register_agent(manifest, deferred=False)
@@ -2352,12 +2311,20 @@ class TestInvokeCleanupExceptionSafety:
 
         # Execute returns IPC error — triggers cleanup branch
         with patch.object(
-            adapter, "execute", new_callable=AsyncMock,
-            return_value={"success": False, "error": "IPC broken", "error_type": "IPCConnectionError"},
+            adapter,
+            "execute",
+            new_callable=AsyncMock,
+            return_value={
+                "success": False,
+                "error": "IPC broken",
+                "error_type": "IPCConnectionError",
+            },
         ):
             # Make get_tool_adapters raise to simulate registry inconsistency
             with patch.object(
-                gw.registry, "get_tool_adapters", side_effect=RuntimeError("registry corrupt"),
+                gw.registry,
+                "get_tool_adapters",
+                side_effect=RuntimeError("registry corrupt"),
             ):
                 func = gw._make_tool_func(adapter)
                 result = await func(x=1)

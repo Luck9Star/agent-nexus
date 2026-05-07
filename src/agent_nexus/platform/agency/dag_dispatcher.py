@@ -201,6 +201,12 @@ class DAGDispatcher:
         # Persistent thread pool for concurrent execution (reused across batches)
         self._pool: concurrent.futures.ThreadPoolExecutor | None = None
 
+    def __del__(self) -> None:
+        """Best-effort cleanup of the thread pool on garbage collection."""
+        if self._pool is not None:
+            self._pool.shutdown(wait=False)
+            self._pool = None
+
     def _get_pool(self) -> concurrent.futures.ThreadPoolExecutor:
         """Lazy-init the persistent thread pool."""
         if self._pool is None:

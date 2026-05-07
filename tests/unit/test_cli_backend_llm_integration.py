@@ -1,4 +1,5 @@
 """Unit tests for LLMClient CLI backend integration."""
+
 from __future__ import annotations
 
 import json
@@ -53,12 +54,14 @@ class TestLLMClientCLICall:
         _write_cli_config(tmp_path)
         proc = MagicMock()
         proc.communicate.return_value = (
-            json.dumps({
-                "result": "planned tasks",
-                "session_id": "sess-001",
-                "model": "claude-sonnet-4-20250514",
-                "usage": {"input_tokens": 100, "output_tokens": 50},
-            }),
+            json.dumps(
+                {
+                    "result": "planned tasks",
+                    "session_id": "sess-001",
+                    "model": "claude-sonnet-4-20250514",
+                    "usage": {"input_tokens": 100, "output_tokens": 50},
+                }
+            ),
             "",
         )
         proc.returncode = 0

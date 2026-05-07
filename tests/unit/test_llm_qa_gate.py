@@ -22,16 +22,18 @@ def _make_integrated():
 def test_llm_qa_gate_evaluates():
     mock_client = MagicMock()
     mock_client.call.return_value = LLMResponse(
-        text=json.dumps({
-            "passed": True,
-            "score": 0.85,
-            "issues": [],
-            "coverage": {
-                "task_addressed": True,
-                "depth_sufficient": True,
-                "recommendations_actionable": True,
-            },
-        }),
+        text=json.dumps(
+            {
+                "passed": True,
+                "score": 0.85,
+                "issues": [],
+                "coverage": {
+                    "task_addressed": True,
+                    "depth_sufficient": True,
+                    "recommendations_actionable": True,
+                },
+            }
+        ),
         model="test-model",
         provider="test",
     )
@@ -46,16 +48,18 @@ def test_llm_qa_gate_evaluates():
 def test_llm_qa_gate_flags_issues():
     mock_client = MagicMock()
     mock_client.call.return_value = LLMResponse(
-        text=json.dumps({
-            "passed": False,
-            "score": 0.4,
-            "issues": ["No security analysis provided", "Recommendations too vague"],
-            "coverage": {
-                "task_addressed": True,
-                "depth_sufficient": False,
-                "recommendations_actionable": False,
-            },
-        }),
+        text=json.dumps(
+            {
+                "passed": False,
+                "score": 0.4,
+                "issues": ["No security analysis provided", "Recommendations too vague"],
+                "coverage": {
+                    "task_addressed": True,
+                    "depth_sufficient": False,
+                    "recommendations_actionable": False,
+                },
+            }
+        ),
         model="test-model",
         provider="test",
     )

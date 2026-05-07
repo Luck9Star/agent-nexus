@@ -19,6 +19,7 @@ from agent_nexus.platform.skills.models import (
 # SkillMetadata
 # ---------------------------------------------------------------------------
 
+
 class TestSkillMetadata:
     def test_creation_with_all_fields(self):
         meta = SkillMetadata(
@@ -69,6 +70,7 @@ class TestSkillMetadata:
 # SkillBody
 # ---------------------------------------------------------------------------
 
+
 class TestSkillBody:
     def test_creation(self):
         body = SkillBody(content="# Role\nYou are a helper.")
@@ -83,6 +85,7 @@ class TestSkillBody:
 # ---------------------------------------------------------------------------
 # SkillResources
 # ---------------------------------------------------------------------------
+
 
 class TestSkillResources:
     def test_creation_with_sections(self):
@@ -107,6 +110,7 @@ class TestSkillResources:
 # ParsedSkill — tier methods
 # ---------------------------------------------------------------------------
 
+
 class TestParsedSkillTier0:
     def test_tier0_summary_full(self):
         meta = SkillMetadata(
@@ -116,9 +120,7 @@ class TestParsedSkillTier0:
             capabilities=["write"],
             model_config={"recommended": "openai:gpt-4o"},
         )
-        skill = ParsedSkill(
-            metadata=meta, body=None, resources=None, raw=""
-        )
+        skill = ParsedSkill(metadata=meta, body=None, resources=None, raw="")
         summary = skill.tier0_summary()
         assert "Skill: doc-filler" in summary
         assert "Type: atomic" in summary
@@ -134,9 +136,7 @@ class TestParsedSkillTier0:
             capabilities=["read"],
             model_config={},
         )
-        skill = ParsedSkill(
-            metadata=meta, body=None, resources=None, raw=""
-        )
+        skill = ParsedSkill(metadata=meta, body=None, resources=None, raw="")
         summary = skill.tier0_summary()
         assert "Model:" not in summary
 
@@ -148,9 +148,7 @@ class TestParsedSkillTier0:
             capabilities=[],
             model_config={"fallback": "gpt-3.5"},
         )
-        skill = ParsedSkill(
-            metadata=meta, body=None, resources=None, raw=""
-        )
+        skill = ParsedSkill(metadata=meta, body=None, resources=None, raw="")
         summary = skill.tier0_summary()
         assert "Model:" not in summary
 
@@ -162,9 +160,7 @@ class TestParsedSkillTier0:
             capabilities=[],
             model_config={},
         )
-        skill = ParsedSkill(
-            metadata=meta, body=None, resources=None, raw=""
-        )
+        skill = ParsedSkill(metadata=meta, body=None, resources=None, raw="")
         summary = skill.tier0_summary()
         assert "Skill: minimal" in summary
         assert "Type: composite" in summary
@@ -174,20 +170,26 @@ class TestParsedSkillTier0:
 
 class TestParsedSkillTier1:
     def test_tier1_summary_with_body(self):
-        meta = SkillMetadata(name="t", agent_type="a", triggers=[], capabilities=[], model_config={})
+        meta = SkillMetadata(
+            name="t", agent_type="a", triggers=[], capabilities=[], model_config={}
+        )
         body = SkillBody(content="  Hello world  \n")
         skill = ParsedSkill(metadata=meta, body=body, resources=None, raw="")
         assert skill.tier1_summary() == "Hello world"
 
     def test_tier1_summary_no_body(self):
-        meta = SkillMetadata(name="t", agent_type="a", triggers=[], capabilities=[], model_config={})
+        meta = SkillMetadata(
+            name="t", agent_type="a", triggers=[], capabilities=[], model_config={}
+        )
         skill = ParsedSkill(metadata=meta, body=None, resources=None, raw="")
         assert skill.tier1_summary() == ""
 
 
 class TestParsedSkillTier2:
     def test_tier2_section_found(self):
-        meta = SkillMetadata(name="t", agent_type="a", triggers=[], capabilities=[], model_config={})
+        meta = SkillMetadata(
+            name="t", agent_type="a", triggers=[], capabilities=[], model_config={}
+        )
         res = SkillResources(
             content="# Resources",
             sections={"Example Fill": "Here is an example...", "Template": "Template content"},
@@ -197,18 +199,24 @@ class TestParsedSkillTier2:
         assert skill.tier2_section("Template") == "Template content"
 
     def test_tier2_section_not_found(self):
-        meta = SkillMetadata(name="t", agent_type="a", triggers=[], capabilities=[], model_config={})
+        meta = SkillMetadata(
+            name="t", agent_type="a", triggers=[], capabilities=[], model_config={}
+        )
         res = SkillResources(content="# Resources", sections={"Example": "data"})
         skill = ParsedSkill(metadata=meta, body=None, resources=res, raw="")
         assert skill.tier2_section("Nonexistent") is None
 
     def test_tier2_section_no_resources(self):
-        meta = SkillMetadata(name="t", agent_type="a", triggers=[], capabilities=[], model_config={})
+        meta = SkillMetadata(
+            name="t", agent_type="a", triggers=[], capabilities=[], model_config={}
+        )
         skill = ParsedSkill(metadata=meta, body=None, resources=None, raw="")
         assert skill.tier2_section("anything") is None
 
     def test_tier2_section_case_insensitive(self):
-        meta = SkillMetadata(name="t", agent_type="a", triggers=[], capabilities=[], model_config={})
+        meta = SkillMetadata(
+            name="t", agent_type="a", triggers=[], capabilities=[], model_config={}
+        )
         res = SkillResources(
             content="# Resources",
             sections={"Example Fill": "data"},
@@ -223,6 +231,7 @@ class TestParsedSkillTier2:
 # ---------------------------------------------------------------------------
 # SkillLoader — _parse_frontmatter
 # ---------------------------------------------------------------------------
+
 
 class TestParseFrontmatter:
     def test_valid_frontmatter(self):
@@ -296,6 +305,7 @@ class TestParseFrontmatter:
 # SkillLoader — _split_body_resources
 # ---------------------------------------------------------------------------
 
+
 class TestSplitBodyResources:
     def test_with_resources_heading(self):
         content = "# Role\nYou are a helper.\n\n# Resources\n\n## Example\ndata"
@@ -358,6 +368,7 @@ class TestSplitBodyResources:
 # SkillLoader — _parse_resource_sections
 # ---------------------------------------------------------------------------
 
+
 class TestParseResourceSections:
     def test_multiple_sections(self):
         content = "# Resources\n\n## Example Fill\nHere is an example.\n\n## Template\nTemplate content here"
@@ -381,6 +392,7 @@ class TestParseResourceSections:
 # ---------------------------------------------------------------------------
 # SkillLoader — _build_metadata
 # ---------------------------------------------------------------------------
+
 
 class TestBuildMetadata:
     def test_full_frontmatter(self):
@@ -593,6 +605,7 @@ class TestParseString:
 # SkillLoader — parse_file
 # ---------------------------------------------------------------------------
 
+
 class TestParseFile:
     def test_parse_real_file(self, tmp_path: Path):
         skill_file = tmp_path / "SKILL.md"
@@ -612,6 +625,7 @@ class TestParseFile:
 # ---------------------------------------------------------------------------
 # SkillLoader — load_agent_skills
 # ---------------------------------------------------------------------------
+
 
 class TestLoadAgentSkills:
     def test_directory_with_multiple_skills(self, tmp_path: Path):

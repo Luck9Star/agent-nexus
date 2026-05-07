@@ -19,6 +19,7 @@ from agent_nexus.platform.evolution.analyzer import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_store(skills: list[SkillRecord] | None = None) -> MagicMock:
     store = MagicMock()
     store.get_active_skills.return_value = skills or []
@@ -41,6 +42,7 @@ def _make_ctx(**overrides) -> EvolutionContext:
 # ---------------------------------------------------------------------------
 # _edit_distance
 # ---------------------------------------------------------------------------
+
 
 class TestEditDistance:
     def test_identical_strings(self):
@@ -66,6 +68,7 @@ class TestEditDistance:
 # ---------------------------------------------------------------------------
 # _correct_skill_ids
 # ---------------------------------------------------------------------------
+
 
 class TestCorrectSkillIds:
     def test_returns_same_if_known(self):
@@ -96,7 +99,7 @@ class TestCorrectSkillIds:
     def test_many_candidates_uses_tighter_threshold(self):
         """When >20 candidates exist, max_dist=2 regardless of suffix length."""
         # Create 21 candidates all sharing the same prefix
-        known = {f"ns__{chr(i)}" for i in range(ord('a'), ord('a') + 21)}
+        known = {f"ns__{chr(i)}" for i in range(ord("a"), ord("a") + 21)}
         # "ns__abc" has distance 1 from some candidates but with 21 candidates
         # the tighter max_dist=2 still allows correction to nearest
         raw_id = "ns__abz"
@@ -175,6 +178,7 @@ class TestCorrectSkillIds:
 # analyze_execution
 # ---------------------------------------------------------------------------
 
+
 class TestAnalyzeExecution:
     def test_returns_analysis_result_with_task_id(self):
         skill = SkillRecord(id="sk-1", name="skill-1")
@@ -228,16 +232,14 @@ class TestAnalyzeExecution:
 # _generate_suggestions -- evolution rules
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateSuggestions:
     def test_captured_suggestion_when_task_ok_no_skills(self):
         store = _make_store([])
         analyzer = ExecutionAnalyzer(store)
         ctx = _make_ctx(skill_ids_used=[], skills_applied=[], task_completed=True)
         result = analyzer.analyze_execution(ctx)
-        assert any(
-            s.evolution_type == EvolutionType.CAPTURED
-            for s in result.suggestions
-        )
+        assert any(s.evolution_type == EvolutionType.CAPTURED for s in result.suggestions)
 
     def test_no_captured_when_task_not_completed(self):
         """CAPTURED only fires when task succeeded with no skills."""
@@ -245,16 +247,16 @@ class TestGenerateSuggestions:
         analyzer = ExecutionAnalyzer(store)
         ctx = _make_ctx(skill_ids_used=[], skills_applied=[], task_completed=False)
         result = analyzer.analyze_execution(ctx)
-        assert not any(
-            s.evolution_type == EvolutionType.CAPTURED
-            for s in result.suggestions
-        )
+        assert not any(s.evolution_type == EvolutionType.CAPTURED for s in result.suggestions)
 
     def test_no_suggestions_for_healthy_skill(self):
         skill = SkillRecord(
-            id="sk-1", name="s1",
-            total_selections=10, total_applied=9,
-            total_completions=8, total_fallbacks=1,
+            id="sk-1",
+            name="s1",
+            total_selections=10,
+            total_applied=9,
+            total_completions=8,
+            total_fallbacks=1,
         )
         store = _make_store([skill])
         analyzer = ExecutionAnalyzer(store)
@@ -286,7 +288,8 @@ class TestGenerateSuggestions:
         result = analyzer.analyze_execution(ctx)
         # Only FIX/DERIVED should be absent; CAPTURED could appear if task completed + no skills
         fix_or_derived = [
-            s for s in result.suggestions
+            s
+            for s in result.suggestions
             if s.evolution_type in (EvolutionType.FIX, EvolutionType.DERIVED)
         ]
         assert fix_or_derived == []
@@ -294,9 +297,12 @@ class TestGenerateSuggestions:
     def test_fallback_skill_triggers_fix(self):
         """High fallback rate triggers FIX suggestion."""
         skill = SkillRecord(
-            id="sk-1", name="s1",
-            total_selections=10, total_applied=6,
-            total_completions=0, total_fallbacks=6,
+            id="sk-1",
+            name="s1",
+            total_selections=10,
+            total_applied=6,
+            total_completions=0,
+            total_fallbacks=6,
         )
         store = _make_store([skill])
         analyzer = ExecutionAnalyzer(store)
@@ -308,10 +314,13 @@ class TestGenerateSuggestions:
         """When the same (type, skill_id) appears from different thresholds,
         the dedup keeps the highest confidence."""
         skill = SkillRecord(
-            id="sk-1", name="s1",
+            id="sk-1",
+            name="s1",
             # Triggers both Rule 1 (fallback > 0.4) and Rule 2 (applied > 0.4, completion < 0.35)
-            total_selections=10, total_applied=7,
-            total_completions=1, total_fallbacks=6,
+            total_selections=10,
+            total_applied=7,
+            total_completions=1,
+            total_fallbacks=6,
         )
         store = _make_store([skill])
         analyzer = ExecutionAnalyzer(store)
@@ -325,6 +334,7 @@ class TestGenerateSuggestions:
 # store property
 # ---------------------------------------------------------------------------
 
+
 class TestStoreProperty:
     def test_store_returns_underlying_store(self):
         store = _make_store()
@@ -335,6 +345,7 @@ class TestStoreProperty:
 # ---------------------------------------------------------------------------
 # _build_analysis_text -- edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestBuildAnalysisText:
     def test_minimal_context_no_optional_fields(self):

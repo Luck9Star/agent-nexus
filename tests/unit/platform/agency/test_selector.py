@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from agent_nexus.platform.agency.registry import ExpertRegistry
-from agent_nexus.platform.agency.selector import SelectionRequest, SelectionResult, SpecialistSelector
+from agent_nexus.platform.agency.selector import (
+    SelectionRequest,
+    SelectionResult,
+    SpecialistSelector,
+)
 import pytest
 
 

@@ -36,11 +36,13 @@ class TestRuntimeE2E:
 
         rt = PythonRuntime()
         try:
-            rt.inject_variable(Variable(
-                name="data",
-                description="input data",
-                value=[1, 2, 3, 4, 5],
-            ))
+            rt.inject_variable(
+                Variable(
+                    name="data",
+                    description="input data",
+                    value=[1, 2, 3, 4, 5],
+                )
+            )
 
             result = self._run(rt.execute("total = sum(data)"))
             assert result.success
@@ -82,11 +84,13 @@ class TestRuntimeE2E:
 
         rt = PythonRuntime()
         try:
-            rt.inject_variable(Variable(
-                name="my_var",
-                description="test",
-                value=42,
-            ))
+            rt.inject_variable(
+                Variable(
+                    name="my_var",
+                    description="test",
+                    value=42,
+                )
+            )
 
             result = self._run(rt.execute("y = my_var + 1"))
             assert result.success
