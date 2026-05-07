@@ -398,24 +398,15 @@ class TaskGraph:
         with self._conn() as c:
             return self._get_parallel_groups_conn(c)
 
-    def _get_parallel_groups_conn(
-        self,
+    @staticmethod
+    def _build_dep_map(
         conn: Any,
-    ) -> list[list[TaskItem]]:
-        """Internal: compute parallel groups using an existing connection."""
-        # Build adjacency: task -> set of tasks it depends on
-        all_rows = conn.execute("SELECT id FROM tasks ORDER BY created_at").fetchall()
-        task_ids = [r[0] for r in all_rows]
-
-        if not task_ids:
-            return []
-
-        task_id_set = set(task_ids)
-        dep_map: dict[str, set[str]] = {tid: set() for tid in task_ids}
+        task_id_set: set[str],
+    ) -> dict[str, set[str]]:
+        """Build adjacency map: task -> set of existing tasks it depends on."""
+        dep_map: dict[str, set[str]] = {tid: set() for tid in task_id_set}
         dep_rows = conn.execute("SELECT task_id, blocked_by_id FROM task_dependencies").fetchall()
         for task_id, blocked_by_id in dep_rows:
-            # Only track dependencies to tasks that exist in the graph.
-            # Unknown deps are logged but don't block grouping.
             if blocked_by_id in task_id_set:
                 dep_map[task_id].add(blocked_by_id)
             else:
@@ -424,47 +415,79 @@ class TaskGraph:
                     task_id,
                     blocked_by_id,
                 )
+        return dep_map
 
-        # In-degree based topological grouping (Kahn's algorithm) — O(V+E)
+    @staticmethod
+    def _build_reverse_map(
+        dep_map: dict[str, set[str]],
+        task_ids: list[str],
+    ) -> tuple[dict[str, int], dict[str, set[str]]]:
+        """Compute in-degree counts and reverse adjacency from dep_map."""
         in_degree: dict[str, int] = {tid: len(deps) for tid, deps in dep_map.items()}
         reverse_map: dict[str, set[str]] = {tid: set() for tid in task_ids}
         for tid, deps in dep_map.items():
             for dep in deps:
                 reverse_map[dep].add(tid)
+        return in_degree, reverse_map
+
+    def _fetch_group_rows(
+        self,
+        conn: Any,
+        group_ids: list[str],
+    ) -> list[tuple[Any, ...]]:
+        """Batch-load task rows for a group of IDs (chunked SQL)."""
+        group_rows: list[tuple[Any, ...]] = []
+        for gi in range(0, len(group_ids), _SQL_CHUNK_SIZE):
+            g_chunk = group_ids[gi : gi + _SQL_CHUNK_SIZE]
+            placeholders = ",".join("?" for _ in g_chunk)
+            group_rows.extend(
+                conn.execute(
+                    f"SELECT {_TASK_COLUMNS} FROM tasks WHERE id IN ({placeholders})",
+                    g_chunk,
+                ).fetchall()
+            )
+        return group_rows
+
+    @staticmethod
+    def _advance_group(
+        group_ids: list[str],
+        reverse_map: dict[str, set[str]],
+        in_degree: dict[str, int],
+    ) -> set[str]:
+        """Decrement in-degrees for dependents and return newly available IDs."""
+        next_available: set[str] = set()
+        for tid in group_ids:
+            for dependent in reverse_map[tid]:
+                in_degree[dependent] -= 1
+                if in_degree[dependent] == 0:
+                    next_available.add(dependent)
+        return next_available
+
+    def _get_parallel_groups_conn(
+        self,
+        conn: Any,
+    ) -> list[list[TaskItem]]:
+        """Internal: compute parallel groups using an existing connection."""
+        all_rows = conn.execute("SELECT id FROM tasks ORDER BY created_at").fetchall()
+        task_ids = [r[0] for r in all_rows]
+        if not task_ids:
+            return []
+
+        task_id_set = set(task_ids)
+        dep_map = self._build_dep_map(conn, task_id_set)
+        in_degree, reverse_map = self._build_reverse_map(dep_map, task_ids)
 
         available: set[str] = {tid for tid, deg in in_degree.items() if deg == 0}
         assigned: set[str] = set()
-
-        # Pre-build position map for O(1) lookup instead of list.index O(n)
         position = {tid: idx for idx, tid in enumerate(task_ids)}
 
         groups: list[list[TaskItem]] = []
         while available:
-            # Preserve creation order within each group
             group_ids = sorted(available, key=lambda t: position[t])
-            # Batch-load group tasks in one pass instead of per-task queries
-            # (chunked to stay under SQLITE_MAX_VARIABLE_NUMBER)
-            group_rows: list[tuple[Any, ...]] = []
-            for gi in range(0, len(group_ids), _SQL_CHUNK_SIZE):
-                g_chunk = group_ids[gi : gi + _SQL_CHUNK_SIZE]
-                placeholders = ",".join("?" for _ in g_chunk)
-                group_rows.extend(
-                    conn.execute(
-                        f"SELECT {_TASK_COLUMNS} FROM tasks WHERE id IN ({placeholders})",
-                        g_chunk,
-                    ).fetchall()
-                )
-            group_tasks = self._rows_to_tasks(conn, group_rows)
-            groups.append(group_tasks)
+            group_rows = self._fetch_group_rows(conn, group_ids)
+            groups.append(self._rows_to_tasks(conn, group_rows))
             assigned.update(group_ids)
-
-            next_available: set[str] = set()
-            for tid in group_ids:
-                for dependent in reverse_map[tid]:
-                    in_degree[dependent] -= 1
-                    if in_degree[dependent] == 0:
-                        next_available.add(dependent)
-            available = next_available
+            available = self._advance_group(group_ids, reverse_map, in_degree)
 
         if len(assigned) < len(task_ids):
             unassigned = task_id_set - assigned

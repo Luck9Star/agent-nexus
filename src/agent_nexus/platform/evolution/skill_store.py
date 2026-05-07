@@ -749,6 +749,46 @@ class SkillStore:
             parents.setdefault(skill_id, []).append(parent_id)
         return parents
 
+    @staticmethod
+    def _parse_snapshot(raw: Any, skill_id: str) -> dict[str, str]:
+        """Parse and validate a content_snapshot JSON string."""
+        if not raw or raw in ('""', "{}", "null"):
+            return {}
+        try:
+            loaded = json.loads(raw)
+            if not isinstance(loaded, dict) or not loaded:
+                return {}
+            if all(isinstance(v, str) for v in loaded.values()):
+                return loaded
+            non_str = [k for k, v in loaded.items() if not isinstance(v, str)]
+            logger.warning(
+                "content_snapshot for skill '%s' has non-string "
+                "values in keys %s, discarding snapshot",
+                skill_id,
+                non_str,
+            )
+            return {}
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Corrupted content_snapshot for skill '%s': %s",
+                skill_id,
+                exc,
+            )
+            return {}
+
+    @staticmethod
+    def _resolve_origin(raw_origin: str, skill_id: str) -> SkillOrigin:
+        """Parse lineage_origin with fallback to CAPTURED."""
+        try:
+            return SkillOrigin(raw_origin)
+        except ValueError:
+            logger.warning(
+                "Invalid lineage_origin '%s' for skill '%s', defaulting to CAPTURED",
+                raw_origin,
+                skill_id,
+            )
+            return SkillOrigin.CAPTURED
+
     def _row_to_record(
         self,
         conn: sqlite3.Connection,
@@ -783,38 +823,8 @@ class SkillStore:
             ).fetchall()
             parent_ids = [r[0] for r in parent_rows]
 
-        snapshot: dict[str, str] = {}
-        if lineage_content_snapshot and lineage_content_snapshot not in ('""', "{}", "null"):
-            try:
-                loaded = json.loads(lineage_content_snapshot)
-                if isinstance(loaded, dict) and loaded:
-                    if all(isinstance(v, str) for v in loaded.values()):
-                        snapshot = loaded
-                    else:
-                        non_str = [k for k, v in loaded.items() if not isinstance(v, str)]
-                        logger.warning(
-                            "content_snapshot for skill '%s' has non-string "
-                            "values in keys %s, discarding snapshot",
-                            skill_id,
-                            non_str,
-                        )
-            except (json.JSONDecodeError, TypeError, ValueError) as exc:
-                logger.warning(
-                    "Corrupted content_snapshot for skill '%s': %s",
-                    skill_id,
-                    exc,
-                )
-
-        try:
-            origin = SkillOrigin(lineage_origin)
-        except ValueError:
-            logger.warning(
-                "Invalid lineage_origin '%s' for skill '%s', defaulting to CAPTURED",
-                lineage_origin,
-                skill_id,
-            )
-            origin = SkillOrigin.CAPTURED
-
+        snapshot = self._parse_snapshot(lineage_content_snapshot, skill_id)
+        origin = self._resolve_origin(lineage_origin, skill_id)
         lineage = SkillLineage(
             origin=origin,
             generation=lineage_generation,

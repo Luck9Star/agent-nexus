@@ -595,6 +595,38 @@ class PlatformRouter:
         return phase_result
 
     @staticmethod
+    def _build_in_degree(tasks: list[Any]) -> tuple[dict[str, int], dict[str, list[str]]]:
+        """Compute in-degree counts and reverse adjacency for topological sort."""
+        in_degree: dict[str, int] = {t.id: 0 for t in tasks}
+        dependents: dict[str, list[str]] = {t.id: [] for t in tasks}
+        for t in tasks:
+            for dep_id in t.blocked_by:
+                if dep_id in in_degree:
+                    in_degree[t.id] += 1
+                    dependents[dep_id].append(t.id)
+        return in_degree, dependents
+
+    @staticmethod
+    def _kahn_bfs(
+        task_map: dict[str, Any],
+        in_degree: dict[str, int],
+        dependents: dict[str, list[str]],
+        queue: deque[str],
+    ) -> list[Any]:
+        """Run Kahn's algorithm BFS to produce sorted task list."""
+        sorted_tasks: list[Any] = []
+        while queue:
+            tid = queue.popleft()
+            task = task_map.get(tid)
+            if task is not None:
+                sorted_tasks.append(task)
+            for dependent_id in dependents[tid]:
+                in_degree[dependent_id] -= 1
+                if in_degree[dependent_id] == 0:
+                    queue.append(dependent_id)
+        return sorted_tasks
+
+    @staticmethod
     def _topological_sort_tasks(tasks: list[Any]) -> list[Any]:
         """Sort tasks so that dependencies appear before dependents.
 
@@ -607,36 +639,14 @@ class PlatformRouter:
         Time complexity: O(V + E) using deque + reverse adjacency map.
         """
         task_map = {t.id: t for t in tasks}
-        in_degree: dict[str, int] = {t.id: 0 for t in tasks}
-
-        # Build reverse adjacency: dep_id -> list of task IDs that depend on it
-        dependents: dict[str, list[str]] = {t.id: [] for t in tasks}
-        for t in tasks:
-            for dep_id in t.blocked_by:
-                if dep_id in in_degree:
-                    in_degree[t.id] += 1
-                    dependents[dep_id].append(t.id)
+        in_degree, dependents = PlatformRouter._build_in_degree(tasks)
 
         queue: deque[str] = deque(tid for tid, deg in in_degree.items() if deg == 0)
-        sorted_tasks: list[Any] = []
+        sorted_tasks = PlatformRouter._kahn_bfs(task_map, in_degree, dependents, queue)
 
-        while queue:
-            tid = queue.popleft()
-            task = task_map.get(tid)
-            if task is not None:
-                sorted_tasks.append(task)
-            for dependent_id in dependents[tid]:
-                in_degree[dependent_id] -= 1
-                if in_degree[dependent_id] == 0:
-                    queue.append(dependent_id)
-
-        # If cycle prevents full sort, append remaining tasks so the
-        # caller still gets all of them (add_task will detect the cycle).
         if len(sorted_tasks) < len(tasks):
             sorted_ids = {t.id for t in sorted_tasks}
-            for t in tasks:
-                if t.id not in sorted_ids:
-                    sorted_tasks.append(t)
+            sorted_tasks.extend(t for t in tasks if t.id not in sorted_ids)
 
         return sorted_tasks
 

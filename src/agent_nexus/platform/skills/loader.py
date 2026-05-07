@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -236,16 +237,8 @@ class SkillLoader:
         return sections
 
     @staticmethod
-    def _build_metadata(frontmatter: dict) -> SkillMetadata:
-        """Build a :class:`SkillMetadata` from raw frontmatter dict.
-
-        Required fields: ``name``, ``agent_type``.
-        Optional fields: ``triggers``, ``capabilities``, ``model_config``.
-        Any extra fields are captured in ``extra``.
-
-        Raises:
-            ValueError: If ``name`` or ``agent_type`` is missing from frontmatter.
-        """
+    def _validate_required(frontmatter: dict) -> tuple[str, str]:
+        """Validate and return (name, agent_type) from frontmatter."""
         missing = [k for k in ("name", "agent_type") if k not in frontmatter]
         if missing:
             raise ValueError(
@@ -261,17 +254,34 @@ class SkillLoader:
             raise ValueError(
                 "SKILL.md frontmatter 'agent_type' must not be empty or whitespace-only"
             )
+        return name_val, type_val
+
+    @staticmethod
+    def _normalize_triggers(raw: Any) -> list[str]:
+        """Normalize triggers field to a list of strings."""
+        if isinstance(raw, list):
+            return [str(t) for t in raw if t is not None]
+        if raw is not None:
+            return [str(raw)]
+        return []
+
+    @staticmethod
+    def _build_metadata(frontmatter: dict) -> SkillMetadata:
+        """Build a :class:`SkillMetadata` from raw frontmatter dict.
+
+        Required fields: ``name``, ``agent_type``.
+        Optional fields: ``triggers``, ``capabilities``, ``model_config``.
+        Any extra fields are captured in ``extra``.
+
+        Raises:
+            ValueError: If ``name`` or ``agent_type`` is missing from frontmatter.
+        """
+        name_val, type_val = SkillLoader._validate_required(frontmatter)
 
         known_keys = {"name", "agent_type", "triggers", "capabilities", "model_config"}
         extra = {k: v for k, v in frontmatter.items() if k not in known_keys}
 
-        raw_triggers = frontmatter.get("triggers", [])
-        if isinstance(raw_triggers, list):
-            raw_triggers = [str(t) for t in raw_triggers if t is not None]
-        elif raw_triggers is not None:
-            raw_triggers = [str(raw_triggers)]
-        else:
-            raw_triggers = []
+        raw_triggers = SkillLoader._normalize_triggers(frontmatter.get("triggers", []))
         raw_capabilities = frontmatter.get("capabilities", [])
         raw_model_config = frontmatter.get("model_config", {})
 
