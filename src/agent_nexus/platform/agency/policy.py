@@ -116,6 +116,73 @@ _CN_MEDIUM_SEVERITY_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 
+def _build_line_map(
+    norm_lines: list[str],
+    orig_lines: list[str],
+    normalized: str,
+    md_body: str,
+) -> dict[int, int]:
+    """Build a mapping from normalized line numbers to original line numbers."""
+    if len(norm_lines) == len(orig_lines):
+        return dict(
+            zip(range(1, len(norm_lines) + 1), range(1, len(orig_lines) + 1), strict=False)
+        )
+
+    # Build mapping by tracking cumulative char offsets.
+    norm_offsets = [0]
+    for i, ch in enumerate(normalized):
+        if ch == "\n":
+            norm_offsets.append(i + 1)
+    orig_offsets = [0]
+    for i, ch in enumerate(md_body):
+        if ch == "\n":
+            orig_offsets.append(i + 1)
+
+    line_map: dict[int, int] = {}
+    orig_idx = 0
+    for norm_line_num, norm_off in enumerate(norm_offsets, start=1):
+        while orig_idx + 1 < len(orig_offsets) and orig_offsets[orig_idx + 1] <= norm_off:
+            orig_idx += 1
+        line_map[norm_line_num] = orig_idx + 1
+    return line_map
+
+
+def _make_risk(pattern: str, severity: str, line: int) -> dict[str, Any]:
+    return {"pattern": pattern, "severity": severity, "line": line}
+
+
+def _scan_line_risks(
+    line: str,
+    line_lower: str,
+    orig_line_num: int,
+) -> list[dict[str, Any]]:
+    """Scan a single line against all pattern categories."""
+    risks: list[dict[str, Any]] = []
+
+    for pattern, description in _HIGH_SEVERITY_PATTERNS:
+        if pattern.search(line_lower):
+            risks.append(_make_risk(description, "high", orig_line_num))
+
+    for pattern, description in _MEDIUM_SEVERITY_PATTERNS:
+        if pattern.search(line_lower):
+            risks.append(_make_risk(description, "medium", orig_line_num))
+
+    # CN high: flagged when line has an instruction prefix OR match is at line start
+    for pattern, description in _CN_HIGH_SEVERITY_PATTERNS:
+        match = pattern.search(line)
+        if match:
+            has_prefix = any(p in line for p in _CN_INSTRUCTION_PREFIXES)
+            at_line_start = match.start() < 3
+            if has_prefix or at_line_start:
+                risks.append(_make_risk(description, "high", orig_line_num))
+
+    for pattern, description in _CN_MEDIUM_SEVERITY_PATTERNS:
+        if pattern.search(line):
+            risks.append(_make_risk(description, "medium", orig_line_num))
+
+    return risks
+
+
 def check_content_policy(md_body: str) -> dict[str, Any]:
     """Check a Markdown body for content policy violations.
 
@@ -126,105 +193,15 @@ def check_content_policy(md_body: str) -> dict[str, Any]:
         - ``severity`` (str): "high", "medium", or "low"
         - ``line`` (int): line number where the risk was found (in original text)
     """
-    risks: list[dict[str, Any]] = []
-    # NFKC normalization + confusable mapping collapses Unicode confusables
-    # (e.g. fullwidth → ASCII, ligatures → component chars, Cyrillic homoglyphs
-    # → Latin) to defeat obfuscation attempts.
     normalized = _normalize_confusables(md_body)
-
-    # Build line-number mapping: normalized line → original line.
-    # Normalization can change string length (e.g. ligatures → multiple chars)
-    # but NFKC + translate preserves newline positions, so we can map by
-    # splitting both texts and counting newlines.
     norm_lines = normalized.split("\n")
     orig_lines = md_body.split("\n")
+    line_map = _build_line_map(norm_lines, orig_lines, normalized, md_body)
 
-    # If line counts match (common case), mapping is 1:1.
-    # If they differ, build a char-offset-based mapping.
-    if len(norm_lines) == len(orig_lines):
-        line_map = dict(
-            zip(range(1, len(norm_lines) + 1), range(1, len(orig_lines) + 1), strict=False)
-        )
-    else:
-        # Build mapping by tracking cumulative char offsets.
-        # Each newline in both texts marks a line boundary.
-        norm_offsets = [0]
-        for i, ch in enumerate(normalized):
-            if ch == "\n":
-                norm_offsets.append(i + 1)
-        orig_offsets = [0]
-        for i, ch in enumerate(md_body):
-            if ch == "\n":
-                orig_offsets.append(i + 1)
-        # Map by offset proximity: for each normalized line start,
-        # find the original line whose start offset is closest.
-        line_map: dict[int, int] = {}
-        orig_idx = 0
-        for norm_line_num, norm_off in enumerate(norm_offsets, start=1):
-            while orig_idx + 1 < len(orig_offsets) and orig_offsets[orig_idx + 1] <= norm_off:
-                orig_idx += 1
-            line_map[norm_line_num] = orig_idx + 1  # 1-based
-
+    risks: list[dict[str, Any]] = []
     for line_num, line in enumerate(norm_lines, start=1):
-        line_lower = line.lower()
-
-        # Check high severity patterns
-        for pattern, description in _HIGH_SEVERITY_PATTERNS:
-            if pattern.search(line_lower):
-                risks.append(
-                    {
-                        "pattern": description,
-                        "severity": "high",
-                        "line": line_map.get(line_num, line_num),
-                    }
-                )
-
-        # Check medium severity patterns (English)
-        for pattern, description in _MEDIUM_SEVERITY_PATTERNS:
-            if pattern.search(line_lower):
-                risks.append(
-                    {
-                        "pattern": description,
-                        "severity": "medium",
-                        "line": line_map.get(line_num, line_num),
-                    }
-                )
-
-        # Check Chinese high severity patterns.
-        # These patterns are already specific (e.g., "忽略...之前" is not
-        # normal phrasing), so the prefix check is a secondary confidence
-        # boost rather than a hard gate.  A match is flagged when EITHER:
-        #   a) the full line contains an instruction prefix, or
-        #   b) the match starts at the very beginning of the line (no
-        #      preceding context needed — a bare injection command).
-        for pattern, description in _CN_HIGH_SEVERITY_PATTERNS:
-            match = pattern.search(line)
-            if match:
-                has_prefix = any(p in line for p in _CN_INSTRUCTION_PREFIXES)
-                at_line_start = match.start() < 3
-                if has_prefix or at_line_start:
-                    risks.append(
-                        {
-                            "pattern": description,
-                            "severity": "high",
-                            "line": line_map.get(line_num, line_num),
-                        }
-                    )
-
-        # Check Chinese medium severity patterns
-        for pattern, description in _CN_MEDIUM_SEVERITY_PATTERNS:
-            if pattern.search(line):
-                risks.append(
-                    {
-                        "pattern": description,
-                        "severity": "medium",
-                        "line": line_map.get(line_num, line_num),
-                    }
-                )
+        orig_line = line_map.get(line_num, line_num)
+        risks.extend(_scan_line_risks(line, line.lower(), orig_line))
 
     passed = not any(r["severity"] in ("high", "medium") for r in risks)
-
-    return {
-        "passed": passed,
-        "risks": risks,
-    }
+    return {"passed": passed, "risks": risks}
