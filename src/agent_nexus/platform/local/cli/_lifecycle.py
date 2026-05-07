@@ -11,12 +11,17 @@ import logging
 import os
 import signal
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 
 from agent_nexus.models.distribution import LockfileEntry
 from agent_nexus.platform.local.cli._shared import _get_config_dir, _init_managers
 from agent_nexus.platform.utils import AGENT_NAME_RE
+
+if TYPE_CHECKING:
+    from agent_nexus.platform.config.loader import ConfigLoader
+    from agent_nexus.platform.local.lockfile import LockfileManager
 
 logger = logging.getLogger(__name__)
 
@@ -333,9 +338,6 @@ async def _info(name: str) -> None:
 
 async def _run(name: str, mode: str, transport: str, extra_args: list[str] | None = None) -> None:
     """Async run implementation."""
-    from agent_nexus.platform.local.supervisor import AgentSupervisor
-    from agent_nexus.platform.orchestration.process_manager import ProcessManager
-
     _loader, lockfile, _sources, config_dir = _init_managers()
 
     entry = lockfile.get_entry(name)
@@ -346,123 +348,105 @@ async def _run(name: str, mode: str, transport: str, extra_args: list[str] | Non
         )
         raise typer.Exit(code=1)
 
-    if mode == "mcp":
-        # MCP stdio standalone: exec directly into the agent process so
-        # the FastMCP server owns stdin/stdout for JSON-RPC framing.
-        # Using ProcessManager with piped I/O would prevent the MCP
-        # client from communicating with the agent.
-        supervisor = AgentSupervisor(
-            process_manager=ProcessManager(),
-            lockfile_manager=lockfile,
-            config_loader=_loader,
-            config_dir=config_dir,
-        )
-
-        command = supervisor._build_command(name, entry)
-        if not command:
-            typer.echo(
-                f"Could not resolve command for agent '{name}'.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
-
-        env = supervisor._build_env(name, entry)
-        env["AGENT_MODE"] = "mcp"
-
-        spawn_env = os.environ.copy()
-        spawn_env.update(env)
-
-        try:
-            os.execvpe(command[0], command, spawn_env)
-        except FileNotFoundError:
-            typer.echo(f"Command not found: {command[0]}", err=True)
-            raise typer.Exit(code=1) from None
-        except OSError as exc:
-            typer.echo(f"Failed to exec agent: {exc}", err=True)
-            raise typer.Exit(code=1) from None
-
+    if mode in ("mcp", "cli"):
+        _exec_agent_direct(name, entry, mode, extra_args, lockfile, _loader, config_dir)
     elif mode == "router":
         try:
-            from agent_nexus.platform.gateway.gateway import MCPGateway
-            from agent_nexus.platform.router.router import PlatformRouter
+            await _run_router_mode(name, transport, lockfile, _loader, config_dir)
         except ImportError as exc:
-            typer.echo(
-                f"Router mode requires additional modules: {exc}",
-                err=True,
-            )
+            typer.echo(f"Router mode requires additional modules: {exc}", err=True)
             raise typer.Exit(code=1) from None
-
-        pm = ProcessManager()
-        supervisor = AgentSupervisor(
-            process_manager=pm,
-            lockfile_manager=lockfile,
-            config_loader=_loader,
-            config_dir=config_dir,
-        )
-
-        ok = await supervisor.start_agent(name)
-        if not ok:
-            typer.echo(f"Failed to start agent '{name}'", err=True)
-            raise typer.Exit(code=1)
-
-        router = PlatformRouter(pm)
-        gateway = MCPGateway(pm, router)
-
-        typer.echo(
-            f"Starting agent '{name}' in router mode ({transport})...",
-            err=True,
-        )
-
-        try:
-            if transport == "sse":
-                await gateway.run_sse()
-            else:
-                await gateway.run_stdio()
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            typer.echo("\nShutting down...", err=True)
-        finally:
-            await gateway.stop()
-
-    elif mode == "cli":
-        # CLI mode: exec directly into the agent process for interactive use.
-        # os.execvpe replaces the current process, giving the agent direct
-        # terminal I/O without a pipe intermediary.  This avoids the deadlock
-        # where piped stdin/stdout are never read/written by either side.
-        supervisor = AgentSupervisor(
-            process_manager=ProcessManager(),
-            lockfile_manager=lockfile,
-            config_loader=_loader,
-            config_dir=config_dir,
-        )
-
-        command = supervisor._build_command(name, entry)
-        if not command:
-            typer.echo(
-                f"Could not resolve command for agent '{name}'.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
-
-        env = supervisor._build_env(name, entry)
-        env["AGENT_MODE"] = "cli"
-
-        # Merge with OS environment for interactive CLI mode
-        spawn_env = os.environ.copy()
-        spawn_env.update(env)
-
-        try:
-            exec_argv = command + (extra_args or [])
-            os.execvpe(exec_argv[0], exec_argv, spawn_env)
-        except FileNotFoundError:
-            typer.echo(f"Command not found: {command[0]}", err=True)
-            raise typer.Exit(code=1) from None
-        except OSError as exc:
-            typer.echo(f"Failed to exec agent: {exc}", err=True)
-            raise typer.Exit(code=1) from None
-
     else:
         typer.echo(f"Unknown mode '{mode}'. Use: mcp, router, cli.", err=True)
         raise typer.Exit(code=1)
+
+
+def _exec_agent_direct(
+    name: str,
+    entry: LockfileEntry,
+    mode: str,
+    extra_args: list[str] | None,
+    lockfile: LockfileManager,
+    config_loader: ConfigLoader,
+    config_dir: Path,
+) -> None:
+    """Exec directly into the agent process (MCP or CLI mode).
+
+    Uses ``os.execvpe`` to replace the current process so the agent owns
+    stdin/stdout directly — avoids pipe deadlocks with ProcessManager.
+    """
+    from agent_nexus.platform.local.supervisor import AgentSupervisor
+    from agent_nexus.platform.orchestration.process_manager import ProcessManager
+
+    supervisor = AgentSupervisor(
+        process_manager=ProcessManager(),
+        lockfile_manager=lockfile,
+        config_loader=config_loader,
+        config_dir=config_dir,
+    )
+
+    command = supervisor._build_command(name, entry)
+    if not command:
+        typer.echo(f"Could not resolve command for agent '{name}'.", err=True)
+        raise typer.Exit(code=1)
+
+    env = supervisor._build_env(name, entry)
+    env["AGENT_MODE"] = mode
+
+    spawn_env = os.environ.copy()
+    spawn_env.update(env)
+
+    exec_argv = command + (extra_args or []) if mode == "cli" else command
+    try:
+        os.execvpe(exec_argv[0], exec_argv, spawn_env)
+    except FileNotFoundError:
+        typer.echo(f"Command not found: {command[0]}", err=True)
+        raise typer.Exit(code=1) from None
+    except OSError as exc:
+        typer.echo(f"Failed to exec agent: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+
+
+async def _run_router_mode(
+    name: str,
+    transport: str,
+    lockfile: LockfileManager,
+    config_loader: ConfigLoader,
+    config_dir: Path,
+) -> None:
+    """Run agent through the platform router with MCP gateway."""
+    from agent_nexus.platform.gateway.gateway import MCPGateway
+    from agent_nexus.platform.local.supervisor import AgentSupervisor
+    from agent_nexus.platform.orchestration.process_manager import ProcessManager
+    from agent_nexus.platform.router.router import PlatformRouter
+
+    pm = ProcessManager()
+    supervisor = AgentSupervisor(
+        process_manager=pm,
+        lockfile_manager=lockfile,
+        config_loader=config_loader,
+        config_dir=config_dir,
+    )
+
+    ok = await supervisor.start_agent(name)
+    if not ok:
+        typer.echo(f"Failed to start agent '{name}'", err=True)
+        raise typer.Exit(code=1)
+
+    router = PlatformRouter(pm)
+    gateway = MCPGateway(pm, router)
+
+    typer.echo(f"Starting agent '{name}' in router mode ({transport})...", err=True)
+
+    try:
+        if transport == "sse":
+            await gateway.run_sse()
+        else:
+            await gateway.run_stdio()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        typer.echo("\nShutting down...", err=True)
+    finally:
+        await gateway.stop()
 
 
 async def _wait_forever() -> None:

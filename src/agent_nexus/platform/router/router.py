@@ -23,7 +23,7 @@ import logging
 import sqlite3
 import uuid
 from collections import deque
-from typing import Any
+from typing import Any, Iterable
 
 from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.models.ipc import AgentToPlatformType
@@ -342,79 +342,21 @@ class PlatformRouter:
     async def get_tools(self) -> list[dict]:
         """Get aggregated tool schemas from the gateway registry.
 
-        Delegates to the DeferredAgentRegistry (the canonical tool source)
-        rather than independently querying agents via IPC.  This avoids
-        returning raw tool names that don't match the sanitized
-        ``mcp__server__tool`` format used by the gateway.
-
-        Falls back to querying running agents via IPC only when no
-        registry is available (backward-compatibility).
-
-        Returns:
-            Flat list of tool definition dicts with sanitized names.
+        Delegates to the DeferredAgentRegistry when available.
+        Falls back to querying running agents via IPC (legacy path).
         """
-        # Use the registry as the canonical source when available.
-        # The router does not own a registry directly; it accesses it
-        # through the gateway if one has been configured.
         registry = getattr(self, "_registry", None)
         if registry is not None:
             return registry.get_tools_for_llm()
 
-        # Fallback: query running agents directly via IPC (legacy path)
-        async def _fetch_tools_from_agent(name: str) -> list[dict]:
-            handle = self._pm.get_agent(name)
-            if handle is None or not handle.is_alive:
-                return []
-            try:
-                async with get_ipc_lock(name):
-                    await handle.ipc.send_chat(_LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID)
-                    response = await handle.ipc.receive_until_result(timeout=10.0)
-                if response.type == AgentToPlatformType.ERROR:
-                    logger.warning(
-                        "Agent '%s' returned error during tool discovery: %s",
-                        name,
-                        response.error or "unknown error",
-                    )
-                    return []
-                if response.content:
-                    content = response.content
-                    if isinstance(content, str):
-                        try:
-                            parsed = json.loads(content)
-                            if isinstance(parsed, list):
-                                return parsed
-                        except (json.JSONDecodeError, ValueError) as exc:
-                            logger.warning(
-                                "Agent '%s' returned invalid JSON tool definitions: %s",
-                                name,
-                                exc,
-                            )
-                return []
-            except (TimeoutError, IPCError, OSError, RuntimeError) as exc:
-                logger.warning("Failed to get tools from agent '%s': %s", name, exc)
-                return []
+        return await self._fetch_tools_from_running_agents()
 
-        tools: list[dict] = []
-        seen_names: set[str] = set()
+    async def _fetch_tools_from_running_agents(self) -> list[dict]:
+        """Query running agents via IPC to discover their tools (legacy path)."""
         all_agent_tools = await asyncio.gather(
-            *[_fetch_tools_from_agent(name) for name in self._pm.list_running()],
+            *[_fetch_single_agent_tools(self._pm, name) for name in self._pm.list_running()],
         )
-        for tool_list in all_agent_tools:
-            for tool in tool_list:
-                tool_name = tool.get("name", "")
-                if not tool_name:
-                    logger.warning("Tool from agent has no 'name' key, skipping")
-                    continue
-                if tool_name in seen_names:
-                    logger.warning(
-                        "Tool name collision: '%s' already registered, skipping",
-                        tool_name,
-                    )
-                    continue
-                seen_names.add(tool_name)
-                tools.append(tool)
-
-        return tools
+        return _deduplicate_tool_lists(all_agent_tools)
 
     async def stop_all(self) -> None:
         """Stop all agents managed by this router."""
@@ -723,3 +665,62 @@ class PlatformRouter:
             output += "\n\n## Warnings\n" + "\n".join(f"- {e}" for e in errors)
 
         return output if output else f"No results from {phase.value} phase"
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers for legacy IPC tool discovery
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_single_agent_tools(pm: ProcessManager, name: str) -> list[dict]:
+    """Fetch tool schemas from a single running agent via IPC."""
+    handle = pm.get_agent(name)
+    if handle is None or not handle.is_alive:
+        return []
+    try:
+        async with get_ipc_lock(name):
+            await handle.ipc.send_chat(_LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID)
+            response = await handle.ipc.receive_until_result(timeout=10.0)
+        if response.type == AgentToPlatformType.ERROR:
+            logger.warning(
+                "Agent '%s' returned error during tool discovery: %s",
+                name,
+                response.error or "unknown error",
+            )
+            return []
+        if response.content and isinstance(response.content, str):
+            try:
+                parsed = json.loads(response.content)
+                if isinstance(parsed, list):
+                    return parsed
+            except (json.JSONDecodeError, ValueError) as exc:
+                logger.warning(
+                    "Agent '%s' returned invalid JSON tool definitions: %s",
+                    name,
+                    exc,
+                )
+        return []
+    except (TimeoutError, IPCError, OSError, RuntimeError) as exc:
+        logger.warning("Failed to get tools from agent '%s': %s", name, exc)
+        return []
+
+
+def _deduplicate_tool_lists(tool_lists: Iterable[list[dict]]) -> list[dict]:
+    """Merge tool lists, keeping the first occurrence of each tool name."""
+    tools: list[dict] = []
+    seen: set[str] = set()
+    for tool_list in tool_lists:
+        for tool in tool_list:
+            tool_name = tool.get("name", "")
+            if not tool_name:
+                logger.warning("Tool from agent has no 'name' key, skipping")
+                continue
+            if tool_name in seen:
+                logger.warning(
+                    "Tool name collision: '%s' already registered, skipping",
+                    tool_name,
+                )
+                continue
+            seen.add(tool_name)
+            tools.append(tool)
+    return tools
