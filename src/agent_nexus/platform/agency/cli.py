@@ -510,6 +510,12 @@ def _write_report(result: TaskComposerResult, path: Path) -> None:
     type=int,
     help=f"Per-LLM-call HTTP timeout in seconds (default: {DEFAULT_LLM_CALL_TIMEOUT})",
 )
+@click.option(
+    "--reasoning-protocol",
+    is_flag=True,
+    default=False,
+    help="Enable structured reasoning protocol for expert execution",
+)
 def run_composition(
     message: str,
     mode: str,
@@ -522,6 +528,7 @@ def run_composition(
     temperature: float | None,
     timeout: int | None,
     call_timeout: int | None,
+    reasoning_protocol: bool,
 ) -> None:
     """Full pipeline: load experts, select, build DAG, execute, integrate, QA.
 
@@ -643,6 +650,7 @@ def run_composition(
             capability_registry=shared_registry if use_llm else None,
             timeout=effective_call_timeout,
             client=shared_client,
+            reasoning_protocol=reasoning_protocol,
         )
         click.echo(f"Using LLM executor (model: {executor.model_name})")
     except Exception as exc:
@@ -661,6 +669,7 @@ def run_composition(
             mode=mode,
             max_parallel=max_parallel,
             timeout_seconds=float(timeout or DEFAULT_PIPELINE_TIMEOUT),
+            reasoning_protocol=reasoning_protocol,
         )
         try:
             composer_result = composer.run(

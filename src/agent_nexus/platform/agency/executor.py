@@ -18,6 +18,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_REASONING_RE = re.compile(r"<thinking>(.*?)</thinking>", re.DOTALL)
+_SUMMARY_RE = re.compile(r"<summary>(.*?)</summary>", re.DOTALL)
+
+
+def _extract_reasoning_tags(text: str) -> tuple[str | None, str | None]:
+    """Extract <thinking> and <summary> content from LLM response.
+
+    Extracts the first occurrence of each tag (by design for v1).
+    Strips ``<thinking>`` first so that ``<summary>`` mentions inside
+    the thinking block are not falsely captured.
+    """
+    t_match = _REASONING_RE.search(text)
+    thinking = t_match.group(1).strip() if t_match else None
+    # Search for <summary> in text *after* removing thinking blocks
+    # to avoid false matches when the LLM mentions the tag name inside
+    # its own thinking process.
+    text_without_thinking = _REASONING_RE.sub("", text)
+    s_match = _SUMMARY_RE.search(text_without_thinking)
+    summary = s_match.group(1).strip() if s_match else None
+    return thinking, summary
+
+
+def _strip_reasoning_tags(text: str) -> str:
+    """Remove <thinking> and <summary> blocks from text before section parsing."""
+    text = _REASONING_RE.sub("", text)
+    text = _SUMMARY_RE.sub("", text)
+    return text.strip()
+
+
 class ProfileBasedExecutor:
     """Executor that constructs artifacts using expert profile data.
 
@@ -137,6 +166,7 @@ class LLMExecutor:
         capability_registry: ModelCapabilityRegistry | None = None,
         timeout: float | None = None,
         client: LLMClient | None = None,
+        reasoning_protocol: bool = False,
     ) -> None:
         self._registry = registry
         self._config_dir = config_dir
@@ -144,6 +174,7 @@ class LLMExecutor:
         self._default_temperature = default_temperature
         self._timeout = timeout
         self._capability_registry = capability_registry
+        self._reasoning_protocol = reasoning_protocol
 
         if client is not None:
             self._default_client = client
@@ -218,6 +249,7 @@ class LLMExecutor:
             body=body,
             capabilities=capabilities,
             required_sections=required_sections,
+            reasoning_protocol=self._reasoning_protocol,
         )
 
         # Inject upstream artifact context into user message
@@ -233,7 +265,15 @@ class LLMExecutor:
             temperature=expert_temperature,
             timeout=self._timeout,
         )
-        sections = self._parse_sections(response.text, required_sections)
+
+        if self._reasoning_protocol:
+            thinking, summary = _extract_reasoning_tags(response.text)
+            clean_text = _strip_reasoning_tags(response.text)
+        else:
+            thinking, summary = None, None
+            clean_text = response.text
+
+        sections = self._parse_sections(clean_text, required_sections)
 
         logger.info(
             "LLMExecutor: expert '%s' completed (model=%s, provider=%s)",
@@ -242,11 +282,21 @@ class LLMExecutor:
             response.provider,
         )
 
+        metadata = {
+            "llm": True,
+            "model": response.model,
+            "provider": response.provider,
+        }
+        if thinking is not None:
+            metadata["reasoning"] = thinking
+        if summary is not None:
+            metadata["expert_summary"] = summary
+
         return Artifact(
             source_agent=profile_id,
             artifact_type=artifact_type,
             sections=sections,
-            metadata={"llm": True, "model": response.model, "provider": response.provider},
+            metadata=metadata,
         )
 
     # ------------------------------------------------------------------
@@ -259,6 +309,8 @@ class LLMExecutor:
         body: str,
         capabilities: list[str],
         required_sections: list[str],
+        *,
+        reasoning_protocol: bool = False,
     ) -> str:
         """Build the full system prompt with section output instructions."""
         parts: list[str] = []
@@ -272,15 +324,26 @@ class LLMExecutor:
             parts.append("Your areas of expertise: " + ", ".join(capabilities) + ".")
 
         section_list = ", ".join(required_sections)
-        parts.append(
-            "Your response must include these sections as ## markdown headings: "
-            + section_list
-            + "."
-        )
-        parts.append(
-            "Use exactly these heading names so they can be parsed. "
-            "Provide substantive content under each heading."
-        )
+        if reasoning_protocol:
+            parts.append(
+                "Follow this response protocol strictly:\n"
+                "1. **Think**: Analyze the task inside <thinking> tags. Consider multiple\n"
+                "   perspectives, identify edge cases, and evaluate trade-offs.\n"
+                "2. **Summarize**: Output a one-line (<30 words) physical snapshot in <summary>\n"
+                "   tags capturing your key finding and confidence level.\n"
+                "3. **Structure**: Output your analysis as ## markdown headings using exactly\n"
+                f"   these section names: {section_list}. Provide substantive content under each."
+            )
+        else:
+            parts.append(
+                "Your response must include these sections as ## markdown headings: "
+                + section_list
+                + "."
+            )
+            parts.append(
+                "Use exactly these heading names so they can be parsed. "
+                "Provide substantive content under each heading."
+            )
 
         return "\n\n".join(parts)
 

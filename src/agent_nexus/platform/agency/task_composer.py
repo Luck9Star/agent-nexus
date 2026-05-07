@@ -37,6 +37,7 @@ class TaskComposerInput:
     mode: str = "plan"
     max_parallel: int = 3
     timeout_seconds: float | None = None
+    reasoning_protocol: bool = False
 
 
 @dataclass
