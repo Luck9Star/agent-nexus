@@ -72,7 +72,9 @@ class GenericCLIBackend:
     ) -> CLIResult:
         if not self.is_available():
             return CLIResult(
-                text="", model="", returncode=-1,
+                text="",
+                model="",
+                returncode=-1,
                 raw_stderr=f"Command not found: {self._config.command}",
                 duration_ms=0,
             )

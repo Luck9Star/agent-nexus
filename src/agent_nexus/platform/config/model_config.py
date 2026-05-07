@@ -277,18 +277,14 @@ class ModelConfigManager:
         if ":" in model_string:
             provider, model_name = model_string.split(":", 1)
             if not provider.strip():
-                raise ValueError(
-                    f"Provider part is empty in model string: {model_string!r}"
-                )
+                raise ValueError(f"Provider part is empty in model string: {model_string!r}")
             provider = provider.strip()
             # CLI providers may have empty model part (e.g. "claude-code:")
             provider_cfg = self._config.models.providers.get(provider)
             if not model_name.strip():
                 if provider_cfg and provider_cfg.api == ProviderApiType.CLI:
                     return provider, ""
-                raise ValueError(
-                    f"Model name part is empty in model string: {model_string!r}"
-                )
+                raise ValueError(f"Model name part is empty in model string: {model_string!r}")
             return provider, model_name.strip()
 
         # No colon: check if bare string is a known provider (e.g. "claude-code")

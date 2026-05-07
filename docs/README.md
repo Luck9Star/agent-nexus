@@ -19,6 +19,8 @@ This directory contains the complete design documentation for Agent Nexus. All d
 | 9 | [09-implementation-plan.md](09-implementation-plan.md) | 7-phase implementation plan, risk matrix, timeline | Phases 1-6 complete, Phase 7 (Rust rewrite) pending |
 | 10 | [10-cloud-local-architecture.md](10-cloud-local-architecture.md) | Git distribution model, local architecture, Python implementation, Rust migration path | Partially implemented (SemVer parser pending) |
 | 11 | [11-agency-agents-integration.md](11-agency-agents-integration.md) | Agency Agents content-pack integration, expert profiles, dynamic Composite Agent orchestration | Proposal |
+| 12 | [12-atomic-agents-improvement-plan.md](12-atomic-agents-improvement-plan.md) | Atomic Agents 借鉴改进方案 P0-P4（Schema/Hook/Token/Context/Reflect） | Implemented (666f713) |
+| 13 | [13-mcp-ecosystem-liteLLM-plan.md](13-mcp-ecosystem-liteLLM-plan.md) | MCP 生态集成 + LiteLLM 统一调用层 + DAG 数据流 | Proposal |
 | A | [appendix.md](appendix.md) | OrchestrationDSL TOML schemas, Agent type comparison, model tier config, reference projects | Implemented |
 | T | [testing.md](testing.md) | Test suite overview, coverage, conventions, run instructions | Live document |
 | C | [capability-testing.md](capability-testing.md) | Contract-driven capability tests: 80 tests, 3 agent tiers × 2 modes × 2 validation levels | Live document |

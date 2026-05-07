@@ -254,9 +254,7 @@ class SkillLoader:
 
         name_val = str(frontmatter["name"]).strip()
         if not name_val:
-            raise ValueError(
-                "SKILL.md frontmatter 'name' must not be empty or whitespace-only"
-            )
+            raise ValueError("SKILL.md frontmatter 'name' must not be empty or whitespace-only")
 
         type_val = str(frontmatter["agent_type"]).strip()
         if not type_val:
@@ -282,9 +280,7 @@ class SkillLoader:
             agent_type=type_val,
             triggers=raw_triggers,
             capabilities=(
-                raw_capabilities
-                if isinstance(raw_capabilities, list)
-                else [raw_capabilities]
+                raw_capabilities if isinstance(raw_capabilities, list) else [raw_capabilities]
             ),
             model_config=raw_model_config if isinstance(raw_model_config, dict) else {},
             extra=extra,
