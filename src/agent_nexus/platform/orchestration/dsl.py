@@ -362,37 +362,42 @@ class OrchestrationDSL:
         for idx, raw_task in enumerate(raw_tasks):
             if not isinstance(raw_task, dict):
                 raise DSLSyntaxError(f"tasks[{idx}] must be a table")
-            task_id = raw_task.get("id")
-            if not task_id or not isinstance(task_id, str):
-                raise DSLSyntaxError(f"tasks[{idx}].id must be a non-empty string")
-            if task_id in seen_task_ids:
-                raise DSLSyntaxError(f"Duplicate task id: '{task_id}'")
-            seen_task_ids.add(task_id)
-
-            description = raw_task.get("description", "")
-            if not description or not isinstance(description, str):
-                raise DSLSyntaxError(
-                    f"tasks[{idx}] ({task_id}): .description must be a non-empty string"
-                )
-            agent = raw_task.get("agent")
-            if not agent or not isinstance(agent, str):
-                raise DSLSyntaxError(f"tasks[{idx}] ({task_id}): .agent must be a non-empty string")
-            blocked_by = OrchestrationDSL._validate_blocked_by(
-                raw_task.get("blocked_by", []), f"tasks[{idx}] ({task_id})",
-            )
-            task_vars = raw_task.get("vars", {})
-            if not isinstance(task_vars, dict):
-                raise DSLSyntaxError(f"tasks[{idx}] ({task_id}): .vars must be a table")
-            tasks.append(
-                DSLTask(
-                    id=task_id,
-                    description=description,
-                    agent=agent,
-                    blocked_by=blocked_by,
-                    vars=dict(task_vars),
-                )
-            )
+            task = OrchestrationDSL._parse_single_task(raw_task, idx, seen_task_ids)
+            seen_task_ids.add(task.id)
+            tasks.append(task)
         return tasks
+
+    @staticmethod
+    def _parse_single_task(
+        raw_task: dict[str, Any], idx: int, seen_ids: set[str],
+    ) -> DSLTask:
+        task_id = raw_task.get("id")
+        if not task_id or not isinstance(task_id, str):
+            raise DSLSyntaxError(f"tasks[{idx}].id must be a non-empty string")
+        if task_id in seen_ids:
+            raise DSLSyntaxError(f"Duplicate task id: '{task_id}'")
+
+        description = raw_task.get("description", "")
+        if not description or not isinstance(description, str):
+            raise DSLSyntaxError(
+                f"tasks[{idx}] ({task_id}): .description must be a non-empty string"
+            )
+        agent = raw_task.get("agent")
+        if not agent or not isinstance(agent, str):
+            raise DSLSyntaxError(f"tasks[{idx}] ({task_id}): .agent must be a non-empty string")
+        blocked_by = OrchestrationDSL._validate_blocked_by(
+            raw_task.get("blocked_by", []), f"tasks[{idx}] ({task_id})",
+        )
+        task_vars = raw_task.get("vars", {})
+        if not isinstance(task_vars, dict):
+            raise DSLSyntaxError(f"tasks[{idx}] ({task_id}): .vars must be a table")
+        return DSLTask(
+            id=task_id,
+            description=description,
+            agent=agent,
+            blocked_by=blocked_by,
+            vars=dict(task_vars),
+        )
 
     def _parse_composition_format(self, raw: dict[str, Any]) -> OrchestrationDefinition:
         """Parse the ``[composition]`` / ``[tasks.X]`` TOML format.

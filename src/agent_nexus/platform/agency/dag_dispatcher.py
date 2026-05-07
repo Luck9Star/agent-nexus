@@ -420,11 +420,18 @@ class DAGDispatcher:
             concurrent.futures.Future[tuple[Artifact | None, str | None]],
             TaskItem,
         ] = {}
+        started_in_batch: list[str] = []
         for task_item in batch:
             if deadline is not None and time.monotonic() > deadline:
                 result.timed_out = True
+                # Fail tasks that were started but never submitted to pool
+                for tid in started_in_batch:
+                    _safe_fail(self._graph, tid)
+                    result.cancelled.append(tid)
+                    result.errors[tid] = "cancelled (deadline reached before submit)"
                 break
             self._graph.start_task(task_item.id)
+            started_in_batch.append(task_item.id)
             upstream = self._collect_upstream_artifacts(task_item, result.artifacts)
             future = pool.submit(self._run_executor, task_item, task_description, upstream)
             futures[future] = task_item

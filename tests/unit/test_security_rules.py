@@ -379,6 +379,32 @@ class TestFunctionRuleAttributeCalls:
 
         assert len(violations) == 1
 
+    def test_indirect_call_blocked(self) -> None:
+        """(exec)("code") is caught regardless of parentheses."""
+        rule = FunctionRule(forbidden=["exec"])
+        code = "(exec)('code')"
+        tree = ast.parse(code)
+
+        violations = []
+        for node in ast.walk(tree):
+            violations.extend(rule.check(node))
+
+        assert len(violations) == 1
+        assert "exec" in violations[0].message
+
+    def test_indirect_eval_blocked(self) -> None:
+        """(eval)("1+1") is caught regardless of parentheses."""
+        rule = FunctionRule(forbidden=["eval"])
+        code = "(eval)('1+1')"
+        tree = ast.parse(code)
+
+        violations = []
+        for node in ast.walk(tree):
+            violations.extend(rule.check(node))
+
+        assert len(violations) == 1
+        assert "eval" in violations[0].message
+
 
 # ============================================================================
 # RegexRule.check_source operates on full source string (from iter14)

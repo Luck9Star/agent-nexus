@@ -324,7 +324,12 @@ def _display_manifest_info(agent_dir: Path) -> None:
     if not isinstance(manifest, dict):
         return
     typer.echo()
-    for key, label in [("description", "Description"), ("run_modes", "Run modes"), ("model_tier", "Model tier")]:
+    display_fields = [
+        ("description", "Description"),
+        ("run_modes", "Run modes"),
+        ("model_tier", "Model tier"),
+    ]
+    for key, label in display_fields:
         val = manifest.get(key)
         if val:
             formatted = ", ".join(val) if isinstance(val, list) else str(val)

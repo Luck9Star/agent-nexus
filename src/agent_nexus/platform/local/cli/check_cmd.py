@@ -114,33 +114,44 @@ def _check_composite_files(path: Path) -> list[str]:
         errors.append(f"composition.toml: parse error: {exc}")
         return errors
 
-    # Validate structure
+    _validate_composition_sections(data, errors)
+    _validate_composition_tasks(data, errors)
+
+    return errors
+
+
+def _validate_composition_sections(data: dict, errors: list[str]) -> None:
     if "composition" not in data:
         errors.append("composition.toml: missing [composition] section")
     if "tasks" not in data:
         errors.append("composition.toml: missing [tasks] section")
-    else:
-        tasks = data["tasks"]
-        for tid, task in tasks.items():
-            if "name" not in task:
-                errors.append(f"composition.toml: task '{tid}' missing 'name'")
-            if "agent" not in task:
-                errors.append(f"composition.toml: task '{tid}' missing 'agent'")
-            if tid in task.get("blocked_by", []):
-                errors.append(f"composition.toml: task '{tid}' cannot depend on itself")
 
-        # Cycle detection via DFS
-        from agent_nexus.platform.utils import detect_cycles_dfs
 
-        task_ids = set(tasks.keys())
-        cycles = detect_cycles_dfs(
-            task_ids,
-            lambda tid: [d for d in tasks[tid].get("blocked_by", []) if d in task_ids],
-        )
-        for cycle in cycles:
-            errors.append(f"composition.toml: circular dependency: {' -> '.join(cycle)}")
+def _validate_composition_tasks(data: dict, errors: list[str]) -> None:
+    tasks = data.get("tasks")
+    if not isinstance(tasks, dict):
+        return
+    for tid, task in tasks.items():
+        if "name" not in task:
+            errors.append(f"composition.toml: task '{tid}' missing 'name'")
+        if "agent" not in task:
+            errors.append(f"composition.toml: task '{tid}' missing 'agent'")
+        if tid in task.get("blocked_by", []):
+            errors.append(f"composition.toml: task '{tid}' cannot depend on itself")
 
-    return errors
+    _detect_composition_cycles(tasks, errors)
+
+
+def _detect_composition_cycles(tasks: dict, errors: list[str]) -> None:
+    from agent_nexus.platform.utils import detect_cycles_dfs
+
+    task_ids = set(tasks.keys())
+    cycles = detect_cycles_dfs(
+        task_ids,
+        lambda tid: [d for d in tasks[tid].get("blocked_by", []) if d in task_ids],
+    )
+    for cycle in cycles:
+        errors.append(f"composition.toml: circular dependency: {' -> '.join(cycle)}")
 
 
 def check_agent(

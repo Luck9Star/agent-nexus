@@ -840,6 +840,36 @@ class TestTimeoutMidBatch:
         assert len(result.completed) >= 1
         assert len(result.completed) < 3
 
+    def test_mid_batch_deadline_fails_started_unsubmitted(self) -> None:
+        """Deadline reached mid-batch: started-but-unsubmitted tasks are cancelled, not stuck IN_PROGRESS."""
+        import unittest.mock
+
+        call_count = {"n": 0}
+
+        def counting(profile_id: str, task: str) -> Artifact:
+            call_count["n"] += 1
+            time.sleep(0.01)
+            return _make_artifact(profile_id)
+
+        dag = _build_dag([
+            DAGTask(id="s1", agent="a1", output="o1"),
+            DAGTask(id="s2", agent="a2", output="o2"),
+            DAGTask(id="s3", agent="a3", output="o3"),
+        ])
+        graph = TaskGraph(":memory:")
+        # Very short timeout so deadline fires mid-batch
+        dispatcher = DAGDispatcher(graph, counting, max_batch_size=10, timeout_seconds=0.005)
+        result = dispatcher.dispatch(dag, "mid-batch deadline test")
+        # All tasks should be in a terminal state (completed, failed, or cancelled)
+        # No tasks stuck in IN_PROGRESS
+        for tid in ["s1", "s2", "s3"]:
+            task = graph.get_task(tid)
+            assert task is not None, f"Task {tid} not found in graph"
+            assert task.state != TaskState.IN_PROGRESS, f"Task {tid} stuck in IN_PROGRESS"
+        # At least some tasks should be cancelled (the deadline-hit ones)
+        total_resolved = len(result.completed) + len(result.failed) + len(result.cancelled)
+        assert total_resolved == 3
+
 
 @pytest.mark.timeout(10)
 class TestDiamondDependency:

@@ -465,7 +465,7 @@ class GitInstaller:
 
         # Checkout the desired ref (or HEAD for latest)
         checkout_ref = ref if ref else "HEAD"
-        await self._run_git(["checkout", checkout_ref], cwd=cache_path)
+        await self._run_git(["checkout", "--", checkout_ref], cwd=cache_path)
 
         agent_dir = cache_path / relative_path
         if not agent_dir.exists():

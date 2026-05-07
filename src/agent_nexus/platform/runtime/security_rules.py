@@ -210,6 +210,21 @@ class FunctionRule(SecurityRule):
                     )
                 )
 
+            # Catch-all: indirect calls like (exec)("code") where node.func
+            # is ast.Call or ast.Subscript, not ast.Name/ast.Attribute.
+            if func_name in self.forbidden and not violations:
+                violations.append(
+                    SecurityViolation(
+                        rule_type="function",
+                        node_type="Call",
+                        code_snippet=ast.unparse(node),
+                        message=(
+                            f"Forbidden function call (indirect): "
+                            f"'{func_name}' at line {node.lineno}"
+                        ),
+                    )
+                )
+
             # Qualified-call check: block os.system(), subprocess.run(), etc.
             # without false-positive on generic names like pipeline.run().
             if (

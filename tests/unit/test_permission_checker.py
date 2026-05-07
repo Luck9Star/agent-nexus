@@ -605,6 +605,32 @@ class TestFnmatchRecursiveSuffixBranches:
         assert _fnmatch_recursive("/tmp/bar/x/y", "/tmp/**/bar/**")
 
 
+class TestSegmentPositions:
+    """Tests for _segment_positions helper (extracted from _fnmatch_recursive)."""
+
+    def test_empty_tail(self) -> None:
+        from agent_nexus.platform.runtime.permission_checker import _segment_positions
+        assert _segment_positions("") == [0]
+
+    def test_single_segment(self) -> None:
+        from agent_nexus.platform.runtime.permission_checker import _segment_positions
+        assert _segment_positions("file.txt") == [0]
+
+    def test_multi_segment(self) -> None:
+        from agent_nexus.platform.runtime.permission_checker import _segment_positions
+        # "/a/b/c.txt" -> [0, after /a -> index 2, after /b -> index 4]... wait
+        # positions: [0, (i+1 where ch='/' and i+1 < len)] -> "/" at 0, "a" at 1; "/" at 2 -> pos 3; "/" at... no
+        # "/" at index 0 -> i+1=1 < 5 -> add 1; "a" at 1; "/" at 2 -> i+1=3 < 5 -> add 3; "b" at 3; "/" at 4 -> i+1=5 == 5, NOT added
+        # Actually: len("/a/b/c.txt") = 9, chars: /,a,/,b,/,c,.,t,x,t
+        # "/" at 0 -> 1<9 -> add 1; "/" at 2 -> 3<9 -> add 3; "/" at 4 -> 5<9 -> add 5
+        assert _segment_positions("/a/b/c.txt") == [0, 1, 3, 5]
+
+    def test_trailing_slash(self) -> None:
+        from agent_nexus.platform.runtime.permission_checker import _segment_positions
+        # "/a/b/" -> "/" at 0 -> add 1; "/" at 2 -> add 3; "/" at 4 -> 5 not < 5 -> NOT added
+        assert _segment_positions("/a/b/") == [0, 1, 3]
+
+
 class TestCheckToolEmpty:
     """Empty tool_name rejection."""
 
