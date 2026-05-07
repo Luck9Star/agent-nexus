@@ -99,6 +99,98 @@ class GitInstaller:
     # Public API
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _validate_agent_name(agent_name: str) -> None:
+        """Raise InstallationError if agent_name is invalid."""
+        if not AGENT_NAME_RE.match(agent_name):
+            raise InstallationError(
+                f"Invalid agent name: '{agent_name}'. "
+                "Must start with alphanumeric and contain only "
+                "alphanumeric, dots, hyphens, and underscores."
+            )
+
+    def _resolve_source(
+        self,
+        agent_name: str,
+        source_url: str | None,
+    ) -> tuple[SourceEntry, str]:
+        """Resolve agent source to a (SourceEntry, relative_path) tuple."""
+        if source_url:
+            _validate_git_url(source_url)
+            source = SourceEntry(
+                name=_url_to_source_name(source_url),
+                type="git",
+                url=source_url,
+            )
+            return source, f"packages/{agent_name}"
+
+        resolved = self._sources.resolve_agent_source(agent_name)
+        if resolved is None:
+            raise AgentNotFoundError(
+                f"Agent '{agent_name}' not found in any configured source. "
+                "Add a source in sources.yaml or use --git-url."
+            )
+        return resolved
+
+    def _copy_to_agents_dir(self, agent_name: str, source_dir: Path) -> Path:
+        """Copy agent files to the managed agents directory."""
+        dest = self._agents_dir / agent_name
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(source_dir, dest)
+        logger.info("Agent files copied to %s", dest)
+        return dest
+
+    @staticmethod
+    def _parse_manifest_safe(
+        agent_name: str,
+        manifest_dict: dict,
+    ) -> AgentManifest | None:
+        """Parse manifest dict into AgentManifest, raising InstallationError on failure."""
+        if not manifest_dict:
+            return None
+        try:
+            return AgentManifest(**manifest_dict)
+        except Exception as exc:
+            raise InstallationError(
+                f"Agent '{agent_name}' has invalid manifest data: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _build_lockfile_entry(
+        manifest: AgentManifest | None,
+        *,
+        source_name: str,
+        commit_sha: str,
+        venv_path: Path | None,
+        fallback_version: str = "0.0.0",
+    ) -> LockfileEntry:
+        """Build a LockfileEntry from manifest data and install metadata."""
+        agent_type = manifest.type if manifest else AgentType.ATOMIC
+        manifest_version = manifest.version if manifest else fallback_version
+        return LockfileEntry(
+            version=manifest_version,
+            source=source_name,
+            commit_sha=commit_sha,
+            agent_type=agent_type,
+            installed_at=datetime.now(UTC),
+            venv_path=str(venv_path) if venv_path else "",
+            dependencies=manifest.pip_dependencies if manifest else [],
+        )
+
+    @staticmethod
+    def _rollback_paths(paths: list[Path], agent_name: str, context: str) -> None:
+        """Best-effort removal of paths created during a failed install."""
+        for path in reversed(paths):
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path, ignore_errors=True)
+                elif path.exists():
+                    path.unlink()
+            except Exception:
+                logger.debug("Rollback: failed to remove %s", path, exc_info=True)
+        logger.warning("%s of '%s' failed; partial files cleaned up.", context, agent_name)
+
     async def install(
         self,
         agent_name: str,
@@ -128,116 +220,53 @@ class GitInstaller:
         InstallationError
             Clone, validation, or venv creation failed.
         """
-        # 0. Validate agent name (prevent path traversal)
-        if not AGENT_NAME_RE.match(agent_name):
-            raise InstallationError(
-                f"Invalid agent name: '{agent_name}'. "
-                "Must start with alphanumeric and contain only "
-                "alphanumeric, dots, hyphens, and underscores."
-            )
-
-        # 1. Resolve source
-        if source_url:
-            _validate_git_url(source_url)
-            source = SourceEntry(
-                name=_url_to_source_name(source_url),
-                type="git",
-                url=source_url,
-            )
-            relative_path = f"packages/{agent_name}"
-        else:
-            resolved = self._sources.resolve_agent_source(agent_name)
-            if resolved is None:
-                raise AgentNotFoundError(
-                    f"Agent '{agent_name}' not found in any configured source. "
-                    "Add a source in sources.yaml or use --git-url."
-                )
-            source, relative_path = resolved
-
-        # 2. Determine git ref (tag format: agent-name/v1.2.0)
+        self._validate_agent_name(agent_name)
+        source, relative_path = self._resolve_source(agent_name, source_url)
         ref = f"{agent_name}/v{version}" if version else None
 
-        # Track paths created during installation for rollback on failure.
         _created_paths: list[Path] = []
-
         try:
-            # 3. Sparse clone
             try:
                 agent_dir = await self._sparse_clone(
-                    source.url,
-                    agent_name,
-                    relative_path,
-                    ref,
+                    source.url, agent_name, relative_path, ref,
                 )
             except Exception as exc:
                 raise InstallationError(f"Failed to clone agent '{agent_name}': {exc}") from exc
 
-            # 4. Validate
             issues, manifest_dict = self._validate_agent_package(agent_dir)
             if issues:
                 raise InstallationError(
                     f"Agent '{agent_name}' validation failed: {'; '.join(issues)}"
                 )
 
-            # 5. Copy to agents dir
-            dest = self._agents_dir / agent_name
-            if dest.exists():
-                shutil.rmtree(dest)
-            shutil.copytree(agent_dir, dest)
+            dest = self._copy_to_agents_dir(agent_name, agent_dir)
             _created_paths.append(dest)
-            logger.info("Agent files copied to %s", dest)
+            manifest = self._parse_manifest_safe(agent_name, manifest_dict)
 
-            # 6. Parse manifest
-            try:
-                manifest = AgentManifest(**manifest_dict) if manifest_dict else None
-            except Exception as exc:
-                raise InstallationError(
-                    f"Agent '{agent_name}' has invalid manifest data: {exc}"
-                ) from exc
-            agent_type = manifest.type if manifest else AgentType.ATOMIC
-            manifest_version = manifest.version if manifest else (version or "0.0.0")
-
-            # 7. Create venv if needed
             venv_path = await self._create_venv(agent_name, dest)
             if venv_path:
                 _created_paths.append(venv_path)
 
-            # 8. Get commit SHA
             cache_path = self._get_cache_path(source.url)
             commit_sha = await self._get_commit_sha(cache_path)
 
-            # 9. Update lockfile
-            entry = LockfileEntry(
-                version=manifest_version,
-                source=source.name,
+            entry = self._build_lockfile_entry(
+                manifest,
+                source_name=source.name,
                 commit_sha=commit_sha,
-                agent_type=agent_type,
-                installed_at=datetime.now(UTC),
-                venv_path=str(venv_path) if venv_path else "",
-                dependencies=manifest.pip_dependencies if manifest else [],
+                venv_path=venv_path,
+                fallback_version=version or "0.0.0",
             )
             self._lockfile.add_entry_by_name(agent_name, entry)
 
             logger.info(
                 "Agent installed: %s@%s (sha=%s, venv=%s)",
-                agent_name,
-                entry.version,
-                commit_sha[:12],
-                "yes" if venv_path else "no",
+                agent_name, entry.version,
+                commit_sha[:12], "yes" if venv_path else "no",
             )
             return entry
-
         except Exception:
-            # Rollback: remove any directories/files created during this install.
-            for path in reversed(_created_paths):
-                try:
-                    if path.is_dir():
-                        shutil.rmtree(path, ignore_errors=True)
-                    elif path.exists():
-                        path.unlink()
-                except Exception:
-                    logger.debug("Rollback: failed to remove %s", path, exc_info=True)
-            logger.warning("Installation of '%s' failed; partial files cleaned up.", agent_name)
+            self._rollback_paths(_created_paths, agent_name, "Installation")
             raise
 
     async def uninstall(self, agent_name: str) -> bool:
@@ -246,13 +275,7 @@ class GitInstaller:
         Removes agent files, venv, and lockfile entry.  Returns ``True`` if
         the agent was installed (and is now removed).
         """
-        # Validate agent name (prevent path traversal)
-        if not AGENT_NAME_RE.match(agent_name):
-            raise InstallationError(
-                f"Invalid agent name: '{agent_name}'. "
-                "Must start with alphanumeric and contain only "
-                "alphanumeric, dots, hyphens, and underscores."
-            )
+        self._validate_agent_name(agent_name)
 
         # Atomically pop the lockfile entry — holds the file lock across the
         # read-remove-write sequence so no concurrent install can race between
@@ -325,78 +348,43 @@ class GitInstaller:
         InstallationError
             Validation or venv creation failed.
         """
-        if not AGENT_NAME_RE.match(agent_name):
-            raise InstallationError(
-                f"Invalid agent name: '{agent_name}'. "
-                "Must start with alphanumeric and contain only "
-                "alphanumeric, dots, hyphens, and underscores."
-            )
+        self._validate_agent_name(agent_name)
 
         if not local_path.is_dir():
             raise InstallationError(f"Local agent path does not exist: {local_path}")
 
-        # 1. Validate
         issues, manifest_dict = self._validate_agent_package(local_path)
         if issues:
             raise InstallationError(f"Agent '{agent_name}' validation failed: {'; '.join(issues)}")
 
         _created_paths: list[Path] = []
         try:
-            # 2. Copy to agents dir
-            dest = self._agents_dir / agent_name
-            if dest.exists():
-                shutil.rmtree(dest)
-            shutil.copytree(local_path, dest)
+            dest = self._copy_to_agents_dir(agent_name, local_path)
             _created_paths.append(dest)
-            logger.info("Local agent files copied to %s", dest)
 
-            # 3. Parse manifest
-            try:
-                manifest = AgentManifest(**manifest_dict) if manifest_dict else None
-            except Exception as exc:
-                raise InstallationError(
-                    f"Agent '{agent_name}' has invalid manifest data: {exc}"
-                ) from exc
-            agent_type = manifest.type if manifest else AgentType.ATOMIC
-            manifest_version = manifest.version if manifest else "0.0.0"
+            manifest = self._parse_manifest_safe(agent_name, manifest_dict)
 
-            # 4. Create venv if needed
             venv_path = await self._create_venv(agent_name, dest)
             if venv_path:
                 _created_paths.append(venv_path)
 
-            # 5. Try to get commit SHA from the local project repo
             commit_sha = await self._get_local_commit_sha(local_path)
 
-            # 6. Update lockfile
-            entry = LockfileEntry(
-                version=manifest_version,
-                source="local",
+            entry = self._build_lockfile_entry(
+                manifest,
+                source_name="local",
                 commit_sha=commit_sha,
-                agent_type=agent_type,
-                installed_at=datetime.now(UTC),
-                venv_path=str(venv_path) if venv_path else "",
-                dependencies=manifest.pip_dependencies if manifest else [],
+                venv_path=venv_path,
             )
             self._lockfile.add_entry_by_name(agent_name, entry)
 
             logger.info(
                 "Local agent installed: %s@%s (source=local)",
-                agent_name,
-                entry.version,
+                agent_name, entry.version,
             )
             return entry
-
         except Exception:
-            for path in reversed(_created_paths):
-                try:
-                    if path.is_dir():
-                        shutil.rmtree(path, ignore_errors=True)
-                    elif path.exists():
-                        path.unlink()
-                except Exception:
-                    logger.debug("Rollback: failed to remove %s", path, exc_info=True)
-            logger.warning("Local install of '%s' failed; cleaned up.", agent_name)
+            self._rollback_paths(_created_paths, agent_name, "Local install")
             raise
 
     async def _get_local_commit_sha(self, agent_path: Path) -> str:
