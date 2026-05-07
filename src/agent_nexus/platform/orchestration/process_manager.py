@@ -169,6 +169,48 @@ class ProcessManager:
                 name,
             )
 
+    async def _kill_orphaned_process(self, process: asyncio.subprocess.Process, name: str) -> None:
+        """Kill an orphaned process and wait for it to exit."""
+        logger.exception("Agent '%s' spawn failed", name)
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
+        try:
+            await process.wait()
+        except Exception:
+            logger.debug(
+                "Failed to wait for orphaned agent '%s' process",
+                name,
+                exc_info=True,
+            )
+
+    def _build_handle(
+        self,
+        process: asyncio.subprocess.Process,
+        name: str,
+        command: list[str],
+        cwd: Path | None,
+        env: dict[str, str] | None,
+    ) -> AgentHandle:
+        """Create AgentHandle with IPC and drain task from a spawned process."""
+        assert process.stdin is not None
+        assert process.stdout is not None
+
+        stream = IPCStream(stdin=process.stdin, stdout=process.stdout)
+        ipc = IPCProtocol(stream)
+
+        handle = AgentHandle(
+            name=name,
+            process=process,
+            ipc=ipc,
+            start_command=list(command),
+            start_cwd=cwd,
+            start_env=dict(env) if env else {},
+        )
+
+        assert process.stderr is not None
+        handle.drain_task = asyncio.create_task(self._drain_stderr(process, name))
+        return handle
+
     async def start_agent(
         self,
         name: str,
@@ -217,45 +259,11 @@ class ProcessManager:
                     f"Failed to start agent '{name}' with command {command}: {exc}"
                 ) from exc
 
-            # Post-creation setup — if anything fails, kill the orphaned process.
             try:
-                assert process.stdin is not None
-                assert process.stdout is not None
-
-                stream = IPCStream(
-                    stdin=process.stdin,
-                    stdout=process.stdout,
-                )
-                ipc = IPCProtocol(stream)
-
-                handle = AgentHandle(
-                    name=name,
-                    process=process,
-                    ipc=ipc,
-                    start_command=list(command),
-                    start_cwd=cwd,
-                    start_env=dict(env) if env else {},
-                )
-
-                # Drain stderr in background to prevent pipe buffer deadlock
-                assert process.stderr is not None
-                drain_task = asyncio.create_task(self._drain_stderr(process, name))
-                handle.drain_task = drain_task
-
+                handle = self._build_handle(process, name, command, cwd, env)
                 self._agents[name] = handle
             except Exception:
-                # Kill orphaned process to prevent resource leak
-                logger.exception("Agent '%s' spawn failed", name)
-                with contextlib.suppress(ProcessLookupError):
-                    process.kill()
-                try:
-                    await process.wait()
-                except Exception:
-                    logger.debug(
-                        "Failed to wait for orphaned agent '%s' process",
-                        name,
-                        exc_info=True,
-                    )
+                await self._kill_orphaned_process(process, name)
                 raise
 
             logger.info(
@@ -507,6 +515,27 @@ class ProcessManager:
     # Bulk operations
     # ------------------------------------------------------------------
 
+    async def _force_kill_and_reap(self, names: list[str]) -> None:
+        """Force-kill all named agents and reap their processes."""
+        logger.warning("stop_all() cancelled mid-shutdown — force-killing remaining agents")
+        for name in names:
+            handle = self._agents.get(name)
+            if handle is not None and handle.is_alive:
+                try:
+                    handle.process.kill()
+                    logger.info("Force-killed agent '%s'", name)
+                except (ProcessLookupError, OSError):
+                    pass
+        # Reap killed processes to prevent zombies
+        for name in names:
+            handle = self._agents.get(name)
+            if handle is not None and handle.process.returncode is None:
+                with contextlib.suppress(Exception):
+                    await handle.process.wait()
+            async with self._lock:
+                if self._agents.get(name) is handle:
+                    self._agents.pop(name, None)
+
     async def stop_all(self, timeout: float = 10.0) -> None:
         """Stop all running agents gracefully."""
         names = list(self._agents.keys())
@@ -523,25 +552,7 @@ class ProcessManager:
                 if isinstance(result, Exception):
                     logger.error("Error stopping agent '%s': %s", agent_name, result)
         except asyncio.CancelledError:
-            # Platform shutdown interrupted gather — force-kill survivors.
-            logger.warning("stop_all() cancelled mid-shutdown — force-killing remaining agents")
-            for name in names:
-                handle = self._agents.get(name)
-                if handle is not None and handle.is_alive:
-                    try:
-                        handle.process.kill()
-                        logger.info("Force-killed agent '%s'", name)
-                    except (ProcessLookupError, OSError):
-                        pass
-            # Reap killed processes to prevent zombies
-            for name in names:
-                handle = self._agents.get(name)
-                if handle is not None and handle.process.returncode is None:
-                    with contextlib.suppress(Exception):
-                        await handle.process.wait()
-                async with self._lock:
-                    if self._agents.get(name) is handle:
-                        self._agents.pop(name, None)
+            await self._force_kill_and_reap(names)
             raise
 
     # ------------------------------------------------------------------
@@ -615,7 +626,7 @@ class ProcessManager:
             agents = list(self._agents.items())
         except Exception:
             return
-        for _name, handle in agents:
+        for _, handle in agents:
             # Cancel drain task to release StreamReader reference
             if handle.drain_task is not None and not handle.drain_task.done():
                 handle.drain_task.cancel()

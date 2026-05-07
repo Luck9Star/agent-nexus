@@ -314,13 +314,12 @@ def check_profiles(output_dir: str) -> None:
 
 def _load_profile_schema() -> object | None:
     """Load JSON schema for profile validation if jsonschema is available."""
-    try:
-        import jsonschema  # type: ignore[import-untyped]
+    import importlib.util
 
-        if _SCHEMA_PATH.is_file():
-            return json.loads(_SCHEMA_PATH.read_text())
-    except ImportError:
-        pass
+    if importlib.util.find_spec("jsonschema") is None:
+        return None
+    if _SCHEMA_PATH.is_file():
+        return json.loads(_SCHEMA_PATH.read_text())
     return None
 
 

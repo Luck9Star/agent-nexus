@@ -23,7 +23,8 @@ import logging
 import sqlite3
 import uuid
 from collections import deque
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.models.ipc import AgentToPlatformType
