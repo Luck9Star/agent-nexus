@@ -158,6 +158,7 @@ async def _stop_one(name: str) -> None:
         typer.echo(f"Stopped {name}")
     else:
         typer.echo(f"Agent '{name}' is not running.", err=True)
+        raise typer.Exit(code=1)
 
 
 async def _stop_all() -> None:
@@ -179,14 +180,16 @@ async def _restart_agent(name: str) -> None:
 
     supervisor, config_dir, pm = await _make_supervisor()
 
-    ok = await supervisor.stop_agent(name)
-    if ok:
+    stop_ok = await supervisor.stop_agent(name)
+    if stop_ok:
         pid_file = config_dir / "agents" / f"{name}.pid"
         with contextlib.suppress(FileNotFoundError):
             pid_file.unlink()
+    else:
+        typer.echo(f"Agent '{name}' was not running, attempting fresh start.", err=True)
 
-    ok = await supervisor.start_agent(name)
-    if not ok:
+    start_ok = await supervisor.start_agent(name)
+    if not start_ok:
         typer.echo(f"Failed to restart agent '{name}'.", err=True)
         raise typer.Exit(code=1)
 
