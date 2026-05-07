@@ -294,6 +294,35 @@ class DAGDispatcher:
             )
             return None, str(exc)
 
+    def _no_more_work(self, specialist_ids: set[str], result: DispatchResult) -> bool:
+        """Handle the "no ready specialists" state inside the dispatch loop.
+
+        Returns True if the dispatch loop should break, False if it should
+        continue (e.g. after failing stale tasks).
+        """
+        all_specialists = [self._graph.get_task(tid) for tid in specialist_ids]
+        pending_or_running = [
+            t for t in all_specialists
+            if t is not None and t.state in (TaskState.PENDING, TaskState.IN_PROGRESS)
+        ]
+
+        if not pending_or_running:
+            return True  # All done
+
+        # Stale IN_PROGRESS tasks → fail them and stop
+        in_progress = [t for t in pending_or_running if t.state == TaskState.IN_PROGRESS]
+        if in_progress:
+            for t in in_progress:
+                _safe_fail(self._graph, t.id)
+                result.failed.append(t.id)
+            return True
+
+        # Only PENDING tasks remain but none are ready → blocked by failed deps
+        for t in pending_or_running:
+            _safe_fail(self._graph, t.id)
+            result.failed.append(t.id)
+        return True
+
     def dispatch(self, dag: CompositionDAG, task_description: str) -> DispatchResult:
         """Execute specialist tasks from *dag* in topological order.
 
@@ -309,7 +338,6 @@ class DAGDispatcher:
         DispatchResult
             Artifacts and completion status for each specialist task.
         """
-        # Load tasks into graph (idempotent — skips already-existing tasks)
         load_dag_into_graph(dag, task_description, self._graph)
 
         result = DispatchResult()
@@ -318,15 +346,9 @@ class DAGDispatcher:
         )
 
         specialist_ids = {t.id for t in dag.specialist_tasks}
-
-        # Safety guard: each iteration processes at least one task, so
-        # len(tasks)*3 is a generous upper bound.  If exceeded something
-        # has gone wrong (e.g. a state machine bug causing a livelock).
         max_iterations = max(len(dag.tasks) * 3, 1)
-        iteration = 0
 
-        # Execute in rounds: pick ready tasks, dispatch up to max_parallel,
-        # mark complete, repeat until done or stuck.
+        iteration = 0
         while iteration < max_iterations:
             iteration += 1
 
@@ -335,53 +357,24 @@ class DAGDispatcher:
                 logger.warning("DAGDispatch timed out after %ss", self._timeout_seconds)
                 break
 
-            ready = self._graph.get_ready_tasks()
-            # Filter to specialist tasks only (skip integrate/validate)
-            ready_specialists = [t for t in ready if t.id in specialist_ids]
+            ready_specialists = [
+                t for t in self._graph.get_ready_tasks() if t.id in specialist_ids
+            ]
 
             if not ready_specialists:
-                # Check if there are still pending/blocked specialist tasks
-                all_specialists_in_graph = [self._graph.get_task(tid) for tid in specialist_ids]
-                pending_or_in_progress = [
-                    t
-                    for t in all_specialists_in_graph
-                    if t is not None and t.state in (TaskState.PENDING, TaskState.IN_PROGRESS)
-                ]
-                if not pending_or_in_progress:
-                    break  # All done
-
-                # Distinguish: tasks still IN_PROGRESS vs truly stuck PENDING
-                in_progress = [
-                    t for t in pending_or_in_progress if t.state == TaskState.IN_PROGRESS
-                ]
-                if in_progress:
-                    # In synchronous mode, stale IN_PROGRESS tasks from a prior
-                    # crash would cause an infinite loop. Fail them instead.
-                    for t in in_progress:
-                        _safe_fail(self._graph, t.id)
-                        result.failed.append(t.id)
+                if self._no_more_work(specialist_ids, result):
                     break
 
-                # Only PENDING tasks remain but none are ready → blocked by failed deps
-                for t in pending_or_in_progress:
-                    _safe_fail(self._graph, t.id)
-                    result.failed.append(t.id)
-                break
-
-            # Dispatch up to max_batch_size tasks per round
-            batch = ready_specialists[: self._max_batch_size]
-
-            if self._concurrent and len(batch) > 1:
-                self._dispatch_parallel(batch, task_description, deadline, result)
             else:
-                self._dispatch_sequential(batch, task_description, deadline, result)
+                batch = ready_specialists[: self._max_batch_size]
+                if self._concurrent and len(batch) > 1:
+                    self._dispatch_parallel(batch, task_description, deadline, result)
+                else:
+                    self._dispatch_sequential(batch, task_description, deadline, result)
 
-            # Fail-fast: stop dispatching after any task failure or cancellation
-            if result.failed or result.cancelled:
-                break
+                if result.failed or result.cancelled:
+                    break
 
-        # If the loop was terminated by the max_iterations guard (not a normal
-        # break), mark the result as timed_out so callers know it didn't finish.
         if iteration >= max_iterations:
             result.hit_iteration_limit = True
             result.timed_out = True
@@ -392,7 +385,6 @@ class DAGDispatcher:
                 len(dag.tasks),
             )
 
-        # Clean up any tasks left in IN_PROGRESS after loop exit
         self._cleanup_stale_tasks(specialist_ids, result)
 
         return result
