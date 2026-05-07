@@ -186,6 +186,10 @@ class SchemaTransformer:
                         )
             elif "properties" in sub:
                 self._merge_properties(sub, merged_props)
+            elif sub:
+                # Inline constraint-only schemas (e.g. {"type": "string"})
+                # are valid JSON Schema but have no fields to merge — skip.
+                pass
 
         return create_model(name, **merged_props)  # type: ignore[call-overload]
 
@@ -223,17 +227,25 @@ class SchemaTransformer:
     # Object model builder
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _model_cache_key(schema: dict[str, Any], name: str) -> str:
+        """Generate a unique cache key combining name with property fingerprint."""
+        props = schema.get("properties", {})
+        prop_names = ",".join(sorted(props.keys())) if isinstance(props, dict) else ""
+        return f"{name}:{prop_names}" if prop_names else name
+
     def _build_object_model(self, schema: dict[str, Any], name: str) -> type[BaseModel]:
         """Build a dynamic Pydantic model from an object schema."""
-        if name in self._model_cache:
-            return self._model_cache[name]
+        cache_key = self._model_cache_key(schema, name)
+        if cache_key in self._model_cache:
+            return self._model_cache[cache_key]
 
         properties = schema.get("properties", {})
         required = set(schema.get("required", []))
 
         # Insert placeholder to break cycles
         placeholder: type[BaseModel] = create_model(name)  # type: ignore[call-overload]
-        self._model_cache[name] = placeholder
+        self._model_cache[cache_key] = placeholder
 
         fields: dict[str, Any] = {}
         for prop_name, prop_def in properties.items():
@@ -253,7 +265,7 @@ class SchemaTransformer:
                     fields[prop_name] = (prop_type, None)
 
         model = create_model(name, **fields)  # type: ignore[call-overload]
-        self._model_cache[name] = model
+        self._model_cache[cache_key] = model
         return model
 
     # ------------------------------------------------------------------

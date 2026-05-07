@@ -387,3 +387,77 @@ class TestFallback:
             }
         )
         assert issubclass(model, BaseModel)
+
+
+class TestSchemaCacheCollision:
+    """Verify _build_object_model doesn't collide on same-name objects."""
+
+    def test_different_objects_same_name_no_collision(self):
+        """Two objects both named 'Properties' with different fields produce distinct models."""
+        t = _make_transformer()
+        model_a = t.resolve(
+            {
+                "type": "object",
+                "properties": {"alpha": {"type": "string"}},
+                "required": ["alpha"],
+            },
+            name="Properties",
+        )
+        model_b = t.resolve(
+            {
+                "type": "object",
+                "properties": {"beta": {"type": "integer"}},
+                "required": ["beta"],
+            },
+            name="Properties",
+        )
+        # model_a should have 'alpha', model_b should have 'beta'
+        assert hasattr(model_a, "model_fields")
+        assert hasattr(model_b, "model_fields")
+        assert "alpha" in model_a.model_fields
+        assert "beta" in model_b.model_fields
+        # They should NOT share fields
+        assert "beta" not in model_a.model_fields
+        assert "alpha" not in model_b.model_fields
+
+    def test_cache_hit_on_identical_schema(self):
+        """Same name + same properties returns the cached model."""
+        t = _make_transformer()
+        schema = {
+            "type": "object",
+            "properties": {"x": {"type": "string"}},
+            "required": ["x"],
+        }
+        first = t.resolve(schema, name="Same")
+        second = t.resolve(schema, name="Same")
+        assert first is second
+
+
+class TestAllOfInlineSchema:
+    """allOf with inline constraint-only schemas."""
+
+    def test_all_of_with_inline_type_constraint(self):
+        """Inline schema with only 'type' (no $ref, no properties) is handled gracefully."""
+        t = _make_transformer()
+        model = t.resolve(
+            {
+                "allOf": [
+                    {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                        "required": ["name"],
+                    },
+                    {"type": "string"},  # constraint-only, no properties
+                ],
+            }
+        )
+        assert issubclass(model, BaseModel)
+        # Should still have the merged properties from the first sub-schema
+        instance = model(name="test")
+        assert instance.name == "test"  # type: ignore[attr-defined]
+
+    def test_all_of_with_only_inline_schemas(self):
+        """allOf with only inline schemas produces empty model (no crash)."""
+        t = _make_transformer()
+        model = t.resolve({"allOf": [{"type": "string"}, {"type": "integer"}]})
+        assert issubclass(model, BaseModel)

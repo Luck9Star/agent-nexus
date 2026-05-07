@@ -456,12 +456,25 @@ class DAGDispatcher:
             for f in futures:
                 f.cancel()
 
-        # Mark cancelled tasks
+        # Mark cancelled tasks — but first drain any futures that completed
+        # successfully before the fail-fast break (as_completed may not have
+        # yielded them yet even though the underlying future is done).
         for _f, ti in futures.items():
-            if ti.id not in result.completed and ti.id not in result.failed:
-                _safe_fail(self._graph, ti.id)
-                result.cancelled.append(ti.id)
-                result.errors[ti.id] = "cancelled (sibling task failed)"
+            if ti.id in result.completed or ti.id in result.failed:
+                continue
+            if _f.done() and not _f.cancelled():
+                try:
+                    artifact, error = _f.result()
+                except Exception:
+                    artifact, error = None, "executor error"
+                if error is None and artifact is not None:
+                    self._graph.complete_task(ti.id)
+                    result.artifacts[ti.id] = artifact
+                    result.completed.append(ti.id)
+                    continue
+            _safe_fail(self._graph, ti.id)
+            result.cancelled.append(ti.id)
+            result.errors[ti.id] = "cancelled (sibling task failed)"
 
     def _dispatch_sequential(
         self,

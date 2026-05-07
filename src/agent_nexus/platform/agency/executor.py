@@ -404,13 +404,13 @@ def _normalize_heading(heading: str) -> str:
 def _fenced_code_line_indices(text: str) -> set[int]:
     """Return the set of 1-based line numbers that fall inside fenced code blocks."""
     code_lines: set[int] = set()
-    inside = False
+    depth = 0
     for lineno, line in enumerate(text.split("\n"), start=1):
         if line.strip().startswith("```"):
-            inside = not inside
+            depth += 1
             code_lines.add(lineno)  # the fence line itself
             continue
-        if inside:
+        if depth % 2 == 1:
             code_lines.add(lineno)
     return code_lines
 

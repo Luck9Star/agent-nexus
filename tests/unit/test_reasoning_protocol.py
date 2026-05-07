@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 from agent_nexus.platform.agency.executor import (
     LLMExecutor,
     _extract_reasoning_tags,
+    _fenced_code_line_indices,
     _strip_reasoning_tags,
 )
 from agent_nexus.platform.agency.registry import ExpertRegistry
@@ -194,3 +195,43 @@ class TestParseSectionsAfterStrip:
         assert sections["summary"] == "This is the real summary"
         assert "Finding 1" in sections["findings"]
         assert "Let me think" not in str(sections)
+
+
+# ---------------------------------------------------------------------------
+# _fenced_code_line_indices edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestFencedCodeLineIndices:
+    """Verify fence detection handles malformed markdown gracefully."""
+
+    def test_well_formed_code_block(self):
+        text = "before\n```\ncode\n```\nafter"
+        code_lines = _fenced_code_line_indices(text)
+        assert 2 in code_lines  # opening fence
+        assert 3 in code_lines  # code line
+        assert 4 in code_lines  # closing fence
+        assert 1 not in code_lines  # before
+        assert 5 not in code_lines  # after
+
+    def test_odd_number_of_fences(self):
+        """Malformed markdown with odd fence count should not mark all remaining lines."""
+        text = "before\n```\ncode\n```\nmore\n```\ntrailing"
+        code_lines = _fenced_code_line_indices(text)
+        # Lines 6-7 should be marked (inside the unmatched third fence)
+        assert 6 in code_lines  # third fence
+        assert 7 in code_lines  # trailing (inside unmatched fence)
+        # But line 5 should NOT be marked (between 2nd and 3rd fences)
+        assert 5 not in code_lines
+
+    def test_no_fences(self):
+        text = "just\ntext\nno code"
+        assert _fenced_code_line_indices(text) == set()
+
+    def test_nested_appearing_fences(self):
+        """Multiple code blocks in sequence."""
+        text = "```\nblock1\n```\nmiddle\n```\nblock2\n```"
+        code_lines = _fenced_code_line_indices(text)
+        assert 2 in code_lines  # block1
+        assert 6 in code_lines  # block2
+        assert 4 not in code_lines  # middle

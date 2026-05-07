@@ -992,3 +992,62 @@ class TestDAGDispatcherCleanup:
         dispatcher.close()
         dispatcher.close()  # second close is a no-op
         graph.close()
+
+
+class TestParallelRaceCondition:
+    """Verify completed tasks are not incorrectly marked as cancelled during fail-fast."""
+
+    def test_fast_successful_task_not_cancelled_on_sibling_failure(self) -> None:
+        """When one task fails fast, already-completed siblings should still appear in completed."""
+        import threading
+
+        barrier = threading.Barrier(2)
+
+        def _controlled_executor(profile_id: str, task: str) -> Artifact:
+            if profile_id == "agency.slow":
+                barrier.wait(timeout=5)
+                raise RuntimeError("deliberate failure")
+            # Fast task completes immediately
+            return _make_artifact(profile_id)
+
+        dag = _build_dag(
+            [
+                DAGTask(id="fast_ok", agent="agency.fast", output="result"),
+                DAGTask(id="slow_fail", agent="agency.slow", output="result"),
+            ],
+        )
+        graph = TaskGraph(":memory:")
+        dispatcher = DAGDispatcher(graph, _controlled_executor, concurrent=True)
+
+        result = dispatcher.dispatch(dag, "test task")
+        # fast_ok should be in completed, not in cancelled
+        assert "fast_ok" in result.completed, (
+            f"fast_ok should be completed, got completed={result.completed}, "
+            f"cancelled={result.cancelled}"
+        )
+        assert "fast_ok" not in result.cancelled
+        dispatcher.close()
+        graph.close()
+
+    def test_all_cancelled_when_none_succeed_before_failure(self) -> None:
+        """When no task finishes before the failure, all non-failed are cancelled."""
+
+        def _fail_immediately(profile_id: str, task: str) -> Artifact:
+            raise RuntimeError("immediate failure")
+
+        dag = _build_dag(
+            [
+                DAGTask(id="t1", agent="agency.a", output="r"),
+                DAGTask(id="t2", agent="agency.b", output="r"),
+            ],
+        )
+        graph = TaskGraph(":memory:")
+        dispatcher = DAGDispatcher(graph, _fail_immediately, concurrent=True)
+
+        result = dispatcher.dispatch(dag, "test task")
+        # At least one should be failed, the rest cancelled
+        assert len(result.failed) >= 1
+        total = len(result.completed) + len(result.failed) + len(result.cancelled)
+        assert total == 2
+        dispatcher.close()
+        graph.close()
