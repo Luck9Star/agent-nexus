@@ -35,6 +35,51 @@ _OFFICIAL_SOURCE = SourceEntry(
 )
 
 
+def _parse_source_entry(item: dict[str, Any]) -> SourceEntry | None:
+    """Parse a single source entry dict, returning None on failure."""
+    try:
+        raw_name = item.get("name")
+        if not raw_name:
+            raise ValueError("Source entry missing required 'name' field")
+        return SourceEntry(
+            name=raw_name,
+            type=item.get("type", "git"),
+            url=item.get("url", ""),
+            branch=item.get("branch", "main"),
+        )
+    except Exception as exc:
+        logger.warning("Skipping invalid source entry %s: %s", item, exc)
+        return None
+
+
+def _parse_index_entry(item: dict[str, Any]) -> IndexEntry | None:
+    """Parse a single index entry dict, returning None on failure."""
+    from agent_nexus.models.agent import AgentType
+
+    try:
+        raw_name = item.get("name")
+        raw_version = item.get("version")
+        raw_type = item.get("type")
+        if not raw_name:
+            raise ValueError("Index entry missing required 'name' field")
+        if not raw_version:
+            raise ValueError("Index entry missing required 'version' field")
+        if not raw_type:
+            raise ValueError("Index entry missing required 'type' field")
+        return IndexEntry(
+            name=raw_name,
+            version=raw_version,
+            type=AgentType(raw_type),
+            description=item.get("description", ""),
+            tags=item.get("tags", []),
+            dependencies=item.get("dependencies", []),
+            path=item.get("path", ""),
+        )
+    except Exception as exc:
+        logger.warning("Skipping invalid index entry %s: %s", item, exc)
+        return None
+
+
 class SourceManager:
     """Manage package sources and resolve agent locations.
 
@@ -279,19 +324,9 @@ class SourceManager:
             if not isinstance(item, dict):
                 logger.warning("Skipping non-mapping source entry: %r", item)
                 continue
-            try:
-                raw_name = item.get("name")
-                if not raw_name:
-                    raise ValueError("Source entry missing required 'name' field")
-                entry = SourceEntry(
-                    name=raw_name,
-                    type=item.get("type", "git"),
-                    url=item.get("url", ""),
-                    branch=item.get("branch", "main"),
-                )
+            entry = _parse_source_entry(item)
+            if entry is not None:
                 entries.append(entry)
-            except Exception as exc:
-                logger.warning("Skipping invalid source entry %s: %s", item, exc)
 
         if sources_list and not entries:
             logger.warning("All source entries invalid, using defaults")
@@ -375,36 +410,14 @@ class SourceManager:
             logger.warning("index.yaml 'agents' key is not a list")
             return None
 
-        from agent_nexus.models.agent import AgentType
-
         entries: list[IndexEntry] = []
         for item in raw["agents"]:
             if not isinstance(item, dict):
                 logger.warning("Skipping non-mapping index entry: %r", item)
                 continue
-            try:
-                raw_name = item.get("name")
-                raw_version = item.get("version")
-                raw_type = item.get("type")
-                if not raw_name:
-                    raise ValueError("Index entry missing required 'name' field")
-                if not raw_version:
-                    raise ValueError("Index entry missing required 'version' field")
-                if not raw_type:
-                    raise ValueError("Index entry missing required 'type' field")
-                entries.append(
-                    IndexEntry(
-                        name=raw_name,
-                        version=raw_version,
-                        type=AgentType(raw_type),
-                        description=item.get("description", ""),
-                        tags=item.get("tags", []),
-                        dependencies=item.get("dependencies", []),
-                        path=item.get("path", ""),
-                    )
-                )
-            except Exception as exc:
-                logger.warning("Skipping invalid index entry %s: %s", item, exc)
+            entry = _parse_index_entry(item)
+            if entry is not None:
+                entries.append(entry)
 
         return entries
 

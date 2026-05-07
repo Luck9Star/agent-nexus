@@ -151,6 +151,30 @@ def _make_risk(pattern: str, severity: str, line: int) -> dict[str, Any]:
     return {"pattern": pattern, "severity": severity, "line": line}
 
 
+def _match_patterns(
+    text: str,
+    patterns: list[tuple[re.Pattern, str]],
+    severity: str,
+    line_num: int,
+) -> list[dict[str, Any]]:
+    """Match *text* against a list of (regex, description) tuples."""
+    return [
+        _make_risk(desc, severity, line_num) for pat, desc in patterns if pat.search(text)
+    ]
+
+
+def _match_cn_high(line: str, line_num: int) -> list[dict[str, Any]]:
+    """Match CN high-severity patterns with instruction prefix or line-start check."""
+    risks: list[dict[str, Any]] = []
+    for pattern, description in _CN_HIGH_SEVERITY_PATTERNS:
+        match = pattern.search(line)
+        if match and (
+            any(p in line for p in _CN_INSTRUCTION_PREFIXES) or match.start() < 3
+        ):
+            risks.append(_make_risk(description, "high", line_num))
+    return risks
+
+
 def _scan_line_risks(
     line: str,
     line_lower: str,
@@ -158,28 +182,10 @@ def _scan_line_risks(
 ) -> list[dict[str, Any]]:
     """Scan a single line against all pattern categories."""
     risks: list[dict[str, Any]] = []
-
-    for pattern, description in _HIGH_SEVERITY_PATTERNS:
-        if pattern.search(line_lower):
-            risks.append(_make_risk(description, "high", orig_line_num))
-
-    for pattern, description in _MEDIUM_SEVERITY_PATTERNS:
-        if pattern.search(line_lower):
-            risks.append(_make_risk(description, "medium", orig_line_num))
-
-    # CN high: flagged when line has an instruction prefix OR match is at line start
-    for pattern, description in _CN_HIGH_SEVERITY_PATTERNS:
-        match = pattern.search(line)
-        if match:
-            has_prefix = any(p in line for p in _CN_INSTRUCTION_PREFIXES)
-            at_line_start = match.start() < 3
-            if has_prefix or at_line_start:
-                risks.append(_make_risk(description, "high", orig_line_num))
-
-    for pattern, description in _CN_MEDIUM_SEVERITY_PATTERNS:
-        if pattern.search(line):
-            risks.append(_make_risk(description, "medium", orig_line_num))
-
+    risks.extend(_match_patterns(line_lower, _HIGH_SEVERITY_PATTERNS, "high", orig_line_num))
+    risks.extend(_match_patterns(line_lower, _MEDIUM_SEVERITY_PATTERNS, "medium", orig_line_num))
+    risks.extend(_match_cn_high(line, orig_line_num))
+    risks.extend(_match_patterns(line, _CN_MEDIUM_SEVERITY_PATTERNS, "medium", orig_line_num))
     return risks
 
 

@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 from agent_nexus.models.distribution import SourceEntry
-from agent_nexus.platform.local.sources import SourceManager
+from agent_nexus.platform.local.sources import SourceManager, _parse_index_entry, _parse_source_entry
 
 
 def _make_source(name: str = "test-src", url: str = "https://example.com/repo.git") -> SourceEntry:
@@ -370,3 +370,61 @@ class TestSearchAgents:
         results = sm.search_agents("found")
         assert len(results) == 1
         assert results[0][0].name == "test"
+
+
+# ---------------------------------------------------------------------------
+# _parse_source_entry helper
+# ---------------------------------------------------------------------------
+
+
+class TestParseSourceEntry:
+    def test_valid_entry(self) -> None:
+        entry = _parse_source_entry({"name": "my-src", "type": "git", "url": "http://x.git", "branch": "dev"})
+        assert entry is not None
+        assert entry.name == "my-src"
+        assert entry.type == "git"
+        assert entry.url == "http://x.git"
+        assert entry.branch == "dev"
+
+    def test_defaults(self) -> None:
+        entry = _parse_source_entry({"name": "minimal", "url": "https://x.git"})
+        assert entry is not None
+        assert entry.type == "git"
+        assert entry.branch == "main"
+
+    def test_missing_name_returns_none(self) -> None:
+        assert _parse_source_entry({"url": "http://x.git"}) is None
+
+    def test_non_dict_raises_caught(self) -> None:
+        # The caller filters non-dict items, but if somehow passed...
+        assert _parse_source_entry(None) is None  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# _parse_index_entry helper
+# ---------------------------------------------------------------------------
+
+
+class TestParseIndexEntry:
+    def test_valid_entry(self) -> None:
+        entry = _parse_index_entry({
+            "name": "my-agent", "version": "2.0", "type": "atomic",
+            "description": "desc", "tags": ["a"], "path": "/agents/a",
+        })
+        assert entry is not None
+        assert entry.name == "my-agent"
+        assert entry.version == "2.0"
+        assert entry.description == "desc"
+        assert entry.tags == ["a"]
+
+    def test_missing_name_returns_none(self) -> None:
+        assert _parse_index_entry({"version": "1.0", "type": "atomic"}) is None
+
+    def test_missing_version_returns_none(self) -> None:
+        assert _parse_index_entry({"name": "x", "type": "atomic"}) is None
+
+    def test_missing_type_returns_none(self) -> None:
+        assert _parse_index_entry({"name": "x", "version": "1.0"}) is None
+
+    def test_invalid_type_returns_none(self) -> None:
+        assert _parse_index_entry({"name": "x", "version": "1.0", "type": "invalid"}) is None

@@ -871,3 +871,35 @@ class TestHTTPHookSSRF:
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.results[0].passed is False
         assert "unsupported scheme" in result.results[0].error.lower()
+
+
+# ---------------------------------------------------------------------------
+# 10. from_yaml preserves allowed_commands on parse failure (security fix)
+# ---------------------------------------------------------------------------
+
+
+class TestFromYamlAllowedCommandsPreserved:
+    """Security regression: from_yaml must not silently drop allowed_commands
+    when YAML parsing fails. Previously, the error path returned
+    cls(hooks=[]) without forwarding allowed_commands."""
+
+    def test_malformed_yaml_preserves_allowed_commands(self, tmp_path: Path) -> None:
+        import yaml
+
+        yaml_file = tmp_path / "hooks.yaml"
+        yaml_file.write_text("pre_execution: []")
+
+        with patch.object(yaml, "safe_load", side_effect=RuntimeError("bad yaml")):
+            executor = HookExecutor.from_yaml(
+                yaml_file, allowed_commands=["git", "npm"]
+            )
+        assert executor._hooks == []
+        assert "git" in executor._allowed_commands
+        assert "npm" in executor._allowed_commands
+
+    def test_nonexistent_file_preserves_allowed_commands(self, tmp_path: Path) -> None:
+        executor = HookExecutor.from_yaml(
+            tmp_path / "nonexistent.yaml", allowed_commands=["git"]
+        )
+        assert executor._hooks == []
+        assert "git" in executor._allowed_commands

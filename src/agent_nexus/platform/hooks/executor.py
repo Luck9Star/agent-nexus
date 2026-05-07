@@ -124,7 +124,7 @@ class HookExecutor:
             raw: dict[str, Any] = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
         except Exception:
             logger.warning("Failed to load hooks from %s", yaml_path, exc_info=True)
-            return cls(hooks=[])
+            return cls(hooks=[], allowed_commands=allowed_commands or [])
 
         hooks: list[HookDefinition] = []
         for event_name, hook_list in raw.items():
