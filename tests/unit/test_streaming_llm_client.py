@@ -1,39 +1,46 @@
-"""Tests for LLMClient SDK-based streaming and non-streaming calls."""
+"""Tests for LLMClient using LiteLLM unified calling layer.
+
+Replaces the old SDK-specific tests (OpenAI/Anthropic streaming) with
+LiteLLM-based tests that verify the unified path works correctly.
+"""
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
-
-from agent_nexus.models.config import (
-    ModelConfig,
-    PlatformConfig,
-    ProviderApiType,
-    ProviderConfig,
-    RuntimeConfig,
-)
 
 
 def _make_llm_client(
-    provider_api=ProviderApiType.OPENAI_COMPATIBLE,
-    streaming=True,
+    provider_api="openai-compatible",
+    provider_name="openai",
+    model_name="test-model",
     provider_base_url="https://api.test.com/v1",
 ):
     """Create an LLMClient with mocked config for testing."""
+    from agent_nexus.models.config import (
+        ModelConfig,
+        PlatformConfig,
+        ProviderApiType,
+        ProviderConfig,
+        RuntimeConfig,
+    )
+
+    api_type = ProviderApiType.OPENAI_COMPATIBLE
+    if provider_api == "anthropic-messages":
+        api_type = ProviderApiType.ANTHROPIC_MESSAGES
+
     with (
-        patch("agent_nexus.platform.config.loader.ConfigLoader") as MockLoader,  # noqa: N806
+        patch("agent_nexus.platform.config.loader.ConfigLoader") as MockLoader,
         patch("agent_nexus.platform.config.model_db.ModelDBClient"),
     ):
         platform_cfg = PlatformConfig(
             runtime=RuntimeConfig(),
             models=ModelConfig(
-                default="openai:test-model",
+                default=f"{provider_name}:{model_name}",
                 providers={
-                    "openai": ProviderConfig(
+                    provider_name: ProviderConfig(
                         base_url=provider_base_url,
                         api_key_env="TEST_API_KEY",
-                        api=provider_api,
-                        streaming=streaming,
+                        api=api_type,
                     ),
                 },
             ),
@@ -46,254 +53,88 @@ def _make_llm_client(
 
         os.environ["TEST_API_KEY"] = "test-key-123"
         try:
-
             from agent_nexus.platform.agency.llm_client import LLMClient
 
-            client = LLMClient(model_string="openai:test-model")
+            client = LLMClient(model_string=f"{provider_name}:{model_name}")
             return client
         finally:
             os.environ.pop("TEST_API_KEY", None)
 
 
-class TestCallOpenaiSDK:
-    """Test OpenAI SDK path (streaming and non-streaming)."""
-
-    def test_non_streaming_uses_sdk(self):
-        """Non-streaming call uses OpenAI SDK .create() without stream=True."""
-        client = _make_llm_client(streaming=False)
-
-        mock_response = MagicMock()
-        mock_response.model = "test-model"
-        mock_choice = MagicMock()
-        mock_choice.message.content = "Hello from test"
-        mock_response.choices = [mock_choice]
-
-        with patch.object(client, "_get_openai_sdk") as mock_get_sdk:
-            mock_sdk = MagicMock()
-            mock_sdk.chat.completions.create.return_value = mock_response
-            mock_get_sdk.return_value = mock_sdk
-
-            result = client.call("You are helpful", "Say hi")
-
-            assert result.text == "Hello from test"
-            mock_sdk.chat.completions.create.assert_called_once()
-            call_kwargs = mock_sdk.chat.completions.create.call_args
-            assert (
-                call_kwargs.kwargs.get("stream") is None
-                or call_kwargs.kwargs.get("stream") is False
-            )
-
-    def test_streaming_uses_sdk_with_stream_true(self):
-        """Streaming call uses OpenAI SDK .create(stream=True)."""
-        from contextlib import contextmanager
-
-        client = _make_llm_client(streaming=True)
-
-        # Build mock stream chunks
-        chunks = []
-        for text in ["Hello", " from", " stream"]:
-            chunk = MagicMock()
-            chunk.model = "test-model"
-            chunk.choices = [MagicMock()]
-            chunk.choices[0].delta.content = text
-            chunks.append(chunk)
-
-        @contextmanager
-        def _mock_stream(*args, **kwargs):
-            yield iter(chunks)
-
-        with patch.object(client, "_get_openai_sdk") as mock_get_sdk:
-            mock_sdk = MagicMock()
-            mock_sdk.chat.completions.create.side_effect = _mock_stream
-            mock_get_sdk.return_value = mock_sdk
-
-            result = client.call("You are helpful", "Say hi")
-
-            assert result.text == "Hello from stream"
-            call_kwargs = mock_sdk.chat.completions.create.call_args
-            assert call_kwargs.kwargs.get("stream") is True
+def _mock_litellm_response(text="Hello from test", model="test-model"):
+    mock_resp = MagicMock()
+    mock_resp.model = model
+    mock_choice = MagicMock()
+    mock_choice.message.content = text
+    mock_resp.choices = [mock_choice]
+    return mock_resp
 
 
-class TestCallAnthropicSDK:
-    """Test Anthropic SDK path (streaming and non-streaming)."""
+class TestOpenAIProviderViaLiteLLM:
+    """Test OpenAI provider uses litellm.completion()."""
 
-    def _make_anthropic_client(self, streaming=True):
-        with (
-            patch("agent_nexus.platform.config.loader.ConfigLoader") as MockLoader,  # noqa: N806
-            patch("agent_nexus.platform.config.model_db.ModelDBClient"),
-        ):
-            platform_cfg = PlatformConfig(
-                runtime=RuntimeConfig(),
-                models=ModelConfig(
-                    default="anthropic:test-model",
-                    providers={
-                        "anthropic": ProviderConfig(
-                            base_url="https://api.anthropic.com",
-                            api_key_env="TEST_API_KEY",
-                            api=ProviderApiType.ANTHROPIC_MESSAGES,
-                            streaming=streaming,
-                        ),
-                    },
-                ),
-            )
-            mock_loader = MagicMock()
-            mock_loader.load_config.return_value = platform_cfg
-            MockLoader.return_value = mock_loader
+    @patch("agent_nexus.platform.agency.llm_client.litellm")
+    def test_call_uses_litellm_completion(self, mock_litellm):
+        mock_litellm.completion.return_value = _mock_litellm_response()
 
-            import os
+        client = _make_llm_client(provider_name="openai", model_name="gpt-4o")
+        result = client.call("You are helpful", "Say hi")
 
-            os.environ["TEST_API_KEY"] = "test-key-123"
-            try:
+        assert result.text == "Hello from test"
+        mock_litellm.completion.assert_called_once()
 
-                from agent_nexus.platform.agency.llm_client import LLMClient
+        call_kwargs = mock_litellm.completion.call_args.kwargs
+        assert call_kwargs["model"] == "openai/gpt-4o"
+        assert call_kwargs["stream"] is False
 
-                return LLMClient(model_string="anthropic:test-model")
-            finally:
-                os.environ.pop("TEST_API_KEY", None)
+    @patch("agent_nexus.platform.agency.llm_client.litellm")
+    def test_response_format_json(self, mock_litellm):
+        mock_litellm.completion.return_value = _mock_litellm_response(text='{"result": "ok"}')
 
-    def test_non_streaming_uses_sdk(self):
-        client = self._make_anthropic_client(streaming=False)
+        client = _make_llm_client(provider_name="openai", model_name="gpt-4o")
+        result = client.call("sys", "usr", response_format="json")
 
-        mock_response = MagicMock()
-        mock_response.model = "test-model"
-        mock_block = MagicMock()
-        mock_block.type = "text"
-        mock_block.text = "Hello from Claude"
-        mock_response.content = [mock_block]
+        call_kwargs = mock_litellm.completion.call_args.kwargs
+        assert call_kwargs["response_format"] == {"type": "json_object"}
+        assert result.text == '{"result": "ok"}'
 
-        with patch.object(client, "_get_anthropic_sdk") as mock_get_sdk:
-            mock_sdk = MagicMock()
-            mock_sdk.messages.create.return_value = mock_response
-            mock_get_sdk.return_value = mock_sdk
 
-            result = client.call("You are helpful", "Say hi")
+class TestAnthropicProviderViaLiteLLM:
+    """Test Anthropic provider uses litellm.completion()."""
 
-            assert result.text == "Hello from Claude"
-            mock_sdk.messages.create.assert_called_once()
-            call_kwargs = mock_sdk.messages.create.call_args
-            assert (
-                call_kwargs.kwargs.get("stream") is None
-                or call_kwargs.kwargs.get("stream") is False
-            )
+    @patch("agent_nexus.platform.agency.llm_client.litellm")
+    def test_call_uses_litellm_completion(self, mock_litellm):
+        mock_litellm.completion.return_value = _mock_litellm_response(
+            text="Hello from Claude", model="claude-sonnet-4-20250514"
+        )
 
-    def test_streaming_uses_sdk_with_stream_true(self):
-        client = self._make_anthropic_client(streaming=True)
+        client = _make_llm_client(
+            provider_api="anthropic-messages",
+            provider_name="anthropic",
+            model_name="claude-sonnet-4-20250514",
+        )
+        result = client.call("You are helpful", "Say hi")
 
-        # Anthropic stream events
-        events = []
-        # message_start
-        start_event = MagicMock()
-        start_event.type = "message_start"
-        start_event.message = MagicMock()
-        start_event.message.model = "test-model"
-        events.append(start_event)
-        # content_block_delta
-        for text in ["Hello", " from", " Claude"]:
-            delta_event = MagicMock()
-            delta_event.type = "content_block_delta"
-            delta_event.delta = MagicMock()
-            delta_event.delta.text = text
-            events.append(delta_event)
-        # message_stop
-        stop_event = MagicMock()
-        stop_event.type = "message_stop"
-        events.append(stop_event)
+        assert result.text == "Hello from Claude"
+        call_kwargs = mock_litellm.completion.call_args.kwargs
+        assert call_kwargs["model"] == "anthropic/claude-sonnet-4-20250514"
 
-        @contextmanager
-        def _mock_anthropic_stream(*args, **kwargs):
-            yield iter(events)
 
-        with patch.object(client, "_get_anthropic_sdk") as mock_get_sdk:
-            mock_sdk = MagicMock()
-            mock_sdk.messages.create.side_effect = _mock_anthropic_stream
-            mock_get_sdk.return_value = mock_sdk
+class TestDeepSeekProviderViaLiteLLM:
+    """Test DeepSeek provider uses litellm.completion()."""
 
-            result = client.call("You are helpful", "Say hi")
+    @patch("agent_nexus.platform.agency.llm_client.litellm")
+    def test_call_uses_litellm_completion(self, mock_litellm):
+        mock_litellm.completion.return_value = _mock_litellm_response(
+            text="Hello from DeepSeek", model="deepseek-chat"
+        )
 
-            assert result.text == "Hello from Claude"
-            call_kwargs = mock_sdk.messages.create.call_args
-            assert call_kwargs.kwargs.get("stream") is True
+        client = _make_llm_client(
+            provider_name="deepseek",
+            model_name="deepseek-chat",
+        )
+        result = client.call("You are helpful", "Say hi")
 
-    def test_non_streaming_falls_back_to_stream_when_sdk_requires(self):
-        """When Anthropic SDK rejects non-streaming (long timeout), falls back to streaming internally."""
-        client = self._make_anthropic_client(streaming=False)
-
-        # Anthropic stream events for the fallback path
-        events = []
-        start_event = MagicMock()
-        start_event.type = "message_start"
-        start_event.message = MagicMock()
-        start_event.message.model = "test-model"
-        events.append(start_event)
-        for text in ["Fallback", " stream"]:
-            delta_event = MagicMock()
-            delta_event.type = "content_block_delta"
-            delta_event.delta = MagicMock()
-            delta_event.delta.text = text
-            events.append(delta_event)
-        stop_event = MagicMock()
-        stop_event.type = "message_stop"
-        events.append(stop_event)
-
-        @contextmanager
-        def _mock_stream(*args, **kwargs):
-            yield iter(events)
-
-        call_count = 0
-
-        def _create_side_effect(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            if kwargs.get("stream") is False or kwargs.get("stream") is None:
-                raise ValueError("Streaming is required for operations that may take longer than 10 minutes.")
-            return _mock_stream(**kwargs)
-
-        with patch.object(client, "_get_anthropic_sdk") as mock_get_sdk:
-            mock_sdk = MagicMock()
-            mock_sdk.messages.create.side_effect = _create_side_effect
-            mock_get_sdk.return_value = mock_sdk
-
-            result = client.call("You are helpful", "Say hi", timeout=900)
-
-            assert result.text == "Fallback stream"
-            assert call_count == 2  # First attempt (non-stream) + second attempt (stream)
-
-    def test_streaming_skips_thinking_delta(self):
-        """ThinkingDelta events (no .text attr) are silently skipped."""
-        client = self._make_anthropic_client(streaming=True)
-
-        events = []
-        start_event = MagicMock()
-        start_event.type = "message_start"
-        start_event.message = MagicMock()
-        start_event.message.model = "test-model"
-        events.append(start_event)
-        # ThinkingDelta — has .thinking but no .text
-        thinking_event = MagicMock()
-        thinking_event.type = "content_block_delta"
-        thinking_event.delta = MagicMock(spec=[])
-        thinking_event.delta.thinking = "internal reasoning"
-        events.append(thinking_event)
-        # Normal TextDelta
-        for text in ["Real", " output"]:
-            delta_event = MagicMock()
-            delta_event.type = "content_block_delta"
-            delta_event.delta = MagicMock()
-            delta_event.delta.text = text
-            events.append(delta_event)
-        stop_event = MagicMock()
-        stop_event.type = "message_stop"
-        events.append(stop_event)
-
-        @contextmanager
-        def _mock_anthropic_stream(*args, **kwargs):
-            yield iter(events)
-
-        with patch.object(client, "_get_anthropic_sdk") as mock_get_sdk:
-            mock_sdk = MagicMock()
-            mock_sdk.messages.create.side_effect = _mock_anthropic_stream
-            mock_get_sdk.return_value = mock_sdk
-
-            result = client.call("You are helpful", "Say hi")
-
-            assert result.text == "Real output"
+        assert result.text == "Hello from DeepSeek"
+        call_kwargs = mock_litellm.completion.call_args.kwargs
+        assert call_kwargs["model"] == "deepseek/deepseek-chat"

@@ -585,6 +585,10 @@ def run_composition(
     llm_integrator = None
     llm_qa_gate = None
     shared_registry = None
+    planner_client = None
+    integrator_client = None
+    qa_client = None
+    shared_client = None
 
     if use_llm:
         try:
@@ -597,24 +601,18 @@ def run_composition(
 
             config_path = Path(config_dir) if config_dir else None
             shared_registry = ModelCapabilityRegistry()
-            planner_client = LLMClient(
+            # One shared client for all pipeline stages — SDK connection
+            # pools (openai.OpenAI / anthropic.Anthropic) are created once
+            # and reused, instead of 3 independent pools per stage.
+            shared_client = LLMClient(
                 model_string=model,
                 stage="planning",
                 config_dir=config_path,
                 capability_registry=shared_registry,
             )
-            integrator_client = LLMClient(
-                model_string=model,
-                stage="integration",
-                config_dir=config_path,
-                capability_registry=shared_registry,
-            )
-            qa_client = LLMClient(
-                model_string=model,
-                stage="qa",
-                config_dir=config_path,
-                capability_registry=shared_registry,
-            )
+            planner_client = shared_client
+            integrator_client = shared_client
+            qa_client = shared_client
             llm_planner = LLMPlanner(
                 registry=registry,
                 client=planner_client,
@@ -644,6 +642,7 @@ def run_composition(
             default_temperature=temperature,
             capability_registry=shared_registry if use_llm else None,
             timeout=effective_call_timeout,
+            client=shared_client,
         )
         click.echo(f"Using LLM executor (model: {executor.model_name})")
     except Exception as exc:
@@ -676,6 +675,8 @@ def run_composition(
         finally:
             if isinstance(executor, LLMExecutor):
                 executor.close()
+            if shared_client is not None:
+                shared_client.close()
 
     # Output results — consume pipeline-detected output intent
     _output_target = composer_result.output_target

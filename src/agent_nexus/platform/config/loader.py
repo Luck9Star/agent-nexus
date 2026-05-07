@@ -23,6 +23,10 @@ from agent_nexus.models.config import (
     RuntimeConfig,
 )
 from agent_nexus.models.distribution import SourceEntry
+from agent_nexus.models.external_mcp import (
+    ExternalServerConfig,
+    TransportType,
+)
 
 from .config_templates import (
     load_backend_configs_from_cli_backends,
@@ -194,6 +198,42 @@ class ConfigLoader:
 
         return backends
 
+    def load_external_servers(self) -> list[ExternalServerConfig]:
+        """Load ``[[mcp.external_servers]]`` entries from config.toml.
+
+        Each entry is parsed into an :class:`ExternalServerConfig`.
+        Entries with ``enabled = false`` are skipped.  Malformed entries
+        are logged and skipped.
+
+        Returns:
+            List of enabled external server configurations.
+        """
+        raw = self._load_raw()
+        mcp_section = raw.get("mcp", {})
+        if not isinstance(mcp_section, dict):
+            logger.warning("config.toml [mcp] is not a mapping, skipping external servers")
+            return []
+
+        servers_list = mcp_section.get("external_servers", [])
+        if not isinstance(servers_list, list):
+            logger.warning("config.toml [mcp].external_servers is not a list, skipping")
+            return []
+
+        configs: list[ExternalServerConfig] = []
+        for item in servers_list:
+            if not isinstance(item, dict):
+                logger.warning("Skipping non-mapping external server entry")
+                continue
+            try:
+                config = self._parse_external_server(item)
+                if config is not None:
+                    configs.append(config)
+            except Exception as exc:
+                name = item.get("name", "<unknown>")
+                logger.warning("Skipping invalid external server '%s': %s", name, exc)
+
+        return configs
+
     def load_cli_routing(self) -> Any:
         """Load [cli_routing] section from config.toml.
 
@@ -308,6 +348,58 @@ class ConfigLoader:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_external_server(item: dict[str, Any]) -> ExternalServerConfig | None:
+        """Parse a single ``[[mcp.external_servers]]`` entry.
+
+        Returns None if the entry is disabled or has a missing name.
+        """
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            logger.warning("External server entry missing 'name', skipping")
+            return None
+
+        enabled = item.get("enabled", True)
+        if isinstance(enabled, str):
+            enabled = enabled.lower() in ("true", "1", "yes")
+        if not enabled:
+            logger.debug("External server '%s' is disabled, skipping", name)
+            return None
+
+        transport_str = item.get("transport", "stdio")
+        try:
+            transport = TransportType(transport_str)
+        except ValueError:
+            valid = [t.value for t in TransportType]
+            logger.warning(
+                "Invalid transport '%s' for external server '%s'. Valid: %s. "
+                "Defaulting to 'stdio'.",
+                transport_str,
+                name,
+                valid,
+            )
+            transport = TransportType.STDIO
+
+        args = item.get("args", [])
+        if not isinstance(args, list):
+            logger.warning("External server '%s' has non-list 'args', using empty list", name)
+            args = []
+
+        headers = item.get("headers", {})
+        if not isinstance(headers, dict):
+            logger.warning("External server '%s' has non-dict 'headers', using empty dict", name)
+            headers = {}
+
+        return ExternalServerConfig(
+            name=name,
+            transport=transport,
+            command=item.get("command", ""),
+            args=args,
+            url=item.get("url", ""),
+            headers=headers,
+            enabled=bool(enabled),
+        )
 
     @staticmethod
     def _parse_sources_from_raw(raw: dict[str, Any]) -> list[SourceEntry]:

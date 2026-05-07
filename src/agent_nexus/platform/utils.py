@@ -89,7 +89,13 @@ def make_error_result(error: str, error_type: str) -> dict[str, Any]:
     Used by McpToolAdapter, PlatformRouter, and any other component
     that needs to return a uniform error payload.
     """
-    return {"output": "", "success": False, "error": error, "error_type": error_type}
+    return {
+        "output": "",
+        "structured": None,
+        "success": False,
+        "error": error,
+        "error_type": error_type,
+    }
 
 
 def cache_path_for_url(base_dir: Path, url: str) -> Path:

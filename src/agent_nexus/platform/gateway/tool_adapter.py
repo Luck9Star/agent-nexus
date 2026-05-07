@@ -141,8 +141,16 @@ class McpToolAdapter:
         if response.type == AgentToPlatformType.ERROR:
             return _make_error_result(response.error or "Agent returned an error", "AgentError")
 
+        content = response.content or ""
+        structured = None
+        try:
+            structured = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
         return {
-            "output": response.content or "",
+            "output": content,
+            "structured": structured,
             "success": response.is_success,
         }
 

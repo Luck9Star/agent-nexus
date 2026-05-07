@@ -9,6 +9,7 @@ Validates that:
 - sqlite_connection provides proper lifecycle management
 - resolve_composition_path follows the documented resolution order
 """
+
 from __future__ import annotations
 
 import os
@@ -107,6 +108,7 @@ class TestMakeErrorResult:
             "success": False,
             "error": "something failed",
             "error_type": "RuntimeError",
+            "structured": None,
         }
 
     def test_empty_error_message(self):

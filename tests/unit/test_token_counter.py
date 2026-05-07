@@ -30,7 +30,8 @@ class TestTokenCounter:
     def test_fallback_estimate_len_div_4(self):
         """Without tiktoken, count uses len/4 heuristic."""
         tc = TokenCounter()
-        # Force fallback by pretending tiktoken unavailable
+        # Force fallback by pretending both litellm and tiktoken unavailable
+        tc._litellm_available = False
         tc._tiktoken_available = False
         text = "a" * 100  # 100 chars
         assert tc.count(text) == 25  # 100 // 4
@@ -38,8 +39,9 @@ class TestTokenCounter:
     def test_fallback_minimum_1(self):
         """Fallback returns at least 1 token for non-empty text."""
         tc = TokenCounter()
+        tc._litellm_available = False
         tc._tiktoken_available = False
-        # 3 chars → 3//4 = 0 → max(1, 0) = 1
+        # 3 chars -> 3//4 = 0 -> max(1, 0) = 1
         assert tc.count("abc") == 1
 
 
@@ -132,15 +134,17 @@ class TestStructuredPrompt:
         sp.add("A", "x" * 40, priority=1)
         sp.add("B", "y" * 40, priority=5)
         tc = TokenCounter()
+        tc._litellm_available = False  # Force tiktoken or len/4
         tc._tiktoken_available = False  # Force len/4
         total = sp.total_tokens(tc)
-        # Each section: title (1 char) + "\n" + 40 chars = 42 → 42//4 = 10
+        # Each section: title (1 char) + "\n" + 40 chars = 42 -> 42//4 = 10
         assert total == 20
 
     def test_trim_to_removes_lowest_priority_first(self):
         """trim_to removes sections with highest priority number first."""
         tc = TokenCounter()
-        tc._tiktoken_available = False  # Force len/4 for deterministic math
+        tc._litellm_available = False  # Force len/4 for deterministic math
+        tc._tiktoken_available = False
 
         sp = StructuredPrompt()
         # Each section: title + "\n" + 100 chars → ~26 tokens with fallback
@@ -148,7 +152,7 @@ class TestStructuredPrompt:
         sp.add("Medium", "y" * 100, priority=5)
         sp.add("Low", "z" * 100, priority=9)
 
-        total = sp.total_tokens(tc)
+        sp.total_tokens(tc)
         # Trim to keep only ~52 tokens (2 sections worth)
         sp.trim_to(52, tc)
 
@@ -166,6 +170,7 @@ class TestStructuredPrompt:
         sp.add("Extra", "y" * 200, priority=9)  # 201 chars → 50 tokens
 
         tc = TokenCounter()
+        tc._litellm_available = False
         tc._tiktoken_available = False
 
         # Trim to 0 — should remove Extra, keep Essential
@@ -183,6 +188,7 @@ class TestStructuredPrompt:
         sp.add("Third", "c" * 100, priority=1)
 
         tc = TokenCounter()
+        tc._litellm_available = False
         tc._tiktoken_available = False
 
         sp.trim_to(50, tc)  # Removes "Second" (priority 5)
@@ -196,6 +202,7 @@ class TestStructuredPrompt:
 
         class FakeProvider:
             title = "Context"
+
             def get_context(self):
                 return "some context"
 
@@ -211,6 +218,7 @@ class TestStructuredPrompt:
 
         class EmptyProvider:
             title = "Empty"
+
             def get_context(self):
                 return ""
 

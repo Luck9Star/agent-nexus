@@ -30,7 +30,13 @@ class ProfileBasedExecutor:
     def __init__(self, registry: ExpertRegistry) -> None:
         self._registry = registry
 
-    def __call__(self, profile_id: str, task: str) -> Artifact:
+    def __call__(
+        self,
+        profile_id: str,
+        task: str,
+        *,
+        upstream_artifacts: list[Any] | None = None,
+    ) -> Artifact:
         profile = self._registry.get(profile_id)
         if profile is None:
             raise ValueError(
@@ -44,11 +50,14 @@ class ProfileBasedExecutor:
         required_sections = output_contract.get("required_sections", ["summary"])
         capabilities = profile.get("capabilities", [])
 
+        # Inject upstream artifact context into task description
+        effective_task = _inject_upstream_context(task, upstream_artifacts)
+
         sections = self._generate_sections(
             name=name,
             body=body,
             capabilities=capabilities,
-            task=task,
+            task=effective_task,
             required_sections=required_sections,
         )
 
@@ -127,6 +136,7 @@ class LLMExecutor:
         default_temperature: float | None = None,
         capability_registry: ModelCapabilityRegistry | None = None,
         timeout: float | None = None,
+        client: LLMClient | None = None,
     ) -> None:
         self._registry = registry
         self._config_dir = config_dir
@@ -135,12 +145,16 @@ class LLMExecutor:
         self._timeout = timeout
         self._capability_registry = capability_registry
 
-        # Create default client (used when expert has no model override)
-        self._default_client = LLMClient(
-            model_string=model_string,
-            config_dir=config_dir,
-            capability_registry=capability_registry,
-        )
+        if client is not None:
+            self._default_client = client
+            self._owns_default_client = False
+        else:
+            self._default_client = LLMClient(
+                model_string=model_string,
+                config_dir=config_dir,
+                capability_registry=capability_registry,
+            )
+            self._owns_default_client = True
 
         # Cache per-expert clients (keyed by model string)
         self._expert_clients: dict[str, LLMClient] = {}
@@ -174,9 +188,16 @@ class LLMExecutor:
         for client in self._expert_clients.values():
             client.close()
         self._expert_clients.clear()
-        self._default_client.close()
+        if self._owns_default_client:
+            self._default_client.close()
 
-    def __call__(self, profile_id: str, task: str) -> Artifact:
+    def __call__(
+        self,
+        profile_id: str,
+        task: str,
+        *,
+        upstream_artifacts: list[Any] | None = None,
+    ) -> Artifact:
         profile = self._registry.get(profile_id)
         if profile is None:
             raise ValueError(
@@ -199,13 +220,16 @@ class LLMExecutor:
             required_sections=required_sections,
         )
 
+        # Inject upstream artifact context into user message
+        effective_task = _inject_upstream_context(task, upstream_artifacts)
+
         # Use per-expert client if available
         client = self._get_client(profile)
         expert_temp = profile.get("temperature")
         expert_temperature = expert_temp if expert_temp is not None else self._default_temperature
         response = client.call(
             system_prompt=system_prompt,
-            user_message=task,
+            user_message=effective_task,
             temperature=expert_temperature,
             timeout=self._timeout,
         )
@@ -351,3 +375,31 @@ def _compute_split_offsets(text: str, splits: list[str]) -> list[int]:
         else:
             pos += len(part)
     return offsets
+
+
+def _inject_upstream_context(task: str, upstream_artifacts: list[Any] | None) -> str:
+    """Inject upstream artifact content into the task description.
+
+    When ``upstream_artifacts`` is not empty, formats each artifact's content
+    as a context block appended to the original task.  Returns the original
+    task unchanged when ``upstream_artifacts`` is ``None`` or empty.
+    """
+    if not upstream_artifacts:
+        return task
+
+    # Import locally to avoid circular imports at module level
+    from .integrator import Artifact
+
+    context_parts: list[str] = [task, "", "## Upstream Artifacts", ""]
+    for i, art in enumerate(upstream_artifacts, 1):
+        if isinstance(art, Artifact):
+            source = art.source_agent
+            sections_text = "\n".join(f"  {k}: {v}" for k, v in art.sections.items())
+            context_parts.append(f"### Artifact {i} (from {source})")
+            context_parts.append(sections_text)
+        else:
+            context_parts.append(f"### Artifact {i}")
+            context_parts.append(str(art))
+        context_parts.append("")
+
+    return "\n".join(context_parts)

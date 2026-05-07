@@ -23,9 +23,18 @@ logger = logging.getLogger(__name__)
 
 
 class TokenCounter:
-    """Hybrid token counter: tiktoken (exact) or len/4 (estimate)."""
+    """Three-tier token counter: LiteLLM -> tiktoken -> len/4 estimate."""
 
     def __init__(self) -> None:
+        self._litellm_available: bool = False
+        try:
+            import litellm as _litellm  # noqa: F401
+
+            self._litellm_available = True
+            self._litellm_mod = _litellm
+        except ImportError:
+            pass
+
         self._tiktoken_available: bool = False
         try:
             import tiktoken as _tiktoken  # noqa: F401
@@ -38,9 +47,26 @@ class TokenCounter:
     # -- public API ----------------------------------------------------------
 
     def count(self, text: str, model: str = "") -> int:
-        """Count tokens. Uses tiktoken if available, else len/4."""
+        """Count tokens using three-tier fallback.
+
+        1. LiteLLM (exact, supports 100+ providers)
+        2. tiktoken (exact, OpenAI-family models)
+        3. len/4 estimate (final fallback)
+        """
         if not text:
             return 0
+
+        # Tier 1: LiteLLM exact counting
+        if self._litellm_available:
+            try:
+                return self._litellm_mod.token_counter(
+                    model=model or "gpt-4o",
+                    text=text,
+                )
+            except Exception:
+                pass  # Fall through to tiktoken
+
+        # Tier 2: tiktoken exact counting
         if self._tiktoken_available:
             import tiktoken
 
@@ -53,6 +79,8 @@ class TokenCounter:
             except (KeyError, ValueError):
                 enc = tiktoken.get_encoding("cl100k_base")
             return len(enc.encode(text))
+
+        # Tier 3: len/4 estimate
         return max(1, len(text) // 4)
 
 

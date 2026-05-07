@@ -17,7 +17,7 @@ import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 from agent_nexus.models.task import TaskItem, TaskState
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
@@ -42,7 +42,13 @@ def _safe_fail(graph: TaskGraph, task_id: str) -> None:
 class ExpertExecutor(Protocol):
     """Callable that produces an Artifact for a given agent + task."""
 
-    def __call__(self, profile_id: str, task: str) -> Artifact: ...
+    def __call__(
+        self,
+        profile_id: str,
+        task: str,
+        *,
+        upstream_artifacts: list[Any] | None = None,
+    ) -> Artifact: ...
 
 
 class ArtifactSink(Protocol):
@@ -203,6 +209,22 @@ class DAGDispatcher:
             )
         return self._pool
 
+    def _collect_upstream_artifacts(
+        self,
+        task_item: TaskItem,
+        artifacts: dict[str, Artifact],
+    ) -> list[Artifact] | None:
+        """Collect artifacts from upstream tasks (via blocked_by edges).
+
+        Returns ``None`` when the task has no upstream dependencies (backward
+        compatible — signals the executor to use default behaviour).
+        """
+        if not task_item.blocked_by:
+            return None
+
+        upstream = [artifacts[dep] for dep in task_item.blocked_by if dep in artifacts]
+        return upstream if upstream else None
+
     def close(self) -> None:
         """Shut down the thread pool, waiting for in-flight work."""
         if self._pool is not None:
@@ -218,6 +240,7 @@ class DAGDispatcher:
         self,
         task_item: TaskItem,
         task_description: str,
+        upstream_artifacts: list[Artifact] | None = None,
     ) -> tuple[Artifact | None, str | None]:
         """Execute a single task and return (artifact, error). Thread-safe.
 
@@ -225,8 +248,38 @@ class DAGDispatcher:
         responsibility so they always happen on the main thread.
         """
         try:
-            artifact = self._executor(task_item.agent, task_description)
+            artifact = self._executor(
+                task_item.agent,
+                task_description,
+                upstream_artifacts=upstream_artifacts,
+            )
             return artifact, None
+        except TypeError as exc:
+            # Backward compatibility: if the executor doesn't accept
+            # upstream_artifacts (old-style two-arg callable), retry
+            # without the keyword argument.
+            if "upstream_artifacts" in str(exc):
+                logger.debug(
+                    "Executor for task '%s' does not accept upstream_artifacts, "
+                    "falling back to two-arg call",
+                    task_item.id,
+                )
+                try:
+                    artifact = self._executor(task_item.agent, task_description)  # type: ignore[call-arg]
+                    return artifact, None
+                except Exception as inner_exc:
+                    logger.exception(
+                        "Executor failed for task '%s' (agent '%s')",
+                        task_item.id,
+                        task_item.agent,
+                    )
+                    return None, str(inner_exc)
+            logger.exception(
+                "Executor failed for task '%s' (agent '%s')",
+                task_item.id,
+                task_item.agent,
+            )
+            return None, str(exc)
         except Exception as exc:
             logger.exception(
                 "Executor failed for task '%s' (agent '%s')",
@@ -358,9 +411,7 @@ class DAGDispatcher:
         result: DispatchResult,
     ) -> None:
         """Execute a batch of tasks concurrently using the thread pool."""
-        per_task_timeout = (
-            self._timeout_seconds if self._timeout_seconds is not None else None
-        )
+        per_task_timeout = self._timeout_seconds if self._timeout_seconds is not None else None
         pool = self._get_pool()
         futures: dict[
             concurrent.futures.Future[tuple[Artifact | None, str | None]],
@@ -371,7 +422,8 @@ class DAGDispatcher:
                 result.timed_out = True
                 break
             self._graph.start_task(task_item.id)
-            future = pool.submit(self._run_executor, task_item, task_description)
+            upstream = self._collect_upstream_artifacts(task_item, result.artifacts)
+            future = pool.submit(self._run_executor, task_item, task_description, upstream)
             futures[future] = task_item
 
         # Collect results — fail-fast on first error
@@ -425,7 +477,8 @@ class DAGDispatcher:
 
             self._graph.start_task(task_item.id)
             started_in_batch.append(task_item.id)
-            artifact, error = self._run_executor(task_item, task_description)
+            upstream = self._collect_upstream_artifacts(task_item, result.artifacts)
+            artifact, error = self._run_executor(task_item, task_description, upstream)
             if error is None and artifact is not None:
                 self._graph.complete_task(task_item.id)
                 result.artifacts[task_item.id] = artifact
