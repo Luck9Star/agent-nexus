@@ -7,7 +7,7 @@ pluggable rule system.
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from agent_contract_analyzer.models import ClauseInfo, ComplianceReport
 

@@ -26,7 +26,7 @@ def create_mcp_server() -> object:
         raise ImportError(
             "FastMCP is required for MCP mode. "
             "Install with: pip install agent-document-compliance-gateway[full]"
-        )
+        ) from None
 
     mcp = FastMCP("document-compliance-gateway")
     coordinator = ComplianceCoordinator()

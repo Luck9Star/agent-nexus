@@ -13,7 +13,6 @@ Covers:
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 import pytest
 
@@ -38,10 +37,8 @@ from agent_accessibility_auditor.tools.audit_content import (
 from agent_accessibility_auditor.tools.check_html import check_html
 from agent_accessibility_auditor.tools.generate_remediation import (
     _categorize_issue,
-    _estimate_effort,
     generate_remediation,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

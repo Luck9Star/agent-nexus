@@ -9,9 +9,7 @@ Provides three MCP tools:
 from __future__ import annotations
 
 from agent_requirements_analyzer.models import (
-    Question,
     RequirementAnalysis,
-    RequirementSpec,
 )
 from agent_requirements_analyzer.tools.analyze_requirements import (
     analyze_requirements as _analyze,
@@ -43,7 +41,7 @@ def create_mcp_server() -> object:
         raise ImportError(
             "FastMCP is required for MCP mode. "
             "Install with: pip install agent-requirements-analyzer[full]"
-        )
+        ) from None
 
     mcp = FastMCP("requirements-analyzer")
 

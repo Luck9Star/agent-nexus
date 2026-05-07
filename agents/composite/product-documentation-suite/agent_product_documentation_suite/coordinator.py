@@ -19,11 +19,12 @@ from agent_nexus.models.composition import Composition, CompositionError
 
 logger = logging.getLogger(__name__)
 
+from agent_nexus.platform.utils import detect_cycles_dfs
+
 from agent_product_documentation_suite.models import (
     DocArtifact,
     DocumentationResult,
 )
-from agent_nexus.platform.utils import detect_cycles_dfs
 
 # ---------------------------------------------------------------------------
 # Simulated Atomic Agent helpers (POC -- no real subprocesses)
@@ -231,7 +232,7 @@ class DocumentationSuiteCoordinator:
             *[_simulate_localization_async(summary_text, lang) for lang in target_langs],
             return_exceptions=True,
         )
-        for lang, loc_result in zip(target_langs, loc_results):
+        for lang, loc_result in zip(target_langs, loc_results, strict=True):
             if isinstance(loc_result, Exception):
                 logger.exception("Localization failed for language '%s'", lang)
             else:

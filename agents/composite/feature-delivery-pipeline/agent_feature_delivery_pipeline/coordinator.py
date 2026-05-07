@@ -11,13 +11,14 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from agent_nexus.models.composition import Composition, CompositionError
+from agent_nexus.platform.utils import resolve_composition_path
+
 from agent_feature_delivery_pipeline.models import (
     PipelineResult,
     PipelineStage,
     StageStatus,
 )
-from agent_nexus.models.composition import Composition, CompositionError
-from agent_nexus.platform.utils import resolve_composition_path
 
 # Simulated agent outputs for POC
 _SIMULATED_RESULTS: dict[str, dict[str, Any]] = {
@@ -140,7 +141,7 @@ class FeatureDeliveryCoordinator:
     async def _run_pipeline_async(self, spec: str) -> PipelineResult:
         try:
             composition = self.load_composition()
-        except CompositionError as exc:
+        except CompositionError:
             return PipelineResult(spec=spec, success=False, stages=[], artifacts={})
 
         stages: list[PipelineStage] = []
@@ -167,7 +168,7 @@ class FeatureDeliveryCoordinator:
                 return_exceptions=True,
             )
 
-            for (task, context, _), result in zip(coros, results):
+            for (task, _context, _), result in zip(coros, results, strict=True):
                 if isinstance(result, Exception):
                     all_success = False
                     completed_results[task.id] = {"error": str(result)}

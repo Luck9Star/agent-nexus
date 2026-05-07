@@ -5,8 +5,6 @@ Pydantic v2 frozen models for CI/CD quality gate checking.
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
 
 

@@ -25,8 +25,6 @@ from agent_contract_analyzer.models import (
     RiskItem,
 )
 from agent_contract_analyzer.tools.analyze_risks import (
-    _check_keyword_risks,
-    _check_missing_clauses,
     _compute_severity_map,
     _generate_recommendations,
     analyze_risks,
@@ -43,7 +41,6 @@ from agent_contract_analyzer.tools.extract_clauses import (
     _split_into_sections,
     extract_clauses,
 )
-
 
 # ---------------------------------------------------------------------------
 # Sample contract texts

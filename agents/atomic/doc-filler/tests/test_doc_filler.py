@@ -16,7 +16,6 @@ import os
 import tempfile
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -34,10 +33,9 @@ from agent_doc_filler.tools.analyze_template import (
     analyze_template,
 )
 from agent_doc_filler.tools.fill_template import (
-    fill_template,
     _default_output_path,
+    fill_template,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

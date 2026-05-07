@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from agent_market_intelligence_analyst.models import (
     MarketAnalysis,
-    TrendReport,
-    BriefingReport,
 )
 from agent_market_intelligence_analyst.tools.analyze_market import (
     analyze_market as _analyze,
@@ -43,7 +41,7 @@ def create_mcp_server() -> object:
         raise ImportError(
             "FastMCP is required for MCP mode. "
             "Install with: pip install agent-market-intelligence-analyst[full]"
-        )
+        ) from None
 
     mcp = FastMCP("market-intelligence-analyst")
 

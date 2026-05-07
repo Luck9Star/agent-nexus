@@ -13,7 +13,6 @@ Covers:
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 import pytest
 
@@ -26,15 +25,14 @@ from agent_localization_specialist.models import (
     TextAnalysis,
 )
 from agent_localization_specialist.tools.analyze_text import (
+    _assess_complexity,
     _detect_domain,
     _detect_register,
     _extract_key_terms,
-    _assess_complexity,
     analyze_text,
 )
 from agent_localization_specialist.tools.localize import localize
 from agent_localization_specialist.tools.manage_glossary import manage_glossary
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

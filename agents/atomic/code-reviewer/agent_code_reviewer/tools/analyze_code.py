@@ -7,7 +7,6 @@ Supports Python, JavaScript/TypeScript, Rust, and Java.
 from __future__ import annotations
 
 import bisect
-import os
 import re
 from pathlib import Path
 
@@ -252,7 +251,6 @@ def _estimate_complexity(content: str, language: str) -> int:
 def _measure_nesting(lines: list[str]) -> int:
     """Measure maximum nesting depth."""
     max_depth = 0
-    current_depth = 0
     for line in lines:
         stripped = line.lstrip()
         if not stripped or stripped.startswith("#"):
@@ -262,7 +260,6 @@ def _measure_nesting(lines: list[str]) -> int:
         indent_unit = 4
         depth = leading // indent_unit
         max_depth = max(max_depth, depth)
-        current_depth = depth
     return max_depth
 
 
@@ -270,9 +267,7 @@ def _count_imports(content: str, language: str) -> int:
     """Count import statements."""
     if language == "python":
         return len(re.findall(r"^\s*(?:import|from)\s+", content, re.MULTILINE))
-    elif language in ("javascript", "typescript"):
-        return len(re.findall(r"\bimport\s+", content))
-    elif language in ("java", "kotlin"):
+    elif language in ("javascript", "typescript") or language in ("java", "kotlin"):
         return len(re.findall(r"\bimport\s+", content))
     elif language == "rust":
         return len(re.findall(r"\buse\s+", content))

@@ -12,7 +12,6 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 
@@ -21,31 +20,26 @@ import pytest
 from agent_test_suite_generator.agent import TestSuiteGeneratorAgent
 from agent_test_suite_generator.local_adapter import handle_message
 from agent_test_suite_generator.models import (
-    TestCase,
     TestAnalysis,
+    TestCase,
     TestSuite,
     TestUnit,
 )
 from agent_test_suite_generator.tools.analyze_code import (
-    SUPPORTED_LANGUAGES,
     _compute_coverage_targets,
-    _extract_function_info,
     _infer_type_from_annotation,
     analyze_code_for_tests,
 )
 from agent_test_suite_generator.tools.build_suite import (
-    SUPPORTED_FRAMEWORKS,
     _collect_imports,
     _generate_fixtures,
     build_test_suite,
 )
 from agent_test_suite_generator.tools.generate_cases import (
     _generate_edge_case_tests,
-    _generate_error_tests,
     _generate_unit_test,
     generate_test_cases,
 )
-
 
 # ---------------------------------------------------------------------------
 # Sample Python source for testing analysis
@@ -315,7 +309,6 @@ class TestInferTypeFromAnnotation:
     """Tests for _infer_type_from_annotation helper."""
 
     def test_none_annotation(self) -> None:
-        import ast
 
         assert _infer_type_from_annotation(None) == "default"
 

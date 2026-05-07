@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from agent_good_skill.agent import GoodSkillAgent
 from agent_good_skill.local_adapter import handle_message
 

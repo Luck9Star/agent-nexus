@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from unittest.mock import patch
 
 import pytest
 
@@ -39,7 +38,6 @@ from agent_security_scanner.tools.scan_code import (
     _severity_rank,
     scan_code,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

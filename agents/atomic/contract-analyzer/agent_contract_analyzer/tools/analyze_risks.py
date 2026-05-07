@@ -6,8 +6,7 @@ ambiguous language, missing mandatory clauses, and excessive liability.
 
 from __future__ import annotations
 
-import re
-from typing import Sequence
+from collections.abc import Sequence
 
 from agent_contract_analyzer.models import ClauseInfo, RiskAnalysis, RiskItem
 
@@ -94,17 +93,7 @@ def _check_missing_clauses(clauses: Sequence[ClauseInfo]) -> list[RiskItem]:
     existing_types = {c.type for c in clauses}
 
     for rule in RISK_RULES:
-        if rule.get("check") == "no_limitation" and "indemnification" not in existing_types:
-            risks.append(
-                RiskItem(
-                    category=rule["category"],
-                    severity=rule["severity"],
-                    description=rule["description_template"],
-                    affected_clauses=[],
-                    mitigation=rule["mitigation"],
-                )
-            )
-        elif rule.get("check") == "no_dispute" and "governing_law" not in existing_types:
+        if rule.get("check") == "no_limitation" and "indemnification" not in existing_types or rule.get("check") == "no_dispute" and "governing_law" not in existing_types:
             risks.append(
                 RiskItem(
                     category=rule["category"],

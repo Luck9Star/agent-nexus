@@ -33,7 +33,7 @@ def create_mcp_server() -> object:
         raise ImportError(
             "FastMCP is required for MCP mode. "
             "Install with: pip install agent-code-reviewer[full]"
-        )
+        ) from None
 
     mcp = FastMCP("code-reviewer")
 

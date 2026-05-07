@@ -9,9 +9,8 @@ Provides three MCP tools:
 from __future__ import annotations
 
 from agent_test_suite_generator.models import (
-    TestCase,
     TestAnalysis,
-    TestSuite,
+    TestCase,
 )
 from agent_test_suite_generator.tools.analyze_code import (
     analyze_code_for_tests as _analyze,
@@ -41,7 +40,7 @@ def create_mcp_server() -> object:
         raise ImportError(
             "FastMCP is required for MCP mode. "
             "Install with: pip install agent-test-suite-generator[full]"
-        )
+        ) from None
 
     mcp = FastMCP("test-suite-generator")
 

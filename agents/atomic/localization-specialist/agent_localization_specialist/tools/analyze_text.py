@@ -46,7 +46,7 @@ _DOMAIN_KEYWORDS: dict[str, set[str]] = {
     "business": {
         "revenue", "stakeholder", "roi", "quarterly", "fiscal", "profit",
         "margin", "acquisition", "merger", "valuation", "portfolio",
-        "revenue", "kpi", "benchmark", "strategy", "market",
+        "kpi", "benchmark", "strategy", "market",
     },
 }
 

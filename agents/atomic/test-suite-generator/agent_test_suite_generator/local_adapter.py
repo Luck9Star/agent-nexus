@@ -22,7 +22,7 @@ import sys
 import traceback
 
 from agent_test_suite_generator.agent import TestSuiteGeneratorAgent
-from agent_test_suite_generator.models import TestCase, TestAnalysis
+from agent_test_suite_generator.models import TestAnalysis, TestCase
 
 
 def handle_message(agent: TestSuiteGeneratorAgent, message: dict) -> dict:

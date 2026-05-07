@@ -11,10 +11,9 @@ Can be used directly or via adapters (MCP, local, CLI).
 from __future__ import annotations
 
 from agent_test_suite_generator.models import (
-    TestCase,
     TestAnalysis,
+    TestCase,
     TestSuite,
-    TestUnit,
 )
 from agent_test_suite_generator.tools.analyze_code import analyze_code_for_tests
 from agent_test_suite_generator.tools.build_suite import build_test_suite

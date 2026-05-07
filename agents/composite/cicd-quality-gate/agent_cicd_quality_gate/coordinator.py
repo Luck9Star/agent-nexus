@@ -10,9 +10,10 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from agent_cicd_quality_gate.models import GateCheck, GateResult
 from agent_nexus.models.composition import Composition, CompositionError
 from agent_nexus.platform.utils import resolve_composition_path
+
+from agent_cicd_quality_gate.models import GateCheck, GateResult
 
 # Simulated agent outputs for POC
 _AGENT_RESULTS: dict[str, dict[str, Any]] = {
@@ -228,7 +229,7 @@ class QualityGateCoordinator:
                     *[c for _, c in coros],
                     return_exceptions=True,
                 )
-                for (task, _), result in zip(coros, results):
+                for (task, _), result in zip(coros, results, strict=True):
                     if isinstance(result, Exception):
                         checks.append(
                             GateCheck(

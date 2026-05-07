@@ -14,9 +14,12 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
+from agent_nexus.models.composition import (
+    Composition,
+    CompositionError,
+)
 
 from agent_document_compliance_gateway.coordinator import (
     ComplianceCoordinator,
@@ -25,19 +28,12 @@ from agent_document_compliance_gateway.coordinator import (
     _generate_recommendations,
     _simulate_agent_check,
 )
-from agent_nexus.models.composition import (
-    Composition,
-    CompositionError,
-    CompositionTask,
-    _detect_cycles,
-)
 from agent_document_compliance_gateway.models import (
     CheckStatus,
     ComplianceCheck,
     ComplianceResult,
     ConflictItem,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -13,7 +13,6 @@ Covers:
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 import pytest
 
@@ -38,7 +37,6 @@ from agent_requirements_analyzer.tools.build_specification import (
 from agent_requirements_analyzer.tools.generate_questions import (
     generate_questions,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -12,6 +12,12 @@ import argparse
 import json
 import os
 import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent_competitive_intelligence_briefing.coordinator import (
+        CompetitiveIntelCoordinator,
+    )
 
 
 def main() -> None:

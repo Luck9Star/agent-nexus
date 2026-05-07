@@ -130,9 +130,8 @@ def _check_images(html: str) -> list[AccessibilityIssue]:
                     fix_suggestion='Add alt="description" to the img element',
                 )
             )
-        elif alt_empty:
-            # Empty alt is acceptable for decorative images, but flag for review
-            if not _IMG_ROLE_PRESENTATION_RE.search(img_tag):
+        elif alt_empty and not _IMG_ROLE_PRESENTATION_RE.search(img_tag):
+                # Empty alt is acceptable for decorative images, but flag for review
                 issues.append(
                     AccessibilityIssue(
                         criterion="1.1.1",
@@ -300,7 +299,6 @@ def _check_tables(html: str) -> list[AccessibilityIssue]:
             continue
         table_content = html[table_start : table_end + len("</table>")]
         has_th = _TH_RE.search(table_content)
-        has_scope = _SCOPE_RE.search(table_content)
         if not has_th and _TD_RE.search(table_content):
             issues.append(
                 AccessibilityIssue(
@@ -328,7 +326,6 @@ def _compute_compliance(issues: list[AccessibilityIssue]) -> tuple[float, str]:
 
     level_a_issues = sum(1 for i in issues if i.level == "A")
     level_aa_issues = sum(1 for i in issues if i.level == "AA")
-    total = len(issues)
 
     # Score: start at 100, deduct per issue
     deduction = (level_a_issues * 5) + (level_aa_issues * 3)

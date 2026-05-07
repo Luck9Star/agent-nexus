@@ -15,7 +15,6 @@ import pytest
 from agent_code_reviewer.agent import CodeReviewerAgent
 from agent_code_reviewer.local_adapter import handle_message
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

@@ -39,7 +39,7 @@ def create_mcp_server() -> object:
         raise ImportError(
             "FastMCP is required for MCP mode. "
             "Install with: pip install agent-api-doc-generator[full]"
-        )
+        ) from None
 
     mcp = FastMCP("api-doc-generator")
 

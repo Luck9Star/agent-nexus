@@ -8,7 +8,6 @@ and party references.
 from __future__ import annotations
 
 import re
-from typing import Sequence
 
 from agent_contract_analyzer.models import ClauseInfo
 

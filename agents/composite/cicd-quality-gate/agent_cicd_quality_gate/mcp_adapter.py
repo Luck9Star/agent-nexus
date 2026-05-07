@@ -28,7 +28,7 @@ def create_mcp_server() -> object:
         raise ImportError(
             "FastMCP is required for MCP mode. "
             "Install with: pip install agent-cicd-quality-gate[full]"
-        )
+        ) from None
 
     mcp = FastMCP("cicd-quality-gate")
     coordinator = QualityGateCoordinator()

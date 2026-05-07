@@ -15,8 +15,8 @@ from agent_contract_analyzer.models import (
     ComplianceReport,
     RiskAnalysis,
 )
-from agent_contract_analyzer.tools.check_compliance import check_compliance
 from agent_contract_analyzer.tools.analyze_risks import analyze_risks
+from agent_contract_analyzer.tools.check_compliance import check_compliance
 from agent_contract_analyzer.tools.extract_clauses import extract_clauses
 
 

@@ -22,7 +22,6 @@ import sys
 import traceback
 
 from agent_localization_specialist.agent import LocalizationSpecialistAgent
-from agent_localization_specialist.models import Glossary
 
 
 def handle_message(agent: LocalizationSpecialistAgent, message: dict) -> dict:

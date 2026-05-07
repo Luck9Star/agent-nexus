@@ -13,17 +13,17 @@ import asyncio
 import logging
 import os
 import uuid
-from pathlib import Path
 
 import toml
 
 logger = logging.getLogger(__name__)
 
+from agent_nexus.platform.utils import detect_cycles_dfs
+
 from agent_competitive_intelligence_briefing.models import (
     BriefingResult,
     PipelineStep,
 )
-from agent_nexus.platform.utils import detect_cycles_dfs, resolve_composition_path
 
 # ---------------------------------------------------------------------------
 # Simulated Atomic Agent helpers (POC -- no real subprocesses)
@@ -191,7 +191,7 @@ class CompetitiveIntelCoordinator:
                 output_data=analysis,
                 status="completed",
             )
-        except Exception as exc:
+        except Exception:
             steps[0] = PipelineStep(
                 name=steps[0].name,
                 agent=steps[0].agent,
@@ -221,7 +221,7 @@ class CompetitiveIntelCoordinator:
                 output_data=fill_result,
                 status="completed",
             )
-        except Exception as exc:
+        except Exception:
             steps[1] = PipelineStep(
                 name=steps[1].name,
                 agent=steps[1].agent,
@@ -256,7 +256,7 @@ class CompetitiveIntelCoordinator:
             return_exceptions=True,
         )
         loc_results: list[dict] = []
-        for lang, result in zip(target_langs, loc_raw):
+        for lang, result in zip(target_langs, loc_raw, strict=True):
             if isinstance(result, Exception):
                 logger.exception("Localization failed for language '%s'", lang)
                 localizations[lang] = f"[localization failed for {lang}]"

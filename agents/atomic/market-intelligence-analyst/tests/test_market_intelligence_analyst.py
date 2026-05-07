@@ -25,23 +25,19 @@ from agent_market_intelligence_analyst.models import (
     TrendReport,
 )
 from agent_market_intelligence_analyst.tools.analyze_market import (
-    FRAMEWORK_FACTORS,
-    SUPPORTED_FRAMEWORKS,
     _compute_score,
     _count_keyword_hits,
     _generate_insights,
     analyze_market,
 )
 from agent_market_intelligence_analyst.tools.generate_briefing import (
-    FRAMEWORK_NAMES,
     generate_briefing,
 )
 from agent_market_intelligence_analyst.tools.identify_trends import (
-    identify_trends,
     _compute_confidence,
     _generate_summary,
+    identify_trends,
 )
-
 
 # ---------------------------------------------------------------------------
 # Sample market data

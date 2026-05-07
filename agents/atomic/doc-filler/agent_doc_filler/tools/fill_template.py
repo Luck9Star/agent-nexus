@@ -122,8 +122,8 @@ def _fill_xml_fallback(
     shutil.copy2(template_path, output_path)
 
     # Read and replace in all XML files within the zip
-    with zipfile.ZipFile(output_path, "r") as zin:
-        with zipfile.ZipFile(output_path + ".tmp", "w") as zout:
+    with zipfile.ZipFile(output_path, "r") as zin, \
+         zipfile.ZipFile(output_path + ".tmp", "w") as zout:
             for item in zin.infolist():
                 data = zin.read(item.filename)
                 if item.filename.endswith(".xml"):
