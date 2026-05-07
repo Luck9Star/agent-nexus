@@ -243,85 +243,13 @@ class TaskGraph:
         if not tasks:
             return
 
+        task_ids = [t.id for t in tasks]
+
         with self._conn(immediate=True) as conn:
-            # 1. Batch duplicate check
-            task_ids = [t.id for t in tasks]
-            id_set = set(task_ids)
-            if len(id_set) < len(task_ids):
-                seen: set[str] = set()
-                dupes: list[str] = []
-                for tid in task_ids:
-                    if tid in seen and tid not in dupes:
-                        dupes.append(tid)
-                    seen.add(tid)
-                raise ValueError(f"Duplicate task IDs in batch: {dupes}")
+            self._check_batch_duplicates(conn, task_ids)
+            all_deps = self._validate_external_deps(conn, tasks, set(task_ids))
+            self._insert_tasks_and_deps(conn, tasks, all_deps)
 
-            existing_ids: set[str] = set()
-            for i in range(0, len(task_ids), _SQL_CHUNK_SIZE):
-                chunk = task_ids[i : i + _SQL_CHUNK_SIZE]
-                placeholders = ",".join("?" * len(chunk))
-                rows = conn.execute(
-                    f"SELECT id FROM tasks WHERE id IN ({placeholders})",
-                    tuple(chunk),
-                ).fetchall()
-                existing_ids.update(r[0] for r in rows)
-            if existing_ids:
-                raise ValueError(f"Tasks already exist: {existing_ids}")
-
-            # 2. Validate all blocked_by references (must exist in DB or in this batch)
-            #    Collect external deps, then validate in a single query.
-            all_deps: list[tuple[str, str]] = []
-            external_deps: set[str] = set()
-            for task in tasks:
-                for dep_id in dict.fromkeys(task.blocked_by):
-                    # Self-dependency will be caught by cycle detection
-                    if dep_id not in id_set and dep_id != task.id:
-                        external_deps.add(dep_id)
-                    all_deps.append((task.id, dep_id))
-            if external_deps:
-                ext_list = list(external_deps)
-                found: set[str] = set()
-                for i in range(0, len(ext_list), _SQL_CHUNK_SIZE):
-                    chunk = ext_list[i : i + _SQL_CHUNK_SIZE]
-                    ph = ",".join("?" * len(chunk))
-                    found.update(
-                        r[0]
-                        for r in conn.execute(
-                            f"SELECT id FROM tasks WHERE id IN ({ph})",
-                            tuple(chunk),
-                        ).fetchall()
-                    )
-                missing = external_deps - found
-                if missing:
-                    raise ValueError(f"blocked_by references non-existent tasks: {missing}")
-
-            # 3. Batch insert all tasks
-            task_rows = [
-                (
-                    t.id,
-                    t.description,
-                    t.agent,
-                    t.state.value,
-                    json.dumps(t.vars, default=str),
-                    t.created_at.isoformat(),
-                    t.updated_at.isoformat(),
-                )
-                for t in tasks
-            ]
-            conn.executemany(
-                "INSERT INTO tasks (id, description, agent, state, vars, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                task_rows,
-            )
-
-            # 4. Batch insert dependencies
-            if all_deps:
-                conn.executemany(
-                    "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES (?, ?)",
-                    all_deps,
-                )
-
-            # 5. Single cycle-detection pass
             cycles = self._detect_cycles_conn(conn)
             if cycles:
                 raise ValueError(f"Adding batch tasks would create cycles: {cycles}")
@@ -558,6 +486,100 @@ class TaskGraph:
         """
         with self._conn() as conn:
             return self._detect_cycles_conn(conn)
+
+
+    def _check_batch_duplicates(
+        self, conn: sqlite3.Connection, task_ids: list[str]
+    ) -> None:
+        """Raise ValueError if task_ids contain duplicates or already exist in DB."""
+        id_set = set(task_ids)
+        if len(id_set) < len(task_ids):
+            seen: set[str] = set()
+            dupes: list[str] = []
+            for tid in task_ids:
+                if tid in seen and tid not in dupes:
+                    dupes.append(tid)
+                seen.add(tid)
+            raise ValueError(f"Duplicate task IDs in batch: {dupes}")
+
+        existing_ids = self._query_ids_in_db(conn, task_ids)
+        if existing_ids:
+            raise ValueError(f"Tasks already exist: {existing_ids}")
+
+    def _validate_external_deps(
+        self,
+        conn: sqlite3.Connection,
+        tasks: list[TaskItem],
+        id_set: set[str],
+    ) -> list[tuple[str, str]]:
+        """Collect all deps and validate that external blocked_by refs exist.
+
+        Returns list of (task_id, dep_id) tuples for all dependencies.
+        """
+        all_deps: list[tuple[str, str]] = []
+        external_deps: set[str] = set()
+        for task in tasks:
+            for dep_id in dict.fromkeys(task.blocked_by):
+                if dep_id not in id_set and dep_id != task.id:
+                    external_deps.add(dep_id)
+                all_deps.append((task.id, dep_id))
+
+        if external_deps:
+            found = self._query_ids_in_db(conn, list(external_deps))
+            missing = external_deps - found
+            if missing:
+                raise ValueError(
+                    f"blocked_by references non-existent tasks: {missing}"
+                )
+
+        return all_deps
+
+    def _insert_tasks_and_deps(
+        self,
+        conn: sqlite3.Connection,
+        tasks: list[TaskItem],
+        all_deps: list[tuple[str, str]],
+    ) -> None:
+        """Batch insert task rows and dependency rows."""
+        task_rows = [
+            (
+                t.id,
+                t.description,
+                t.agent,
+                t.state.value,
+                json.dumps(t.vars, default=str),
+                t.created_at.isoformat(),
+                t.updated_at.isoformat(),
+            )
+            for t in tasks
+        ]
+        conn.executemany(
+            "INSERT INTO tasks (id, description, agent, state, vars, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            task_rows,
+        )
+
+        if all_deps:
+            conn.executemany(
+                "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES (?, ?)",
+                all_deps,
+            )
+
+    @staticmethod
+    def _query_ids_in_db(
+        conn: sqlite3.Connection, ids: list[str]
+    ) -> set[str]:
+        """Chunked SELECT to find which of *ids* already exist in the tasks table."""
+        found: set[str] = set()
+        for i in range(0, len(ids), _SQL_CHUNK_SIZE):
+            chunk = ids[i : i + _SQL_CHUNK_SIZE]
+            placeholders = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT id FROM tasks WHERE id IN ({placeholders})",
+                tuple(chunk),
+            ).fetchall()
+            found.update(r[0] for r in rows)
+        return found
 
     def _detect_cycles_conn(
         self,
