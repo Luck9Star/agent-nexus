@@ -163,6 +163,21 @@ fn default_warm_days() -> u32 {
     90
 }
 
+/// Execution record parameters for [`CLISessionStore::record_execution`].
+#[derive(Debug, Clone, Default)]
+pub struct ExecutionRecord<'a> {
+    pub task_id: &'a str,
+    pub backend_type: &'a str,
+    pub backend_name: &'a str,
+    pub model: Option<&'a str>,
+    pub session_id: Option<&'a str>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub duration_ms: Option<u64>,
+    pub status: &'a str,
+    pub error: Option<&'a str>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct CLISession {
     pub session_id: String,

@@ -16,7 +16,10 @@ pub fn extract_json_value<'a>(data: &'a serde_json::Value, path: &str) -> Option
 }
 
 pub fn parse_json_output(stdout: &str, config: &BackendConfig) -> CLIResult {
-    let mut result = CLIResult::default();
+    let mut result = CLIResult {
+        raw_stdout: stdout.to_string(),
+        ..Default::default()
+    };
 
     let json_data: serde_json::Value = match serde_json::from_str(stdout.trim()) {
         Ok(v) => v,
@@ -65,10 +68,12 @@ fn build_result_from_json(
 }
 
 pub fn parse_text_output(stdout: &str, stderr: &str, config: &BackendConfig) -> CLIResult {
-    let mut result = CLIResult::default();
-    result.text = stdout.to_string();
-    result.raw_stdout = stdout.to_string();
-    result.raw_stderr = stderr.to_string();
+    let mut result = CLIResult {
+        text: stdout.to_string(),
+        raw_stdout: stdout.to_string(),
+        raw_stderr: stderr.to_string(),
+        ..Default::default()
+    };
 
     if let Some(ref pattern) = config.text_patterns.session_id {
         if let Ok(re) = regex::Regex::new(pattern) {
@@ -147,12 +152,14 @@ mod tests {
 
     #[test]
     fn parse_text_with_regex() {
-        let mut config = BackendConfig::default();
-        config.command = "openclaw".into();
-        config.output_format = "text".into();
-        config.text_patterns = TextPatternConfig {
-            session_id: Some(r"session[:\s]+([a-f0-9-]+)".into()),
-            model: None,
+        let config = BackendConfig {
+            command: "openclaw".into(),
+            output_format: "text".into(),
+            text_patterns: TextPatternConfig {
+                session_id: Some(r"session[:\s]+([a-f0-9-]+)".into()),
+                model: None,
+            },
+            ..Default::default()
         };
         let result = parse_text_output("done", "session: abc-123 started", &config);
         assert_eq!(result.text, "done");

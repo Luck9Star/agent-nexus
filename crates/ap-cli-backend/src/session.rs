@@ -1,6 +1,6 @@
 //! CLISessionStore — SQLite session persistence with WAL and triggers.
 
-use crate::types::{CLIBackendError, CLISession, DataLifecycleConfig};
+use crate::types::{CLIBackendError, CLISession, DataLifecycleConfig, ExecutionRecord};
 use rusqlite::{params, Connection};
 use std::path::Path;
 
@@ -139,16 +139,7 @@ impl CLISessionStore {
 
     pub fn record_execution(
         &self,
-        task_id: &str,
-        backend_type: &str,
-        backend_name: &str,
-        model: Option<&str>,
-        session_id: Option<&str>,
-        input_tokens: Option<u64>,
-        output_tokens: Option<u64>,
-        duration_ms: Option<u64>,
-        status: &str,
-        error: Option<&str>,
+        record: &ExecutionRecord,
     ) -> Result<(), CLIBackendError> {
         self.conn.execute(
             "INSERT INTO task_executions \
@@ -156,8 +147,8 @@ impl CLISessionStore {
               input_tokens, output_tokens, duration_ms, status, error) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
-                task_id, backend_type, backend_name, model, session_id,
-                input_tokens, output_tokens, duration_ms, status, error,
+                record.task_id, record.backend_type, record.backend_name, record.model, record.session_id,
+                record.input_tokens, record.output_tokens, record.duration_ms, record.status, record.error,
             ],
         )?;
         Ok(())
@@ -189,6 +180,7 @@ impl CLISessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ExecutionRecord;
     use tempfile::TempDir;
 
     fn setup() -> (TempDir, CLISessionStore) {
@@ -226,14 +218,28 @@ mod tests {
     #[test]
     fn record_execution_updates_daily_stats() {
         let (_dir, store) = setup();
-        store.record_execution(
-            "t1", "cli", "claude-code", Some("model"),
-            None, Some(100), Some(50), Some(1000), "success", None,
-        ).unwrap();
-        store.record_execution(
-            "t2", "cli", "claude-code", Some("model"),
-            None, Some(50), Some(0), Some(500), "error", None,
-        ).unwrap();
+        store.record_execution(&ExecutionRecord {
+            task_id: "t1",
+            backend_type: "cli",
+            backend_name: "claude-code",
+            model: Some("model"),
+            input_tokens: Some(100),
+            output_tokens: Some(50),
+            duration_ms: Some(1000),
+            status: "success",
+            ..Default::default()
+        }).unwrap();
+        store.record_execution(&ExecutionRecord {
+            task_id: "t2",
+            backend_type: "cli",
+            backend_name: "claude-code",
+            model: Some("model"),
+            input_tokens: Some(50),
+            output_tokens: Some(0),
+            duration_ms: Some(500),
+            status: "error",
+            ..Default::default()
+        }).unwrap();
 
         let mut stmt = store.prepare_stmt(
             "SELECT total_calls, success_calls FROM daily_stats WHERE backend_name = 'claude-code'"
@@ -241,5 +247,75 @@ mod tests {
         let row: (i64, i64) = stmt.query_row([], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
         assert_eq!(row.0, 2);
         assert_eq!(row.1, 1);
+    }
+
+    #[test]
+    fn cleanup_sessions_removes_old() {
+        let (_dir, store) = setup();
+
+        // Insert an old session (manually set last_used_at)
+        let old_session = CLISession {
+            session_id: "old-s1".into(),
+            backend_name: "claude-code".into(),
+            created_at: "2020-01-01T00:00:00".into(),
+            last_used_at: "2020-01-01T00:00:00".into(),
+            turn_count: 1,
+            ..Default::default()
+        };
+        store.save_session(&old_session).unwrap();
+
+        // Insert a recent session
+        let recent_session = CLISession {
+            session_id: "recent-s2".into(),
+            backend_name: "claude-code".into(),
+            created_at: "2026-05-01T00:00:00".into(),
+            last_used_at: "2026-05-01T00:00:00".into(),
+            turn_count: 1,
+            ..Default::default()
+        };
+        store.save_session(&recent_session).unwrap();
+
+        // Cleanup sessions older than 90 days
+        let removed = store.cleanup_sessions(90).unwrap();
+        assert_eq!(removed, 1);
+
+        // Recent session should still be there
+        assert!(store.get_session("recent-s2").unwrap().is_some());
+        // Old session should be gone
+        assert!(store.get_session("old-s1").unwrap().is_none());
+    }
+
+    #[test]
+    fn cleanup_sessions_nothing_to_remove() {
+        let (_dir, store) = setup();
+        let removed = store.cleanup_sessions(90).unwrap();
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn save_session_upsert() {
+        let (_dir, store) = setup();
+        let session = CLISession {
+            session_id: "s1".into(),
+            backend_name: "claude-code".into(),
+            created_at: "2026-01-01T00:00:00".into(),
+            last_used_at: "2026-01-01T00:00:00".into(),
+            turn_count: 1,
+            ..Default::default()
+        };
+        store.save_session(&session).unwrap();
+
+        // Update with same ID
+        let updated = CLISession {
+            session_id: "s1".into(),
+            backend_name: "gemini-cli".into(),
+            turn_count: 5,
+            ..session
+        };
+        store.save_session(&updated).unwrap();
+
+        let retrieved = store.get_session("s1").unwrap().unwrap();
+        assert_eq!(retrieved.backend_name, "gemini-cli");
+        assert_eq!(retrieved.turn_count, 5);
     }
 }
