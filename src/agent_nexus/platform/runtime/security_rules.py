@@ -88,13 +88,30 @@ class ImportRule(SecurityRule):
                     )
                 )
 
+            # Wildcard imports from relative paths bypass the per-name check
+            # since "*" is not in the forbidden set, but can re-export
+            # forbidden modules if __init__.py re-exports them.
+            if (
+                node.level > 0
+                and node.module is None
+                and any(alias.name == "*" for alias in node.names)
+            ):
+                violations.append(
+                    SecurityViolation(
+                        rule_type="import",
+                        node_type="ImportFrom",
+                        code_snippet="from . import *",
+                        message=f"Wildcard relative import at line {node.lineno}",
+                    )
+                )
+
             # Relative imports like "from . import os" have node.module=None
             # but forbidden names in node.names.  Only check names when
             # the module-level check didn't already catch the violation,
             # to avoid duplicate reports for "from os import os".
             if not violations:
                 for alias in node.names:
-                    if alias.name and self._is_forbidden(alias.name):
+                    if alias.name and alias.name != "*" and self._is_forbidden(alias.name):
                         violations.append(
                             SecurityViolation(
                                 rule_type="import",

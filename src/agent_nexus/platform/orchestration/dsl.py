@@ -238,55 +238,15 @@ class OrchestrationDSL:
         return self._parse(raw)
 
     def validate(self, definition: OrchestrationDefinition) -> ValidationResult:
-        """Validate the definition.
-
-        Checks:
-        1. All task.agent references exist in agents dict
-        2. All task.blocked_by references exist in tasks
-        3. No cycles in the dependency graph
-        4. All agents have at least one task (warning)
-        5. Global preload_agents reference valid agent names
-
-        Returns:
-            ValidationResult with separate errors and warnings lists.
-        """
         errors: list[str] = []
         warnings: list[str] = []
-        task_ids = {t.id for t in definition.tasks}
-        agent_names = set(definition.agents.keys())
 
-        # 1. task.agent references
-        for task in definition.tasks:
-            if task.agent not in agent_names:
-                errors.append(f"Task '{task.id}' references unknown agent '{task.agent}'")
-
-        # 2. task.blocked_by references
-        for task in definition.tasks:
-            for dep_id in task.blocked_by:
-                if dep_id not in task_ids:
-                    errors.append(f"Task '{task.id}' blocked_by unknown task '{dep_id}'")
-
-        # 2b. Self-reference check
-        for task in definition.tasks:
-            if task.id in task.blocked_by:
-                errors.append(f"Task '{task.id}' cannot block itself")
-
-        # 3. Cycle detection (DFS with visiting/visited sets)
-        task_map = {t.id: t for t in definition.tasks}
-        cycles = self._detect_cycles(task_map)
-        for cycle in cycles:
-            errors.append(f"Dependency cycle detected: {' -> '.join(cycle)}")
-
-        # 4. Agents with no tasks (warning only)
-        tasked_agents = {t.agent for t in definition.tasks}
-        for name in agent_names:
-            if name not in tasked_agents:
-                warnings.append(f"Agent '{name}' has no tasks assigned")
-
-        # 5. Global preload_agents references
-        for agent_name in definition.tool_loading.preload_agents:
-            if agent_name not in agent_names:
-                errors.append(f"preload_agents references unknown agent '{agent_name}'")
+        self._check_agent_refs(definition, errors)
+        self._check_blocked_by_refs(definition, errors)
+        self._check_no_self_blocks(definition, errors)
+        self._check_cycles(definition, errors)
+        self._check_unused_agents(definition, warnings)
+        self._check_preload_agents(definition, errors)
 
         return ValidationResult(errors=errors, warnings=warnings)
 
@@ -571,3 +531,43 @@ class OrchestrationDSL:
             nodes=task_map.keys(),
             get_deps=lambda name: [dep for dep in task_map[name].blocked_by if dep in task_map],
         )
+
+    @staticmethod
+    def _check_agent_refs(definition: OrchestrationDefinition, errors: list[str]) -> None:
+        agent_names = set(definition.agents.keys())
+        for task in definition.tasks:
+            if task.agent not in agent_names:
+                errors.append(f"Task '{task.id}' references unknown agent '{task.agent}'")
+
+    @staticmethod
+    def _check_blocked_by_refs(definition: OrchestrationDefinition, errors: list[str]) -> None:
+        task_ids = {t.id for t in definition.tasks}
+        for task in definition.tasks:
+            for dep_id in task.blocked_by:
+                if dep_id not in task_ids:
+                    errors.append(f"Task '{task.id}' blocked_by unknown task '{dep_id}'")
+
+    @staticmethod
+    def _check_no_self_blocks(definition: OrchestrationDefinition, errors: list[str]) -> None:
+        for task in definition.tasks:
+            if task.id in task.blocked_by:
+                errors.append(f"Task '{task.id}' cannot block itself")
+
+    def _check_cycles(self, definition: OrchestrationDefinition, errors: list[str]) -> None:
+        task_map = {t.id: t for t in definition.tasks}
+        for cycle in self._detect_cycles(task_map):
+            errors.append(f"Dependency cycle detected: {' -> '.join(cycle)}")
+
+    @staticmethod
+    def _check_unused_agents(definition: OrchestrationDefinition, warnings: list[str]) -> None:
+        tasked_agents = {t.agent for t in definition.tasks}
+        for name in definition.agents:
+            if name not in tasked_agents:
+                warnings.append(f"Agent '{name}' has no tasks assigned")
+
+    @staticmethod
+    def _check_preload_agents(definition: OrchestrationDefinition, errors: list[str]) -> None:
+        agent_names = set(definition.agents.keys())
+        for agent_name in definition.tool_loading.preload_agents:
+            if agent_name not in agent_names:
+                errors.append(f"preload_agents references unknown agent '{agent_name}'")

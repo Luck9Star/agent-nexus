@@ -689,30 +689,32 @@ def run_composition(
 
     from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
-    with TaskGraph(":memory:") as graph:
-        composer = TaskComposer(registry)
-        composer_input = TaskComposerInput(
-            task=message,
-            mode=mode,
-            max_parallel=max_parallel,
-            timeout_seconds=float(timeout or DEFAULT_PIPELINE_TIMEOUT),
-            reasoning_protocol=reasoning_protocol,
-        )
-        try:
-            composer_result = composer.run(
-                composer_input,
-                expert_executor=executor,
-                task_graph=graph,
-                llm_planner=llm_planner,
-                llm_integrator=llm_integrator,
-                llm_qa_gate=llm_qa_gate,
-                concurrent=True,
+    try:
+        with TaskGraph(":memory:") as graph:
+            composer = TaskComposer(registry)
+            composer_input = TaskComposerInput(
+                task=message,
+                mode=mode,
+                max_parallel=max_parallel,
+                timeout_seconds=float(timeout or DEFAULT_PIPELINE_TIMEOUT),
+                reasoning_protocol=reasoning_protocol,
             )
-        finally:
-            if isinstance(executor, LLMExecutor):
-                executor.close()
-            if shared_client is not None:
-                shared_client.close()
+            try:
+                composer_result = composer.run(
+                    composer_input,
+                    expert_executor=executor,
+                    task_graph=graph,
+                    llm_planner=llm_planner,
+                    llm_integrator=llm_integrator,
+                    llm_qa_gate=llm_qa_gate,
+                    concurrent=True,
+                )
+            finally:
+                if isinstance(executor, LLMExecutor):
+                    executor.close()
+    finally:
+        if shared_client is not None:
+            shared_client.close()
 
     # Output results — consume pipeline-detected output intent
     _output_target = composer_result.output_target

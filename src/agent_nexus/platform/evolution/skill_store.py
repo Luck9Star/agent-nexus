@@ -322,81 +322,14 @@ class SkillStore:
         parent_skill_ids: list[str],
     ) -> EvolveResult:
         """Atomic evolution: insert new version, deactivate old for FIX."""
-        from agent_nexus.platform.evolution._shared import _SQL_CHUNK_SIZE
         from agent_nexus.platform.evolution.evolver import EvolveResult
 
         try:
             with self._conn(immediate=True) as conn:
                 if new_record.lineage.origin == SkillOrigin.FIXED:
-                    if parent_skill_ids:
-                        found = {
-                            r[0]
-                            for r in _chunked_in_fetchall(
-                                conn,
-                                "SELECT id FROM skill_records WHERE id IN ({IN})",
-                                parent_skill_ids,
-                            )
-                        }
-                        missing = set(parent_skill_ids) - found
-                        if missing:
-                            raise ValueError(
-                                f"Parent skill_id(s) not found: {missing} — "
-                                f"cannot deactivate for FIX evolution"
-                            )
+                    self._handle_fixed_evolution(conn, new_record, parent_skill_ids)
 
-                    if parent_skill_ids:
-                        now = _now_iso()
-                        for ci in range(0, len(parent_skill_ids), _SQL_CHUNK_SIZE):
-                            chunk = parent_skill_ids[ci : ci + _SQL_CHUNK_SIZE]
-                            ph = ",".join("?" * len(chunk))
-                            conn.execute(
-                                f"UPDATE skill_records SET is_active = 0, updated_at = ? "
-                                f"WHERE id IN ({ph})",
-                                (now, *chunk),
-                            )
-
-                    dup = conn.execute(
-                        "SELECT id FROM skill_records WHERE name = ? AND is_active = 1 AND id != ?",
-                        (new_record.name, new_record.id),
-                    ).fetchone()
-                    if dup is not None:
-                        raise ValueError(
-                            f"Duplicate active skill: '{new_record.name}' "
-                            f"(id={dup[0]}) already active"
-                        )
-
-                lin = new_record.lineage
-                snapshot_json = json.dumps(lin.content_snapshot or {}, ensure_ascii=False)
-                conn.execute(
-                    """
-                    INSERT INTO skill_records (
-                        id, name, version,
-                        lineage_origin, lineage_generation,
-                        lineage_content_diff, lineage_content_snapshot,
-                        directory, is_active,
-                        total_selections, total_applied,
-                        total_completions, total_fallbacks,
-                        created_at, updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                    """,
-                    (
-                        new_record.id,
-                        new_record.name,
-                        new_record.version,
-                        lin.origin.value,
-                        lin.generation,
-                        lin.content_diff or "",
-                        snapshot_json,
-                        new_record.directory,
-                        int(new_record.is_active),
-                        new_record.total_selections,
-                        new_record.total_applied,
-                        new_record.total_completions,
-                        new_record.total_fallbacks,
-                        new_record.first_seen.isoformat(),
-                        new_record.last_updated.isoformat(),
-                    ),
-                )
+                self._insert_skill_record(conn, new_record)
 
                 if parent_skill_ids:
                     conn.executemany(
@@ -421,6 +354,87 @@ class SkillStore:
             )
 
         return EvolveResult(success=True, new_record=new_record)
+
+    def _handle_fixed_evolution(
+        self,
+        conn: sqlite3.Connection,
+        new_record: SkillRecord,
+        parent_skill_ids: list[str],
+    ) -> None:
+        """Validate parents, deactivate them, and check for duplicate active skills."""
+        from agent_nexus.platform.evolution._shared import _SQL_CHUNK_SIZE
+
+        if parent_skill_ids:
+            found = {
+                r[0]
+                for r in _chunked_in_fetchall(
+                    conn,
+                    "SELECT id FROM skill_records WHERE id IN ({IN})",
+                    parent_skill_ids,
+                )
+            }
+            missing = set(parent_skill_ids) - found
+            if missing:
+                raise ValueError(
+                    f"Parent skill_id(s) not found: {missing} — "
+                    f"cannot deactivate for FIX evolution"
+                )
+
+            now = _now_iso()
+            for ci in range(0, len(parent_skill_ids), _SQL_CHUNK_SIZE):
+                chunk = parent_skill_ids[ci : ci + _SQL_CHUNK_SIZE]
+                ph = ",".join("?" * len(chunk))
+                conn.execute(
+                    f"UPDATE skill_records SET is_active = 0, updated_at = ? "
+                    f"WHERE id IN ({ph})",
+                    (now, *chunk),
+                )
+
+        dup = conn.execute(
+            "SELECT id FROM skill_records WHERE name = ? AND is_active = 1 AND id != ?",
+            (new_record.name, new_record.id),
+        ).fetchone()
+        if dup is not None:
+            raise ValueError(
+                f"Duplicate active skill: '{new_record.name}' "
+                f"(id={dup[0]}) already active"
+            )
+
+    @staticmethod
+    def _insert_skill_record(conn: sqlite3.Connection, new_record: SkillRecord) -> None:
+        """Insert a new skill record row."""
+        lin = new_record.lineage
+        snapshot_json = json.dumps(lin.content_snapshot or {}, ensure_ascii=False)
+        conn.execute(
+            """
+            INSERT INTO skill_records (
+                id, name, version,
+                lineage_origin, lineage_generation,
+                lineage_content_diff, lineage_content_snapshot,
+                directory, is_active,
+                total_selections, total_applied,
+                total_completions, total_fallbacks,
+                created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                new_record.id,
+                new_record.name,
+                new_record.version,
+                lin.origin.value,
+                lin.generation,
+                lin.content_diff or "",
+                snapshot_json,
+                new_record.directory,
+                int(new_record.is_active),
+                new_record.total_selections,
+                new_record.total_applied,
+                new_record.total_completions,
+                new_record.total_fallbacks,
+                new_record.first_seen.isoformat(),
+                new_record.last_updated.isoformat(),
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Lineage queries

@@ -133,6 +133,23 @@ class Integrator:
 
         conflicts = _detect_conflicts(artifacts)
 
+        Integrator._collect_recommendations(artifacts, merged_sections)
+        Integrator._add_decision_summary(merged_sections, len(artifacts), source_agents)
+        open_questions = Integrator._check_expected_sections(merged_sections, expected_sections)
+
+        return IntegratedArtifact(
+            artifact_type="integrated_plan",
+            source_agents=source_agents,
+            merged_sections=merged_sections,
+            conflicts=conflicts,
+            risks=risks,
+            open_questions=open_questions,
+        )
+
+    @staticmethod
+    def _collect_recommendations(
+        artifacts: list[Artifact], merged_sections: dict[str, object]
+    ) -> None:
         recommendations: list[str] = []
         for artifact in artifacts:
             rec = artifact.sections.get("recommendation")
@@ -147,27 +164,27 @@ class Integrator:
             else "No explicit recommendations from experts"
         )
 
+    @staticmethod
+    def _add_decision_summary(
+        merged_sections: dict[str, object], count: int, source_agents: list[str]
+    ) -> None:
         merged_sections["decision_summary"] = (
-            f"Integrated {len(artifacts)} expert artifacts from: " + ", ".join(source_agents)
+            f"Integrated {count} expert artifacts from: " + ", ".join(source_agents)
         )
 
-        open_questions: list[str] = []
-        if expected_sections:
-            present_keys = set(merged_sections.keys())
-            for section in expected_sections:
-                if section not in present_keys:
-                    open_questions.append(
-                        f"Missing section: '{section}' — no expert provided this content"
-                    )
-
-        return IntegratedArtifact(
-            artifact_type="integrated_plan",
-            source_agents=source_agents,
-            merged_sections=merged_sections,
-            conflicts=conflicts,
-            risks=risks,
-            open_questions=open_questions,
-        )
+    @staticmethod
+    def _check_expected_sections(
+        merged_sections: dict[str, object],
+        expected_sections: list[str] | None,
+    ) -> list[str]:
+        if not expected_sections:
+            return []
+        present_keys = set(merged_sections.keys())
+        return [
+            f"Missing section: '{section}' — no expert provided this content"
+            for section in expected_sections
+            if section not in present_keys
+        ]
 
 
 def _extract_risks(artifact: Artifact, risks: list[str]) -> None:

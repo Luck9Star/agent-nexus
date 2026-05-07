@@ -348,6 +348,7 @@ class DAGDispatcher:
         specialist_ids = {t.id for t in dag.specialist_tasks}
         max_iterations = max(len(dag.tasks) * 3, 1)
 
+        completed_normally = False
         iteration = 0
         while iteration < max_iterations:
             iteration += 1
@@ -363,6 +364,7 @@ class DAGDispatcher:
 
             if not ready_specialists:
                 if self._no_more_work(specialist_ids, result):
+                    completed_normally = True
                     break
 
             else:
@@ -375,7 +377,7 @@ class DAGDispatcher:
                 if result.failed or result.cancelled:
                     break
 
-        if iteration >= max_iterations:
+        if not completed_normally and iteration >= max_iterations:
             result.hit_iteration_limit = True
             result.timed_out = True
             logger.warning(
