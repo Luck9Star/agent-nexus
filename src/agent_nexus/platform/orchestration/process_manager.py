@@ -298,78 +298,77 @@ class ProcessManager:
             drain_task = handle.drain_task
 
         try:
-            # Cancel the stderr drain task to prevent it from reading a closed pipe.
-            if drain_task is not None and not drain_task.done():
-                drain_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await drain_task
+            await self._cancel_drain(drain_task)
 
             if not handle.is_alive:
-                # Already dead -- close IPC and clean up.
-                try:
-                    await handle.ipc.stream.close()
-                except Exception:
-                    logger.debug(
-                        "Failed to close IPC stream for dead agent '%s'", name, exc_info=True
-                    )
-                async with self._lock:
-                    if self._agents.get(name) is handle:
-                        self._agents.pop(name, None)
+                await self._close_ipc_quietly(name, handle)
+                await self._remove_agent(name, handle)
                 logger.info("Agent '%s' already exited (rc=%s)", name, process.returncode)
                 return
 
             # Stage 1: Close IPC stdin (signal EOF).
-            try:
-                await handle.ipc.stream.close()
-            except Exception:
-                logger.debug("Failed to close IPC stdin for agent '%s'", name, exc_info=True)
-
-            try:
-                await asyncio.wait_for(process.wait(), timeout=timeout)
-                async with self._lock:
-                    if self._agents.get(name) is handle:
-                        self._agents.pop(name, None)
+            await self._close_ipc_quietly(name, handle)
+            if await self._wait_exit(name, handle, timeout):
                 logger.info("Agent '%s' exited cleanly after IPC close", name)
                 return
-            except TimeoutError:
-                pass
 
             # Stage 2: SIGTERM.
             logger.warning("Agent '%s' did not exit, sending SIGTERM", name)
             try:
                 process.send_signal(signal.SIGTERM)
             except ProcessLookupError:
-                async with self._lock:
-                    if self._agents.get(name) is handle:
-                        self._agents.pop(name, None)
+                await self._remove_agent(name, handle)
                 return
 
-            try:
-                await asyncio.wait_for(process.wait(), timeout=timeout)
-                async with self._lock:
-                    if self._agents.get(name) is handle:
-                        self._agents.pop(name, None)
+            if await self._wait_exit(name, handle, timeout):
                 logger.info("Agent '%s' terminated after SIGTERM", name)
                 return
-            except TimeoutError:
-                pass
 
             # Stage 3: SIGKILL.
             logger.error("Agent '%s' did not exit after SIGTERM, sending SIGKILL", name)
             with contextlib.suppress(ProcessLookupError):
                 process.kill()
-
             try:
                 await process.wait()
             except Exception:
                 logger.warning("Error waiting for agent '%s' after SIGKILL", name, exc_info=True)
 
-            async with self._lock:
-                if self._agents.get(name) is handle:
-                    self._agents.pop(name, None)
+            await self._remove_agent(name, handle)
             logger.info("Agent '%s' killed", name)
         finally:
             self._stopping.discard(name)
+
+    async def _remove_agent(self, name: str, handle: AgentHandle) -> None:
+        """Remove agent from registry if handle still matches."""
+        async with self._lock:
+            if self._agents.get(name) is handle:
+                self._agents.pop(name, None)
+
+    async def _cancel_drain(self, drain_task: asyncio.Task | None) -> None:
+        """Cancel stderr drain task safely."""
+        if drain_task is not None and not drain_task.done():
+            drain_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await drain_task
+
+    async def _close_ipc_quietly(self, name: str, handle: AgentHandle) -> None:
+        """Close IPC stream, logging failures at debug level."""
+        try:
+            await handle.ipc.stream.close()
+        except Exception:
+            logger.debug("Failed to close IPC for agent '%s'", name, exc_info=True)
+
+    async def _wait_exit(self, name: str, handle: AgentHandle, timeout: float) -> bool:
+        """Wait for process to exit within timeout.
+
+        Returns True if process exited (and agent removed), False if timeout.
+        """
+        try:
+            await asyncio.wait_for(handle.process.wait(), timeout=timeout)
+            await self._remove_agent(name, handle)
+            return True
+        except TimeoutError:
+            return False
 
     # ------------------------------------------------------------------
     # Restart
