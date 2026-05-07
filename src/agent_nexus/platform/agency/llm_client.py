@@ -128,19 +128,27 @@ def _build_enriched_capability(
     registry: ModelCapabilityRegistry,
 ) -> ModelCapability:
     """Merge remote ModelDB data with registry fallback to produce enriched capability."""
-    cap_fallback = (
-        registry.get(model_name)
-        or registry.get_provider_default(provider_name)
-    )
+    cap_fallback = registry.get(model_name) or registry.get_provider_default(provider_name)
+    if cap_fallback is None:
+        cap_fallback = ModelCapability(
+            model_id=model_name,
+            provider=provider_name,
+            max_output_tokens=4096,
+            context_window=8192,
+            supports_vision=False,
+            supports_tool_use=False,
+            supports_temperature=True,
+            temperature_min=0.0,
+            temperature_max=2.0,
+            knowledge_cutoff="2024-01",
+        )
     enriched = ModelCapability(
         model_id=remote_data.get("id", cap_fallback.model_id),
         provider=remote_data.get("provider", cap_fallback.provider),
         max_output_tokens=remote_data.get("max_output_tokens", cap_fallback.max_output_tokens),
         context_window=remote_data.get("context_window", cap_fallback.context_window),
         supports_vision=remote_data.get("supports_vision", cap_fallback.supports_vision),
-        supports_tool_use=remote_data.get(
-            "supports_tool_use", cap_fallback.supports_tool_use
-        ),
+        supports_tool_use=remote_data.get("supports_tool_use", cap_fallback.supports_tool_use),
         supports_temperature=remote_data.get(
             "supports_temperature", cap_fallback.supports_temperature
         ),

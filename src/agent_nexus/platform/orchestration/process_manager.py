@@ -155,8 +155,9 @@ class ProcessManager:
                     line.decode(errors="replace").rstrip(),
                 )
         except asyncio.CancelledError:
-            # Expected when stop_agent or _cleanup_dead cancels us.
-            pass
+            # Expected when stop_agent or _cleanup_dead cancels us — re-raise
+            # so the parent task/group knows this was cancelled.
+            raise
         except Exception:
             # Unexpected crash — log to prevent "Task exception was
             # never retrieved" warning and to aid debugging.  The

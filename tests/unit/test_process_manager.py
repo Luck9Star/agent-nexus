@@ -1214,8 +1214,8 @@ class TestDrainStderrExceptionHandling:
         assert any("stderr drain task failed unexpectedly" in r.message for r in caplog.records)
 
     @pytest.mark.asyncio
-    async def test_drain_stderr_cancelled_is_silent(self, caplog) -> None:
-        """CancelledError is expected (stop_agent cancel) — no error log."""
+    async def test_drain_stderr_cancelled_re_raises(self, caplog) -> None:
+        """CancelledError re-raises so cancellation propagates to parent task."""
         import logging
 
         pm = ProcessManager()
@@ -1224,8 +1224,11 @@ class TestDrainStderrExceptionHandling:
         mock_stderr.readline.side_effect = asyncio.CancelledError()
         mock_proc.stderr = mock_stderr
 
-        with caplog.at_level(
-            logging.WARNING, logger="agent_nexus.platform.orchestration.process_manager"
+        with (
+            caplog.at_level(
+                logging.WARNING, logger="agent_nexus.platform.orchestration.process_manager"
+            ),
+            pytest.raises(asyncio.CancelledError),
         ):
             await pm._drain_stderr(mock_proc, "cancelled-agent")
 

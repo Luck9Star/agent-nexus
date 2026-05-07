@@ -191,7 +191,8 @@ class DeferredAgentRegistry:
             if info is None:
                 raise KeyError(f"Agent '{name}' not registered")
             if info.is_activated:
-                assert info.tool_schemas is not None
+                if info.tool_schemas is None:
+                    raise RuntimeError(f"Agent '{name}' is activated but has no tool schemas")
                 return info.tool_schemas
 
             await self._ensure_subprocess(info, name)
