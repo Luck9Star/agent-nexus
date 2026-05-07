@@ -13,9 +13,10 @@ pub fn archive_old_data(
 
     let valid = path_str.chars().all(|c| c.is_alphanumeric() || c == '/' || c == '.' || c == '-' || c == '_');
     if !valid || path_str.is_empty() {
-        return Err(CLIBackendError::JsonParse(
+        return Err(CLIBackendError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
             format!("Archive path contains disallowed characters: {}", path_str)
-        ));
+        )));
     }
 
     conn.execute(
@@ -24,7 +25,9 @@ pub fn archive_old_data(
     )?;
 
     let result = archive_inner(conn, config);
-    let _ = conn.execute("DETACH DATABASE archive", []);
+    if let Err(e) = conn.execute("DETACH DATABASE archive", []) {
+        tracing::warn!("Failed to detach archive database: {e}");
+    }
     result
 }
 
@@ -126,7 +129,8 @@ mod tests {
         let config = DataLifecycleConfig::default();
         let bad_path = std::path::PathBuf::from("/tmp/evil; DROP TABLE--.db");
         let result = archive_old_data(&conn, &config, &bad_path);
-        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("disallowed characters"), "Expected path validation error, got: {err_msg}");
     }
 
     #[test]
