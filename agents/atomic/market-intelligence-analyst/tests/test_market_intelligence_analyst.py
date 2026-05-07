@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from agent_market_intelligence_analyst.agent import MarketIntelligenceAgent
 from agent_market_intelligence_analyst.local_adapter import handle_message
@@ -125,7 +126,7 @@ class TestMarketAnalysis:
 
     def test_frozen(self) -> None:
         ma = MarketAnalysis(framework="porter")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ma.framework = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -170,7 +171,7 @@ class TestTrendItem:
 
     def test_frozen(self) -> None:
         t = TrendItem(name="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             t.name = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -200,7 +201,7 @@ class TestTrendReport:
 
     def test_frozen(self) -> None:
         tr = TrendReport()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             tr.trends = []  # type: ignore[misc]
 
 
@@ -226,7 +227,7 @@ class TestBriefingReport:
 
     def test_frozen(self) -> None:
         br = BriefingReport()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             br.title = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:

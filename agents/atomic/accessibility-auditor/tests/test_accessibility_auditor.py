@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from agent_accessibility_auditor.agent import AccessibilityAuditorAgent
 from agent_accessibility_auditor.local_adapter import handle_message
@@ -80,7 +81,7 @@ class TestAccessibilityIssue:
 
     def test_frozen(self) -> None:
         i = AccessibilityIssue(criterion="1.1.1")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             i.criterion = "2.0"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -113,7 +114,7 @@ class TestAuditResult:
 
     def test_frozen(self) -> None:
         r = AuditResult()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.compliance_score = 50.0  # type: ignore[misc]
 
 
@@ -133,7 +134,7 @@ class TestRemediationPlan:
 
     def test_frozen(self) -> None:
         p = RemediationPlan()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             p.estimated_effort = "2 hours"  # type: ignore[misc]
 
 

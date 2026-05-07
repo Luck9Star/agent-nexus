@@ -15,6 +15,7 @@ import json
 import os
 
 import pytest
+from pydantic import ValidationError
 
 from agent_product_documentation_suite.coordinator import (
     DocumentationSuiteCoordinator,
@@ -77,7 +78,7 @@ class TestDocArtifact:
 
     def test_frozen(self) -> None:
         artifact = DocArtifact(type="spec")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             artifact.type = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -126,7 +127,7 @@ class TestDocumentationResult:
 
     def test_frozen(self) -> None:
         result = DocumentationResult()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             result.success = False  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:

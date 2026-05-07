@@ -17,6 +17,7 @@ import os
 import tempfile
 
 import pytest
+from pydantic import ValidationError
 
 from agent_security_scanner.agent import SecurityScannerAgent
 from agent_security_scanner.local_adapter import handle_message
@@ -97,7 +98,7 @@ class TestSecurityFinding:
 
     def test_frozen(self) -> None:
         f = SecurityFinding(severity="low", category="info", location="a.py:1")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             f.severity = "high"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -130,7 +131,7 @@ class TestSecurityScanResult:
 
     def test_frozen(self) -> None:
         r = SecurityScanResult()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.findings = []  # type: ignore[misc]
 
 
@@ -144,7 +145,7 @@ class TestDependencyVulnerability:
 
     def test_frozen(self) -> None:
         v = DependencyVulnerability(package="flask", version="2.0.1")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             v.package = "django"  # type: ignore[misc]
 
 
@@ -179,7 +180,7 @@ class TestSecurityReport:
 
     def test_frozen(self) -> None:
         r = SecurityReport()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.critical_count = 99  # type: ignore[misc]
 
 

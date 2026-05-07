@@ -18,6 +18,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from agent_doc_filler.agent import DocFillerAgent
 from agent_doc_filler.local_adapter import handle_message
@@ -136,7 +137,7 @@ class TestPlaceholderInfo:
 
     def test_frozen(self) -> None:
         p = PlaceholderInfo(name="title")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             p.name = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -177,7 +178,7 @@ class TestTemplateAnalysis:
 
     def test_frozen(self) -> None:
         a = TemplateAnalysis(template_path="t.docx")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             a.template_path = "other.docx"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -211,7 +212,7 @@ class TestFillRequest:
 
     def test_frozen(self) -> None:
         r = FillRequest(template_path="t.docx", values={})
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.template_path = "other.docx"  # type: ignore[misc]
 
     def test_empty_values(self) -> None:
@@ -250,7 +251,7 @@ class TestFillResult:
 
     def test_frozen(self) -> None:
         r = FillResult(success=True, output_path="out.docx")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.success = False  # type: ignore[misc]
 
 

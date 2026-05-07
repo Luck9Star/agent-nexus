@@ -11,8 +11,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from agent_nexus.models.composition import Composition, CompositionError
 from agent_nexus.platform.utils import resolve_composition_path
 
@@ -22,6 +20,8 @@ from agent_document_compliance_gateway.models import (
     ComplianceResult,
     ConflictItem,
 )
+
+logger = logging.getLogger(__name__)
 
 # Simulated dimension results for POC
 _DIMENSION_RESULTS: dict[str, dict[str, Any]] = {

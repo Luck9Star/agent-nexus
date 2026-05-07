@@ -16,6 +16,7 @@ import json
 import os
 
 import pytest
+from pydantic import ValidationError
 
 from agent_competitive_intelligence_briefing.coordinator import (
     CompetitiveIntelCoordinator,
@@ -80,7 +81,7 @@ class TestPipelineStep:
 
     def test_frozen(self) -> None:
         step = PipelineStep(name="Step", agent="agent")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             step.name = "Changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -130,7 +131,7 @@ class TestBriefingResult:
 
     def test_frozen(self) -> None:
         result = BriefingResult(query="q")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             result.query = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:

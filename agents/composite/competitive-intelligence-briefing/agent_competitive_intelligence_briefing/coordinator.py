@@ -15,15 +15,14 @@ import os
 import uuid
 
 import toml
-
-logger = logging.getLogger(__name__)
-
 from agent_nexus.platform.utils import detect_cycles_dfs
 
 from agent_competitive_intelligence_briefing.models import (
     BriefingResult,
     PipelineStep,
 )
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Simulated Atomic Agent helpers (POC -- no real subprocesses)

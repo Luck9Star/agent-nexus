@@ -23,6 +23,7 @@ from agent_nexus.models.composition import (
     CompositionTask,
     _detect_cycles,
 )
+from pydantic import ValidationError
 
 from agent_cicd_quality_gate.coordinator import (
     QualityGateCoordinator,
@@ -147,7 +148,7 @@ class TestGateCheck:
 
     def test_frozen(self) -> None:
         gc = GateCheck(agent="x")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             gc.agent = "y"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -197,7 +198,7 @@ class TestGateResult:
 
     def test_frozen(self) -> None:
         r = GateResult()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.overall_passed = True  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:

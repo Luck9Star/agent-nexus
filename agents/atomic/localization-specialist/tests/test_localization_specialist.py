@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from agent_localization_specialist.agent import LocalizationSpecialistAgent
 from agent_localization_specialist.local_adapter import handle_message
@@ -80,7 +81,7 @@ class TestTermEntry:
 
     def test_frozen(self) -> None:
         t = TermEntry(source="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             t.source = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -112,7 +113,7 @@ class TestTextAnalysis:
 
     def test_frozen(self) -> None:
         a = TextAnalysis()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             a.formality = "formal"  # type: ignore[misc]
 
 
@@ -135,7 +136,7 @@ class TestGlossary:
 
     def test_frozen(self) -> None:
         g = Glossary()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             g.source_lang = "fr"  # type: ignore[misc]
 
 
@@ -158,7 +159,7 @@ class TestLocalizationResult:
 
     def test_frozen(self) -> None:
         r = LocalizationResult(translated_text="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.translated_text = "other"  # type: ignore[misc]
 
 

@@ -16,15 +16,14 @@ import os
 import uuid
 
 from agent_nexus.models.composition import Composition, CompositionError
-
-logger = logging.getLogger(__name__)
-
 from agent_nexus.platform.utils import detect_cycles_dfs
 
 from agent_product_documentation_suite.models import (
     DocArtifact,
     DocumentationResult,
 )
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Simulated Atomic Agent helpers (POC -- no real subprocesses)

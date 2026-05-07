@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from agent_requirements_analyzer.agent import RequirementsAnalyzerAgent
 from agent_requirements_analyzer.local_adapter import handle_message
@@ -88,7 +89,7 @@ class TestRequirementAnalysis:
 
     def test_frozen(self) -> None:
         a = RequirementAnalysis(text="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             a.text = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -131,7 +132,7 @@ class TestQuestion:
 
     def test_frozen(self) -> None:
         q = Question(text="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             q.text = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -161,7 +162,7 @@ class TestRequirementSection:
 
     def test_frozen(self) -> None:
         s = RequirementSection(title="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             s.title = "changed"  # type: ignore[misc]
 
 
@@ -191,7 +192,7 @@ class TestRequirementSpec:
 
     def test_frozen(self) -> None:
         spec = RequirementSpec(title="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             spec.title = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:

@@ -18,6 +18,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from agent_api_doc_generator.agent import APIDocGeneratorAgent
 from agent_api_doc_generator.local_adapter import handle_message
@@ -154,7 +155,7 @@ class TestEndpointInfo:
 
     def test_frozen(self) -> None:
         e = EndpointInfo(path="/test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             e.path = "/changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -190,7 +191,7 @@ class TestSchemaInfo:
 
     def test_frozen(self) -> None:
         s = SchemaInfo(name="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             s.name = "changed"  # type: ignore[misc]
 
 
@@ -206,7 +207,7 @@ class TestOpenAPISpec:
 
     def test_frozen(self) -> None:
         spec = OpenAPISpec()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             spec.openapi_version = "2.0"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:

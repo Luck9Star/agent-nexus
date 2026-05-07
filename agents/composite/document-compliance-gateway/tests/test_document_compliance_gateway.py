@@ -20,6 +20,7 @@ from agent_nexus.models.composition import (
     Composition,
     CompositionError,
 )
+from pydantic import ValidationError
 
 from agent_document_compliance_gateway.coordinator import (
     ComplianceCoordinator,
@@ -158,7 +159,7 @@ class TestComplianceCheck:
 
     def test_frozen(self) -> None:
         c = ComplianceCheck(dimension="x")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             c.dimension = "y"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -197,7 +198,7 @@ class TestConflictItem:
 
     def test_frozen(self) -> None:
         ci = ConflictItem(dimensions=["x"], description="y")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ci.description = "z"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -228,7 +229,7 @@ class TestComplianceResult:
 
     def test_frozen(self) -> None:
         r = ComplianceResult()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.overall_score = 100.0  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:

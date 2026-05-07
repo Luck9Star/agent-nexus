@@ -16,6 +16,7 @@ import os
 import tempfile
 
 import pytest
+from pydantic import ValidationError
 
 from agent_test_suite_generator.agent import TestSuiteGeneratorAgent
 from agent_test_suite_generator.local_adapter import handle_message
@@ -142,7 +143,7 @@ class TestTestUnit:
 
     def test_frozen(self) -> None:
         u = TestUnit(name="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             u.name = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -172,7 +173,7 @@ class TestTestAnalysis:
 
     def test_frozen(self) -> None:
         ta = TestAnalysis()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ta.framework = "changed"  # type: ignore[misc]
 
 
@@ -200,7 +201,7 @@ class TestTestCase:
 
     def test_frozen(self) -> None:
         tc = TestCase(name="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             tc.name = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -232,7 +233,7 @@ class TestTestSuite:
 
     def test_frozen(self) -> None:
         ts = TestSuite()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ts.framework = "changed"  # type: ignore[misc]
 
 

@@ -23,6 +23,7 @@ from agent_nexus.models.composition import (
     CompositionTask,
     _detect_cycles,
 )
+from pydantic import ValidationError
 
 from agent_feature_delivery_pipeline.coordinator import (
     FeatureDeliveryCoordinator,
@@ -213,7 +214,7 @@ class TestPipelineStage:
 
     def test_frozen(self) -> None:
         s = PipelineStage(name="x", agent="y")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             s.name = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -255,7 +256,7 @@ class TestPipelineResult:
 
     def test_frozen(self) -> None:
         r = PipelineResult(spec="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.success = True  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:

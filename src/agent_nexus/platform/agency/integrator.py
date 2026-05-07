@@ -277,29 +277,36 @@ def _risk_similarity(set_a: set[str], set_b: set[str]) -> float:
 
 def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
     """Detect conflicting viewpoints across artifacts."""
-    conflicts: list[ConflictItem] = []
     if len(artifacts) < 2:
-        return conflicts
+        return []
 
-    # Check for severity conflicts between artifacts
+    return (
+        _detect_severity_conflicts(artifacts)
+        + _detect_risk_conflicts(artifacts)
+        + _detect_recommendation_conflicts(artifacts)
+    )
+
+
+def _detect_severity_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
     severity_by_agent: dict[str, str] = {}
     for artifact in artifacts:
         for key, value in artifact.sections.items():
             if key == "severity" and isinstance(value, str):
                 severity_by_agent[artifact.source_agent] = _normalize_severity(value)
 
-    severity_values = set(severity_by_agent.values())
-    if len(severity_values) > 1:
-        conflicting_agents = list(severity_by_agent.keys())
-        conflicts.append(
-            ConflictItem(
-                field="severity",
-                description=f"Disagreement on severity: {dict(severity_by_agent)}",
-                agents=conflicting_agents,
-            )
-        )
+    if len(set(severity_by_agent.values())) <= 1:
+        return []
 
-    # Check for risk description conflicts
+    return [
+        ConflictItem(
+            field="severity",
+            description=f"Disagreement on severity: {dict(severity_by_agent)}",
+            agents=list(severity_by_agent.keys()),
+        )
+    ]
+
+
+def _detect_risk_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
     risk_sets: dict[str, list[str]] = {}
     for artifact in artifacts:
         risks_found: list[str] = []
@@ -313,83 +320,81 @@ def _detect_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
         if risks_found:
             risk_sets[artifact.source_agent] = risks_found
 
-    # If agents have completely disjoint risk sets, that's a potential conflict
-    # only when agents share overlapping section keys (proxy for shared capabilities).
-    if len(risk_sets) >= 2:
-        [_tokenize_risk(r) for risks in risk_sets.values() for r in risks]
-        # Compare risk descriptions across agents using token overlap
-        agent_risk_tokens: dict[str, set[str]] = {}
-        for agent_id, risks in risk_sets.items():
-            agent_tokens: set[str] = set()
-            for r in risks:
-                agent_tokens |= _tokenize_risk(r)
-            agent_risk_tokens[agent_id] = agent_tokens
+    if len(risk_sets) < 2:
+        return []
 
-        # Check if any pair of agents has similar risks (Jaccard >= 0.5)
-        agent_ids = list(agent_risk_tokens.keys())
-        has_similar_risks = False
-        for i in range(len(agent_ids)):
-            for j in range(i + 1, len(agent_ids)):
-                sim = _risk_similarity(
-                    agent_risk_tokens[agent_ids[i]],
-                    agent_risk_tokens[agent_ids[j]],
-                )
-                if sim >= 0.5:
-                    has_similar_risks = True
-                    break
-            if has_similar_risks:
-                break
+    # Compare risk descriptions across agents using token overlap
+    agent_risk_tokens: dict[str, set[str]] = {}
+    for agent_id, risks in risk_sets.items():
+        agent_tokens: set[str] = set()
+        for r in risks:
+            agent_tokens |= _tokenize_risk(r)
+        agent_risk_tokens[agent_id] = agent_tokens
 
-        if not has_similar_risks and all(len(v) > 0 for v in risk_sets.values()):
-            # No similar risks across agents — flag as potential blind spots
-            # Exclude synthetic/structural sections that Integrator.merge adds to
-            # all artifacts (final_recommendation, decision_summary) — these inflate
-            # the overlap check and cause false positives.
-            _structural_sections = frozenset(
-                {
-                    "final_recommendation",
-                    "decision_summary",
-                    "recommendation",
-                }
+    # Check if any pair of agents has similar risks (Jaccard >= 0.5)
+    agent_ids = list(agent_risk_tokens.keys())
+    has_similar_risks = False
+    for i in range(len(agent_ids)):
+        for j in range(i + 1, len(agent_ids)):
+            sim = _risk_similarity(
+                agent_risk_tokens[agent_ids[i]],
+                agent_risk_tokens[agent_ids[j]],
             )
-            agent_section_keys: dict[str, set[str]] = {}
-            for artifact in artifacts:
-                if artifact.source_agent in risk_sets:
-                    agent_section_keys[artifact.source_agent] = (
-                        set(artifact.sections.keys()) - _structural_sections
-                    )
-            section_sets = list(agent_section_keys.values())
-            if section_sets:
-                shared = section_sets[0]
-                for s in section_sets[1:]:
-                    shared = shared & s
-                if shared:
-                    conflicting_agents = list(risk_sets.keys())
-                    conflicts.append(
-                        ConflictItem(
-                            field="risks",
-                            description=(
-                                "Experts have completely disjoint risk "
-                                "findings — potential blind spots"
-                            ),
-                            agents=conflicting_agents,
-                        )
-                    )
+            if sim >= 0.5:
+                has_similar_risks = True
+                break
+        if has_similar_risks:
+            break
 
-    # Check for conflicting recommendations
+    if has_similar_risks or not all(len(v) > 0 for v in risk_sets.values()):
+        return []
+
+    # No similar risks and all non-empty — check shared section overlap
+    _structural_sections = frozenset(
+        {"final_recommendation", "decision_summary", "recommendation"}
+    )
+    agent_section_keys: dict[str, set[str]] = {}
+    for artifact in artifacts:
+        if artifact.source_agent in risk_sets:
+            agent_section_keys[artifact.source_agent] = (
+                set(artifact.sections.keys()) - _structural_sections
+            )
+    section_sets = list(agent_section_keys.values())
+    if not section_sets:
+        return []
+
+    shared = section_sets[0]
+    for s in section_sets[1:]:
+        shared = shared & s
+    if not shared:
+        return []
+
+    return [
+        ConflictItem(
+            field="risks",
+            description=(
+                "Experts have completely disjoint risk "
+                "findings — potential blind spots"
+            ),
+            agents=list(risk_sets.keys()),
+        )
+    ]
+
+
+def _detect_recommendation_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
     rec_by_agent: dict[str, str] = {}
     for artifact in artifacts:
         rec = artifact.sections.get("recommendation")
         if isinstance(rec, str):
             rec_by_agent[artifact.source_agent] = rec
-    rec_values = set(rec_by_agent.values())
-    if len(rec_values) > 1:
-        conflicts.append(
-            ConflictItem(
-                field="recommendation",
-                description=f"Conflicting recommendations: {dict(rec_by_agent)}",
-                agents=list(rec_by_agent.keys()),
-            )
-        )
 
-    return conflicts
+    if len(set(rec_by_agent.values())) <= 1:
+        return []
+
+    return [
+        ConflictItem(
+            field="recommendation",
+            description=f"Conflicting recommendations: {dict(rec_by_agent)}",
+            agents=list(rec_by_agent.keys()),
+        )
+    ]

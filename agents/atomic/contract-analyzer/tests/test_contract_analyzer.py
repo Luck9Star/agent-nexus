@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from agent_contract_analyzer.agent import ContractAnalyzerAgent
 from agent_contract_analyzer.local_adapter import handle_message
@@ -130,7 +131,7 @@ class TestClauseInfo:
 
     def test_frozen(self) -> None:
         c = ClauseInfo(clause_id="1")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             c.clause_id = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -171,7 +172,7 @@ class TestRiskItem:
 
     def test_frozen(self) -> None:
         r = RiskItem(category="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.category = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -201,7 +202,7 @@ class TestRiskAnalysis:
 
     def test_frozen(self) -> None:
         ra = RiskAnalysis()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ra.risks = []  # type: ignore[misc]
 
 
@@ -225,7 +226,7 @@ class TestComplianceReport:
 
     def test_frozen(self) -> None:
         cr = ComplianceReport()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             cr.compliant = False  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:

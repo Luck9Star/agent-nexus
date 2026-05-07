@@ -69,7 +69,7 @@ def localize(
         occurrences = pattern.findall(translated)
         if occurrences:
             matches.append(source_term)
-            translated = pattern.sub(lambda m: _preserve_case(m, target_term), translated)
+            translated = pattern.sub(lambda m, tgt=target_term: _preserve_case(m, tgt), translated)
 
     # Check for terms that might need glossary entries
     _detect_untranslated(translated, target_lang, warnings)
