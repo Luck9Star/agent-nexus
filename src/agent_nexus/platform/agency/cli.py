@@ -427,6 +427,7 @@ def _setup_llm_components(
     object | None,  # shared_client
 ]:
     """Initialize LLM planner/integrator/QA-gate if config is available."""
+    shared_client = None
     try:
         from agent_nexus.models.capability import ModelCapabilityRegistry
 
@@ -453,6 +454,8 @@ def _setup_llm_components(
         click.echo("LLM-powered planning, integration, and QA enabled")
         return llm_planner, llm_integrator, llm_qa_gate, shared_client
     except (ImportError, ValueError, KeyError, OSError) as exc:
+        if shared_client is not None:
+            shared_client.close()
         click.echo(
             f"LLM config unavailable ({exc}), falling back to profile-based executor",
             err=True,
@@ -709,7 +712,10 @@ def run_composition(
 
     if use_llm:
         llm_planner, llm_integrator, llm_qa_gate, shared_client = _setup_llm_components(
-            model, config_dir, temperature, registry,
+            model,
+            config_dir,
+            temperature,
+            registry,
         )
         shared_registry = shared_client  # for capability_registry passthrough
     else:
@@ -722,9 +728,14 @@ def run_composition(
         float(call_timeout) if call_timeout else float(DEFAULT_LLM_CALL_TIMEOUT)
     )
     executor, is_llm = _create_executor(
-        model, config_dir, temperature, registry,
-        shared_registry, shared_client,
-        effective_call_timeout, reasoning_protocol,
+        model,
+        config_dir,
+        temperature,
+        registry,
+        shared_registry,
+        shared_client,
+        effective_call_timeout,
+        reasoning_protocol,
     )
 
     # Step 4: Execute pipeline

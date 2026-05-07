@@ -387,8 +387,7 @@ class SkillStore:
             missing = set(parent_skill_ids) - found
             if missing:
                 raise ValueError(
-                    f"Parent skill_id(s) not found: {missing} — "
-                    f"cannot deactivate for FIX evolution"
+                    f"Parent skill_id(s) not found: {missing} — cannot deactivate for FIX evolution"
                 )
 
             now = _now_iso()
@@ -396,8 +395,7 @@ class SkillStore:
                 chunk = parent_skill_ids[ci : ci + _SQL_CHUNK_SIZE]
                 ph = ",".join("?" * len(chunk))
                 conn.execute(
-                    f"UPDATE skill_records SET is_active = 0, updated_at = ? "
-                    f"WHERE id IN ({ph})",
+                    f"UPDATE skill_records SET is_active = 0, updated_at = ? WHERE id IN ({ph})",
                     (now, *chunk),
                 )
 
@@ -407,8 +405,7 @@ class SkillStore:
         ).fetchone()
         if dup is not None:
             raise ValueError(
-                f"Duplicate active skill: '{new_record.name}' "
-                f"(id={dup[0]}) already active"
+                f"Duplicate active skill: '{new_record.name}' (id={dup[0]}) already active"
             )
 
     @staticmethod
@@ -463,7 +460,10 @@ class SkillStore:
             return self._build_ancestry_result(skill_ids, visited, records_by_id)
 
     def _ancestry_bfs(
-        self, conn: sqlite3.Connection, skill_ids: list[str], max_depth: int,
+        self,
+        conn: sqlite3.Connection,
+        skill_ids: list[str],
+        max_depth: int,
     ) -> dict[str, set[str]]:
         """BFS traversal collecting visited ancestor IDs per skill."""
         visited: dict[str, set[str]] = {sid: set() for sid in skill_ids}
@@ -475,22 +475,44 @@ class SkillStore:
             if not all_frontier_ids:
                 break
             round_parents = self._batch_load_parents(conn, all_frontier_ids)
-            next_frontiers: dict[str, list[str]] = {sid: [] for sid in skill_ids}
-            any_progress = False
-            for sid in skill_ids:
-                for fid in frontiers[sid]:
-                    for pid in round_parents.get(fid, []):
-                        if pid not in visited[sid]:
-                            visited[sid].add(pid)
-                            next_frontiers[sid].append(pid)
-                            any_progress = True
+            next_frontiers, any_progress = self._expand_frontiers(
+                skill_ids,
+                frontiers,
+                round_parents,
+                visited,
+            )
             frontiers = next_frontiers
             if not any_progress:
                 break
         return visited
 
+    @staticmethod
+    def _expand_frontiers(
+        skill_ids: list[str],
+        frontiers: dict[str, list[str]],
+        round_parents: dict[str, list[str]],
+        visited: dict[str, set[str]],
+    ) -> tuple[dict[str, list[str]], bool]:
+        """Expand BFS frontiers one level. Returns (next_frontiers, any_progress)."""
+        next_frontiers: dict[str, list[str]] = {sid: [] for sid in skill_ids}
+        any_progress = False
+        for sid in skill_ids:
+            new_parents = [
+                pid
+                for fid in frontiers[sid]
+                for pid in round_parents.get(fid, [])
+                if pid not in visited[sid]
+            ]
+            for pid in new_parents:
+                visited[sid].add(pid)
+                next_frontiers[sid].append(pid)
+                any_progress = True
+        return next_frontiers, any_progress
+
     def _load_ancestry_records(
-        self, conn: sqlite3.Connection, visited: dict[str, set[str]],
+        self,
+        conn: sqlite3.Connection,
+        visited: dict[str, set[str]],
     ) -> dict[str, SkillRecord]:
         """Batch-load SkillRecords for all discovered ancestor IDs."""
         all_ids: set[str] = set()
@@ -505,10 +527,7 @@ class SkillStore:
         )
         ancestors_ids = {r[0] for r in rows}
         parents = self._batch_load_parents(conn, ancestors_ids)
-        return {
-            (rec := self._row_to_record(conn, row, parents)).id: rec
-            for row in rows
-        }
+        return {(rec := self._row_to_record(conn, row, parents)).id: rec for row in rows}
 
     @staticmethod
     def _build_ancestry_result(
@@ -521,9 +540,7 @@ class SkillStore:
             return {sid: [] for sid in skill_ids}
         result: dict[str, list[SkillRecord]] = {}
         for sid in skill_ids:
-            ancestors = [
-                records_by_id[aid] for aid in visited[sid] if aid in records_by_id
-            ]
+            ancestors = [records_by_id[aid] for aid in visited[sid] if aid in records_by_id]
             ancestors.sort(key=lambda r: r.lineage.generation)
             result[sid] = ancestors
         return result

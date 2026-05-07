@@ -8,10 +8,13 @@ import yaml
 from agent_nexus.platform.agency.allowlist import (
     _SAFE_SOURCE_PATH,
     _validate_capabilities,
+    _validate_entries,
     _validate_id,
     _validate_output_contract,
+    _validate_source,
     _validate_source_path,
     _validate_string_list,
+    _validate_top_level,
     _validate_tools,
     load_allowlist,
     validate_allowlist_entry,
@@ -409,3 +412,73 @@ class TestSafeSourcePathRegex:
 
     def test_url_encoded_traversal_fails(self):
         assert _SAFE_SOURCE_PATH.match("%2e%2e/expert.md") is None
+
+
+# ===================================================================
+# _validate_entries — extracted helper
+# ===================================================================
+
+
+class TestValidateEntries:
+    def test_valid_entries(self):
+        entries = [_valid_entry(id="agency.a"), _valid_entry(id="agency.b")]
+        _validate_entries(entries)  # should not raise
+
+    def test_duplicate_id_raises(self):
+        entries = [_valid_entry(id="agency.dup"), _valid_entry(id="agency.dup")]
+        with pytest.raises(ValueError, match="Duplicate"):
+            _validate_entries(entries)
+
+    def test_non_dict_entry_raises(self):
+        entries = ["not a dict"]
+        with pytest.raises(ValueError, match="must be a mapping"):
+            _validate_entries(entries)
+
+    def test_invalid_entry_field_raises(self):
+        entries = [_valid_entry(id="bad-prefix")]
+        with pytest.raises(ValueError, match="agency."):
+            _validate_entries(entries)
+
+
+# ===================================================================
+# _validate_source — extracted helper
+# ===================================================================
+
+
+class TestValidateSource:
+    def test_valid_source(self):
+        _validate_source({"repo": "https://example.com/r", "ref": "main"})
+
+    def test_non_dict_source_raises(self):
+        with pytest.raises(ValueError, match="mapping"):
+            _validate_source("not a dict")
+
+    def test_missing_repo_raises(self):
+        with pytest.raises(ValueError, match="'repo' and 'ref'"):
+            _validate_source({"ref": "main"})
+
+    def test_missing_ref_raises(self):
+        with pytest.raises(ValueError, match="'repo' and 'ref'"):
+            _validate_source({"repo": "https://example.com/r"})
+
+
+# ===================================================================
+# _validate_top_level — extracted helper
+# ===================================================================
+
+
+class TestValidateTopLevel:
+    def test_valid_top_level(self):
+        _validate_top_level({"source": {}, "agents": []})
+
+    def test_missing_source_raises(self):
+        with pytest.raises(ValueError, match="'source'"):
+            _validate_top_level({"agents": []})
+
+    def test_missing_agents_raises(self):
+        with pytest.raises(ValueError, match="'agents'"):
+            _validate_top_level({"source": {}})
+
+    def test_agents_not_list_raises(self):
+        with pytest.raises(ValueError, match="'agents' list"):
+            _validate_top_level({"source": {}, "agents": "nope"})

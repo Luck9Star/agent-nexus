@@ -30,6 +30,16 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class _LegacyContext:
+    """Mutable state bag for the legacy dispatch loop."""
+
+    executed: set[str] = field(default_factory=set)
+    failed: set[str] = field(default_factory=set)
+    skipped: set[str] = field(default_factory=set)
+    artifacts: list[Artifact] = field(default_factory=list)
+
+
+@dataclass
 class TaskComposerInput:
     """Input for a TaskComposer run."""
 
@@ -279,12 +289,20 @@ class TaskComposer:
         # Step 4: Dispatch experts
         if task_graph is not None:
             artifacts, skipped = self._dispatch_via_graph(
-                dag, input.task, executor, task_graph, input.timeout_seconds,
-                input.max_parallel, concurrent,
+                dag,
+                input.task,
+                executor,
+                task_graph,
+                input.timeout_seconds,
+                input.max_parallel,
+                concurrent,
             )
         else:
             artifacts, skipped = self._dispatch_legacy(
-                dag, input.task, executor, input.timeout_seconds,
+                dag,
+                input.task,
+                executor,
+                input.timeout_seconds,
             )
 
         if not artifacts:
@@ -311,7 +329,11 @@ class TaskComposer:
 
         # Step 6: QA Gate validation
         qa_result = self._run_qa_gate(
-            integrated, selected, input, llm_qa_gate, llm_integrator is not None,
+            integrated,
+            selected,
+            input,
+            llm_qa_gate,
+            llm_integrator is not None,
         )
 
         return TaskComposerResult(
@@ -329,7 +351,9 @@ class TaskComposer:
     # ------------------------------------------------------------------
 
     def _infer_capabilities(
-        self, task: str, llm_planner: LLMPlanner | None,
+        self,
+        task: str,
+        llm_planner: LLMPlanner | None,
     ) -> list[str]:
         """Infer required capabilities from the task description."""
         if llm_planner is not None:
@@ -390,9 +414,7 @@ class TaskComposer:
             dispatcher.close()
 
         if dispatch_result.timed_out:
-            raise TimeoutError(
-                f"TaskComposer pipeline timed out after {timeout_seconds}s"
-            )
+            raise TimeoutError(f"TaskComposer pipeline timed out after {timeout_seconds}s")
 
         skipped: set[str] = set()
         if dispatch_result.failed or dispatch_result.cancelled:
@@ -406,7 +428,9 @@ class TaskComposer:
             )
             for tid, err_msg in dispatch_result.errors.items():
                 logger.error(
-                    "TaskComposer: task '%s' failed because: %s", tid, err_msg,
+                    "TaskComposer: task '%s' failed because: %s",
+                    tid,
+                    err_msg,
                 )
             skipped.update(dispatch_result.failed)
             skipped.update(dispatch_result.cancelled)
@@ -416,9 +440,7 @@ class TaskComposer:
     @staticmethod
     def _check_deadline(deadline: float | None, timeout_seconds: float | None) -> None:
         if deadline is not None and time.monotonic() > deadline:
-            raise TimeoutError(
-                f"TaskComposer pipeline timed out after {timeout_seconds}s"
-            )
+            raise TimeoutError(f"TaskComposer pipeline timed out after {timeout_seconds}s")
 
     @staticmethod
     def _should_skip_task(
@@ -449,42 +471,76 @@ class TaskComposer:
         failed: set[str] = set()
         skipped: set[str] = set()
         artifacts: list[Artifact] = []
-        deadline = (
-            time.monotonic() + timeout_seconds if timeout_seconds is not None else None
-        )
+        deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+        ctx = _LegacyContext(executed, failed, skipped, artifacts)
 
         for _ in range(len(dag.tasks)):
             for task_def in dag.tasks:
                 self._check_deadline(deadline, timeout_seconds)
-                verdict = self._should_skip_task(task_def, executed, failed, specialist_ids)
-                if verdict is True:
-                    continue
-                if verdict is False:
-                    if task_def.id not in skipped:
-                        logger.warning(
-                            "Skipping task '%s' (agent '%s'): blocked by failed dependency %s",
-                            task_def.id,
-                            task_def.agent,
-                            [d for d in task_def.blocked_by if d in failed],
-                        )
-                        skipped.add(task_def.id)
-                    failed.add(task_def.id)
-                    continue
-                # verdict is None and deps are satisfied
-                if all(dep in executed for dep in task_def.blocked_by):
-                    try:
-                        artifact = executor(task_def.agent, task)
-                        executed.add(task_def.id)
-                        artifacts.append(artifact)
-                    except Exception:
-                        logger.exception(
-                            "Executor failed for task '%s' (agent '%s') in legacy path",
-                            task_def.id,
-                            task_def.agent,
-                        )
-                        failed.add(task_def.id)
+                self._process_legacy_task(
+                    task_def,
+                    task,
+                    executor,
+                    specialist_ids,
+                    ctx,
+                )
 
         return artifacts, skipped
+
+    def _process_legacy_task(
+        self,
+        task_def: DAGTask,
+        task: str,
+        executor: ExpertExecutor,
+        specialist_ids: set[str],
+        ctx: _LegacyContext,
+    ) -> None:
+        """Handle a single task in the legacy dispatch loop."""
+        verdict = self._should_skip_task(task_def, ctx.executed, ctx.failed, specialist_ids)
+        if verdict is True:
+            return
+        if verdict is False:
+            self._mark_legacy_failure(task_def, ctx)
+            return
+        # verdict is None — check if deps are satisfied
+        if all(dep in ctx.executed for dep in task_def.blocked_by):
+            self._try_execute_legacy(task_def, task, executor, ctx)
+
+    @staticmethod
+    def _mark_legacy_failure(
+        task_def: DAGTask,
+        ctx: _LegacyContext,
+    ) -> None:
+        """Mark a task as failed due to dependency failure."""
+        if task_def.id not in ctx.skipped:
+            logger.warning(
+                "Skipping task '%s' (agent '%s'): blocked by failed dependency %s",
+                task_def.id,
+                task_def.agent,
+                [d for d in task_def.blocked_by if d in ctx.failed],
+            )
+            ctx.skipped.add(task_def.id)
+        ctx.failed.add(task_def.id)
+
+    @staticmethod
+    def _try_execute_legacy(
+        task_def: DAGTask,
+        task: str,
+        executor: ExpertExecutor,
+        ctx: _LegacyContext,
+    ) -> None:
+        """Attempt to execute a task, recording success or failure."""
+        try:
+            artifact = executor(task_def.agent, task)
+            ctx.executed.add(task_def.id)
+            ctx.artifacts.append(artifact)
+        except Exception:
+            logger.exception(
+                "Executor failed for task '%s' (agent '%s') in legacy path",
+                task_def.id,
+                task_def.agent,
+            )
+            ctx.failed.add(task_def.id)
 
     def _run_qa_gate(
         self,

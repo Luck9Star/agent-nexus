@@ -77,7 +77,7 @@ class SchemaTransformer:
     # Internal dispatch
     # ------------------------------------------------------------------
 
-    def _resolve_any(self, schema: dict[str, Any], name: str = "Anonymous") -> type:  # noqa: PLR0911, PLR0912
+    def _resolve_any(self, schema: dict[str, Any], name: str = "Anonymous") -> type:  # noqa: PLR0911
         """Dispatch based on schema keywords."""
         # 1. ``$ref`` — highest priority
         if "$ref" in schema:
@@ -96,7 +96,22 @@ class SchemaTransformer:
 
         # 4. Explicit ``type``
         type_str = schema.get("type")
+        if type_str is not None:
+            return self._resolve_by_type_str(type_str, schema, name)
 
+        # 5. Fallback — treat as object if properties present, else str
+        if "properties" in schema:
+            return self._build_object_model(schema, name)
+
+        return str
+
+    def _resolve_by_type_str(
+        self,
+        type_str: str | list[str],
+        schema: dict[str, Any],
+        name: str,
+    ) -> type:
+        """Resolve a schema that has an explicit ``type`` field."""
         if isinstance(type_str, list):
             # OpenAPI 3.1 style: ["string", "null"]
             non_null = [t for t in type_str if t != "null"]
@@ -104,16 +119,9 @@ class SchemaTransformer:
             inner_type = self._resolve_typed(non_null[0], schema, name) if non_null else str
             return inner_type | None if has_null else inner_type  # type: ignore[return-value]
 
-        if isinstance(type_str, str):
-            nullable = schema.get("nullable", False)
-            inner = self._resolve_typed(type_str, schema, name)
-            return inner | None if nullable else inner  # type: ignore[return-value]
-
-        # 5. Fallback — treat as object if properties present, else str
-        if "properties" in schema:
-            return self._build_object_model(schema, name)
-
-        return str
+        nullable = schema.get("nullable", False)
+        inner = self._resolve_typed(type_str, schema, name)
+        return inner | None if nullable else inner  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
     # Type-specific resolvers
@@ -140,9 +148,7 @@ class SchemaTransformer:
     def _resolve_ref(self, ref: str, _name: str = "RefModel") -> type:
         """Resolve a ``$ref`` pointer (``#/$defs/X`` or ``#/definitions/X``)."""
         if not ref.startswith("#/"):
-            logger.warning(
-                "External $ref %r is not supported — degrading to str", ref
-            )
+            logger.warning("External $ref %r is not supported — degrading to str", ref)
             return str
 
         parts = ref[2:].split("/")

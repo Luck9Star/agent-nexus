@@ -517,3 +517,82 @@ class TestSafeJsonLoads:
 
     def test_type_error_input_returns_default(self) -> None:
         assert _safe_json_loads(123, "default") == "default"  # type: ignore[arg-type]
+
+
+# ===================================================================
+# _expand_frontiers — extracted BFS helper
+# ===================================================================
+
+
+class TestExpandFrontiers:
+    """Tests for SkillStore._expand_frontiers static method."""
+
+    def test_no_new_parents(self):
+        """When all parents already visited, no progress is made."""
+        from agent_nexus.platform.evolution.skill_store import SkillStore
+
+        frontiers = {"a": ["x"]}
+        visited = {"a": {"x"}}
+        round_parents = {"x": ["p1"]}
+        # p1 not in visited, but let's test already-visited case
+        visited = {"a": {"x", "p1"}}
+        round_parents = {"x": ["p1"]}
+        next_f, progress = SkillStore._expand_frontiers(
+            ["a"], frontiers, round_parents, visited,
+        )
+        assert not progress
+        assert next_f == {"a": []}
+
+    def test_discovers_new_parents(self):
+        """New parents are added to visited and next_frontiers."""
+        from agent_nexus.platform.evolution.skill_store import SkillStore
+
+        frontiers = {"a": ["x"]}
+        visited = {"a": set()}
+        round_parents = {"x": ["p1", "p2"]}
+        next_f, progress = SkillStore._expand_frontiers(
+            ["a"], frontiers, round_parents, visited,
+        )
+        assert progress
+        assert next_f["a"] == ["p1", "p2"]
+        assert visited["a"] == {"p1", "p2"}
+
+    def test_partial_new_parents(self):
+        """Only truly new parents are added to next frontier."""
+        from agent_nexus.platform.evolution.skill_store import SkillStore
+
+        frontiers = {"a": ["x"]}
+        visited = {"a": {"p1"}}
+        round_parents = {"x": ["p1", "p2"]}
+        next_f, progress = SkillStore._expand_frontiers(
+            ["a"], frontiers, round_parents, visited,
+        )
+        assert progress
+        assert next_f["a"] == ["p2"]
+        assert visited["a"] == {"p1", "p2"}
+
+    def test_multiple_skills(self):
+        """Frontier expansion works across multiple skills independently."""
+        from agent_nexus.platform.evolution.skill_store import SkillStore
+
+        frontiers = {"a": ["x"], "b": ["y"]}
+        visited = {"a": set(), "b": set()}
+        round_parents = {"x": ["p1"], "y": ["p2"]}
+        next_f, progress = SkillStore._expand_frontiers(
+            ["a", "b"], frontiers, round_parents, visited,
+        )
+        assert progress
+        assert next_f == {"a": ["p1"], "b": ["p2"]}
+
+    def test_empty_frontiers(self):
+        """Empty frontiers produce no progress."""
+        from agent_nexus.platform.evolution.skill_store import SkillStore
+
+        frontiers = {"a": []}
+        visited = {"a": set()}
+        round_parents = {}
+        next_f, progress = SkillStore._expand_frontiers(
+            ["a"], frontiers, round_parents, visited,
+        )
+        assert not progress
+        assert next_f == {"a": []}

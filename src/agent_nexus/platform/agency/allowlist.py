@@ -20,15 +20,25 @@ def load_allowlist(path: str) -> dict:
     if not isinstance(data, dict):
         raise ValueError("Allowlist file must contain a YAML mapping")
 
-    # Validate top-level structure
+    _validate_top_level(data)
+    _validate_entries(data["agents"])
+    _validate_source(data["source"])
+
+    return data
+
+
+def _validate_top_level(data: dict) -> None:
+    """Validate top-level structure has 'source' and 'agents' keys."""
     if "source" not in data:
         raise ValueError("Allowlist must have a 'source' key")
     if "agents" not in data or not isinstance(data["agents"], list):
         raise ValueError("Allowlist must have an 'agents' list")
 
-    # Validate each agent entry
+
+def _validate_entries(agents: list[dict]) -> None:
+    """Validate each agent entry and check for duplicate IDs."""
     seen_ids: set[str] = set()
-    for i, entry in enumerate(data["agents"]):
+    for i, entry in enumerate(agents):
         if not isinstance(entry, dict):
             raise ValueError(f"Agent entry #{i} must be a mapping, got {type(entry).__name__}")
         entry_errors = validate_allowlist_entry(entry)
@@ -40,13 +50,13 @@ def load_allowlist(path: str) -> dict:
             raise ValueError(f"Duplicate agent id '{entry_id}' in allowlist")
         seen_ids.add(entry_id)
 
-    source = data["source"]
+
+def _validate_source(source: dict) -> None:
+    """Validate source section has 'repo' and 'ref' keys."""
     if not isinstance(source, dict):
         raise ValueError("'source' must be a mapping")
     if "repo" not in source or "ref" not in source:
         raise ValueError("'source' must contain 'repo' and 'ref' keys")
-
-    return data
 
 
 def validate_allowlist_entry(entry: dict) -> list[str]:

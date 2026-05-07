@@ -54,9 +54,7 @@ def _build_spawn_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     Caller-supplied *extra* variables (model config, API keys) are layered
     on top.  This prevents accidental credential leakage to agents.
     """
-    env = {
-        key: value for key in _ESSENTIAL_ENV_VARS if (value := os.environ.get(key)) is not None
-    }
+    env = {key: value for key in _ESSENTIAL_ENV_VARS if (value := os.environ.get(key)) is not None}
     if extra:
         env.update(extra)
     return env
@@ -565,53 +563,56 @@ class ProcessManager:
         Closes IPC streams and cancels drain tasks for dead agents to
         prevent FD leaks.
 
+        Note: mutates ``_agents`` without ``_lock``. Under CPython's
+        GIL, individual dict operations are atomic.  The close_sync()
+        calls are deferred until after the dict mutation loop completes
+        to avoid FD corruption if the drain task races with us.
+
         Returns:
             List of agent names that were cleaned up.
         """
         dead: list[str] = []
+        to_close: list[tuple[str, Any]] = []
         for name, handle in list(self._agents.items()):
             if not handle.is_alive:
                 dead.append(name)
                 self._agents.pop(name, None)
 
                 # Cancel background drain task.
-                # Note: we cancel without awaiting because this is a
-                # synchronous method.  The drain coroutine will receive
-                # CancelledError on the next event loop tick.  We close
-                # the transport *after* cancellation — the process is
-                # already dead so the OS closed the remote end; any
-                # remaining reads in the drain task will get EOF/BrokenPipe
-                # which the drain task's exception handler already catches.
                 drain_task = handle.drain_task
                 if drain_task is not None and not drain_task.done():
                     drain_task.cancel()
 
-                # Close IPC streams to release FDs.
-                # The process is already dead so the OS has closed the
-                # remote end; synchronous close is enough to release our
-                # local FDs.
-                try:
-                    handle.ipc.stream.close_sync()
-                except Exception:
-                    logger.debug(
-                        "Failed to close IPC stream for dead agent '%s'",
-                        name,
-                        exc_info=True,
-                    )
+                # Defer close until after dict mutation to reduce
+                # race window with drain tasks.
+                to_close.append((name, handle))
 
-                rc = handle.process.returncode
-                if rc is not None and rc != 0:
-                    logger.warning(
-                        "Agent '%s' exited with non-zero return code %d",
-                        name,
-                        rc,
-                    )
-                else:
-                    logger.debug(
-                        "Cleaned up dead agent handle '%s' (rc=%s)",
-                        name,
-                        rc,
-                    )
+        # Close IPC streams after all dict mutations complete.
+        # The process is already dead so the OS closed the remote end;
+        # synchronous close is enough to release our local FDs.
+        for name, handle in to_close:
+            try:
+                handle.ipc.stream.close_sync()
+            except Exception:
+                logger.debug(
+                    "Failed to close IPC stream for dead agent '%s'",
+                    name,
+                    exc_info=True,
+                )
+
+            rc = handle.process.returncode
+            if rc is not None and rc != 0:
+                logger.warning(
+                    "Agent '%s' exited with non-zero return code %d",
+                    name,
+                    rc,
+                )
+            else:
+                logger.debug(
+                    "Cleaned up dead agent handle '%s' (rc=%s)",
+                    name,
+                    rc,
+                )
         return dead
 
     def __del__(self) -> None:

@@ -3,11 +3,12 @@
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
-from agent_nexus.platform.agency.cli import cli
+from agent_nexus.platform.agency.cli import cli, _setup_llm_components
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _VENDOR_DIR = _PROJECT_ROOT / "vendor" / "agency-agents"
@@ -267,3 +268,75 @@ class TestCheckProfilesCommand:
             ["check-profiles", "--output-dir", "/nonexistent/path"],
         )
         assert result.exit_code != 0
+
+
+# ===================================================================
+# _setup_llm_components — resource leak regression
+# ===================================================================
+
+
+class TestSetupLLMComponentsResourceCleanup:
+    """Verify LLMClient.close() is called on component init failure."""
+
+    def test_client_closed_on_import_error(self):
+        """LLMClient must be closed if LLMPlanner constructor raises."""
+        mock_client = MagicMock()
+        mock_registry = MagicMock()
+        with (
+            patch.dict(
+                "sys.modules",
+                {
+                    **__import__("sys").modules,
+                    "agent_nexus.models.capability": MagicMock(
+                        ModelCapabilityRegistry=mock_registry,
+                    ),
+                    "agent_nexus.platform.agency.llm_client": MagicMock(
+                        LLMClient=MagicMock(return_value=mock_client),
+                    ),
+                    "agent_nexus.platform.agency.llm_planner": MagicMock(
+                        LLMPlanner=MagicMock(side_effect=ImportError("no planner")),
+                    ),
+                    "agent_nexus.platform.agency.llm_integrator": MagicMock(
+                        LLMIntegrator=MagicMock(),
+                    ),
+                    "agent_nexus.platform.agency.llm_qa_gate": MagicMock(
+                        LLMQualityGate=MagicMock(),
+                    ),
+                },
+            ),
+        ):
+            result = _setup_llm_components(
+                model="test:model",
+                config_dir=None,
+                temperature=None,
+                registry=MagicMock(),
+            )
+            assert result == (None, None, None, None)
+            mock_client.close.assert_called_once()
+
+    def test_client_not_created_when_import_fails(self):
+        """If ModelCapabilityRegistry import fails, no client is created."""
+        with patch.dict(
+            "sys.modules",
+            {
+                **__import__("sys").modules,
+            },
+        ):
+            # Force import failure by temporarily removing the module
+            import sys
+
+            orig = sys.modules.get("agent_nexus.models.capability")
+            sys.modules["agent_nexus.models.capability"] = None  # type: ignore[assignment]
+            try:
+                result = _setup_llm_components(
+                    model="test:model",
+                    config_dir=None,
+                    temperature=None,
+                    registry=MagicMock(),
+                )
+                assert result == (None, None, None, None)
+            finally:
+                if orig is not None:
+                    sys.modules["agent_nexus.models.capability"] = orig
+                else:
+                    sys.modules.pop("agent_nexus.models.capability", None)
