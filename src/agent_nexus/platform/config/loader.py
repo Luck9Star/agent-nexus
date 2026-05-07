@@ -44,6 +44,54 @@ from .defaults import (
 logger = logging.getLogger(__name__)
 
 
+def _read_sources_yaml(path: Path) -> object | None:
+    """Load and parse sources.yaml, returning raw object or None on failure."""
+    logger.debug("Loading sources from %s", path)
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        logger.error("Failed to parse %s: %s", path, exc)
+        return None
+    except OSError as exc:
+        logger.error("Cannot read %s: %s", path, exc)
+        return None
+    if not isinstance(raw, dict) or "sources" not in raw:
+        logger.warning("sources.yaml is empty or missing 'sources' key")
+        return None
+    sources_list = raw["sources"]
+    if not isinstance(sources_list, list):
+        logger.warning("sources.yaml 'sources' key is not a list")
+        return None
+    return sources_list
+
+
+def _parse_sources_list(raw: object | None) -> list[SourceEntry]:
+    """Validate raw YAML entries and return SourceEntry list."""
+    if raw is None:
+        return []
+    entries: list[SourceEntry] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            logger.warning("Skipping non-mapping source entry: %r", item)
+            continue
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            logger.error("Skipping source entry with missing/invalid 'name': %r", item)
+            continue
+        try:
+            entries.append(
+                SourceEntry(
+                    name=name,
+                    type=item.get("type", "git"),
+                    url=item.get("url", ""),
+                    branch=item.get("branch", "main"),
+                )
+            )
+        except Exception as exc:
+            logger.warning("Skipping invalid source entry %s: %s", item, exc)
+    return entries
+
+
 class ConfigLoader:
     """Load and merge platform configuration from multiple sources.
 
@@ -450,44 +498,8 @@ class ConfigLoader:
             self._sources_cache_mtime = mtime
             return entries
 
-        logger.debug("Loading sources from %s", sources_path)
-        try:
-            raw = yaml.safe_load(sources_path.read_text(encoding="utf-8"))
-        except yaml.YAMLError as exc:
-            logger.error("Failed to parse %s: %s", sources_path, exc)
-            return []
-        except OSError as exc:
-            logger.error("Cannot read %s: %s", sources_path, exc)
-            return []
-
-        if not isinstance(raw, dict) or "sources" not in raw:
-            logger.warning("sources.yaml is empty or missing 'sources' key")
-            return []
-
-        sources_list = raw["sources"]
-        if not isinstance(sources_list, list):
-            logger.warning("sources.yaml 'sources' key is not a list")
-            return []
-
-        entries: list[SourceEntry] = []
-        for item in sources_list:
-            if not isinstance(item, dict):
-                logger.warning("Skipping non-mapping source entry: %r", item)
-                continue
-            name = item.get("name")
-            if not isinstance(name, str) or not name.strip():
-                logger.error("Skipping source entry with missing/invalid 'name': %r", item)
-                continue
-            try:
-                entry = SourceEntry(
-                    name=name,
-                    type=item.get("type", "git"),
-                    url=item.get("url", ""),
-                    branch=item.get("branch", "main"),
-                )
-                entries.append(entry)
-            except Exception as exc:
-                logger.warning("Skipping invalid source entry %s: %s", item, exc)
+        raw = _read_sources_yaml(sources_path)
+        entries = _parse_sources_list(raw)
 
         logger.info("Loaded %d source(s) from sources.yaml", len(entries))
         self._sources_cache = entries

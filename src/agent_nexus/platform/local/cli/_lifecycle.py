@@ -285,7 +285,6 @@ async def _info(name: str) -> None:
     if not AGENT_NAME_RE.match(name):
         typer.echo(f"Invalid agent name: {name!r}", err=True)
         raise typer.Exit(code=1)
-    import yaml
 
     _loader, lockfile, _sources, config_dir = _init_managers()
     entry = lockfile.get_entry(name)
@@ -306,34 +305,46 @@ async def _info(name: str) -> None:
         typer.echo(f"  Dependencies: {', '.join(entry.dependencies)}")
 
     agent_dir = config_dir / "agents" / name
-    manifest_path = agent_dir / "agent-manifest.yaml"
-    if manifest_path.exists():
-        try:
-            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-            if isinstance(manifest, dict):
-                typer.echo()
-                desc = manifest.get("description", "")
-                if desc:
-                    typer.echo(f"  Description:  {desc}")
-                run_modes = manifest.get("run_modes", [])
-                if run_modes:
-                    typer.echo(f"  Run modes:    {', '.join(run_modes)}")
-                model_tier = manifest.get("model_tier", "")
-                if model_tier:
-                    typer.echo(f"  Model tier:   {model_tier}")
-        except Exception:
-            logger.debug("Failed to read manifest for info display", exc_info=True)
+    _display_manifest_info(agent_dir)
+    _display_skill_preview(agent_dir)
 
+
+def _display_manifest_info(agent_dir: Path) -> None:
+    """Read and display agent-manifest.yaml metadata."""
+    import yaml
+
+    manifest_path = agent_dir / "agent-manifest.yaml"
+    if not manifest_path.exists():
+        return
+    try:
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.debug("Failed to read manifest for info display", exc_info=True)
+        return
+    if not isinstance(manifest, dict):
+        return
+    typer.echo()
+    for key, label in [("description", "Description"), ("run_modes", "Run modes"), ("model_tier", "Model tier")]:
+        val = manifest.get(key)
+        if val:
+            formatted = ", ".join(val) if isinstance(val, list) else str(val)
+            typer.echo(f"  {label}:  {formatted}")
+
+
+def _display_skill_preview(agent_dir: Path) -> None:
+    """Show first 5 lines of SKILL.md as a preview."""
     skill_path = agent_dir / "SKILL.md"
-    if skill_path.exists():
-        try:
-            first_lines = skill_path.read_text(encoding="utf-8").split("\n")[:5]
-            typer.echo()
-            typer.echo("  SKILL.md preview:")
-            for line in first_lines:
-                typer.echo(f"    {line}")
-        except Exception:
-            logger.debug("Failed to read SKILL.md preview", exc_info=True)
+    if not skill_path.exists():
+        return
+    try:
+        first_lines = skill_path.read_text(encoding="utf-8").split("\n")[:5]
+    except Exception:
+        logger.debug("Failed to read SKILL.md preview", exc_info=True)
+        return
+    typer.echo()
+    typer.echo("  SKILL.md preview:")
+    for line in first_lines:
+        typer.echo(f"    {line}")
 
 
 async def _run(name: str, mode: str, transport: str, extra_args: list[str] | None = None) -> None:

@@ -297,53 +297,80 @@ def check_profiles(output_dir: str) -> None:
         click.echo("No profile files found.")
         return
 
+    schema = _load_profile_schema()
     errors: list[str] = []
     checked = 0
 
-    # Load JSON schema for validation if available
-    schema = None
+    for jf in json_files:
+        profile, read_err = _load_profile_json(jf)
+        if read_err is not None:
+            errors.append(read_err)
+            continue
+        checked += 1
+        errors.extend(_validate_profile(profile, jf.name, schema))
+
+    _report_profile_results(checked, errors)
+
+
+def _load_profile_schema() -> object | None:
+    """Load JSON schema for profile validation if jsonschema is available."""
     try:
         import jsonschema  # type: ignore[import-untyped]
 
         if _SCHEMA_PATH.is_file():
-            schema = json.loads(_SCHEMA_PATH.read_text())
+            return json.loads(_SCHEMA_PATH.read_text())
     except ImportError:
         pass
+    return None
 
-    for jf in json_files:
-        try:
-            with jf.open() as f:
-                profile = json.load(f)
-        except (json.JSONDecodeError, OSError) as exc:
-            errors.append(f"{jf.name}: failed to read — {exc}")
-            continue
 
-        checked += 1
+def _load_profile_json(path: Path) -> tuple[dict | None, str | None]:
+    """Load a single profile JSON file, returning (profile, None) or (None, error_msg)."""
+    try:
+        with path.open() as f:
+            return json.load(f), None
+    except (json.JSONDecodeError, OSError) as exc:
+        return None, f"{path.name}: failed to read — {exc}"
 
-        # Schema-based validation (preferred)
-        if schema is not None:
-            try:
-                jsonschema.validate(profile, schema)  # type: ignore[name-defined]
-            except jsonschema.ValidationError as exc:  # type: ignore[name-defined]
-                errors.append(f"{jf.name}: schema validation failed — {exc.message}")
-            continue
 
-        # Fallback: manual key validation (when jsonschema not installed)
-        required_keys = {"id", "name", "capabilities", "permissions", "output_contract"}
-        missing = required_keys - set(profile.keys())
-        if missing:
-            errors.append(f"{jf.name}: missing keys {missing}")
+def _validate_profile(profile: dict, name: str, schema: object | None) -> list[str]:
+    """Validate a single profile, returning list of error strings."""
+    if schema is not None:
+        return _validate_profile_schema(profile, name, schema)
+    return _validate_profile_manual(profile, name)
 
-        # Validate capabilities is non-empty
-        caps = profile.get("capabilities", [])
-        if not isinstance(caps, list) or len(caps) == 0:
-            errors.append(f"{jf.name}: capabilities must be a non-empty list")
 
-        # Validate permissions.mode
-        perm_mode = profile.get("permissions", {}).get("mode")
-        if perm_mode not in ("plan", "default", "full_auto"):
-            errors.append(f"{jf.name}: invalid permission mode '{perm_mode}'")
+def _validate_profile_schema(profile: dict, name: str, schema: object) -> list[str]:
+    """Validate profile against JSON schema."""
+    import jsonschema  # type: ignore[import-untyped]
 
+    try:
+        jsonschema.validate(profile, schema)
+        return []
+    except jsonschema.ValidationError as exc:  # type: ignore[name-defined]
+        return [f"{name}: schema validation failed — {exc.message}"]
+
+
+def _validate_profile_manual(profile: dict, name: str) -> list[str]:
+    """Fallback manual validation when jsonschema is not installed."""
+    errors: list[str] = []
+    required_keys = {"id", "name", "capabilities", "permissions", "output_contract"}
+    missing = required_keys - set(profile.keys())
+    if missing:
+        errors.append(f"{name}: missing keys {missing}")
+
+    caps = profile.get("capabilities", [])
+    if not isinstance(caps, list) or len(caps) == 0:
+        errors.append(f"{name}: capabilities must be a non-empty list")
+
+    perm_mode = profile.get("permissions", {}).get("mode")
+    if perm_mode not in ("plan", "default", "full_auto"):
+        errors.append(f"{name}: invalid permission mode '{perm_mode}'")
+    return errors
+
+
+def _report_profile_results(checked: int, errors: list[str]) -> None:
+    """Print validation summary and exit with appropriate code."""
     if errors:
         click.echo(f"Checked {checked} profiles, found {len(errors)} issue(s):")
         for err in errors:
