@@ -165,6 +165,28 @@ class SpecialistSelector:
             team, required_set, optional_set, request, protect_coverage=True
         )
 
+    @staticmethod
+    def _is_better_candidate(
+        profile: dict[str, Any],
+        coverage: set[str],
+        best_profile: dict[str, Any] | None,
+        best_coverage: set[str],
+        best_score: float,
+    ) -> bool:
+        """Determine if *profile* is a strictly better greedy choice than the current best."""
+        coverage_len = len(coverage)
+        if coverage_len > len(best_coverage):
+            return True
+        total_caps = len(set(profile.get("capabilities", [])))
+        if coverage_len == len(best_coverage) and total_caps > best_score:
+            return True
+        return bool(
+            coverage_len == len(best_coverage)
+            and total_caps == best_score
+            and best_profile is not None
+            and profile["id"] < best_profile["id"]
+        )
+
     def _greedy_set_cover(
         self,
         candidates: list[dict[str, Any]],
@@ -188,24 +210,13 @@ class SpecialistSelector:
                 pid = profile["id"]
                 if pid in used_ids:
                     continue
-                agent_caps = set(profile.get("capabilities", []))
-                coverage = agent_caps & remaining
-                # Deterministic tie-breaking: prefer more uncovered caps,
-                # then higher overall capability count, then lexicographic id
-                coverage_len = len(coverage)
-                total_caps = len(agent_caps)
-                if (
-                    coverage_len > len(best_coverage)
-                    or (coverage_len == len(best_coverage) and total_caps > best_score)
-                    or (
-                        coverage_len == len(best_coverage)
-                        and total_caps == best_score
-                        and pid < (best_profile["id"] if best_profile else "")
-                    )
+                coverage = set(profile.get("capabilities", [])) & remaining
+                if self._is_better_candidate(
+                    profile, coverage, best_profile, best_coverage, best_score,
                 ):
                     best_profile = profile
                     best_coverage = coverage
-                    best_score = total_caps
+                    best_score = len(set(profile.get("capabilities", [])))
 
             if best_profile is None or not best_coverage:
                 break  # No agent can cover remaining caps

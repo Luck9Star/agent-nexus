@@ -203,9 +203,12 @@ class DAGDispatcher:
 
     def __del__(self) -> None:
         """Best-effort cleanup of the thread pool on garbage collection."""
-        if self._pool is not None:
-            self._pool.shutdown(wait=False)
-            self._pool = None
+        try:
+            if self._pool is not None:
+                self._pool.shutdown(wait=False)
+                self._pool = None
+        except Exception:
+            pass
 
     def _get_pool(self) -> concurrent.futures.ThreadPoolExecutor:
         """Lazy-init the persistent thread pool."""
@@ -427,26 +430,31 @@ class DAGDispatcher:
             futures[future] = task_item
 
         # Collect results — fail-fast on first error
-        for future in concurrent.futures.as_completed(futures, timeout=per_task_timeout):
-            task_item = futures[future]
-            try:
-                artifact, error = future.result()
-            except Exception as exc:
-                error = str(exc)
-                artifact = None
+        try:
+            for future in concurrent.futures.as_completed(futures, timeout=per_task_timeout):
+                task_item = futures[future]
+                try:
+                    artifact, error = future.result()
+                except Exception as exc:
+                    error = str(exc)
+                    artifact = None
 
-            if error is None and artifact is not None:
-                self._graph.complete_task(task_item.id)
-                result.artifacts[task_item.id] = artifact
-                result.completed.append(task_item.id)
-            else:
-                _safe_fail(self._graph, task_item.id)
-                result.errors[task_item.id] = error or "unknown error"
-                result.failed.append(task_item.id)
-                # Cancel remaining futures — fail fast
-                for f in futures:
-                    f.cancel()
-                break
+                if error is None and artifact is not None:
+                    self._graph.complete_task(task_item.id)
+                    result.artifacts[task_item.id] = artifact
+                    result.completed.append(task_item.id)
+                else:
+                    _safe_fail(self._graph, task_item.id)
+                    result.errors[task_item.id] = error or "unknown error"
+                    result.failed.append(task_item.id)
+                    # Cancel remaining futures — fail fast
+                    for f in futures:
+                        f.cancel()
+                    break
+        except TimeoutError:
+            result.timed_out = True
+            for f in futures:
+                f.cancel()
 
         # Mark cancelled tasks
         for _f, ti in futures.items():
@@ -536,7 +544,12 @@ class DAGDispatcher:
                     changed = True
 
     def _should_fail_orphan(self, task: Any) -> bool:
-        """Return True if a PENDING task should be failed (orphaned)."""
+        """Return True if a PENDING task should be failed (orphaned).
+
+        After the dispatch loop exits, any remaining PENDING task will never
+        be scheduled.  Mark it as failed so the caller sees a complete set
+        of terminal states (completed / failed / cancelled).
+        """
         if not task.blocked_by:
             return True  # Independent task never started
         dep_tasks = [self._graph.get_task(d) for d in task.blocked_by]

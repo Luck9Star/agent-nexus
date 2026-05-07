@@ -52,76 +52,86 @@ class ImportRule(SecurityRule):
         self.forbidden: set[str] = set(forbidden)
         self._forbidden_prefixes: tuple[str, ...] = tuple(f"{mod}." for mod in self.forbidden)
 
-    def check(self, node: ast.AST) -> list[SecurityViolation]:
+
+    def _check_import_node(self, node: ast.Import) -> list[SecurityViolation]:
+        violations: list[SecurityViolation] = []
+        for alias in node.names:
+            if self._is_forbidden(alias.name):
+                violations.append(
+                    SecurityViolation(
+                        rule_type="import",
+                        node_type="Import",
+                        code_snippet=f"import {alias.name}",
+                        message=f"Forbidden import: '{alias.name}' at line {node.lineno}",
+                    )
+                )
+        return violations
+
+    def _check_import_from_node(self, node: ast.ImportFrom) -> list[SecurityViolation]:
         violations: list[SecurityViolation] = []
 
-        if isinstance(node, ast.Import):
+        # Resolve the absolute module name: strip leading dots from
+        # relative imports so that "from .os import *" is checked
+        # against "os", not ".os" (which would bypass the forbidden
+        # list due to startswith(".os") != startswith("os")).
+        module_name = node.module
+        if module_name and node.level > 0:
+            module_name = module_name.lstrip(".")
+
+        # Check module path (e.g. "from os import path")
+        if module_name and self._is_forbidden(module_name):
+            violations.append(
+                SecurityViolation(
+                    rule_type="import",
+                    node_type="ImportFrom",
+                    code_snippet=f"from {node.module} import ...",
+                    message=f"Forbidden import: 'from {node.module}' at line {node.lineno}",
+                )
+            )
+
+        # Wildcard imports from relative paths bypass the per-name check
+        # since "*" is not in the forbidden set, but can re-export
+        # forbidden modules if __init__.py re-exports them.
+        if (
+            node.level > 0
+            and node.module is None
+            and any(alias.name == "*" for alias in node.names)
+        ):
+            violations.append(
+                SecurityViolation(
+                    rule_type="import",
+                    node_type="ImportFrom",
+                    code_snippet="from . import *",
+                    message=f"Wildcard relative import at line {node.lineno}",
+                )
+            )
+
+        # Relative imports like "from . import os" have node.module=None
+        # but forbidden names in node.names.  Only check names when
+        # the module-level check didn't already catch the violation,
+        # to avoid duplicate reports for "from os import os".
+        if not violations:
             for alias in node.names:
-                if self._is_forbidden(alias.name):
+                if alias.name and alias.name != "*" and self._is_forbidden(alias.name):
                     violations.append(
                         SecurityViolation(
                             rule_type="import",
-                            node_type="Import",
-                            code_snippet=f"import {alias.name}",
-                            message=f"Forbidden import: '{alias.name}' at line {node.lineno}",
+                            node_type="ImportFrom",
+                            code_snippet=f"from . import {alias.name}",
+                            message=(
+                                f"Forbidden import: '{alias.name}' at line {node.lineno}"
+                            ),
                         )
                     )
-
-        elif isinstance(node, ast.ImportFrom):
-            # Resolve the absolute module name: strip leading dots from
-            # relative imports so that "from .os import *" is checked
-            # against "os", not ".os" (which would bypass the forbidden
-            # list due to startswith(".os") != startswith("os")).
-            module_name = node.module
-            if module_name and node.level > 0:
-                # Strip relative-import prefix dots (e.g. "..os" -> "os")
-                module_name = module_name.lstrip(".")
-
-            # Check module path (e.g. "from os import path")
-            if module_name and self._is_forbidden(module_name):
-                violations.append(
-                    SecurityViolation(
-                        rule_type="import",
-                        node_type="ImportFrom",
-                        code_snippet=f"from {node.module} import ...",
-                        message=f"Forbidden import: 'from {node.module}' at line {node.lineno}",
-                    )
-                )
-
-            # Wildcard imports from relative paths bypass the per-name check
-            # since "*" is not in the forbidden set, but can re-export
-            # forbidden modules if __init__.py re-exports them.
-            if (
-                node.level > 0
-                and node.module is None
-                and any(alias.name == "*" for alias in node.names)
-            ):
-                violations.append(
-                    SecurityViolation(
-                        rule_type="import",
-                        node_type="ImportFrom",
-                        code_snippet="from . import *",
-                        message=f"Wildcard relative import at line {node.lineno}",
-                    )
-                )
-
-            # Relative imports like "from . import os" have node.module=None
-            # but forbidden names in node.names.  Only check names when
-            # the module-level check didn't already catch the violation,
-            # to avoid duplicate reports for "from os import os".
-            if not violations:
-                for alias in node.names:
-                    if alias.name and alias.name != "*" and self._is_forbidden(alias.name):
-                        violations.append(
-                            SecurityViolation(
-                                rule_type="import",
-                                node_type="ImportFrom",
-                                code_snippet=f"from . import {alias.name}",
-                                message=(f"Forbidden import: '{alias.name}' at line {node.lineno}"),
-                            )
-                        )
 
         return violations
+
+    def check(self, node: ast.AST) -> list[SecurityViolation]:
+        if isinstance(node, ast.Import):
+            return self._check_import_node(node)
+        elif isinstance(node, ast.ImportFrom):
+            return self._check_import_from_node(node)
+        return []
 
     def _is_forbidden(self, module_name: str) -> bool:
         """Check if module_name is forbidden (exact match or parent module)."""

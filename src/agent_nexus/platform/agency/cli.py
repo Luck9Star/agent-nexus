@@ -416,6 +416,99 @@ def _print_result(result: TaskComposerResult) -> None:
         click.echo("No artifacts produced — all experts failed.")
 
 
+def _setup_llm_components(
+    model: str | None,
+    config_dir: str | None,
+    temperature: float | None,
+    registry: ExpertRegistry,
+) -> tuple[
+    object | None,  # llm_planner
+    object | None,  # llm_integrator
+    object | None,  # llm_qa_gate
+    object | None,  # shared_client
+]:
+    """Initialize LLM planner/integrator/QA-gate if config is available."""
+    try:
+        from agent_nexus.models.capability import ModelCapabilityRegistry
+
+        from .llm_client import LLMClient
+        from .llm_integrator import LLMIntegrator
+        from .llm_planner import LLMPlanner
+        from .llm_qa_gate import LLMQualityGate
+
+        config_path = Path(config_dir) if config_dir else None
+        shared_registry = ModelCapabilityRegistry()
+        shared_client = LLMClient(
+            model_string=model,
+            stage="planning",
+            config_dir=config_path,
+            capability_registry=shared_registry,
+        )
+        llm_planner = LLMPlanner(
+            registry=registry,
+            client=shared_client,
+            temperature=temperature,
+        )
+        llm_integrator = LLMIntegrator(client=shared_client, temperature=temperature)
+        llm_qa_gate = LLMQualityGate(client=shared_client, temperature=temperature)
+        click.echo("LLM-powered planning, integration, and QA enabled")
+        return llm_planner, llm_integrator, llm_qa_gate, shared_client
+    except (ImportError, ValueError, KeyError, OSError) as exc:
+        click.echo(
+            f"LLM config unavailable ({exc}), falling back to profile-based executor",
+            err=True,
+        )
+        return None, None, None, None
+
+
+def _create_executor(
+    model: str | None,
+    config_dir: str | None,
+    temperature: float | None,
+    registry: ExpertRegistry,
+    shared_registry: object | None,
+    shared_client: object | None,
+    effective_call_timeout: float,
+    reasoning_protocol: bool,
+) -> tuple[object, bool]:
+    """Create the executor, trying LLM first then falling back to profile-based."""
+    from .executor import LLMExecutor, ProfileBasedExecutor
+
+    try:
+        executor = LLMExecutor(
+            registry=registry,
+            model_string=model,
+            config_dir=Path(config_dir) if config_dir else None,
+            default_temperature=temperature,
+            capability_registry=shared_registry,
+            timeout=effective_call_timeout,
+            client=shared_client,
+            reasoning_protocol=reasoning_protocol,
+        )
+        click.echo(f"Using LLM executor (model: {executor.model_name})")
+        return executor, True
+    except Exception as exc:
+        click.echo(
+            f"LLM config unavailable ({exc}), falling back to profile-based executor",
+            err=True,
+        )
+        return ProfileBasedExecutor(registry=registry), False
+
+
+def _handle_output(composer_result: TaskComposerResult) -> None:
+    """Write the result to file or stdout based on output_target."""
+    _output_target = composer_result.output_target
+    if _output_target is not None:
+        if _output_target == "file":
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            _output_path = Path(f"composition-report-{ts}.md")
+        else:
+            _output_path = Path(_output_target)
+        _write_report(composer_result, _output_path)
+    else:
+        _print_result(composer_result)
+
+
 def _validate_output_path(path: Path) -> Path:
     """Resolve and validate an output path, blocking traversal attacks.
 
@@ -529,7 +622,7 @@ def _write_report(result: TaskComposerResult, path: Path) -> None:
     "--timeout",
     default=DEFAULT_PIPELINE_TIMEOUT,
     type=int,
-    help="Overall pipeline timeout in seconds (default: 300)",
+    help=f"Overall pipeline timeout in seconds (default: {DEFAULT_PIPELINE_TIMEOUT})",
 )
 @click.option(
     "--call-timeout",
@@ -611,83 +704,34 @@ def run_composition(
         ep = pkg["expert_profile"]
         registry.add(ep["id"], ep, ep["capabilities"])
 
-    # Step 2-6: Delegate to TaskComposer (avoids duplicating pipeline logic)
-    from .task_composer import TaskComposer, TaskComposerInput
-
-    # Initialize LLM components if requested
-    llm_planner = None
-    llm_integrator = None
-    llm_qa_gate = None
-    shared_registry = None
-    planner_client = None
-    integrator_client = None
-    qa_client = None
+    # Step 2: Initialize LLM components if requested
     shared_client = None
+    shared_registry = None
 
     if use_llm:
-        try:
-            from agent_nexus.models.capability import ModelCapabilityRegistry
+        llm_planner, llm_integrator, llm_qa_gate, shared_client = _setup_llm_components(
+            model, config_dir, temperature, registry,
+        )
+        shared_registry = shared_client  # for capability_registry passthrough
+    else:
+        llm_planner = None
+        llm_integrator = None
+        llm_qa_gate = None
 
-            from .llm_client import LLMClient
-            from .llm_integrator import LLMIntegrator
-            from .llm_planner import LLMPlanner
-            from .llm_qa_gate import LLMQualityGate
-
-            config_path = Path(config_dir) if config_dir else None
-            shared_registry = ModelCapabilityRegistry()
-            # One shared client for all pipeline stages — SDK connection
-            # pools (openai.OpenAI / anthropic.Anthropic) are created once
-            # and reused, instead of 3 independent pools per stage.
-            shared_client = LLMClient(
-                model_string=model,
-                stage="planning",
-                config_dir=config_path,
-                capability_registry=shared_registry,
-            )
-            planner_client = shared_client
-            integrator_client = shared_client
-            qa_client = shared_client
-            llm_planner = LLMPlanner(
-                registry=registry,
-                client=planner_client,
-                temperature=temperature,
-            )
-            llm_integrator = LLMIntegrator(client=integrator_client, temperature=temperature)
-            llm_qa_gate = LLMQualityGate(client=qa_client, temperature=temperature)
-            click.echo("LLM-powered planning, integration, and QA enabled")
-        except (ImportError, ValueError, KeyError, OSError) as exc:
-            click.echo(
-                f"LLM config unavailable ({exc}), falling back to profile-based executor",
-                err=True,
-            )
-
-    # Create executor (LLM for experts if config available)
-    from .executor import LLMExecutor, ProfileBasedExecutor
-
+    # Step 3: Create executor
     effective_call_timeout = (
         float(call_timeout) if call_timeout else float(DEFAULT_LLM_CALL_TIMEOUT)
     )
+    executor, is_llm = _create_executor(
+        model, config_dir, temperature, registry,
+        shared_registry, shared_client,
+        effective_call_timeout, reasoning_protocol,
+    )
 
-    try:
-        executor = LLMExecutor(
-            registry=registry,
-            model_string=model,
-            config_dir=Path(config_dir) if config_dir else None,
-            default_temperature=temperature,
-            capability_registry=shared_registry if use_llm else None,
-            timeout=effective_call_timeout,
-            client=shared_client,
-            reasoning_protocol=reasoning_protocol,
-        )
-        click.echo(f"Using LLM executor (model: {executor.model_name})")
-    except Exception as exc:
-        click.echo(
-            f"LLM config unavailable ({exc}), falling back to profile-based executor",
-            err=True,
-        )
-        executor = ProfileBasedExecutor(registry=registry)
-
+    # Step 4: Execute pipeline
     from agent_nexus.platform.orchestration.task_graph import TaskGraph
+
+    from .task_composer import TaskComposer, TaskComposerInput
 
     try:
         with TaskGraph(":memory:") as graph:
@@ -710,25 +754,14 @@ def run_composition(
                     concurrent=True,
                 )
             finally:
-                if isinstance(executor, LLMExecutor):
+                if is_llm:
                     executor.close()
     finally:
         if shared_client is not None:
             shared_client.close()
 
-    # Output results — consume pipeline-detected output intent
-    _output_target = composer_result.output_target
-    if _output_target is not None:
-        if _output_target == "file":
-            # Generic "output to file" intent — generate default filename
-            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-            _output_path = Path(f"composition-report-{ts}.md")
-        else:
-            # Specific path from task intent (e.g. "docs/review.md")
-            _output_path = Path(_output_target)
-        _write_report(composer_result, _output_path)
-    else:
-        _print_result(composer_result)
+    # Step 5: Output results
+    _handle_output(composer_result)
 
 
 if __name__ == "__main__":
