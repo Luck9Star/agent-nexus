@@ -494,8 +494,16 @@ class DAGDispatcher:
     ) -> None:
         """Clean up IN_PROGRESS and orphaned PENDING tasks after the main loop."""
         failed_set = set(result.failed)
+        self._fail_in_progress(specialist_ids, result, failed_set)
+        self._fail_orphaned_pending(specialist_ids, result, failed_set)
 
-        # Clean up any tasks left in IN_PROGRESS after loop exit (e.g. mid-batch timeout)
+    def _fail_in_progress(
+        self,
+        specialist_ids: set[str],
+        result: DispatchResult,
+        failed_set: set[str],
+    ) -> None:
+        """Fail any tasks left IN_PROGRESS after loop exit (e.g. mid-batch timeout)."""
         for tid in specialist_ids:
             task = self._graph.get_task(tid)
             if task is not None and task.state == TaskState.IN_PROGRESS:
@@ -504,8 +512,13 @@ class DAGDispatcher:
                     result.failed.append(tid)
                     failed_set.add(tid)
 
-        # Clean up orphaned PENDING tasks. Loop until stable to handle
-        # transitive failure chains (e.g. A→B→C where failing B must also fail C).
+    def _fail_orphaned_pending(
+        self,
+        specialist_ids: set[str],
+        result: DispatchResult,
+        failed_set: set[str],
+    ) -> None:
+        """Fail orphaned PENDING tasks, looping until stable for transitive chains."""
         changed = True
         while changed:
             changed = False
@@ -513,23 +526,19 @@ class DAGDispatcher:
                 task = self._graph.get_task(tid)
                 if task is None or task.state != TaskState.PENDING:
                     continue
-                deps = task.blocked_by
-                if not deps:
-                    # Independent task never started (e.g. after fail-fast)
+                if self._should_fail_orphan(task):
                     _safe_fail(self._graph, tid)
                     if tid not in failed_set:
                         result.failed.append(tid)
                         failed_set.add(tid)
                     changed = True
-                    continue
-                dep_tasks = [self._graph.get_task(d) for d in deps]
-                all_done = all(
-                    t is not None and t.state in (TaskState.COMPLETED, TaskState.FAILED)
-                    for t in dep_tasks
-                )
-                if all_done:
-                    _safe_fail(self._graph, tid)
-                    if tid not in failed_set:
-                        result.failed.append(tid)
-                        failed_set.add(tid)
-                    changed = True
+
+    def _should_fail_orphan(self, task: Any) -> bool:
+        """Return True if a PENDING task should be failed (orphaned)."""
+        if not task.blocked_by:
+            return True  # Independent task never started
+        dep_tasks = [self._graph.get_task(d) for d in task.blocked_by]
+        return all(
+            t is not None and t.state in (TaskState.COMPLETED, TaskState.FAILED)
+            for t in dep_tasks
+        )

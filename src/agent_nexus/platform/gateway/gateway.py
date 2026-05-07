@@ -254,25 +254,8 @@ class MCPGateway:
         disambiguates by appending a numeric suffix.
         """
         async with self._reg_lock:
-            if agent_name in self._registered_agents:
-                # Check if the agent process is still alive.  If not,
-                # clean up stale state so we can re-register fresh tools.
-                info = self._registry.get_agent_info(agent_name)
-                if info is not None and info.handle is not None and info.handle.is_alive:
-                    logger.debug(
-                        "Agent '%s' tools already registered and process alive, skipping",
-                        agent_name,
-                    )
-                    return
-                # Stale registration — clean up old tool names
-                logger.info(
-                    "Agent '%s' registered but process dead; cleaning up for re-registration",
-                    agent_name,
-                )
-                adapters = self._registry.get_tool_adapters(agent_name)
-                for ad in adapters:
-                    self._registered_tool_names.discard(ad.full_name)
-                self._registered_agents.discard(agent_name)
+            if self._is_stale_registration(agent_name):
+                self._cleanup_agent_registration(agent_name)
 
             info = self._registry.get_agent_info(agent_name)
             if info is None or info.tool_schemas is None:
@@ -285,43 +268,64 @@ class MCPGateway:
                 return
 
             adapters = self._registry.get_tool_adapters(agent_name)
-
             for adapter in adapters:
-                full_name = adapter.full_name
-                # Detect collision with an already-registered tool name
-                if full_name in self._registered_tool_names:
-                    # Append numeric suffix to disambiguate
-                    suffix = 2
-                    while f"{full_name}_{suffix}" in self._registered_tool_names:
-                        suffix += 1
-                        if suffix > 100:
-                            raise ValueError(
-                                f"Too many tool name collisions for '{full_name}' "
-                                f"(max 100 disambiguations)"
-                            )
-                    disambiguated = f"{full_name}_{suffix}"
-                    logger.warning(
-                        "Tool name collision: '%s' from agent '%s' "
-                        "already registered, renaming to '%s'",
-                        full_name,
-                        agent_name,
-                        disambiguated,
-                    )
-                    full_name = disambiguated
-
-                try:
-                    self._mcp.tool(self._make_tool_func(adapter, registered_name=full_name))
-                    self._registered_tool_names.add(full_name)
-                    logger.debug("Registered gateway tool: %s", full_name)
-                except Exception as exc:
-                    # FastMCP may raise if tool name already registered
-                    logger.warning(
-                        "Tool '%s' already registered or error: %s",
-                        full_name,
-                        exc,
-                    )
+                self._register_single_tool(adapter, agent_name)
 
             self._registered_agents.add(agent_name)
+
+    def _is_stale_registration(self, agent_name: str) -> bool:
+        """Check if an already-registered agent has a dead process (stale)."""
+        if agent_name not in self._registered_agents:
+            return False
+        info = self._registry.get_agent_info(agent_name)
+        if info is not None and info.handle is not None and info.handle.is_alive:
+            logger.debug(
+                "Agent '%s' tools already registered and process alive, skipping",
+                agent_name,
+            )
+            return False
+        logger.info(
+            "Agent '%s' registered but process dead; cleaning up for re-registration",
+            agent_name,
+        )
+        return True
+
+    def _register_single_tool(self, adapter: Any, agent_name: str) -> None:
+        """Register a single tool adapter, handling name collisions."""
+        full_name = adapter.full_name
+        if full_name in self._registered_tool_names:
+            full_name = self._disambiguate_tool_name(full_name, agent_name)
+
+        try:
+            self._mcp.tool(self._make_tool_func(adapter, registered_name=full_name))
+            self._registered_tool_names.add(full_name)
+            logger.debug("Registered gateway tool: %s", full_name)
+        except Exception as exc:
+            logger.warning(
+                "Tool '%s' already registered or error: %s",
+                full_name,
+                exc,
+            )
+
+    def _disambiguate_tool_name(self, full_name: str, agent_name: str) -> str:
+        """Append numeric suffix to resolve tool name collision."""
+        suffix = 2
+        while f"{full_name}_{suffix}" in self._registered_tool_names:
+            suffix += 1
+            if suffix > 100:
+                raise ValueError(
+                    f"Too many tool name collisions for '{full_name}' "
+                    f"(max 100 disambiguations)"
+                )
+        disambiguated = f"{full_name}_{suffix}"
+        logger.warning(
+            "Tool name collision: '%s' from agent '%s' "
+            "already registered, renaming to '%s'",
+            full_name,
+            agent_name,
+            disambiguated,
+        )
+        return disambiguated
 
     def _cleanup_agent_registration(self, agent_name: str) -> None:
         """Clean up stale registration state for a dead agent.

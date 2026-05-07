@@ -376,50 +376,71 @@ class AgentSupervisor:
         agent_dir = self._resolve_agent_dir(agent_name)
         pkg_name = self._resolve_package_name(agent_name, agent_dir)
 
-        # Compute candidate paths once — reused across all strategies
         agent_main = agent_dir / "main.py"
         pkg_main = (agent_dir / pkg_name / "main.py") if pkg_name else None
 
-        # Strategy 1: venv python
         if entry.venv_path:
+            cmd = self._try_venv_command(agent_name, entry, agent_main, pkg_main)
+            if cmd is not None:
+                return cmd
+            # venv tried but failed — if venv_python exists, it's a
+            # security block or missing main files → stop (don't fall through)
             venv_python = Path(entry.venv_path).resolve() / "bin" / "python"
-            if not venv_python.exists():
-                logger.warning(
-                    "Configured venv for '%s' not found at %s, falling back to system python/uvx",
-                    agent_name,
-                    venv_python,
-                )
-            else:
-                allowed = self._config_dir.resolve()
-                if not venv_python.is_relative_to(allowed):
-                    logger.warning(
-                        "venv_path outside config_dir, skipping: %s",
-                        venv_python,
-                    )
-                    return None
-                if agent_main.exists():
-                    return [str(venv_python), str(agent_main)]
-                if pkg_main and pkg_main.exists():
-                    return [str(venv_python), str(pkg_main)]
+            if venv_python.exists():
                 return None
+            # venv_python not found → fall through to system commands
 
-        # No venv — warn if the agent declares dependencies via pyproject.toml,
-        # as the agent will likely fail at runtime with missing imports.
-        if not entry.venv_path and (agent_dir / "pyproject.toml").exists():
+        if (agent_dir / "pyproject.toml").exists():
             logger.warning(
                 "Agent '%s' has pyproject.toml but no venv — dependencies "
                 "may not be installed. Re-install the agent to create a venv.",
                 agent_name,
             )
 
-        # Strategy 2: system python3 <agent_dir>/<pkg>/main.py
+        return self._try_system_command(agent_name, agent_main, pkg_main)
+
+    def _try_venv_command(
+        self,
+        agent_name: str,
+        entry: LockfileEntry,
+        agent_main: Path,
+        pkg_main: Path | None,
+    ) -> list[str] | None:
+        """Try building command using venv python (Strategy 1)."""
+        if not entry.venv_path:
+            return None
+        venv_python = Path(entry.venv_path).resolve() / "bin" / "python"
+        if not venv_python.exists():
+            logger.warning(
+                "Configured venv for '%s' not found at %s, falling back to system python/uvx",
+                agent_name,
+                venv_python,
+            )
+            return None
+        allowed = self._config_dir.resolve()
+        if not venv_python.is_relative_to(allowed):
+            logger.warning(
+                "venv_path outside config_dir, skipping: %s",
+                venv_python,
+            )
+            return None  # treated as "not found" for the caller
+        if agent_main.exists():
+            return [str(venv_python), str(agent_main)]
+        if pkg_main and pkg_main.exists():
+            return [str(venv_python), str(pkg_main)]
+        return None
+
+    @staticmethod
+    def _try_system_command(
+        agent_name: str,
+        agent_main: Path,
+        pkg_main: Path | None,
+    ) -> list[str]:
+        """Try system python or fall back to uvx (Strategy 2+3)."""
         if pkg_main and pkg_main.exists():
             return ["python3", str(pkg_main)]
-
-        # Strategy 3: system python3 <agent_dir>/main.py (skip symlinks)
         if agent_main.exists() and not agent_main.is_symlink():
             return ["python3", str(agent_main)]
-
         return ["uvx", agent_name]
 
     def _resolve_package_name(self, agent_name: str, agent_dir: Path) -> str | None:

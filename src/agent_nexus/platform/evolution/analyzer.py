@@ -75,51 +75,50 @@ def _correct_skill_ids(
     """
     if not known_ids:
         return ids
+    return [_correct_single_id(raw_id, known_ids) for raw_id in ids]
 
-    corrected: list[str] = []
-    for raw_id in ids:
-        if raw_id in known_ids:
-            corrected.append(raw_id)
-            continue
 
-        if "__" not in raw_id:
-            # No prefix separator — can't narrow candidates safely, skip
-            corrected.append(raw_id)
-            continue
+def _correct_single_id(raw_id: str, known_ids: set[str]) -> str:
+    """Try to correct a single skill ID against known IDs."""
+    if raw_id in known_ids:
+        return raw_id
+    if "__" not in raw_id:
+        return raw_id  # No prefix separator — can't narrow candidates safely
 
-        prefix = raw_id.split("__")[0]
-        pfx = prefix + "__"
-        candidates = [k for k in known_ids if k.startswith(pfx)]
+    prefix = raw_id.split("__")[0]
+    pfx = prefix + "__"
+    candidates = [k for k in known_ids if k.startswith(pfx)]
+    max_dist = _max_edit_distance(raw_id, pfx, len(candidates))
+    best = _find_best_candidate(raw_id, candidates, max_dist)
+    return best if best is not None else raw_id
 
-        # Scale max_dist with suffix length to avoid loose matches on short IDs
-        # e.g. "x__ab" matching "x__wxyz" at distance 4 is clearly wrong.
-        _suffix = raw_id[len(pfx) :]
-        _suffix_len = len(_suffix)
-        if len(candidates) > 20:
-            max_dist = 2
-        elif _suffix_len <= 4:
-            max_dist = 1
-        elif _suffix_len <= 8:
-            max_dist = 2
-        else:
-            max_dist = 3
-        best: str | None = None
-        best_dist = max_dist + 1
-        ambiguous = False
 
-        for cand in candidates:
-            d = _edit_distance(raw_id, cand)
-            if d < best_dist:
-                best, best_dist, ambiguous = cand, d, False
-            elif d == best_dist and cand != best:
-                ambiguous = True
+def _max_edit_distance(raw_id: str, pfx: str, n_candidates: int) -> int:
+    """Scale max edit distance with suffix length and candidate count."""
+    if n_candidates > 20:
+        return 2
+    suffix_len = len(raw_id) - len(pfx)
+    if suffix_len <= 4:
+        return 1
+    if suffix_len <= 8:
+        return 2
+    return 3
 
-        if best is not None and not ambiguous:
-            corrected.append(best)
-        else:
-            corrected.append(raw_id)
 
-    return corrected
+def _find_best_candidate(
+    raw_id: str, candidates: list[str], max_dist: int
+) -> str | None:
+    """Find the closest candidate within max_dist, returning None if ambiguous."""
+    best: str | None = None
+    best_dist = max_dist + 1
+    ambiguous = False
+    for cand in candidates:
+        d = _edit_distance(raw_id, cand)
+        if d < best_dist:
+            best, best_dist, ambiguous = cand, d, False
+        elif d == best_dist and cand != best:
+            ambiguous = True
+    return best if not ambiguous else None
 
 
 class ExecutionAnalyzer:
