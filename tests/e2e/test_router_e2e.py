@@ -67,7 +67,7 @@ class TestRouterE2E:
 
     def test_run_parallel_limits_concurrency(self):
         """SubtaskController runs tasks in parallel with semaphore limit."""
-        from agent_nexus.platform.router.subtask import SubtaskController, SubtaskConfig
+        from agent_nexus.platform.router.subtask import SubtaskConfig, SubtaskController
 
         config = SubtaskConfig(max_parallel=2)
         ctrl = SubtaskController(config)

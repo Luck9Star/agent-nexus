@@ -1584,7 +1584,6 @@ class TestMaxParallelEnforcement:
     def test_max_parallel_3_allows_batching(self):
         """max_parallel=3 allows up to 3 tasks in a single batch."""
         graph = TaskGraph(":memory:")
-        batch_sizes: list[int] = []
 
         # Override dispatch to track batch sizes (via call ordering)
         call_order: list[str] = []

@@ -12,6 +12,7 @@ Reference: docs/06-mcp-communication.md Section 8.1.1
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -143,10 +144,8 @@ class McpToolAdapter:
 
         content = response.content or ""
         structured = None
-        try:
+        with contextlib.suppress(json.JSONDecodeError, TypeError):
             structured = json.loads(content)
-        except (json.JSONDecodeError, TypeError):
-            pass
 
         return {
             "output": content,

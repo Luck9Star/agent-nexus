@@ -12,6 +12,8 @@ tests/integration/ since all dependencies are mocked or in-process.
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import pytest
 
 from agent_nexus.models.task import TaskItem, TaskState
@@ -20,7 +22,6 @@ from agent_nexus.platform.orchestration.dsl import (
     OrchestrationDSL,
 )
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
-
 
 # ---------------------------------------------------------------------------
 # TOML fixtures
@@ -308,9 +309,9 @@ async def test_cycle_detection_via_dsl() -> None:
 
 async def test_cycle_detection_via_task_graph(task_graph: TaskGraph) -> None:
     """Verify cycles are rejected when adding tasks to TaskGraph."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Add A (no deps)
     task_graph.add_task(
@@ -406,9 +407,9 @@ async def test_cycle_detection_via_task_graph(task_graph: TaskGraph) -> None:
 
 async def test_task_failure(task_graph: TaskGraph) -> None:
     """Verify a failed task does not unblock its dependents."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # A -> B (B depends on A)
     task_graph.add_task(
@@ -490,9 +491,9 @@ async def test_dsl_validation_clean() -> None:
 
 async def test_task_graph_snapshot(task_graph: TaskGraph) -> None:
     """Verify snapshot captures full graph state."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Add 3 tasks: A -> B -> C
     task_graph.add_task(

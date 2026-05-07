@@ -14,8 +14,8 @@ class TestOrchestrationE2E:
 
     def test_task_graph_lifecycle(self, tmp_path: Path) -> None:
         """TaskGraph: add tasks, start, complete, query."""
-        from agent_nexus.platform.orchestration.task_graph import TaskGraph
         from agent_nexus.models.task import TaskItem, TaskState
+        from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
         db_path = tmp_path / "test.db"
         tg = TaskGraph(str(db_path))
@@ -69,8 +69,8 @@ blocked_by = []
 
     def test_task_graph_cycle_detection(self, tmp_path: Path) -> None:
         """TaskGraph rejects tasks with circular dependencies."""
-        from agent_nexus.platform.orchestration.task_graph import TaskGraph
         from agent_nexus.models.task import TaskItem, TaskState
+        from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
         db_path = tmp_path / "cycle.db"
         tg = TaskGraph(str(db_path))
@@ -88,10 +88,10 @@ blocked_by = []
     def test_ipc_json_lines_protocol(self) -> None:
         """IPC models serialize to JSON-lines format correctly."""
         from agent_nexus.models.ipc import (
-            PlatformToAgent,
-            PlatformToAgentType,
             AgentToPlatform,
             AgentToPlatformType,
+            PlatformToAgent,
+            PlatformToAgentType,
         )
 
         msg_out = PlatformToAgent(

@@ -6,28 +6,24 @@ loading, env var overrides, model resolution, and provider API key resolution.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from agent_nexus.models.agent import ModelTier
-from agent_nexus.models.config import ProviderApiType, ProviderConfig
+from agent_nexus.models.config import PlatformConfig, ProviderApiType, ProviderConfig
 from agent_nexus.platform.config import (
     CONFIG_FILE,
     DEFAULT_CONFIG_DIR,
     DEFAULT_MODEL_STRING,
     DEFAULT_PROVIDERS,
     ENV_VAR_OVERRIDES,
-    LOCKFILE,
     MODEL_TIER_MAP,
     SOURCES_FILE,
     ConfigLoader,
     ModelConfigManager,
 )
-from agent_nexus.models.config import PlatformConfig
-
 
 # ============================================================================
 # Helpers
@@ -228,6 +224,7 @@ class TestConfigLoaderTomlDecodeErrorLogLevel:
     def test_broken_toml_raises(self, tmp_path: Path) -> None:
         """Broken TOML content triggers logger.error and re-raises TomlDecodeError."""
         import logging
+
         import toml
 
         _write_config(tmp_path, "[section\nkey = value\n")
@@ -236,9 +233,8 @@ class TestConfigLoaderTomlDecodeErrorLogLevel:
         with patch.object(
             logging.getLogger("agent_nexus.platform.config.loader"),
             "error",
-        ) as mock_error:
-            with pytest.raises(toml.TomlDecodeError):
-                loader.load_config()
+        ) as mock_error, pytest.raises(toml.TomlDecodeError):
+            loader.load_config()
 
         # logger.error should still have been called before re-raising
         mock_error.assert_called_once()

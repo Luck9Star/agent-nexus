@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from agent_nexus.models.task import TaskGraphSnapshot, TaskItem, TaskState
 
-
 # ---------------------------------------------------------------------------
 # TaskState enum
 # ---------------------------------------------------------------------------

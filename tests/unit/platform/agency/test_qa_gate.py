@@ -4,12 +4,10 @@ import pytest
 
 from agent_nexus.platform.agency.qa_gate import (
     ContractValidationResult,
-    GitNexusCheckResult,
     QAGate,
     QAGateInput,
     QAGateResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

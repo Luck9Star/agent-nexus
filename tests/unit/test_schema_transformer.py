@@ -1,10 +1,8 @@
 """Tests for SchemaTransformer — JSON Schema to Python/Pydantic conversion."""
 
-import pytest
 from pydantic import BaseModel
 
 from agent_nexus.platform.gateway.schema_transformer import SchemaTransformer
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from agent_nexus.platform.agency.cli_backend.types import (
     BackendConfig,
     CLIResult,

@@ -195,10 +195,12 @@ class DynamicCompositePlanner:
             for earlier in subtasks:
                 if earlier.id == st.id:
                     continue
-                if set(st.needed_capabilities) < set(earlier.needed_capabilities):
+                if (
+                    set(st.needed_capabilities) < set(earlier.needed_capabilities)
+                    and earlier.id not in blocked_by
+                ):
                     # st's caps are a strict subset of earlier's caps → dep
-                    if earlier.id not in blocked_by:
-                        blocked_by.append(earlier.id)
+                    blocked_by.append(earlier.id)
             dag_tasks.append(
                 DAGTask(
                     id=st.id,

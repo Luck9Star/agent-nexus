@@ -23,14 +23,12 @@ from agent_nexus.platform.gateway.tool_adapter import (
     McpToolAdapter,
     _sanitize,
     remove_all_locks,
-    remove_lock,
 )
 from agent_nexus.platform.orchestration.ipc import _ipc_lock_registry
 from agent_nexus.platform.orchestration.process_manager import (
     AgentHandle,
     ProcessManager,
 )
-
 
 # ============================================================================
 # Helpers / Fixtures
@@ -665,7 +663,6 @@ class TestMCPGatewayRegisterAgentTools:
         await gateway.register_agent(manifest, deferred=True, start_command=[])
 
         # Directly set up the state: agent is registered, info has a live handle.
-        from agent_nexus.platform.gateway.deferred_registry import AgentInfo
 
         mock_handle = MagicMock()
         mock_handle.is_alive = True
@@ -1455,20 +1452,18 @@ class TestSearchAndActivateErrorPath:
             gw._registry,
             "search_agents",
             return_value=[manifest],
+        ), patch.object(
+            gw._registry,
+            "activate_agent",
+            new_callable=AsyncMock,
+            return_value=[{"name": "t", "description": "d", "inputSchema": {}}],
+        ), patch.object(
+            gw,
+            "_register_agent_tools",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("subprocess crashed"),
         ):
-            with patch.object(
-                gw._registry,
-                "activate_agent",
-                new_callable=AsyncMock,
-                return_value=[{"name": "t", "description": "d", "inputSchema": {}}],
-            ):
-                with patch.object(
-                    gw,
-                    "_register_agent_tools",
-                    new_callable=AsyncMock,
-                    side_effect=RuntimeError("subprocess crashed"),
-                ):
-                    result = await gw._search_and_activate("fail")
+            result = await gw._search_and_activate("fail")
 
         assert "fail-agent" in result
         assert "activation failed" in result
@@ -1501,20 +1496,18 @@ class TestSearchAndActivateErrorPath:
             gw._registry,
             "search_agents",
             return_value=[manifest_ok, manifest_bad],
+        ), patch.object(
+            gw._registry,
+            "activate_agent",
+            new_callable=AsyncMock,
+            side_effect=activate_side_effect,
+        ), patch.object(
+            gw,
+            "_register_agent_tools",
+            new_callable=AsyncMock,
+            side_effect=register_side_effect,
         ):
-            with patch.object(
-                gw._registry,
-                "activate_agent",
-                new_callable=AsyncMock,
-                side_effect=activate_side_effect,
-            ):
-                with patch.object(
-                    gw,
-                    "_register_agent_tools",
-                    new_callable=AsyncMock,
-                    side_effect=register_side_effect,
-                ):
-                    result = await gw._search_and_activate("agent")
+            result = await gw._search_and_activate("agent")
 
         assert "ok-agent" in result
         assert "tools loaded" in result

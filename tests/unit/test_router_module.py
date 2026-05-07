@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -30,14 +30,13 @@ from agent_nexus.platform.orchestration.ipc import (
     IPCError,
     IPCTimeoutError,
 )
-from agent_nexus.platform.router.router import PlatformRouter, _PHASE_ORDER
+from agent_nexus.platform.router.router import _PHASE_ORDER, PlatformRouter
 from agent_nexus.platform.router.subtask import SubtaskConfig, SubtaskController
 from agent_nexus.platform.router.workflow import (
     WorkflowContext,
     WorkflowPhase,
     WorkflowResult,
 )
-
 
 # ============================================================================
 # Helpers
@@ -146,7 +145,7 @@ class TestWorkflowContext:
         assert ctx.current_phase is None
         assert ctx.task_graph is None
         assert isinstance(ctx.started_at, datetime)
-        assert ctx.started_at.tzinfo == timezone.utc
+        assert ctx.started_at.tzinfo == UTC
 
     def test_explicit_fields(self) -> None:
         from agent_nexus.platform.orchestration.task_graph import TaskGraph
@@ -1220,7 +1219,7 @@ class TestExecuteSingleAgentErrorWrapping:
     @pytest.mark.parametrize(
         "recv_side_effect, match_str, expected_error_type",
         [
-            (asyncio.TimeoutError("IPC timeout"), "IPC error", "TimeoutError"),
+            (TimeoutError("IPC timeout"), "IPC error", "TimeoutError"),
             (ConnectionError("Broken pipe"), "IPC error", "ConnectionError"),
         ],
         ids=["timeout", "connection"],
@@ -1624,7 +1623,7 @@ class TestRouteToAtomicSendChatError:
     async def test_send_chat_timeout_returns_error_dict(self) -> None:
         """send_chat timeout returns error dict."""
         handle = _make_agent_handle()
-        handle.ipc.send_chat = AsyncMock(side_effect=asyncio.TimeoutError("send timeout"))
+        handle.ipc.send_chat = AsyncMock(side_effect=TimeoutError("send timeout"))
 
         pm = _make_process_manager(agents={"agent-a": handle})
         router = PlatformRouter(process_manager=pm)
@@ -2138,19 +2137,18 @@ class TestCompositeOverallTimeout:
         with patch(
             "agent_nexus.platform.router.router._DEFAULT_COMPOSITE_TIMEOUT",
             short_timeout,
-        ):
-            with patch.object(router, "_execute_phase", side_effect=_hanging_phase):
-                with patch.object(router, "_build_phase_message", return_value="msg"):
-                    definition = OrchestrationDefinition(
-                        goal="test",
-                        agent_name="test-agent",
-                        agents={
-                            "a": DSLAgent(name="a", description="a", role="worker"),
-                        },
-                        tasks=[DSLTask(id="t1", description="d", agent="a")],
-                        tool_loading=DSLToolLoading(),
-                    )
-                    result = await router.route_composite(definition, "test", "conv-1")
+        ), patch.object(router, "_execute_phase", side_effect=_hanging_phase):
+            with patch.object(router, "_build_phase_message", return_value="msg"):
+                definition = OrchestrationDefinition(
+                    goal="test",
+                    agent_name="test-agent",
+                    agents={
+                        "a": DSLAgent(name="a", description="a", role="worker"),
+                    },
+                    tasks=[DSLTask(id="t1", description="d", agent="a")],
+                    tool_loading=DSLToolLoading(),
+                )
+                result = await router.route_composite(definition, "test", "conv-1")
 
         assert result.success is False
         assert result.error is not None
@@ -2165,7 +2163,7 @@ class TestCompositeOverallTimeout:
         )
         from agent_nexus.platform.router.router import _DEFAULT_COMPOSITE_TIMEOUT
 
-        assert _DEFAULT_COMPOSITE_TIMEOUT == DEFAULT_IPC_EXECUTE_TIMEOUT * len(_PHASE_ORDER)
+        assert DEFAULT_IPC_EXECUTE_TIMEOUT * len(_PHASE_ORDER) == _DEFAULT_COMPOSITE_TIMEOUT
 
 
 # ---------------------------------------------------------------------------
@@ -2244,8 +2242,8 @@ class TestUnifiedIpcLock:
     @pytest.mark.asyncio
     async def test_route_to_atomic_uses_shared_lock(self) -> None:
         """route_to_atomic acquires the same lock as McpToolAdapter."""
-        from agent_nexus.platform.orchestration.ipc import get_ipc_lock
         from agent_nexus.platform.gateway.tool_adapter import remove_all_locks
+        from agent_nexus.platform.orchestration.ipc import get_ipc_lock
 
         remove_all_locks()
         handle = _make_agent_handle(response_content="hello back")
@@ -2264,8 +2262,8 @@ class TestUnifiedIpcLock:
     @pytest.mark.asyncio
     async def test_execute_single_agent_uses_shared_lock(self) -> None:
         """_execute_single_agent acquires the same lock as McpToolAdapter."""
-        from agent_nexus.platform.orchestration.ipc import get_ipc_lock
         from agent_nexus.platform.gateway.tool_adapter import remove_all_locks
+        from agent_nexus.platform.orchestration.ipc import get_ipc_lock
 
         remove_all_locks()
         handle = _make_agent_handle(response_content="result")
@@ -2287,7 +2285,6 @@ class TestUnifiedIpcLock:
             McpToolAdapter,
             remove_all_locks,
         )
-        from agent_nexus.platform.orchestration.ipc import get_ipc_lock
 
         remove_all_locks()
 
@@ -2346,8 +2343,8 @@ class TestErrorTypeConsistency:
     @pytest.mark.asyncio
     async def test_agent_not_found_has_error_type(self) -> None:
         """Agent not found returns error_type='KeyError'."""
-        from agent_nexus.platform.router.router import PlatformRouter
         from agent_nexus.platform.orchestration.process_manager import ProcessManager
+        from agent_nexus.platform.router.router import PlatformRouter
 
         pm = ProcessManager()
         router = PlatformRouter(process_manager=pm)
@@ -2358,12 +2355,13 @@ class TestErrorTypeConsistency:
     @pytest.mark.asyncio
     async def test_agent_not_alive_has_error_type(self) -> None:
         """Agent not alive returns error_type='ProcessNotAliveError'."""
-        from agent_nexus.platform.router.router import PlatformRouter
+        from unittest.mock import MagicMock
+
         from agent_nexus.platform.orchestration.process_manager import (
             AgentHandle,
             ProcessManager,
         )
-        from unittest.mock import MagicMock
+        from agent_nexus.platform.router.router import PlatformRouter
 
         pm = ProcessManager()
         router = PlatformRouter(process_manager=pm)
@@ -2378,8 +2376,8 @@ class TestErrorTypeConsistency:
     @pytest.mark.asyncio
     async def test_empty_agent_name_has_error_type(self) -> None:
         """Empty agent_name returns error_type='ValueError'."""
-        from agent_nexus.platform.router.router import PlatformRouter
         from agent_nexus.platform.orchestration.process_manager import ProcessManager
+        from agent_nexus.platform.router.router import PlatformRouter
 
         pm = ProcessManager()
         router = PlatformRouter(process_manager=pm)
@@ -2390,8 +2388,8 @@ class TestErrorTypeConsistency:
     @pytest.mark.asyncio
     async def test_empty_message_has_error_type(self) -> None:
         """Empty message returns error_type='ValueError'."""
-        from agent_nexus.platform.router.router import PlatformRouter
         from agent_nexus.platform.orchestration.process_manager import ProcessManager
+        from agent_nexus.platform.router.router import PlatformRouter
 
         pm = ProcessManager()
         router = PlatformRouter(process_manager=pm)

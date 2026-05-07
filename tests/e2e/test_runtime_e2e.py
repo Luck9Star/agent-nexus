@@ -5,8 +5,6 @@ Tests the full runtime lifecycle from setup through execution to cleanup.
 
 import asyncio
 
-import pytest
-
 
 class TestRuntimeE2E:
     """E2E runtime scenarios."""
@@ -31,8 +29,8 @@ class TestRuntimeE2E:
 
     def test_runtime_inject_and_use_variable(self):
         """Runtime injects variable and executes code using it."""
-        from agent_nexus.platform.runtime.runtime import PythonRuntime
         from agent_nexus.models.runtime import Variable
+        from agent_nexus.platform.runtime.runtime import PythonRuntime
 
         rt = PythonRuntime()
         try:
@@ -79,8 +77,8 @@ class TestRuntimeE2E:
 
     def test_runtime_reset_clears_state(self):
         """Runtime reset clears injected variables and execution state."""
-        from agent_nexus.platform.runtime.runtime import PythonRuntime
         from agent_nexus.models.runtime import Variable
+        from agent_nexus.platform.runtime.runtime import PythonRuntime
 
         rt = PythonRuntime()
         try:

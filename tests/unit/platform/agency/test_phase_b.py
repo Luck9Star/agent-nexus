@@ -1,16 +1,14 @@
 """Phase B tests: Agency importer — parser, allowlist, content policy, registry, dry-run."""
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
-import yaml
+import pytest
 
+from agent_nexus.platform.agency.allowlist import load_allowlist, validate_allowlist_entry
 from agent_nexus.platform.agency.importer import AgencyImporter
 from agent_nexus.platform.agency.parser import parse_frontmatter
-from agent_nexus.platform.agency.allowlist import load_allowlist, validate_allowlist_entry
 from agent_nexus.platform.agency.policy import check_content_policy
 from agent_nexus.platform.agency.registry import ExpertRegistry
-import pytest
 
 # ---------------------------------------------------------------------------
 # Paths

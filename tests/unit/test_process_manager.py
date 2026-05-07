@@ -8,18 +8,17 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent_nexus.platform.orchestration.ipc import IPCProtocol, IPCStream
 from agent_nexus.platform.orchestration.process_manager import (
     AgentHandle,
     ProcessManager,
 )
-from agent_nexus.platform.orchestration.ipc import IPCProtocol, IPCStream
-
 
 # ============================================================================
 # Fixtures
@@ -237,7 +236,7 @@ class TestStopAgent:
                 # call 1: first IPCStream.close() drain (tolerated)
                 # call 2: second IPCStream.close() drain (stage 1 close)
                 # call 3: stage 1 process.wait timeout
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             # call 4: stage 2 process.wait succeeds after SIGTERM
             mock_proc.returncode = -signal.SIGTERM
 
@@ -261,7 +260,7 @@ class TestStopAgent:
         async def _always_timeout(coro, timeout=None):
             # Close coroutine to suppress "never awaited" warning
             coro.close()
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         with patch(
             "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
@@ -287,7 +286,7 @@ class TestStopAgent:
         # Stage 1 timeout, then SIGTERM raises ProcessLookupError
         async def _timeout_then_race(coro, timeout=None):
             coro.close()
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         mock_proc.send_signal.side_effect = ProcessLookupError()
 
@@ -311,7 +310,7 @@ class TestRestartAgent:
         """restart_agent stops and starts with same params."""
         mock_spawn.return_value = _make_mock_process(returncode=None, pid=100)
 
-        original = await pm.start_agent(
+        await pm.start_agent(
             name="restarter",
             command=["cmd"],
             cwd=Path("/work"),
@@ -353,7 +352,7 @@ class TestHealthCheck:
         result = await pm.health_check("healthy")
         assert result is True
         # last_heartbeat should be updated
-        assert handle.last_heartbeat > datetime(2000, 1, 1, tzinfo=timezone.utc)
+        assert handle.last_heartbeat > datetime(2000, 1, 1, tzinfo=UTC)
 
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
     async def test_health_check_dead_process(
@@ -1022,12 +1021,11 @@ class TestRestartAgentRaceCondition:
 
         with patch.object(pm, "stop_agent", side_effect=_stop_raises_keyerror):
             new_proc = _iter17_make_mock_process(pid=50002)
-            with patch(_SUBPROCESS_PATCH, return_value=new_proc):
-                with caplog.at_level(
-                    logging.WARNING,
-                    logger="agent_nexus.platform.orchestration.process_manager",
-                ):
-                    result = await pm.restart_agent("warn-agent")
+            with patch(_SUBPROCESS_PATCH, return_value=new_proc), caplog.at_level(
+                logging.WARNING,
+                logger="agent_nexus.platform.orchestration.process_manager",
+            ):
+                result = await pm.restart_agent("warn-agent")
 
         assert isinstance(result, AgentHandle)
         assert any("already removed during restart" in r.message for r in caplog.records)
@@ -1425,7 +1423,7 @@ class TestStopAgentSigtermSuccess:
             if call_count <= 2:
                 # call 1: IPCStream.close() drain
                 # call 2: stage 1 process.wait timeout
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             # call 3: stage 2 process.wait succeeds after SIGTERM
             mock_proc.returncode = -signal.SIGTERM
 
@@ -1470,7 +1468,7 @@ class TestStopAgentSigkillEdgeCases:
 
         async def _always_timeout(coro, timeout=None):
             coro.close()
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         with patch(
             "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
@@ -1504,7 +1502,7 @@ class TestStopAgentSigkillEdgeCases:
 
         async def _always_timeout(coro, timeout=None):
             coro.close()
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         with patch(
             "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
@@ -1585,7 +1583,7 @@ class TestStopAgentSigtermRealWait:
             wait_call_count += 1
             # First wait (stage 1): simulate timeout by not setting returncode
             if wait_call_count == 1:
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             # Second wait (stage 2 after SIGTERM): success
             mock_proc.returncode = -signal.SIGTERM
 

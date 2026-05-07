@@ -10,10 +10,9 @@ from agent_nexus.models.evolution import (
 from agent_nexus.platform.evolution.analyzer import (
     AnalysisResult,
     ExecutionAnalyzer,
-    _edit_distance,
     _correct_skill_ids,
+    _edit_distance,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

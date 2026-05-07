@@ -6,13 +6,12 @@ import pytest
 
 from agent_nexus.models.context import BudgetAlertLevel, ContextBudget, ContextBudgetLogEntry
 from agent_nexus.platform.runtime.token_tracker import (
+    _ALERT_OK,
     MAX_TOKENS,
     TokenAlert,
     TokenTracker,
-    _ALERT_OK,
     _alert_from_budget,
 )
-
 
 # ---------------------------------------------------------------------------
 # TokenAlert

@@ -13,7 +13,6 @@ from agent_nexus.models.hooks import (
     AggregatedHookResult,
     HookDefinition,
     HookEvent,
-    HookExecution,
     HookType,
 )
 from agent_nexus.platform.hooks.executor import HookExecutor
@@ -633,7 +632,7 @@ pre_execution:
         yaml_file = tmp_path / "hooks.yaml"
         yaml_file.write_text(yaml_content)
 
-        executor = HookExecutor.from_yaml(yaml_file)
+        HookExecutor.from_yaml(yaml_file)
         # The second entry has type=command but no 'command' field set via yaml.
         # model_validate still succeeds (command is Optional). So let's make one
         # that truly fails: omit 'type' entirely.
@@ -759,14 +758,14 @@ class TestTimeoutKillFailure:
         with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
             mock_proc = AsyncMock()
             # communicate() will time out
-            mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+            mock_proc.communicate = AsyncMock(side_effect=TimeoutError())
             # kill() raises -- this is the branch we want
             mock_proc.kill = Mock(side_effect=RuntimeError("kill failed"))
             mock_proc.wait = AsyncMock()
             mock_proc.returncode = None
             mock_sp.return_value = mock_proc
 
-            with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
+            with patch("asyncio.wait_for", side_effect=TimeoutError()):
                 result = await executor.execute_event(HookEvent.PRE_EXECUTION)
 
         assert len(result.results) == 1

@@ -10,10 +10,9 @@ from agent_nexus.models.runtime import (
     RuntimeType,
     Variable,
 )
-from agent_nexus.platform.runtime.runtime import PythonRuntime
-from agent_nexus.platform.runtime.executor import _IPYTHON_INTERNALS, IPythonExecutor
 from agent_nexus.platform.runtime.describer import TieredRuntimeDescriber
-
+from agent_nexus.platform.runtime.executor import _IPYTHON_INTERNALS, IPythonExecutor
+from agent_nexus.platform.runtime.runtime import PythonRuntime
 
 # ---------------------------------------------------------------------------
 # inject_variable
@@ -96,7 +95,7 @@ class TestInjectCallable:
         assert "my_sync_func" in desc
         # The line for my_sync_func should not have (async)
         lines = desc.strip().split("\n")
-        sync_line = [l for l in lines if "my_sync_func" in l][0]
+        sync_line = [line for line in lines if "my_sync_func" in line][0]
         assert "(async)" not in sync_line
 
 
@@ -315,7 +314,7 @@ class TestIPythonInternalsNoDuplicates:
             "_sh",
             "_dh",
         }
-        assert _IPYTHON_INTERNALS == expected
+        assert expected == _IPYTHON_INTERNALS
 
 
 # ============================================================================
@@ -668,6 +667,7 @@ class TestSecurityCheckerExceptionBranches:
     def test_non_syntax_error_returns_parse_error(self) -> None:
         """A non-SyntaxError exception from ast.parse returns parse error."""
         from unittest.mock import patch
+
         from agent_nexus.platform.runtime.security_checker import SecurityChecker
 
         checker = SecurityChecker()
@@ -681,8 +681,9 @@ class TestSecurityCheckerExceptionBranches:
 
     def test_regex_rule_exception_handled(self) -> None:
         """A failing regex rule logs warning but does not raise."""
-        from unittest.mock import patch, MagicMock
-        from agent_nexus.platform.runtime.security_checker import SecurityChecker, RegexRule
+        from unittest.mock import MagicMock
+
+        from agent_nexus.platform.runtime.security_checker import RegexRule, SecurityChecker
 
         bad_rule = MagicMock(spec=RegexRule)
         bad_rule.check_source.side_effect = RuntimeError("regex engine exploded")

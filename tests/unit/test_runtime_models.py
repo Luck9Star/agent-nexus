@@ -1,6 +1,5 @@
 """Unit tests for agent_nexus.models.runtime module."""
 
-import json
 
 import pytest
 from pydantic import ValidationError
@@ -12,7 +11,6 @@ from agent_nexus.models.runtime import (
     SecurityViolation,
     Variable,
 )
-
 
 # ---------------------------------------------------------------------------
 # Variable

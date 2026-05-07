@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import ast
 import logging
 
 import pytest
 
-from agent_nexus.models.runtime import SecurityViolation
 from agent_nexus.platform.runtime.security_checker import SecurityChecker
 from agent_nexus.platform.runtime.security_rules import (
     AttributeRule,

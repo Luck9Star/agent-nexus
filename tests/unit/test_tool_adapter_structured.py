@@ -14,7 +14,6 @@ import pytest
 from agent_nexus.models.ipc import AgentToPlatform, AgentToPlatformType
 from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
 
-
 # ============================================================================
 # Helpers
 # ============================================================================

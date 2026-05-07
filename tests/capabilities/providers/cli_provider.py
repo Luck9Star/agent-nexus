@@ -60,10 +60,11 @@ class CLIProvider:
             env = {**os.environ, "AGENT_MODE": "local"}
             args: list[str] = ["uv", "run"]
             # Composite agents import from agent_nexus which lives in the
-            # platform venv.  Use --active so uv targets the already-active
-            # environment instead of creating a per-agent venv.
+            # platform venv.  Point uv at the root project so it reuses
+            # the root .venv (which has agent_nexus on sys.path) rather
+            # than creating a per-agent venv.
             if contract.agent_type == "composite":
-                args.append("--active")
+                args.extend(["--active", "--project", str(_REPO_ROOT)])
             args.extend(["python", "-m", module_name])
             proc = await _subprocess_exec(
                 *args,

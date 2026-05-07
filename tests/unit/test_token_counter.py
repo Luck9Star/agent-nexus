@@ -5,10 +5,9 @@ import pytest
 from agent_nexus.platform.agency.token_counter import (
     PromptSection,
     StructuredPrompt,
-    TokenCountResult,
     TokenCounter,
+    TokenCountResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # TokenCounter

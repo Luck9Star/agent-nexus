@@ -29,7 +29,6 @@ from agent_nexus.platform.utils import (
     to_class_name,
 )
 
-
 # ---------------------------------------------------------------------------
 # agent_name_to_package
 # ---------------------------------------------------------------------------
@@ -293,11 +292,10 @@ class TestSqliteConnection:
         with sqlite_connection(db_file) as conn:
             conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)")
         # Now cause an error mid-transaction
-        with pytest.raises(sqlite3.IntegrityError):
-            with sqlite_connection(db_file) as conn:
-                conn.execute("INSERT INTO t VALUES (1, 'ok')")
-                # This will fail: UNIQUE constraint on id
-                conn.execute("INSERT INTO t VALUES (1, 'dup')")
+        with pytest.raises(sqlite3.IntegrityError), sqlite_connection(db_file) as conn:
+            conn.execute("INSERT INTO t VALUES (1, 'ok')")
+            # This will fail: UNIQUE constraint on id
+            conn.execute("INSERT INTO t VALUES (1, 'dup')")
         # First insert should have been rolled back
         with sqlite_connection(db_file) as conn:
             rows = conn.execute("SELECT count(*) FROM t").fetchall()

@@ -5,10 +5,8 @@ from pathlib import Path
 import pytest
 
 from agent_nexus.platform.agency.importer import AgencyImporter
+from agent_nexus.platform.agency.integrator import Artifact
 from agent_nexus.platform.agency.registry import ExpertRegistry
-from agent_nexus.platform.agency.selector import SelectionRequest, SpecialistSelector
-from agent_nexus.platform.agency.integrator import Artifact, Integrator
-from agent_nexus.platform.agency.qa_gate import QAGate, QAGateInput
 from agent_nexus.platform.agency.task_composer import (
     TaskComposer,
     TaskComposerInput,

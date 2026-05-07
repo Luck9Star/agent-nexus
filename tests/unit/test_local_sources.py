@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 import hashlib
+from pathlib import Path
 
 import yaml
 
-from agent_nexus.models.distribution import IndexEntry, SourceEntry
+from agent_nexus.models.distribution import SourceEntry
 from agent_nexus.platform.local.sources import SourceManager
 
 
@@ -139,7 +136,6 @@ class TestSourceResolve:
         assert sm.resolve_agent_source("missing-agent") is None
 
     def test_resolve_finds_matching_entry(self, tmp_path: Path) -> None:
-        from agent_nexus.models.agent import AgentType
 
         path = tmp_path / "sources.yaml"
         sm = SourceManager(path)

@@ -6,7 +6,6 @@ helpers, parsing, and validation including cycle detection.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -14,14 +13,13 @@ import pytest
 from agent_nexus.models.task import TaskState
 from agent_nexus.platform.orchestration.dsl import (
     DSLAgent,
-    DSLValidationError,
     DSLSyntaxError,
     DSLTask,
     DSLToolLoading,
-    OrchestrationDSL,
+    DSLValidationError,
     OrchestrationDefinition,
+    OrchestrationDSL,
 )
-
 
 # ============================================================================
 # DSLAgent
@@ -534,7 +532,6 @@ class TestDetectCycles:
 class TestParseFile:
     def test_parse_file_not_found(self, tmp_path: Any) -> None:
         """parse_file raises DSLSyntaxError for non-existent file."""
-        from pathlib import Path
 
         dsl = OrchestrationDSL()
         with pytest.raises(DSLSyntaxError, match="TOML file not found"):

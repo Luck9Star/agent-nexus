@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent_nexus.models.agent import AgentType
-from agent_nexus.models.distribution import LockfileEntry, SourceEntry
+from agent_nexus.models.distribution import LockfileEntry
 from agent_nexus.platform.local.installer import (
     AgentNotFoundError,
     GitInstaller,
@@ -568,9 +568,8 @@ class TestGetCommitShaPropagation:
 
         with patch.object(
             inst, "_run_git_capture", new_callable=AsyncMock, side_effect=OSError("no git")
-        ):
-            with pytest.raises(InstallationError, match="Could not determine commit SHA"):
-                await inst._get_commit_sha(repo_path)
+        ), pytest.raises(InstallationError, match="Could not determine commit SHA"):
+            await inst._get_commit_sha(repo_path)
 
 
 class TestReadManifestPropagation:

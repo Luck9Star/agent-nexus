@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 import pytest
 
-from agent_nexus.models.runtime import ExecutionResult
 from agent_nexus.platform.runtime.executor import IPythonExecutor
 
 EVAL_CODE = "\x65\x76\x61\x6c"  # "eval" to avoid security hook false positive
@@ -178,7 +177,6 @@ class TestRequireShellConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_require_shell_creates_one_shell(self) -> None:
         """Multiple concurrent calls to _require_shell produce exactly one shell."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -193,7 +191,6 @@ class TestRequireShellConcurrency:
     @pytest.mark.asyncio
     async def test_run_cell_sync_without_shell_raises(self) -> None:
         """_run_cell_sync raises RuntimeError if shell is not initialized."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -238,7 +235,6 @@ class TestConcurrentExecuteVariableDetection:
     @pytest.mark.asyncio
     async def test_concurrent_execute_correct_variables(self) -> None:
         """Two concurrent execute() calls should each detect their own new variables."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -289,7 +285,6 @@ class TestPendingInjectsAppliedOnShellCreation:
     @pytest.mark.asyncio
     async def test_inject_before_shell_creation_applied(self) -> None:
         """Variables injected before shell init should be available after execute."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -315,11 +310,9 @@ class TestCloseExceptionHandling:
 
     def test_close_handles_user_ns_clear_exception(self) -> None:
         """close() should not raise even if user_ns.clear() fails."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         # Manually set up a shell mock that raises on clear
-        mock_ns = {"x": 1}
 
         class BadNamespace(dict):
             def clear(self):
@@ -336,7 +329,6 @@ class TestDelMethod:
 
     def test_del_releases_shell(self) -> None:
         """__del__ should clear user_ns and set _shell to None."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         # Create a shell-like object with a clearable namespace
@@ -347,7 +339,6 @@ class TestDelMethod:
 
     def test_del_no_shell_is_noop(self) -> None:
         """__del__ with no shell should be a no-op."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         assert executor._shell is None
@@ -362,7 +353,6 @@ class TestDelMethod:
             def clear(self):
                 raise RuntimeError("simulated clear failure")
 
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         executor._shell = type("FakeShell", (), {"user_ns": BadNamespace()})()
@@ -392,7 +382,6 @@ class TestTimedOutFlag:
     @pytest.mark.asyncio
     async def test_timed_out_flag_blocks_subsequent_execution(self) -> None:
         """After timeout, subsequent execute() returns error without running code."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -407,7 +396,6 @@ class TestTimedOutFlag:
     @pytest.mark.asyncio
     async def test_timeout_sets_flag(self) -> None:
         """A real timeout sets _timed_out to True."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -426,7 +414,6 @@ class TestTimedOutFlag:
     @pytest.mark.asyncio
     async def test_reset_clears_timed_out_flag(self) -> None:
         """reset() clears the _timed_out flag."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -443,7 +430,6 @@ class TestExecuteGeneralException:
     @pytest.mark.asyncio
     async def test_unexpected_exception_returns_error(self) -> None:
         """Unexpected exceptions during execute are caught and returned."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -472,7 +458,6 @@ class TestInjectPendingQueue:
 
     def test_inject_queues_when_no_shell(self) -> None:
         """inject() stores in _pending_injects when _shell is None."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -491,7 +476,6 @@ class TestDoubleCheckAfterLock:
     @pytest.mark.asyncio
     async def test_double_check_prevents_duplicate_shell(self) -> None:
         """Second caller to _require_shell sees shell created by first."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -511,7 +495,6 @@ class TestDoubleCheckAfterLock:
         """Exercise the double-check path inside the lock body (line 74)."""
         from unittest.mock import MagicMock
 
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -571,17 +554,14 @@ class TestCloseRaceWithTimedOutThread:
 
     def test_close_logs_warning_when_thread_still_running(self) -> None:
         """close() logs warning when _exec_done.wait() returns False."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         executor._shell = type("FakeShell", (), {"user_ns": {"a": 1}})()
         executor._timed_out = True
         # Simulate wait() returning False (thread still running)
         executor._exec_done.clear()
-        original_wait = executor._exec_done.wait
         executor._exec_done.wait = lambda timeout=False: False  # type: ignore[assignment]
 
-        import logging
 
         with (
             patch("agent_nexus.platform.runtime.executor.logger") as mock_logger,
@@ -596,7 +576,6 @@ class TestCloseRaceWithTimedOutThread:
 
     def test_close_succeeds_when_wait_returns_true(self) -> None:
         """close() succeeds cleanly when wait() returns True (thread finished)."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         executor._shell = type("FakeShell", (), {"user_ns": {"a": 1}})()
@@ -618,7 +597,6 @@ class TestResetRaceWithTimedOutThread:
 
     def test_reset_logs_warning_when_thread_still_running(self) -> None:
         """reset() logs warning when _exec_done.wait() returns False."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         executor._shell = type("FakeShell", (), {"user_ns": {"a": 1}})()
@@ -641,7 +619,6 @@ class TestResetRaceWithTimedOutThread:
 
     def test_reset_succeeds_when_wait_returns_true(self) -> None:
         """reset() succeeds cleanly when wait() returns True."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         executor._shell = type("FakeShell", (), {"user_ns": {"a": 1}})()
@@ -658,7 +635,6 @@ class TestExecDoneRestoredOnException:
     @pytest.mark.asyncio
     async def test_exec_done_set_after_transform_failure(self) -> None:
         """transform_cell failure clears _exec_done but except handler must restore it."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -690,7 +666,6 @@ class TestTimeoutZeroClamped:
     @pytest.mark.asyncio
     async def test_timeout_zero_clamped(self) -> None:
         """execute with timeout=0 does not immediately timeout."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -703,7 +678,6 @@ class TestTimeoutZeroClamped:
     @pytest.mark.asyncio
     async def test_timeout_negative_clamped(self) -> None:
         """execute with timeout=-1 does not immediately timeout."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -726,7 +700,6 @@ class TestCancelledErrorHandling:
         - _timed_out flag is set — verified by subsequent contaminated error
         - Subsequent execution is blocked — verified by contaminated assertion
         """
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -765,7 +738,6 @@ class TestThreadContaminationAfterTimeout:
     @pytest.mark.asyncio
     async def test_execute_waits_for_old_thread_after_reset(self) -> None:
         """After timeout + reset(), execute() waits for old thread to finish."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -800,7 +772,6 @@ class TestThreadContaminationAfterTimeout:
     @pytest.mark.asyncio
     async def test_execute_fails_if_old_thread_never_finishes(self) -> None:
         """If old thread never finishes within 5s, execute returns error."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -819,7 +790,6 @@ class TestThreadContaminationAfterTimeout:
     @pytest.mark.asyncio
     async def test_exec_done_already_set_skips_wait(self) -> None:
         """Normal execution (no prior timeout) skips the _exec_done wait."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -844,7 +814,6 @@ class TestExecDoneTiming:
     @pytest.mark.asyncio
     async def test_exec_done_set_after_normal_execution(self) -> None:
         """After successful execution, _exec_done is set."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -856,7 +825,6 @@ class TestExecDoneTiming:
     @pytest.mark.asyncio
     async def test_exec_done_set_after_error_in_exec(self) -> None:
         """After error-in-exec, _exec_done is set by _run_cell_sync finally."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -868,7 +836,6 @@ class TestExecDoneTiming:
     @pytest.mark.asyncio
     async def test_exec_done_set_after_pre_thread_exception(self) -> None:
         """After exception before thread start, _exec_done is set by except handler."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:
@@ -886,7 +853,6 @@ class TestExecDoneTiming:
     @pytest.mark.asyncio
     async def test_exec_done_eventually_set_after_timeout(self) -> None:
         """After timeout, _exec_done is set once the thread completes."""
-        from agent_nexus.platform.runtime.executor import IPythonExecutor
 
         executor = IPythonExecutor()
         try:

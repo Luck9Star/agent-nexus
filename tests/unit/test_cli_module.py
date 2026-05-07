@@ -10,6 +10,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import builtins
 import json
 import os
 from datetime import datetime
@@ -21,8 +22,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agent_nexus.models.agent import AgentType
-from agent_nexus.models.distribution import Lockfile, LockfileEntry, SourceEntry
-
+from agent_nexus.models.distribution import Lockfile, LockfileEntry
 from agent_nexus.platform.local.cli import app
 from agent_nexus.platform.local.cli._lifecycle import (
     _info,
@@ -1244,7 +1244,7 @@ class TestUninstallCLICommand:
         with patch(
             "agent_nexus.platform.local.cli._lifecycle._uninstall", new_callable=AsyncMock
         ) as mock_uninstall:
-            result = runner.invoke(app, ["uninstall", "my-agent"])
+            runner.invoke(app, ["uninstall", "my-agent"])
             assert mock_uninstall.called
             assert mock_uninstall.call_args[0][0] == "my-agent"
 
@@ -1262,7 +1262,7 @@ class TestUpdateCLICommand:
         with patch(
             "agent_nexus.platform.local.cli._lifecycle._update", new_callable=AsyncMock
         ) as mock_update:
-            result = runner.invoke(app, ["update", "my-agent"])
+            runner.invoke(app, ["update", "my-agent"])
             assert mock_update.called
             call_args = mock_update.call_args[0]
             assert call_args[0] == "my-agent"
@@ -1273,7 +1273,7 @@ class TestUpdateCLICommand:
         with patch(
             "agent_nexus.platform.local.cli._lifecycle._update", new_callable=AsyncMock
         ) as mock_update:
-            result = runner.invoke(app, ["update", "--all"])
+            runner.invoke(app, ["update", "--all"])
             assert mock_update.called
             call_args = mock_update.call_args[0]
             assert call_args[1] is True

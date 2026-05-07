@@ -1,9 +1,7 @@
 """Tests for Reflector — hybrid rule-based + LLM evaluation system."""
 
 import json
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from agent_nexus.platform.agency.reflector import (
     EmptyResultRule,
@@ -12,7 +10,6 @@ from agent_nexus.platform.agency.reflector import (
     Reflection,
     Reflector,
 )
-
 
 # ---------------------------------------------------------------------------
 # Reflection dataclass

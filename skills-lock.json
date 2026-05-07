@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "skills": {
+    "pydantic": {
+      "source": "jiatastic/open-python-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pydantic/SKILL.md",
+      "computedHash": "e0d9591c01ccaac3ffe5fd3fc2dab98eb267c8674bd59bb00c8e5eaba2df6fed"
+    },
+    "pydantic-ai-agent-creation": {
+      "source": "existential-birds/beagle",
+      "sourceType": "github",
+      "skillPath": "plugins/beagle-ai/skills/pydantic-ai-agent-creation/SKILL.md",
+      "computedHash": "fab5d021dde0396ecbb9fe62b2496d4be1daa66fda4a5a1f323d46ea8f0b176b"
+    },
+    "pydantic-ai-dependency-injection": {
+      "source": "existential-birds/beagle",
+      "sourceType": "github",
+      "skillPath": "plugins/beagle-ai/skills/pydantic-ai-dependency-injection/SKILL.md",
+      "computedHash": "e2ad9de09faa14430e209a2cf7d7050636fe06da6cbbcd3f79bf6430ed80ae0c"
+    },
+    "python-design-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/python-development/skills/python-design-patterns/SKILL.md",
+      "computedHash": "f263ed30e7627f1f22aea99f0f098b73a9f3b5f1c9ea36d3a31a787eacf2e07e"
+    },
+    "python-performance-optimization": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/python-development/skills/python-performance-optimization/SKILL.md",
+      "computedHash": "1a7009e7e16fd08c201f4a527a44d4f0d9d1d892b15b92ab3492624b23be22b8"
+    },
+    "python-testing-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/python-development/skills/python-testing-patterns/SKILL.md",
+      "computedHash": "69915bb276b6aec61fe5b283a933f96584f66d14b616ce2060d95757629c6866"
+    },
+    "rust": {
+      "source": "mindrally/skills",
+      "sourceType": "github",
+      "skillPath": "rust/SKILL.md",
+      "computedHash": "d66647042598d8c308892dabfefbab38c14c6bcba3b55c8055be6eb22bf0b017"
+    },
+    "rust-best-practices": {
+      "source": "majiayu000/claude-arsenal",
+      "sourceType": "github",
+      "skillPath": "skills/rust-best-practices/SKILL.md",
+      "computedHash": "4ed9f918125231aa6ce9d173d8810acb13a91e77476b5a3cd0a2388fc465f271"
+    },
+    "rust-engineer": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "skillPath": "skills/rust-engineer/SKILL.md",
+      "computedHash": "f8093c6253afe24bbac3c3328c3ca07e9ef089758896ba10221ed0f2078cb2a0"
+    },
+    "skill-vetter": {
+      "source": "useai-pro/openclaw-skills-security",
+      "sourceType": "github",
+      "skillPath": "skills/skill-vetter/SKILL.md",
+      "computedHash": "5172ac6d437a5f41b5fa8be0def458a48b0e73c6b901c3f4e5e792434c4dc133"
+    }
+  }
+}

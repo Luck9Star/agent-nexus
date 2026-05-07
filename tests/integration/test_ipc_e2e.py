@@ -9,7 +9,6 @@ real asyncio subprocess lifecycle, and real JSON-lines framing over stdin/stdout
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 
@@ -18,14 +17,10 @@ import pytest
 from agent_nexus.models.ipc import (
     AgentToPlatform,
     AgentToPlatformType,
-    PlatformToAgent,
-    PlatformToAgentType,
 )
 from agent_nexus.models.task import TaskItem, TaskState
 from agent_nexus.platform.orchestration.ipc import (
     IPCConnectionError,
-    IPCProtocol,
-    IPCStream,
     IPCTimeoutError,
 )
 from agent_nexus.platform.orchestration.process_manager import (
@@ -122,7 +117,6 @@ class TestProcessManagerRealSubprocess:
             name="stop-test",
             command=_echo_command(),
         )
-        pid = handle.pid
         assert handle.is_alive
 
         await pm.stop_agent("stop-test", timeout=5.0)

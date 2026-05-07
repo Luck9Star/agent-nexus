@@ -8,7 +8,6 @@ import pytest
 
 from agent_nexus.platform.router.subtask import SubtaskConfig, SubtaskController
 
-
 # ---------------------------------------------------------------------------
 # SubtaskConfig
 # ---------------------------------------------------------------------------

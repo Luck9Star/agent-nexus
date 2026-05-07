@@ -5,9 +5,7 @@ cross-stage data flow via ReflectionFeedbackProvider.
 """
 
 import json
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from agent_nexus.platform.agency.context_provider import ReflectionFeedbackProvider
 from agent_nexus.platform.agency.llm_client import LLMResponse
@@ -15,10 +13,8 @@ from agent_nexus.platform.agency.reflector import (
     EmptyResultRule,
     LLMReflector,
     MaxIterationRule,
-    Reflection,
     Reflector,
 )
-
 
 # ---------------------------------------------------------------------------
 # 1. Single pass — sufficient result

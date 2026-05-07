@@ -6,10 +6,9 @@ from agent_nexus.platform.evolution.thresholds import (
     _FALLBACK_THRESHOLD,
     _HIGH_APPLIED_FOR_FIX,
     _LOW_COMPLETION_THRESHOLD,
-    _MODERATE_EFFECTIVE_THRESHOLD,
     _MIN_APPLIED_FOR_DERIVED,
+    _MODERATE_EFFECTIVE_THRESHOLD,
 )
-
 
 # ---------------------------------------------------------------------------
 # Threshold constant values (docs/04 Section 6)

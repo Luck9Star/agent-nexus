@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import toml
-import pytest
 
 from agent_nexus.platform.local.cli._shared import ConfigMigrator
 

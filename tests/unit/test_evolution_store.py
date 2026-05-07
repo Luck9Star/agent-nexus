@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -272,8 +272,8 @@ class TestEvolutionStoreCounterPreservation:
             total_applied=total_applied,
             total_completions=total_completions,
             total_fallbacks=total_fallbacks,
-            first_seen=datetime.now(timezone.utc),
-            last_updated=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_updated=datetime.now(UTC),
         )
 
     def test_save_preserves_counters_when_zero(self, tmp_path: Path) -> None:
@@ -374,8 +374,8 @@ class TestEvolutionStoreCounterPreservation:
             directory="skills/test",
             is_active=True,
             total_selections=0,
-            first_seen=datetime.now(timezone.utc),
-            last_updated=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_updated=datetime.now(UTC),
         )
 
         store.evolve_skill(evolved, parent_skill_ids=["parent-1"])
@@ -436,7 +436,7 @@ class TestMalformedSnapshot:
         import uuid
 
         sid = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with store._conn() as conn:
             conn.execute(
                 "INSERT INTO skill_records "
@@ -527,8 +527,8 @@ class TestRecordAnalysisSkipsBadSkillId:
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/test",
                 is_active=True,
-                first_seen=datetime.now(timezone.utc),
-                last_updated=datetime.now(timezone.utc),
+                first_seen=datetime.now(UTC),
+                last_updated=datetime.now(UTC),
             )
         )
 
@@ -536,7 +536,7 @@ class TestRecordAnalysisSkipsBadSkillId:
         store = _make_store(tmp_path)
         self._seed_skill(store, "s-valid")
 
-        analysis_id = store.record_analysis(  # noqa: FURB118  # pyright: ignore[reportUnusedVariable]
+        store.record_analysis(  # noqa: FURB118  # pyright: ignore[reportUnusedVariable]
             task_id="t1",
             agent_name="tester",
             analysis_text="check",
@@ -590,7 +590,7 @@ class TestRecordAnalysisSkipsBadSkillId:
     def test_all_invalid_skill_ids_no_judgments(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
 
-        analysis_id = store.record_analysis(  # pyright: ignore[reportUnusedVariable]
+        store.record_analysis(  # pyright: ignore[reportUnusedVariable]
             task_id="t4",
             agent_name="tester",
             analysis_text="check",
@@ -637,8 +637,8 @@ class TestSkillJudgmentFKEnforcement:
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/real",
                 is_active=True,
-                first_seen=datetime.now(timezone.utc),
-                last_updated=datetime.now(timezone.utc),
+                first_seen=datetime.now(UTC),
+                last_updated=datetime.now(UTC),
             )
         )
 
@@ -680,8 +680,8 @@ class TestEvolveSkillIdCollision:
             lineage=SkillLineage(origin=origin, generation=generation),
             directory="skills/test",
             is_active=True,
-            first_seen=datetime.now(timezone.utc),
-            last_updated=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_updated=datetime.now(UTC),
         )
 
     def test_collision_returns_failure(self, tmp_path: Path) -> None:
@@ -770,8 +770,8 @@ class TestEvolveSkillDatabaseError:
             lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
             directory="skills/test",
             is_active=True,
-            first_seen=datetime.now(timezone.utc),
-            last_updated=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_updated=datetime.now(UTC),
         )
 
     def test_operational_error_returns_failure(self, tmp_path: Path) -> None:
@@ -807,8 +807,8 @@ class TestGetAnalysesForTask:
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/test",
                 is_active=True,
-                first_seen=datetime.now(timezone.utc),
-                last_updated=datetime.now(timezone.utc),
+                first_seen=datetime.now(UTC),
+                last_updated=datetime.now(UTC),
             )
         )
 
@@ -881,8 +881,8 @@ class TestGetJudgmentsForSkill:
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/test",
                 is_active=True,
-                first_seen=datetime.now(timezone.utc),
-                last_updated=datetime.now(timezone.utc),
+                first_seen=datetime.now(UTC),
+                last_updated=datetime.now(UTC),
             )
         )
 
@@ -996,8 +996,8 @@ class TestGetAncestry:
             lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=generation),
             directory="skills/test",
             is_active=True,
-            first_seen=datetime.now(timezone.utc),
-            last_updated=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_updated=datetime.now(UTC),
         )
 
     def test_linear_ancestry(self, tmp_path: Path) -> None:
@@ -1015,8 +1015,8 @@ class TestGetAncestry:
             ),
             directory="skills/test",
             is_active=True,
-            first_seen=datetime.now(timezone.utc),
-            last_updated=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_updated=datetime.now(UTC),
         )
         child = SkillRecord(
             id="c",
@@ -1029,8 +1029,8 @@ class TestGetAncestry:
             ),
             directory="skills/test",
             is_active=True,
-            first_seen=datetime.now(timezone.utc),
-            last_updated=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_updated=datetime.now(UTC),
         )
 
         store.save_skill_record(grandparent)
@@ -1062,8 +1062,8 @@ class TestGetAncestry:
                 ),
                 directory="skills/test",
                 is_active=True,
-                first_seen=datetime.now(timezone.utc),
-                last_updated=datetime.now(timezone.utc),
+                first_seen=datetime.now(UTC),
+                last_updated=datetime.now(UTC),
             )
             store.evolve_skill(rec, parent_skill_ids=[prev_id])
             prev_id = f"s{i}"
@@ -1134,7 +1134,7 @@ class TestInvalidLineageOrigin:
         import uuid
 
         sid = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with store._conn() as conn:
             conn.execute(
                 "INSERT INTO skill_records "
@@ -1214,7 +1214,7 @@ class TestJudgmentsBatchEvenLimit:
     def _seed_judgments(self, store: EvolutionStore, skill_id: str, count: int) -> None:
         """Insert *count* judgment rows for *skill_id*."""
         import uuid
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         with store._conn(immediate=True) as conn:
             # Insert a parent analysis row (FK requirement)
@@ -1227,10 +1227,10 @@ class TestJudgmentsBatchEvenLimit:
                     analysis_id,
                     "test-task",
                     "test-agent",
-                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(UTC).isoformat(),
                 ),
             )
-            for i in range(count):
+            for _i in range(count):
                 conn.execute(
                     "INSERT INTO skill_judgments "
                     "(id, analysis_id, skill_id, selected, applied, completed, fell_back) "
@@ -1307,8 +1307,8 @@ class TestGetAncestryBatch:
             lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=generation),
             directory="skills/test",
             is_active=True,
-            first_seen=datetime.now(timezone.utc),
-            last_updated=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_updated=datetime.now(UTC),
         )
 
     def test_empty_input_returns_empty(self, tmp_path: Path) -> None:
@@ -1329,8 +1329,8 @@ class TestGetAncestryBatch:
             ),
             directory="skills/test",
             is_active=True,
-            first_seen=datetime.now(timezone.utc),
-            last_updated=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_updated=datetime.now(UTC),
         )
         child = SkillRecord(
             id="c",
@@ -1343,8 +1343,8 @@ class TestGetAncestryBatch:
             ),
             directory="skills/test",
             is_active=True,
-            first_seen=datetime.now(timezone.utc),
-            last_updated=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_updated=datetime.now(UTC),
         )
         store.evolve_skill(parent, parent_skill_ids=["gp"])
         store.evolve_skill(child, parent_skill_ids=["p"])
@@ -1372,8 +1372,8 @@ class TestGetAncestryBatch:
                 ),
                 directory="skills/test",
                 is_active=True,
-                first_seen=datetime.now(timezone.utc),
-                last_updated=datetime.now(timezone.utc),
+                first_seen=datetime.now(UTC),
+                last_updated=datetime.now(UTC),
             )
             store.evolve_skill(rec, parent_skill_ids=["root"])
 
@@ -1411,8 +1411,8 @@ class TestGetAncestryBatch:
                 ),
                 directory="skills/test",
                 is_active=True,
-                first_seen=datetime.now(timezone.utc),
-                last_updated=datetime.now(timezone.utc),
+                first_seen=datetime.now(UTC),
+                last_updated=datetime.now(UTC),
             )
             store.evolve_skill(rec, parent_skill_ids=[prev_id])
             prev_id = f"s{i}"
@@ -1501,10 +1501,9 @@ class TestConnResourceCleanup:
         store = _make_store(tmp_path)
 
         patcher, closes = self._make_failing_connect("PRAGMA", "forced pragma fail")
-        with patcher:
-            with pytest.raises(sqlite3.OperationalError, match="forced pragma"):
-                with store._conn() as _:
-                    pass
+        with patcher, pytest.raises(sqlite3.OperationalError, match="forced pragma"):
+            with store._conn() as _:
+                pass
 
         assert closes[0] == 1, "Connection leaked: conn.close() never called after PRAGMA failure"
 
@@ -1512,10 +1511,9 @@ class TestConnResourceCleanup:
         store = _make_store(tmp_path)
 
         patcher, closes = self._make_failing_connect("BEGIN", "database is locked")
-        with patcher:
-            with pytest.raises(sqlite3.OperationalError, match="database is locked"):
-                with store._conn(immediate=True) as _:
-                    pass
+        with patcher, pytest.raises(sqlite3.OperationalError, match="database is locked"):
+            with store._conn(immediate=True) as _:
+                pass
 
         assert closes[0] == 1, "Connection leaked after BEGIN IMMEDIATE failure"
 
@@ -1631,8 +1629,8 @@ class TestRecordAnalysisCounterInvariants:
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/test",
                 is_active=True,
-                first_seen=datetime.now(timezone.utc),
-                last_updated=datetime.now(timezone.utc),
+                first_seen=datetime.now(UTC),
+                last_updated=datetime.now(UTC),
             )
         )
 
@@ -1732,8 +1730,8 @@ class TestNegativeLimitClamped:
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/test",
                 is_active=True,
-                first_seen=datetime.now(timezone.utc),
-                last_updated=datetime.now(timezone.utc),
+                first_seen=datetime.now(UTC),
+                last_updated=datetime.now(UTC),
             )
         )
 
@@ -1768,7 +1766,7 @@ class TestNegativeLimitClamped:
     def test_get_budget_log_negative_limit(self, tmp_path: Path) -> None:
         """limit=-1 in get_budget_log must return at most 1 row."""
         store = _make_store(tmp_path)
-        for i in range(5):
+        for _i in range(5):
             store.log_budget_event(
                 agent_name="test-agent",
                 event_type="compaction",
@@ -1814,14 +1812,13 @@ class TestJudgmentsBatchLimitClamp:
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/test",
                 is_active=True,
-                first_seen=datetime.now(timezone.utc),
-                last_updated=datetime.now(timezone.utc),
+                first_seen=datetime.now(UTC),
+                last_updated=datetime.now(UTC),
             )
         )
 
     @staticmethod
     def _seed_judgments(store: EvolutionStore, skill_id: str, count: int) -> None:
-        import uuid
 
         for i in range(count):
             store.record_analysis(
@@ -1878,6 +1875,7 @@ class TestStoreSchemaInitTransaction:
     def test_no_executescript_in_source(self) -> None:
         """Verify executescript is NOT used in store.py."""
         import inspect
+
         from agent_nexus.platform.evolution.store import EvolutionStore as ES
 
         source = inspect.getsource(ES)
@@ -1935,7 +1933,6 @@ class TestEvolveSkillParentValidation:
     def test_parent_deactivation_succeeds_for_valid_parent(self, tmp_path: Path) -> None:
         """evolve_skill with valid parent creates new record and deactivates parent."""
         store = _make_store(tmp_path)
-        from agent_nexus.platform.evolution.evolver import EvolveResult
 
         # Create a parent skill first
         parent = SkillRecord(

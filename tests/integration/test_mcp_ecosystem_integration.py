@@ -16,11 +16,9 @@ Pipeline 4: End-to-end agency pipeline smoke test
 from __future__ import annotations
 
 import json
-import uuid
 from pathlib import Path
-from dataclasses import dataclass
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -28,7 +26,6 @@ from agent_nexus.models.external_mcp import ExternalServerConfig, TransportType
 from agent_nexus.models.ipc import AgentToPlatform, AgentToPlatformType
 from agent_nexus.platform.agency.dag_dispatcher import (
     DAGDispatcher,
-    DispatchResult,
     dag_task_to_task_item,
     load_dag_into_graph,
 )
@@ -44,7 +41,6 @@ from agent_nexus.platform.agency.registry import ExpertRegistry
 from agent_nexus.platform.gateway.external_mcp_adapter import ExternalMcpAdapter
 from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter, _sanitize
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
-
 
 # ============================================================================
 # Helpers

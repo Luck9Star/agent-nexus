@@ -3,14 +3,12 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from agent_nexus.models.evolution import EvolutionContext, SkillRecord
+from agent_nexus.models.evolution import EvolutionContext, EvolutionType, SkillRecord
 from agent_nexus.platform.evolution.analyzer import AnalysisResult
 from agent_nexus.platform.evolution.compaction import AgentContext
 from agent_nexus.platform.evolution.engine import EvolutionEngine
-from agent_nexus.platform.evolution.evolver import EvolveResult, EvolutionTrigger
+from agent_nexus.platform.evolution.evolver import EvolutionTrigger, EvolveResult
 from agent_nexus.platform.evolution.promotion import PromotionCandidate, PromotionResult
-from agent_nexus.models.evolution import EvolutionType
-
 
 # ---------------------------------------------------------------------------
 # Helpers

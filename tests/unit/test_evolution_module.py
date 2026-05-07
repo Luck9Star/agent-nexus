@@ -7,21 +7,19 @@ Target: ~65 tests across all modules.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from agent_nexus.models.context import BudgetAlertLevel, ContextBudget, TokenUsage
 from agent_nexus.models.evolution import (
     EvolutionContext,
-    EvolutionMetrics,
     EvolutionType,
     SkillLineage,
     SkillOrigin,
     SkillRecord,
 )
-from agent_nexus.models.context import BudgetAlertLevel, ContextBudget, TokenUsage
-from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.analyzer import (
     AnalysisResult,
     EvolutionSuggestion,
@@ -29,25 +27,25 @@ from agent_nexus.platform.evolution.analyzer import (
     _correct_skill_ids,
     _edit_distance,
 )
+from agent_nexus.platform.evolution.compaction import AgentContext, CompactionGuard
 from agent_nexus.platform.evolution.evolver import (
-    EvolveResult,
     EvolutionTrigger,
+    EvolveResult,
     SkillEvolver,
 )
-from agent_nexus.platform.evolution.compaction import AgentContext, CompactionGuard
+from agent_nexus.platform.evolution.health import HealthChecker, HealthReport
 from agent_nexus.platform.evolution.promotion import (
     AgentPromoter,
     PromotionCandidate,
     PromotionResult,
 )
-from agent_nexus.platform.evolution.health import HealthChecker, HealthReport
-
+from agent_nexus.platform.evolution.store import EvolutionStore
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-_now = datetime.now(timezone.utc)
+_now = datetime.now(UTC)
 
 
 def _make_record(
@@ -105,7 +103,7 @@ def _store_with_records(tmp_path: Path, *records: SkillRecord) -> EvolutionStore
 class TestEvolutionStoreInit:
     def test_creates_database_file(self, tmp_path: Path) -> None:
         db = tmp_path / "evo.db"
-        store = EvolutionStore(db)
+        EvolutionStore(db)
         assert db.exists()
         # Opening again should not fail (idempotent schema)
         EvolutionStore(db)
@@ -1002,7 +1000,7 @@ class TestCompactionGuardReinject:
         long_l1 = "x" * 5000
         ctx = _make_agent_context(l0_content="id", l1_content=long_l1)
         result = guard.reinject_after_compaction(ctx)
-        budget = ContextBudget()
+        ContextBudget()
         # l1_max is 3000, so l1 should be truncated
         assert len(result) < len("id\n" + long_l1)
 
@@ -2079,7 +2077,7 @@ class TestEvolutionEngineEvolvePostAnalysis:
             task_completed=False,
             skill_ids_used=["s1"],
         )
-        result = engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
+        engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
         # The original should be deactivated (FIX evolution)
         original = store.get_skill_record("s1")
         assert original is not None
@@ -2307,7 +2305,7 @@ class TestEvolutionEngineFacadeDelegation:
     """
 
     @pytest.fixture
-    def engine(self, tmp_path: Path) -> "EvolutionEngine":
+    def engine(self, tmp_path: Path) -> EvolutionEngine:
         """Create an EvolutionEngine with a temp SQLite store."""
         from agent_nexus.platform.evolution.engine import EvolutionEngine
 
@@ -2315,7 +2313,7 @@ class TestEvolutionEngineFacadeDelegation:
         store = EvolutionStore(db_path)
         return EvolutionEngine(store, agents_root=tmp_path / "agents")
 
-    def test_properties_return_components(self, engine: "EvolutionEngine") -> None:
+    def test_properties_return_components(self, engine: EvolutionEngine) -> None:
         """All sub-component properties return non-None instances."""
         assert engine.store is not None
         assert engine.analyzer is not None
@@ -2324,22 +2322,22 @@ class TestEvolutionEngineFacadeDelegation:
         assert engine.compaction_guard is not None
         assert engine.promoter is not None
 
-    def test_evolve_post_analysis_requires_ctx(self, engine: "EvolutionEngine") -> None:
+    def test_evolve_post_analysis_requires_ctx(self, engine: EvolutionEngine) -> None:
         """trigger=POST_ANALYSIS without ctx raises ValueError."""
         with pytest.raises(ValueError, match="ctx.*required"):
             engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=None)
 
-    def test_evolve_tool_degradation_requires_tool_key(self, engine: "EvolutionEngine") -> None:
+    def test_evolve_tool_degradation_requires_tool_key(self, engine: EvolutionEngine) -> None:
         """trigger=TOOL_DEGRADATION without tool_key raises ValueError."""
         with pytest.raises(ValueError, match="tool_key.*required"):
             engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION)
 
-    def test_evolve_unknown_trigger(self, engine: "EvolutionEngine") -> None:
+    def test_evolve_unknown_trigger(self, engine: EvolutionEngine) -> None:
         """Unknown trigger raises ValueError."""
         with pytest.raises(ValueError, match="Unknown trigger"):
             engine.evolve(trigger="nonexistent")  # type: ignore[arg-type]
 
-    def test_evolve_post_analysis_returns_analysis_result(self, engine: "EvolutionEngine") -> None:
+    def test_evolve_post_analysis_returns_analysis_result(self, engine: EvolutionEngine) -> None:
         """trigger=POST_ANALYSIS with valid ctx returns AnalysisResult."""
         ctx = EvolutionContext(
             agent_id="test-agent",
@@ -2350,7 +2348,7 @@ class TestEvolutionEngineFacadeDelegation:
         # AnalysisResult has .suggestions attribute
         assert hasattr(result, "suggestions")
 
-    def test_evolve_tool_degradation_returns_list(self, engine: "EvolutionEngine") -> None:
+    def test_evolve_tool_degradation_returns_list(self, engine: EvolutionEngine) -> None:
         """trigger=TOOL_DEGRADATION returns list[EvolveResult]."""
         results = engine.evolve(
             trigger=EvolutionTrigger.TOOL_DEGRADATION,
@@ -2359,12 +2357,12 @@ class TestEvolutionEngineFacadeDelegation:
         )
         assert isinstance(results, list)
 
-    def test_evolve_metric_check_returns_list(self, engine: "EvolutionEngine") -> None:
+    def test_evolve_metric_check_returns_list(self, engine: EvolutionEngine) -> None:
         """trigger=METRIC_CHECK returns list[EvolveResult]."""
         results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
         assert isinstance(results, list)
 
-    def test_should_compact_delegates(self, engine: "EvolutionEngine") -> None:
+    def test_should_compact_delegates(self, engine: EvolutionEngine) -> None:
         """should_compact delegates to CompactionGuard."""
         from agent_nexus.platform.evolution.compaction import AgentContext
 
@@ -2373,12 +2371,12 @@ class TestEvolutionEngineFacadeDelegation:
         result = engine.should_compact(ctx)
         assert isinstance(result, bool)
 
-    def test_diagnose_all_delegates(self, engine: "EvolutionEngine") -> None:
+    def test_diagnose_all_delegates(self, engine: EvolutionEngine) -> None:
         """diagnose_all delegates to HealthChecker."""
         report = engine.diagnose_all()
         assert isinstance(report, dict)
 
-    def test_check_health_missing_skill_raises(self, engine: "EvolutionEngine") -> None:
+    def test_check_health_missing_skill_raises(self, engine: EvolutionEngine) -> None:
         """check_health raises ValueError for unknown skill_id."""
         with pytest.raises(ValueError, match="Skill not found"):
             engine.check_health("nonexistent-skill")
@@ -2736,7 +2734,7 @@ class TestEvolutionStoreAnalysisSkipEmptySkillId:
     def test_judgment_without_skill_id_skipped(self, tmp_path: Path) -> None:
         """Judgments missing skill_id are silently skipped."""
         store = _store_with_records(tmp_path, _make_record("s1", "x"))
-        analysis_id = store.record_analysis(
+        store.record_analysis(
             task_id="t1",
             agent_name="a",
             analysis_text="test",

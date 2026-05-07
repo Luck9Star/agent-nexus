@@ -1,6 +1,5 @@
 """Unit tests for agent_nexus.models.evolution module."""
 
-import json
 from datetime import datetime
 
 import pytest
@@ -14,7 +13,6 @@ from agent_nexus.models.evolution import (
     SkillOrigin,
     SkillRecord,
 )
-
 
 # ---------------------------------------------------------------------------
 # EvolutionType enum

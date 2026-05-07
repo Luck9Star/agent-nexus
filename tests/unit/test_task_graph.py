@@ -6,7 +6,7 @@ Tests add_task, state transitions, queries, cycle detection, and snapshots.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -23,7 +23,7 @@ def _make_task(
     state: TaskState = TaskState.PENDING,
 ) -> TaskItem:
     """Create a TaskItem with UTC timestamps."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return TaskItem(
         id=task_id,
         description=description or f"Task {task_id}",
@@ -420,7 +420,6 @@ class TestTaskGraphCorruptRow:
 
     def test_invalid_state_in_db_raises(self, tmp_path: Path) -> None:
         """A row with an invalid state value causes an error, not silent drop."""
-        import json
         import sqlite3
 
         db_path = tmp_path / "corrupt.db"
@@ -618,7 +617,6 @@ class TestGetTaskConnRequiredRaises:
         UPDATE is no longer an error -- the method returns the updated
         task object without needing a second DB read.
         """
-        import json
         from unittest.mock import patch
 
         tg = TaskGraph(Path(":memory:"))
@@ -965,6 +963,7 @@ class TestSchemaInitTransaction:
     def test_no_executescript_in_source(self) -> None:
         """Verify executescript is NOT used in task_graph.py."""
         import inspect
+
         from agent_nexus.platform.orchestration.task_graph import TaskGraph as TG
 
         source = inspect.getsource(TG)

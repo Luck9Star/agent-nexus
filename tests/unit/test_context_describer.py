@@ -6,10 +6,8 @@ Uses unittest.mock to mock EvolutionStore and HealthChecker.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from agent_nexus.models.evolution import (
     EvolutionMetrics,
@@ -24,12 +22,11 @@ from agent_nexus.platform.evolution.context_describer import (
 )
 from agent_nexus.platform.evolution.health import HealthChecker, HealthReport
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-_now = datetime.now(timezone.utc)
+_now = datetime.now(UTC)
 
 
 def _make_record(
@@ -388,8 +385,8 @@ class TestL1Context:
 
         lines = result.split("\n")
         # Find row indices (skip header rows)
-        skill_lines = [l for l in lines if l.startswith("| ") and "Skill |" not in l]
-        names = [l.split("|")[1].strip() for l in skill_lines]
+        skill_lines = [line for line in lines if line.startswith("| ") and "Skill |" not in line]
+        names = [line.split("|")[1].strip() for line in skill_lines]
         # high (500) > mid (100) > low (10)
         assert names == ["high", "mid", "low"]
 

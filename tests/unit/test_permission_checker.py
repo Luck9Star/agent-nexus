@@ -16,7 +16,6 @@ from agent_nexus.platform.runtime.permission_checker import (
     _fnmatch_recursive,
 )
 
-
 # ======================================================================
 # Helpers
 # ======================================================================
@@ -318,7 +317,6 @@ class TestCheckPathSensitive:
         resolve to sensitive locations regardless of test environment.
         """
         import os
-
         from pathlib import Path
 
         checker = _checker(mode=PermissionMode.FULL_AUTO)
@@ -651,7 +649,6 @@ class TestApplyPathAccessFallback:
             path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.READ)],
         )
         # Use _apply_path_access directly with a mock PathAccess
-        from agent_nexus.models.permission import PathAccess as PA
 
         # Create a mock PathAccess that is not in the known set
         class FakeAccess:

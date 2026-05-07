@@ -11,9 +11,7 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
-import tempfile
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -24,13 +22,11 @@ from typer.testing import CliRunner
 from agent_nexus.models.agent import AgentType
 from agent_nexus.models.config import ModelConfig, PlatformConfig, ProviderConfig
 from agent_nexus.models.distribution import IndexEntry, Lockfile, LockfileEntry, SourceEntry
-
 from agent_nexus.platform.local.cli import app
 from agent_nexus.platform.local.installer import AgentNotFoundError, GitInstaller, InstallationError
 from agent_nexus.platform.local.lockfile import LockfileManager
 from agent_nexus.platform.local.sources import SourceManager
 from agent_nexus.platform.local.supervisor import AgentSupervisor, RestartTracker
-
 
 # ============================================================================
 # Helpers
@@ -1138,7 +1134,7 @@ class TestCLI:
     @patch("agent_nexus.platform.local.cli._lifecycle._install", new_callable=AsyncMock)
     def test_install_agent_success(self, mock_install) -> None:
         """install command invokes _install with the agent name."""
-        result = runner.invoke(app, ["install", "doc-filler"])
+        runner.invoke(app, ["install", "doc-filler"])
         assert mock_install.called
         call_args = mock_install.call_args[0]
         assert call_args[0] == "doc-filler"
@@ -1447,7 +1443,7 @@ class TestPipeSafetyCreateVenv:
             "agent_nexus.platform.local.installer.asyncio.create_subprocess_exec",
             side_effect=[mock_proc_venv, mock_proc_install],
         ):
-            result = await installer._create_venv("test-agent", agent_dir)
+            await installer._create_venv("test-agent", agent_dir)
 
         mock_proc_venv.communicate.assert_awaited_once()
         mock_proc_install.communicate.assert_awaited_once()
@@ -2285,7 +2281,7 @@ class TestGitInstallerInstall:
         installer._create_venv = AsyncMock(return_value=None)
         installer._get_commit_sha = AsyncMock(return_value="latest")
 
-        entry = await installer.install(
+        await installer.install(
             "test-agent",
             version="3.1.0",
             source_url="https://github.com/org/agents.git",
@@ -2723,7 +2719,7 @@ class TestGitInstallerUninstallEdgeCases:
         config_dir.mkdir()
 
         # Create the malicious venv so we can verify it is NOT removed
-        malicious = Path("/tmp/malicious-venv")
+        Path("/tmp/malicious-venv")
         # We can't reliably test /tmp, but we can verify the logic doesn't crash
         installer = GitInstaller(
             MagicMock(spec=SourceManager),
@@ -2786,9 +2782,8 @@ class TestGitInstallerRunGitCapture:
         with patch(
             "agent_nexus.platform.local.installer.asyncio.create_subprocess_exec",
             return_value=mock_proc,
-        ):
-            with pytest.raises(InstallationError, match="git.*failed"):
-                await GitInstaller._run_git_capture(["bad-cmd"], tmp_path)
+        ), pytest.raises(InstallationError, match="git.*failed"):
+            await GitInstaller._run_git_capture(["bad-cmd"], tmp_path)
 
 
 # ============================================================================
@@ -3275,9 +3270,8 @@ class TestInstallRollbackCleanupFailure:
         with patch(
             "agent_nexus.platform.local.installer.shutil.rmtree",
             side_effect=_rmtree_side_effect,
-        ):
-            with pytest.raises(RuntimeError, match="venv fail"):
-                await installer.install("rf-agent", source_url="https://github.com/x/y.git")
+        ), pytest.raises(RuntimeError, match="venv fail"):
+            await installer.install("rf-agent", source_url="https://github.com/x/y.git")
 
         # At least 2 rmtree calls: step-5 pre-copy + rollback cleanup
         assert len(rmtree_calls) >= 2

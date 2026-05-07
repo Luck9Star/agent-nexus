@@ -1,7 +1,8 @@
 """Policy multilingual tests: Chinese prompt injection detection."""
 
-from agent_nexus.platform.agency.policy import check_content_policy
 import pytest
+
+from agent_nexus.platform.agency.policy import check_content_policy
 
 
 @pytest.mark.timeout(30)

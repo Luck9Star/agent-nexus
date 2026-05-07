@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 
 import jsonschema
-import yaml
 import pytest
+import yaml
 
 # ---------------------------------------------------------------------------
 # Paths

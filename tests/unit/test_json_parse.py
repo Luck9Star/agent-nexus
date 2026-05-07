@@ -12,13 +12,10 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from agent_nexus.platform.agency.json_parse import (
     robust_json_parse,
     strip_markdown_fence,
 )
-
 
 # ---------------------------------------------------------------------------
 # strip_markdown_fence

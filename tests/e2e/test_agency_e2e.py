@@ -17,20 +17,20 @@ from pathlib import Path
 import pytest
 
 from agent_nexus.platform.agency.importer import AgencyImporter
-from agent_nexus.platform.agency.registry import ExpertRegistry
-from agent_nexus.platform.agency.selector import (
-    SelectionRequest,
-    SelectionResult,
-    SpecialistSelector,
-)
+from agent_nexus.platform.agency.integrator import Artifact, Integrator
 from agent_nexus.platform.agency.planner import (
     CompositionDAG,
     DynamicCompositePlanner,
     SubtaskDef,
     generate_toml,
 )
-from agent_nexus.platform.agency.integrator import Artifact, Integrator
 from agent_nexus.platform.agency.qa_gate import QAGate, QAGateInput
+from agent_nexus.platform.agency.registry import ExpertRegistry
+from agent_nexus.platform.agency.selector import (
+    SelectionRequest,
+    SelectionResult,
+    SpecialistSelector,
+)
 from agent_nexus.platform.agency.task_composer import (
     TaskComposer,
     TaskComposerInput,
@@ -495,8 +495,6 @@ class TestImportAllFileOutput:
 
     def test_all_profile_json_files_written(self):
         """All 12 <id>.json files are written to output_dir."""
-        import io
-        import json
 
         with tempfile.TemporaryDirectory() as tmpdir:
             importer = AgencyImporter(
@@ -530,7 +528,6 @@ class TestImportAllFileOutput:
 
     def test_source_lock_yaml_exists_and_valid(self):
         """source.lock.yaml exists and is valid YAML with correct structure."""
-        import io
 
         with tempfile.TemporaryDirectory() as tmpdir:
             importer = AgencyImporter(
@@ -801,7 +798,9 @@ class TestYAMLSerialization:
     def test_dump_yaml_produces_parseable_output(self):
         """_dump_yaml() output can be parsed by yaml.safe_load."""
         import io
+
         import yaml
+
         from agent_nexus.platform.agency.importer import _dump_yaml
 
         data = {

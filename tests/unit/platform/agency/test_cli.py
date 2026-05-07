@@ -4,10 +4,10 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from agent_nexus.platform.agency.cli import cli
-import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _VENDOR_DIR = _PROJECT_ROOT / "vendor" / "agency-agents"

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from tests.capabilities.contracts.schema import CapabilityContract

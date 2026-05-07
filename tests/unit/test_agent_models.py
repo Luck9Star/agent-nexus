@@ -6,8 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from agent_nexus.models.agent import (
-    AgentDependencies,
     AgentDefinition,
+    AgentDependencies,
     AgentManifest,
     AgentModelConfig,
     AgentPackage,
@@ -22,7 +22,6 @@ from agent_nexus.models.agent import (
 )
 from agent_nexus.models.hooks import HookEvent, HookType
 from agent_nexus.models.permission import PermissionConfig, PermissionMode
-
 
 # ---------------------------------------------------------------------------
 # AgentType enum

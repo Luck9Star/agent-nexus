@@ -11,17 +11,15 @@ import time
 
 import pytest
 
-from agent_nexus.models.task import TaskItem, TaskState
+from agent_nexus.models.task import TaskState
 from agent_nexus.platform.agency.dag_dispatcher import (
     DAGDispatcher,
-    DispatchResult,
     dag_task_to_task_item,
     load_dag_into_graph,
 )
 from agent_nexus.platform.agency.integrator import Artifact
 from agent_nexus.platform.agency.planner import CompositionDAG, DAGTask
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -593,11 +591,12 @@ class TestDispatchWithExpertExecutorProtocol:
     """Use a lambda as executor to verify protocol works."""
 
     def test_lambda_executor(self) -> None:
-        executor = lambda profile_id, task: Artifact(
-            source_agent=profile_id,
-            artifact_type="lambda_result",
-            sections={"task_desc": task},
-        )
+        def executor(profile_id, task):
+            return Artifact(
+                    source_agent=profile_id,
+                    artifact_type="lambda_result",
+                    sections={"task_desc": task},
+                )
         dag = _build_dag(
             [
                 DAGTask(id="s1", agent="a1", output="o1"),
@@ -936,7 +935,6 @@ class TestMaxBatchSizeSemantics:
 
     def test_batch_size_limits_pick_per_round(self) -> None:
         """max_batch_size=2 with 4 tasks: at most 2 tasks per round, all complete."""
-        rounds_log: list[list[str]] = []
         call_count = {"n": 0}
 
         def tracking(profile_id: str, task: str) -> Artifact:

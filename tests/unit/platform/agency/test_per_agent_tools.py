@@ -9,7 +9,6 @@ import yaml
 from agent_nexus.platform.agency.allowlist import validate_allowlist_entry
 from agent_nexus.platform.agency.importer import AgencyImporter
 
-
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------

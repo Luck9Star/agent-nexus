@@ -6,14 +6,12 @@ import ast
 
 import pytest
 
-from agent_nexus.models.runtime import SecurityViolation
 from agent_nexus.platform.runtime.security_rules import (
     AttributeRule,
     FunctionRule,
     ImportRule,
     RegexRule,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

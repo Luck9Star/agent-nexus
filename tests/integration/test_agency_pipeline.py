@@ -12,11 +12,11 @@ from pathlib import Path
 import pytest
 
 from agent_nexus.platform.agency.importer import AgencyImporter
+from agent_nexus.platform.agency.integrator import Artifact, Integrator
+from agent_nexus.platform.agency.planner import DynamicCompositePlanner, generate_toml
+from agent_nexus.platform.agency.qa_gate import QAGate, QAGateInput
 from agent_nexus.platform.agency.registry import ExpertRegistry
 from agent_nexus.platform.agency.selector import SelectionRequest, SpecialistSelector
-from agent_nexus.platform.agency.planner import DynamicCompositePlanner, generate_toml
-from agent_nexus.platform.agency.integrator import Artifact, Integrator
-from agent_nexus.platform.agency.qa_gate import QAGate, QAGateInput
 
 # Load profile_loader from the generic-expert-agent package (not installed in project venv)
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
