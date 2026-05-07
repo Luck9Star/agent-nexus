@@ -433,60 +433,75 @@ class SkillStore:
         if not skill_ids:
             return {}
         with self._conn() as conn:
-            visited_per_skill: dict[str, set[str]] = {sid: set() for sid in skill_ids}
-            frontiers: dict[str, list[str]] = {sid: [sid] for sid in skill_ids}
+            visited = self._ancestry_bfs(conn, skill_ids, max_depth)
+            records_by_id = self._load_ancestry_records(conn, visited)
+            return self._build_ancestry_result(skill_ids, visited, records_by_id)
 
-            for _ in range(max_depth):
-                all_frontier_ids: set[str] = set()
-                for sid in skill_ids:
-                    all_frontier_ids.update(frontiers[sid])
-
-                if not all_frontier_ids:
-                    break
-
-                round_parents = self._batch_load_parents(conn, all_frontier_ids)
-
-                next_frontiers: dict[str, list[str]] = {sid: [] for sid in skill_ids}
-                any_progress = False
-                for sid in skill_ids:
-                    for fid in frontiers[sid]:
-                        for pid in round_parents.get(fid, []):
-                            if pid not in visited_per_skill[sid]:
-                                visited_per_skill[sid].add(pid)
-                                next_frontiers[sid].append(pid)
-                                any_progress = True
-                frontiers = next_frontiers
-                if not any_progress:
-                    break
-
-            all_ancestor_ids: set[str] = set()
-            for s in visited_per_skill.values():
-                all_ancestor_ids.update(s)
-
-            if not all_ancestor_ids:
-                return {sid: [] for sid in skill_ids}
-
-            rows = _chunked_in_fetchall(
-                conn,
-                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE id IN ({{IN}})",
-                list(all_ancestor_ids),
-            )
-
-            ancestors_ids = {r[0] for r in rows}
-            parents = self._batch_load_parents(conn, ancestors_ids)
-            records_by_id: dict[str, SkillRecord] = {}
-            for row in rows:
-                record = self._row_to_record(conn, row, parents)
-                records_by_id[record.id] = record
-
-            result: dict[str, list[SkillRecord]] = {}
+    def _ancestry_bfs(
+        self, conn: sqlite3.Connection, skill_ids: list[str], max_depth: int,
+    ) -> dict[str, set[str]]:
+        """BFS traversal collecting visited ancestor IDs per skill."""
+        visited: dict[str, set[str]] = {sid: set() for sid in skill_ids}
+        frontiers: dict[str, list[str]] = {sid: [sid] for sid in skill_ids}
+        for _ in range(max_depth):
+            all_frontier_ids: set[str] = set()
             for sid in skill_ids:
-                ancestors = [
-                    records_by_id[aid] for aid in visited_per_skill[sid] if aid in records_by_id
-                ]
-                ancestors.sort(key=lambda r: r.lineage.generation)
-                result[sid] = ancestors
-            return result
+                all_frontier_ids.update(frontiers[sid])
+            if not all_frontier_ids:
+                break
+            round_parents = self._batch_load_parents(conn, all_frontier_ids)
+            next_frontiers: dict[str, list[str]] = {sid: [] for sid in skill_ids}
+            any_progress = False
+            for sid in skill_ids:
+                for fid in frontiers[sid]:
+                    for pid in round_parents.get(fid, []):
+                        if pid not in visited[sid]:
+                            visited[sid].add(pid)
+                            next_frontiers[sid].append(pid)
+                            any_progress = True
+            frontiers = next_frontiers
+            if not any_progress:
+                break
+        return visited
+
+    def _load_ancestry_records(
+        self, conn: sqlite3.Connection, visited: dict[str, set[str]],
+    ) -> dict[str, SkillRecord]:
+        """Batch-load SkillRecords for all discovered ancestor IDs."""
+        all_ids: set[str] = set()
+        for s in visited.values():
+            all_ids.update(s)
+        if not all_ids:
+            return {}
+        rows = _chunked_in_fetchall(
+            conn,
+            f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE id IN ({{IN}})",
+            list(all_ids),
+        )
+        ancestors_ids = {r[0] for r in rows}
+        parents = self._batch_load_parents(conn, ancestors_ids)
+        return {
+            (rec := self._row_to_record(conn, row, parents)).id: rec
+            for row in rows
+        }
+
+    @staticmethod
+    def _build_ancestry_result(
+        skill_ids: list[str],
+        visited: dict[str, set[str]],
+        records_by_id: dict[str, SkillRecord],
+    ) -> dict[str, list[SkillRecord]]:
+        """Build sorted per-skill ancestry lists from visited IDs and records."""
+        if not records_by_id:
+            return {sid: [] for sid in skill_ids}
+        result: dict[str, list[SkillRecord]] = {}
+        for sid in skill_ids:
+            ancestors = [
+                records_by_id[aid] for aid in visited[sid] if aid in records_by_id
+            ]
+            ancestors.sort(key=lambda r: r.lineage.generation)
+            result[sid] = ancestors
+        return result
 
     def get_ancestry(self, skill_id: str, max_depth: int = 10) -> list[SkillRecord]:
         """Walk up the lineage tree, returns ancestors oldest-first."""

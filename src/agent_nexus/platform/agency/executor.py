@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -108,46 +109,38 @@ class ProfileBasedExecutor:
         """Generate artifact sections. Override in subclass for LLM integration."""
         sections: dict[str, object] = {}
         for section in required_sections:
-            if section == "context":
-                sections["context"] = task
-            elif section == "summary":
-                sections["summary"] = f"[{name}] Analysis of: {task}"
-            elif section == "recommendations":
-                sections["recommendations"] = [f"Apply {name} expertise to: {task}"]
-            elif section == "findings":
-                sections["findings"] = [f"{cap} perspective on: {task}" for cap in capabilities[:3]]
-            elif section == "proposed_design":
-                sections["proposed_design"] = f"[{name}] Design for: {task}"
-            elif section == "tradeoffs":
-                sections["tradeoffs"] = [
-                    f"Trade-off from {cap} perspective" for cap in capabilities[:2]
-                ]
-            elif section == "risks":
-                sections["risks"] = [f"Risk identified via {cap}" for cap in capabilities[:2]]
-            elif section == "next_steps":
-                sections["next_steps"] = [
-                    f"Follow up with {cap} analysis" for cap in capabilities[:2]
-                ]
-            elif section == "assumptions":
-                sections["assumptions"] = [
-                    f"Assumed: {task} relates to {cap}" for cap in capabilities[:2]
-                ]
-            elif section == "objective":
-                sections["objective"] = f"[{name}] Orchestration plan for: {task}"
-            elif section == "task_decomposition":
-                sections["task_decomposition"] = [f"Subtask: apply {cap}" for cap in capabilities]
-            elif section == "agent_assignments":
-                sections["agent_assignments"] = {
-                    cap: f"Assigned to {name}" for cap in capabilities[:2]
-                }
-            elif section == "execution_order":
-                sections["execution_order"] = [
-                    f"Step {i + 1}: {cap}" for i, cap in enumerate(capabilities)
-                ]
-            else:
-                logger.warning("Unmapped section '%s' in output contract for '%s'", section, name)
-                sections[section] = f"[{name}] {section} for: {task}"
+            sections[section] = self._resolve_section(section, name, capabilities, task)
         return sections
+
+    @staticmethod
+    def _resolve_section(
+        section: str, name: str, capabilities: list[str], task: str,
+    ) -> object:
+        """Map a section name to its generated value."""
+        generators: dict[str, Callable[[], object]] = {
+            "context": lambda: task,
+            "summary": lambda: f"[{name}] Analysis of: {task}",
+            "recommendations": lambda: [f"Apply {name} expertise to: {task}"],
+            "findings": lambda: [f"{cap} perspective on: {task}" for cap in capabilities[:3]],
+            "proposed_design": lambda: f"[{name}] Design for: {task}",
+            "tradeoffs": lambda: [f"Trade-off from {cap} perspective" for cap in capabilities[:2]],
+            "risks": lambda: [f"Risk identified via {cap}" for cap in capabilities[:2]],
+            "next_steps": lambda: [f"Follow up with {cap} analysis" for cap in capabilities[:2]],
+            "assumptions": lambda: [
+                f"Assumed: {task} relates to {cap}" for cap in capabilities[:2]
+            ],
+            "objective": lambda: f"[{name}] Orchestration plan for: {task}",
+            "task_decomposition": lambda: [f"Subtask: apply {cap}" for cap in capabilities],
+            "agent_assignments": lambda: {cap: f"Assigned to {name}" for cap in capabilities[:2]},
+            "execution_order": lambda: [
+                f"Step {i + 1}: {cap}" for i, cap in enumerate(capabilities)
+            ],
+        }
+        gen = generators.get(section)
+        if gen is not None:
+            return gen()
+        logger.warning("Unmapped section '%s' in output contract for '%s'", section, name)
+        return f"[{name}] {section} for: {task}"
 
 
 class LLMExecutor:

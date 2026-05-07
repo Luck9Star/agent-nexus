@@ -49,79 +49,20 @@ def doctor() -> None:
     """Run diagnostic checks on the agent-nexus installation."""
     config_dir = _get_config_dir()
     config_path = config_dir / "config.toml"
-    checks: list[tuple[str, bool, str]] = []
 
     # Load .env before checking API keys so that keys stored in
     # ~/.agent-nexus/.env are visible to os.environ.get() below.
     _load_dot_env(config_dir)
 
-    # Check 1: config.toml exists and parses
-    try:
-        import toml
-
-        toml.loads(config_path.read_text(encoding="utf-8"))
-        checks.append(("config.toml exists and parses", True, "OK"))
-    except FileNotFoundError:
-        checks.append(("config.toml exists and parses", False, "not found"))
-    except Exception as exc:
-        checks.append(("config.toml exists and parses", False, str(exc)))
-
-    # Check 2: API key configured
-    # Read api_key_env from user's config.toml (may have custom providers)
-    config_key_envs: list[str] = []
-    try:
-        import toml
-
-        raw = toml.loads(config_path.read_text(encoding="utf-8"))
-        providers = raw.get("models", {}).get("providers", {})
-        config_key_envs = [
-            str(v["api_key_env"])
-            for v in providers.values()
-            if isinstance(v, dict) and "api_key_env" in v
-        ]
-    except Exception:
-        pass
-    # Fallback to built-in defaults if config has no providers
-    if not config_key_envs:
-        from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
-
-        config_key_envs = [
-            str(p["api_key_env"])
-            for p in DEFAULT_PROVIDERS.values()
-            if isinstance(p, dict) and "api_key_env" in p
-        ]
-    has_key = any(os.environ.get(k) for k in config_key_envs)
-    checks.append(("API key configured", has_key, "at least one set" if has_key else "none set"))
-
-    # Check 3: git on PATH
-    git_path = shutil.which("git")
-    checks.append(("git on PATH", git_path is not None, git_path or "not found"))
-
-    # Check 4: uv on PATH
-    uv_path = shutil.which("uv")
-    checks.append(("uv on PATH", uv_path is not None, uv_path or "not found"))
-
-    # Check 5: Python version
-    py_ok = sys.version_info >= (3, 11)
-    checks.append(("Python >= 3.11", py_ok, sys.version.split()[0]))
-
-    # Check 6: config directory writable (lockfile will be created here)
-    try:
-        config_dir.mkdir(parents=True, exist_ok=True)
-        writable = os.access(config_dir, os.W_OK)
-        checks.append(("config dir writable", writable, "OK" if writable else "not writable"))
-    except Exception as exc:
-        checks.append(("config dir writable", False, str(exc)))
-
-    # Check 7: Evolution DB accessible
-    try:
-        from agent_nexus.platform.evolution.store import EvolutionStore
-
-        store = EvolutionStore(Path(":memory:"))
-        store.close()
-        checks.append(("Evolution DB accessible", True, "OK"))
-    except Exception as exc:
-        checks.append(("Evolution DB accessible", False, str(exc)))
+    checks = [
+        _check_config_toml(config_path),
+        _check_api_keys(config_path),
+        _check_tool_on_path("git"),
+        _check_tool_on_path("uv"),
+        _check_python_version(),
+        _check_config_dir_writable(config_dir),
+        _check_evolution_db(),
+    ]
 
     # Output
     all_pass = True
@@ -137,6 +78,80 @@ def doctor() -> None:
 
     if not all_pass:
         raise typer.Exit(code=1)
+
+
+def _check_config_toml(config_path: Path) -> tuple[str, bool, str]:
+    """Check that config.toml exists and parses."""
+    try:
+        import toml
+
+        toml.loads(config_path.read_text(encoding="utf-8"))
+        return ("config.toml exists and parses", True, "OK")
+    except FileNotFoundError:
+        return ("config.toml exists and parses", False, "not found")
+    except Exception as exc:
+        return ("config.toml exists and parses", False, str(exc))
+
+
+def _check_api_keys(config_path: Path) -> tuple[str, bool, str]:
+    """Check that at least one API key is configured."""
+    config_key_envs: list[str] = []
+    try:
+        import toml
+
+        raw = toml.loads(config_path.read_text(encoding="utf-8"))
+        providers = raw.get("models", {}).get("providers", {})
+        config_key_envs = [
+            str(v["api_key_env"])
+            for v in providers.values()
+            if isinstance(v, dict) and "api_key_env" in v
+        ]
+    except Exception:
+        pass
+    if not config_key_envs:
+        from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
+
+        config_key_envs = [
+            str(p["api_key_env"])
+            for p in DEFAULT_PROVIDERS.values()
+            if isinstance(p, dict) and "api_key_env" in p
+        ]
+    has_key = any(os.environ.get(k) for k in config_key_envs)
+    return ("API key configured", has_key, "at least one set" if has_key else "none set")
+
+
+def _check_tool_on_path(tool_name: str) -> tuple[str, bool, str]:
+    """Check that a CLI tool is on PATH."""
+    found = shutil.which(tool_name)
+    return (f"{tool_name} on PATH", found is not None, found or "not found")
+
+
+def _check_python_version() -> tuple[str, bool, str]:
+    """Check Python version >= 3.11."""
+    ok = sys.version_info >= (3, 11)
+    return ("Python >= 3.11", ok, sys.version.split()[0])
+
+
+def _check_config_dir_writable(config_dir: Path) -> tuple[str, bool, str]:
+    """Check that config directory is writable."""
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        writable = os.access(config_dir, os.W_OK)
+        return ("config dir writable", writable, "OK" if writable else "not writable")
+    except Exception as exc:
+        return ("config dir writable", False, str(exc))
+
+
+def _check_evolution_db() -> tuple[str, bool, str]:
+    """Check that Evolution DB is accessible."""
+    try:
+        from agent_nexus.platform.evolution.store import EvolutionStore
+
+        store = EvolutionStore(Path(":memory:"))
+        store.close()
+        return ("Evolution DB accessible", True, "OK")
+    except Exception as exc:
+        return ("Evolution DB accessible", False, str(exc))
 
 
 # =====================================================================
