@@ -44,7 +44,7 @@ def handle_message(agent: ContractAnalyzerAgent, message: dict) -> dict:
             if not text:
                 return {"status": "error", "error": "Missing 'text' parameter"}
             result = agent.extract_clauses(text)
-            return {"status": "ok", "result": [c.model_dump() for c in result]}
+            return {"status": "ok", "result": {"clauses": [c.model_dump() for c in result]}}
 
         elif method == "analyze_risks":
             raw_clauses = params.get("clauses", [])

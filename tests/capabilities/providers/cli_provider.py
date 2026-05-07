@@ -58,12 +58,15 @@ class CLIProvider:
         start = time.monotonic()
         try:
             env = {**os.environ, "AGENT_MODE": "local"}
+            args: list[str] = ["uv", "run"]
+            # Composite agents import from agent_nexus which lives in the
+            # platform venv.  Use --active so uv targets the already-active
+            # environment instead of creating a per-agent venv.
+            if contract.agent_type == "composite":
+                args.append("--active")
+            args.extend(["python", "-m", module_name])
             proc = await _subprocess_exec(
-                "uv",
-                "run",
-                "python",
-                "-m",
-                module_name,
+                *args,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

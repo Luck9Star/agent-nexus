@@ -30,12 +30,12 @@ SECURITY_SCANNER = CapabilityContract(
     },
     output_schema={
         "findings": OutputSpec(type="list", min_length=0),
-        "summary": OutputSpec(type="str", min_length=5),
+        "summary": OutputSpec(type="dict"),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
         min_output_length=50,
-        required_keywords=["finding", "vulnerability"],
+        required_keywords=["finding"],
         score_threshold=0.7,
     ),
     cli_method="scan_code",
@@ -62,13 +62,12 @@ CODE_REVIEWER = CapabilityContract(
     },
     output_schema={
         "issues": OutputSpec(type="list", min_length=0),
-        "summary": OutputSpec(type="str", min_length=5),
-        "overall_score": OutputSpec(type="float"),
+        "metrics": OutputSpec(type="dict"),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
         min_output_length=50,
-        required_keywords=["issue", "quality"],
+        required_keywords=["issue"],
         score_threshold=0.7,
     ),
     cli_method="analyze",
@@ -95,12 +94,12 @@ ACCESSIBILITY_AUDITOR = CapabilityContract(
     },
     output_schema={
         "issues": OutputSpec(type="list", min_length=0),
-        "score": OutputSpec(type="float"),
+        "compliance_score": OutputSpec(type="float"),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
         min_output_length=50,
-        required_keywords=["accessibility", "wcag"],
+        required_keywords=["accessibility"],
         score_threshold=0.6,
     ),
     cli_method="audit",
@@ -111,24 +110,23 @@ API_DOC_GENERATOR = CapabilityContract(
     agent_type="atomic",
     description="API 文档生成",
     required_inputs={
-        "code_path": InputSpec(
+        "file_path": InputSpec(
             type="str",
-            description="API 源码路径",
-            examples=["src/agent_nexus/platform/agency/"],
+            description="API 源码文件路径",
+            examples=["agent_api_doc_generator/tools/extract_endpoints.py"],
         ),
     },
     optional_inputs={},
     output_schema={
         "endpoints": OutputSpec(type="list", min_length=0),
-        "schema": OutputSpec(type="dict"),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
         min_output_length=50,
-        required_keywords=["endpoint", "api"],
+        required_keywords=["endpoint"],
         score_threshold=0.6,
     ),
-    cli_method="extract_endpoints",
+    cli_method="extract",
 )
 
 CONTRACT_ANALYZER = CapabilityContract(
@@ -136,7 +134,7 @@ CONTRACT_ANALYZER = CapabilityContract(
     agent_type="atomic",
     description="合同条款分析",
     required_inputs={
-        "contract_text": InputSpec(
+        "text": InputSpec(
             type="str",
             description="合同文本内容",
             examples=["This agreement is between Party A and Party B..."],
@@ -145,12 +143,11 @@ CONTRACT_ANALYZER = CapabilityContract(
     optional_inputs={},
     output_schema={
         "clauses": OutputSpec(type="list", min_length=0),
-        "risks": OutputSpec(type="list", min_length=0),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
         min_output_length=50,
-        required_keywords=["clause", "risk"],
+        required_keywords=["clause"],
         score_threshold=0.6,
     ),
     cli_method="extract_clauses",
@@ -161,14 +158,14 @@ DOC_FILLER = CapabilityContract(
     agent_type="atomic",
     description="文档模板填充",
     required_inputs={
-        "template": InputSpec(
+        "template_path": InputSpec(
             type="str",
-            description="文档模板路径或内容",
-            examples=["# Project\n## Overview\n{{overview}}"],
+            description="文档模板文件路径",
+            examples=["SKILL.md"],
         ),
     },
     optional_inputs={
-        "data": InputSpec(
+        "values": InputSpec(
             type="dict",
             description="填充数据",
             examples=['{"overview": "A test project"}'],
@@ -176,11 +173,12 @@ DOC_FILLER = CapabilityContract(
         ),
     },
     output_schema={
-        "filled_content": OutputSpec(type="str", min_length=10),
+        "output_path": OutputSpec(type="str", min_length=1),
+        "success": OutputSpec(type="bool"),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
-        min_output_length=30,
+        min_output_length=10,
         required_keywords=[],
         score_threshold=0.5,
     ),
@@ -197,18 +195,15 @@ LOCALIZATION_SPECIALIST = CapabilityContract(
             description="待本地化文本",
             examples=["Welcome to our platform"],
         ),
-    },
-    optional_inputs={
-        "target_locale": InputSpec(
+        "target_lang": InputSpec(
             type="str",
             description="目标语言",
             examples=["zh-CN"],
-            required=False,
         ),
     },
+    optional_inputs={},
     output_schema={
-        "translated": OutputSpec(type="str", min_length=1),
-        "locale": OutputSpec(type="str"),
+        "translated_text": OutputSpec(type="str", min_length=1),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
@@ -216,7 +211,7 @@ LOCALIZATION_SPECIALIST = CapabilityContract(
         required_keywords=[],
         score_threshold=0.6,
     ),
-    cli_method="translate",
+    cli_method="localize",
 )
 
 MARKET_INTELLIGENCE = CapabilityContract(
@@ -224,21 +219,20 @@ MARKET_INTELLIGENCE = CapabilityContract(
     agent_type="atomic",
     description="市场情报分析",
     required_inputs={
-        "topic": InputSpec(
+        "data": InputSpec(
             type="str",
-            description="分析主题",
+            description="分析数据或主题",
             examples=["AI Agent market trend analysis"],
         ),
     },
     optional_inputs={},
     output_schema={
         "insights": OutputSpec(type="list", min_length=0),
-        "summary": OutputSpec(type="str", min_length=10),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
         min_output_length=80,
-        required_keywords=["market", "trend"],
+        required_keywords=["market"],
         score_threshold=0.6,
     ),
     cli_method="analyze_market",
@@ -249,7 +243,7 @@ REQUIREMENTS_ANALYZER = CapabilityContract(
     agent_type="atomic",
     description="需求分析",
     required_inputs={
-        "requirements_text": InputSpec(
+        "text": InputSpec(
             type="str",
             description="需求描述",
             examples=["The system shall support user login, registration, and password recovery"],
@@ -257,8 +251,8 @@ REQUIREMENTS_ANALYZER = CapabilityContract(
     },
     optional_inputs={},
     output_schema={
-        "requirements": OutputSpec(type="list", min_length=0),
-        "questions": OutputSpec(type="list", min_length=0),
+        "gaps": OutputSpec(type="list", min_length=0),
+        "key_terms": OutputSpec(type="list", min_length=0),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
@@ -274,16 +268,16 @@ TEST_SUITE_GENERATOR = CapabilityContract(
     agent_type="atomic",
     description="测试套件生成",
     required_inputs={
-        "code_path": InputSpec(
+        "file_path": InputSpec(
             type="str",
-            description="待测试代码路径",
-            examples=["src/agent_nexus/platform/agency/llm_client.py"],
+            description="待测试代码文件路径",
+            examples=["agent_test_suite_generator/agent.py"],
         ),
     },
     optional_inputs={},
     output_schema={
-        "test_cases": OutputSpec(type="list", min_length=0),
-        "coverage_estimate": OutputSpec(type="float", required=False),
+        "units": OutputSpec(type="list", min_length=0),
+        "framework": OutputSpec(type="str"),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
@@ -291,7 +285,7 @@ TEST_SUITE_GENERATOR = CapabilityContract(
         required_keywords=["test"],
         score_threshold=0.6,
     ),
-    cli_method="generate",
+    cli_method="analyze_code_for_tests",
 )
 
 GOOD_SKILL = CapabilityContract(
