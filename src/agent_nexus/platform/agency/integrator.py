@@ -57,23 +57,55 @@ class Integrator:
     MAX_SECTION_VALUE_SIZE: int = 500_000
 
     @staticmethod
+    def _validate_section_value(
+        key: str, value: object, source_agent: str, max_size: int
+    ) -> None:
+        if isinstance(value, str) and len(value) > max_size:
+            raise ValueError(
+                f"Section '{key}' in artifact from '{source_agent}' "
+                f"exceeds max size ({len(value)} > {max_size})"
+            )
+        if isinstance(value, (list, dict)):
+            total_chars = sum(
+                len(str(v)) for v in (value.values() if isinstance(value, dict) else value)
+            )
+            if total_chars > max_size:
+                raise ValueError(
+                    f"Section '{key}' in artifact from '{source_agent}' "
+                    f"exceeds max aggregate size ({total_chars} > {max_size})"
+                )
+
+    @staticmethod
+    def _merge_section_value(
+        merged_sections: dict[str, object], key: str, value: object
+    ) -> None:
+        if key not in merged_sections:
+            merged_sections[key] = value
+            return
+        existing = merged_sections[key]
+        if isinstance(existing, list) and isinstance(value, list):
+            merged_sections[key] = existing + value
+        elif isinstance(existing, dict) and isinstance(value, dict):
+            merged_sections[key] = {**existing, **value}
+        else:
+            logger.warning(
+                "Type mismatch for section '%s': existing=%s, new=%s; "
+                "converting to list",
+                key,
+                type(existing).__name__,
+                type(value).__name__,
+            )
+            converted: list[object] = (
+                existing if isinstance(existing, list) else [existing]
+            )
+            converted.append(value)
+            merged_sections[key] = converted
+
+    @staticmethod
     def merge(
         artifacts: list[Artifact],
         expected_sections: list[str] | None = None,
     ) -> IntegratedArtifact:
-        """Merge multiple expert artifacts into a single integrated output.
-
-        Parameters
-        ----------
-        artifacts:
-            List of expert artifacts to merge.
-        expected_sections:
-            Optional list of section names that should be present. Missing
-            sections are reported in ``open_questions``.
-
-        Raises:
-            ValueError: If artifacts is empty.
-        """
         if not artifacts:
             raise ValueError("Need at least one artifact to merge")
 
@@ -82,7 +114,6 @@ class Integrator:
 
         source_agents = [a.source_agent for a in artifacts]
 
-        # Collect all sections, merging dicts and extending lists
         merged_sections: dict[str, object] = {}
         risks: list[str] = []
 
@@ -92,54 +123,16 @@ class Integrator:
                     f"Artifact from '{artifact.source_agent}' has too many sections "
                     f"({len(artifact.sections)}); max 100"
                 )
-            # Validate and merge sections in a single pass
             for key, value in artifact.sections.items():
-                # Validate section value sizes to prevent memory exhaustion
-                if isinstance(value, str) and len(value) > Integrator.MAX_SECTION_VALUE_SIZE:
-                    raise ValueError(
-                        f"Section '{key}' in artifact from '{artifact.source_agent}' "
-                        f"exceeds max size ({len(value)} > {Integrator.MAX_SECTION_VALUE_SIZE})"
-                    )
-                if isinstance(value, (list, dict)):
-                    total_chars = sum(
-                        len(str(v)) for v in (value.values() if isinstance(value, dict) else value)
-                    )
-                    if total_chars > Integrator.MAX_SECTION_VALUE_SIZE:
-                        raise ValueError(
-                            f"Section '{key}' in artifact from '{artifact.source_agent}' "
-                            f"exceeds max aggregate size ({total_chars} > "
-                            f"{Integrator.MAX_SECTION_VALUE_SIZE})"
-                        )
-                # Merge into consolidated sections
-                if key in merged_sections:
-                    existing = merged_sections[key]
-                    if isinstance(existing, list) and isinstance(value, list):
-                        merged_sections[key] = existing + value
-                    elif isinstance(existing, dict) and isinstance(value, dict):
-                        merged_sections[key] = {**existing, **value}
-                    else:
-                        logger.warning(
-                            "Type mismatch for section '%s': existing=%s, new=%s; "
-                            "converting to list",
-                            key,
-                            type(existing).__name__,
-                            type(value).__name__,
-                        )
-                        converted: list[object] = (
-                            existing if isinstance(existing, list) else [existing]
-                        )
-                        converted.append(value)
-                        merged_sections[key] = converted
-                else:
-                    merged_sections[key] = value
+                Integrator._validate_section_value(
+                    key, value, artifact.source_agent, Integrator.MAX_SECTION_VALUE_SIZE
+                )
+                Integrator._merge_section_value(merged_sections, key, value)
 
-            # Extract risks from relevant sections
             _extract_risks(artifact, risks)
 
-        # Detect conflicts (severity + recommendation viewpoints)
         conflicts = _detect_conflicts(artifacts)
 
-        # Build final_recommendation
         recommendations: list[str] = []
         for artifact in artifacts:
             rec = artifact.sections.get("recommendation")
@@ -154,12 +147,10 @@ class Integrator:
             else "No explicit recommendations from experts"
         )
 
-        # Build decision summary
         merged_sections["decision_summary"] = (
             f"Integrated {len(artifacts)} expert artifacts from: " + ", ".join(source_agents)
         )
 
-        # Compute open_questions for missing expected sections
         open_questions: list[str] = []
         if expected_sections:
             present_keys = set(merged_sections.keys())
@@ -306,7 +297,8 @@ def _detect_severity_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
     ]
 
 
-def _detect_risk_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
+def _extract_risk_sets(artifacts: list[Artifact]) -> dict[str, list[str]]:
+    """Extract per-agent risk descriptions from artifact sections."""
     risk_sets: dict[str, list[str]] = {}
     for artifact in artifacts:
         risks_found: list[str] = []
@@ -319,47 +311,46 @@ def _detect_risk_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
                         risks_found.append(item)
         if risks_found:
             risk_sets[artifact.source_agent] = risks_found
+    return risk_sets
+
+
+def _has_similar_risks(risk_sets: dict[str, list[str]]) -> bool:
+    """Check if any pair of agents has Jaccard-similar risk tokens (>= 0.5)."""
+    agent_risk_tokens: dict[str, set[str]] = {}
+    for agent_id, risks in risk_sets.items():
+        tokens: set[str] = set()
+        for r in risks:
+            tokens |= _tokenize_risk(r)
+        agent_risk_tokens[agent_id] = tokens
+
+    agent_ids = list(agent_risk_tokens.keys())
+    for i in range(len(agent_ids)):
+        for j in range(i + 1, len(agent_ids)):
+            sim = _risk_similarity(agent_risk_tokens[agent_ids[i]], agent_risk_tokens[agent_ids[j]])
+            if sim >= 0.5:
+                return True
+    return False
+
+
+def _detect_risk_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
+    risk_sets = _extract_risk_sets(artifacts)
 
     if len(risk_sets) < 2:
         return []
-
-    # Compare risk descriptions across agents using token overlap
-    agent_risk_tokens: dict[str, set[str]] = {}
-    for agent_id, risks in risk_sets.items():
-        agent_tokens: set[str] = set()
-        for r in risks:
-            agent_tokens |= _tokenize_risk(r)
-        agent_risk_tokens[agent_id] = agent_tokens
-
-    # Check if any pair of agents has similar risks (Jaccard >= 0.5)
-    agent_ids = list(agent_risk_tokens.keys())
-    has_similar_risks = False
-    for i in range(len(agent_ids)):
-        for j in range(i + 1, len(agent_ids)):
-            sim = _risk_similarity(
-                agent_risk_tokens[agent_ids[i]],
-                agent_risk_tokens[agent_ids[j]],
-            )
-            if sim >= 0.5:
-                has_similar_risks = True
-                break
-        if has_similar_risks:
-            break
-
-    if has_similar_risks or not all(len(v) > 0 for v in risk_sets.values()):
+    if _has_similar_risks(risk_sets):
+        return []
+    if not all(len(v) > 0 for v in risk_sets.values()):
         return []
 
     # No similar risks and all non-empty — check shared section overlap
     _structural_sections = frozenset(
         {"final_recommendation", "decision_summary", "recommendation"}
     )
-    agent_section_keys: dict[str, set[str]] = {}
-    for artifact in artifacts:
-        if artifact.source_agent in risk_sets:
-            agent_section_keys[artifact.source_agent] = (
-                set(artifact.sections.keys()) - _structural_sections
-            )
-    section_sets = list(agent_section_keys.values())
+    section_sets = [
+        set(a.sections.keys()) - _structural_sections
+        for a in artifacts
+        if a.source_agent in risk_sets
+    ]
     if not section_sets:
         return []
 
