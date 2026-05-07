@@ -337,12 +337,8 @@ class TestConflictDetection:
 
     def test_accessibility_localization_conflict(self) -> None:
         checks = [
-            ComplianceCheck(
-                dimension="accessibility", issues=["Alt text missing"], score=50.0
-            ),
-            ComplianceCheck(
-                dimension="localization", issues=["Untranslated"], score=80.0
-            ),
+            ComplianceCheck(dimension="accessibility", issues=["Alt text missing"], score=50.0),
+            ComplianceCheck(dimension="localization", issues=["Untranslated"], score=80.0),
         ]
         conflicts = _detect_conflicts(checks)
         assert any("accessibility" in c.dimensions for c in conflicts)
@@ -396,9 +392,7 @@ class TestRecommendations:
 
     def test_conflict_recommendation(self) -> None:
         conflicts = [
-            ConflictItem(
-                dimensions=["a", "b"], description="conflict", resolution="Fix it"
-            )
+            ConflictItem(dimensions=["a", "b"], description="conflict", resolution="Fix it")
         ]
         recs = _generate_recommendations([], conflicts)
         assert "Fix it" in recs
@@ -539,16 +533,12 @@ class TestLocalAdapter:
         assert "checks" in response["result"]
 
     def test_missing_document(self) -> None:
-        response = self._handle_message(
-            {"method": "check_compliance", "params": {}}
-        )
+        response = self._handle_message({"method": "check_compliance", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
     def test_unknown_method(self) -> None:
-        response = self._handle_message(
-            {"method": "unknown", "params": {}}
-        )
+        response = self._handle_message({"method": "unknown", "params": {}})
         assert response["status"] == "error"
         assert "Unknown method" in response["error"]
 

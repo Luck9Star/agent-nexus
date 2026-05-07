@@ -27,8 +27,7 @@ def create_mcp_server() -> object:
         from fastmcp import FastMCP
     except ImportError:
         raise ImportError(
-            "FastMCP is required for MCP mode. "
-            "Install with: pip install agent-doc-filler[full]"
+            "FastMCP is required for MCP mode. Install with: pip install agent-doc-filler[full]"
         ) from None
 
     mcp = FastMCP("doc-filler")

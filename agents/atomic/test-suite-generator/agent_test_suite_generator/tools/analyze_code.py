@@ -105,8 +105,7 @@ def _analyze_python_file(file_path: str) -> list[TestUnit]:
         elif isinstance(node, ast.ClassDef):
             # Add the class itself as a testable unit
             methods = [
-                n for n in node.body
-                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                n for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
             ]
 
             class_unit = TestUnit(

@@ -71,9 +71,7 @@ def _run_local() -> None:
         sys.stdout.flush()
 
 
-def _handle_message(
-    coordinator: DocumentationSuiteCoordinator, message: dict
-) -> dict:
+def _handle_message(coordinator: DocumentationSuiteCoordinator, message: dict) -> dict:
     """Dispatch a single inbound message to the coordinator."""
     method = message.get("method", "")
     params = message.get("params", {})
@@ -113,9 +111,7 @@ def _run_cli() -> None:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     gen_parser = subparsers.add_parser("generate", help="Generate documentation suite")
-    gen_parser.add_argument(
-        "--code-path", required=True, help="Path to source code file"
-    )
+    gen_parser.add_argument("--code-path", required=True, help="Path to source code file")
     gen_parser.add_argument(
         "--target-langs",
         nargs="+",

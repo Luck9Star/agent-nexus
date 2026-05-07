@@ -16,18 +16,10 @@ _IMG_ALT_RE = re.compile(r'\balt\s*=\s*["\']', re.IGNORECASE)
 _IMG_ALT_EMPTY_RE = re.compile(r'\balt\s*=\s*["\']["\']', re.IGNORECASE)
 _IMG_ROLE_PRESENTATION_RE = re.compile(r'\brole\s*=\s*["\']presentation["\']', re.IGNORECASE)
 
-_INPUT_TAG_RE = re.compile(
-    r"<input\s[^>]*type\s*=\s*['\"]?(\w+)['\"]?[^>]*>", re.IGNORECASE
-)
-_LABEL_FOR_RE = re.compile(
-    r'<label\s[^>]*for\s*=\s*["\'](\w+)["\']', re.IGNORECASE
-)
-_ARIA_LABEL_RE = re.compile(
-    r'aria-label\s*=\s*["\']', re.IGNORECASE
-)
-_ARIA_LABELLEDBY_RE = re.compile(
-    r'aria-labelledby\s*=\s*["\']', re.IGNORECASE
-)
+_INPUT_TAG_RE = re.compile(r"<input\s[^>]*type\s*=\s*['\"]?(\w+)['\"]?[^>]*>", re.IGNORECASE)
+_LABEL_FOR_RE = re.compile(r'<label\s[^>]*for\s*=\s*["\'](\w+)["\']', re.IGNORECASE)
+_ARIA_LABEL_RE = re.compile(r'aria-label\s*=\s*["\']', re.IGNORECASE)
+_ARIA_LABELLEDBY_RE = re.compile(r'aria-labelledby\s*=\s*["\']', re.IGNORECASE)
 _ID_ATTR_RE = re.compile(r'\bid\s*=\s*["\'](\w+)["\']', re.IGNORECASE)
 
 _HEADING_TAG_RE = re.compile(r"<(h[1-6])\b[^>]*>", re.IGNORECASE)
@@ -40,14 +32,12 @@ _LINK_INNER_TAG_RE = re.compile(r"<[^>]+>")
 _HTML_TAG_RE = re.compile(r"<html\b", re.IGNORECASE)
 _HTML_LANG_RE = re.compile(r"<html\s[^>]*lang\s*=", re.IGNORECASE)
 
-_DIV_BUTTON_ROLE_RE = re.compile(
-    r'<div\s[^>]*role\s*=\s*["\']button["\'][^>]*>', re.IGNORECASE
-)
-_TABINDEX_RE = re.compile(r'tabindex\s*=', re.IGNORECASE)
+_DIV_BUTTON_ROLE_RE = re.compile(r'<div\s[^>]*role\s*=\s*["\']button["\'][^>]*>', re.IGNORECASE)
+_TABINDEX_RE = re.compile(r"tabindex\s*=", re.IGNORECASE)
 
 _TABLE_TAG_RE = re.compile(r"<table\b[^>]*>", re.IGNORECASE)
 _TH_RE = re.compile(r"<th\b", re.IGNORECASE)
-_SCOPE_RE = re.compile(r'scope\s*=', re.IGNORECASE)
+_SCOPE_RE = re.compile(r"scope\s*=", re.IGNORECASE)
 _TD_RE = re.compile(r"<td\b", re.IGNORECASE)
 
 
@@ -131,16 +121,19 @@ def _check_images(html: str) -> list[AccessibilityIssue]:
                 )
             )
         elif alt_empty and not _IMG_ROLE_PRESENTATION_RE.search(img_tag):
-                # Empty alt is acceptable for decorative images, but flag for review
-                issues.append(
-                    AccessibilityIssue(
-                        criterion="1.1.1",
-                        level="A",
-                        element=img_tag[:50],
-                        description="Image has empty alt but no role='presentation'",
-                        fix_suggestion="Add role='presentation' for decorative images or provide meaningful alt text",
-                    )
+            # Empty alt is acceptable for decorative images, but flag for review
+            issues.append(
+                AccessibilityIssue(
+                    criterion="1.1.1",
+                    level="A",
+                    element=img_tag[:50],
+                    description="Image has empty alt but no role='presentation'",
+                    fix_suggestion=(
+                        "Add role='presentation' for decorative images"
+                        " or provide meaningful alt text"
+                    ),
                 )
+            )
     return issues
 
 
@@ -165,9 +158,7 @@ def _check_forms(html: str) -> list[AccessibilityIssue]:
 
         if has_id:
             id_val = has_id.group(1)
-            if re.search(
-                rf'<label\s[^>]*for\s*=\s*["\']({ id_val })["\']', html, re.IGNORECASE
-            ):
+            if re.search(rf'<label\s[^>]*for\s*=\s*["\']({id_val})["\']', html, re.IGNORECASE):
                 continue
 
         issues.append(
@@ -176,7 +167,10 @@ def _check_forms(html: str) -> list[AccessibilityIssue]:
                 level="A",
                 element=input_tag[:50],
                 description=f"Form input (type={input_type}) missing associated label",
-                fix_suggestion="Add a <label> element with 'for' matching the input's 'id', or use aria-label",
+                fix_suggestion=(
+                    "Add a <label> element with 'for' matching the input's"
+                    " 'id', or use aria-label"
+                ),
             )
         )
     return issues
@@ -306,7 +300,10 @@ def _check_tables(html: str) -> list[AccessibilityIssue]:
                     level="A",
                     element="<table>",
                     description="Data table missing header cells (<th>)",
-                    fix_suggestion="Use <th> elements for header cells with appropriate scope attributes",
+                    fix_suggestion=(
+                        "Use <th> elements for header cells"
+                        " with appropriate scope attributes"
+                    ),
                 )
             )
     return issues

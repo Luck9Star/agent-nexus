@@ -36,8 +36,7 @@ def main() -> None:
         except ImportError as e:
             print(f"Error: {e}", file=sys.stderr)
             print(
-                "Install full dependencies with: "
-                "pip install agent-test-suite-generator[full]",
+                "Install full dependencies with: pip install agent-test-suite-generator[full]",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -55,15 +54,15 @@ def _run_cli() -> None:
     # analyze command
     analyze_parser = subparsers.add_parser("analyze", help="Analyze code for tests")
     analyze_parser.add_argument("file_path", help="Path to source file")
-    analyze_parser.add_argument(
-        "--language", default="python", help="Programming language"
-    )
+    analyze_parser.add_argument("--language", default="python", help="Programming language")
 
     # generate command
     generate_parser = subparsers.add_parser("generate", help="Generate test cases")
     generate_parser.add_argument("file_path", help="Path to source file")
     generate_parser.add_argument(
-        "--framework", default="pytest", choices=["pytest", "unittest"],
+        "--framework",
+        default="pytest",
+        choices=["pytest", "unittest"],
         help="Test framework",
     )
 
@@ -71,7 +70,9 @@ def _run_cli() -> None:
     build_parser = subparsers.add_parser("build", help="Build test suite")
     build_parser.add_argument("file_path", help="Path to source file")
     build_parser.add_argument(
-        "--framework", default="pytest", choices=["pytest", "unittest"],
+        "--framework",
+        default="pytest",
+        choices=["pytest", "unittest"],
         help="Test framework",
     )
 

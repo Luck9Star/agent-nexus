@@ -16,9 +16,7 @@ class TestLocalAdapter:
 
     def test_handle_run(self) -> None:
         agent = GoodSkillAgent()
-        with patch.object(
-            agent, "run", new_callable=AsyncMock, return_value="result text"
-        ):
+        with patch.object(agent, "run", new_callable=AsyncMock, return_value="result text"):
             response = handle_message(
                 agent,
                 {"method": "run", "params": {"task": "do something"}},
@@ -28,9 +26,7 @@ class TestLocalAdapter:
 
     def test_handle_run_with_context(self) -> None:
         agent = GoodSkillAgent()
-        with patch.object(
-            agent, "run", new_callable=AsyncMock, return_value="context result"
-        ):
+        with patch.object(agent, "run", new_callable=AsyncMock, return_value="context result"):
             response = handle_message(
                 agent,
                 {"method": "run", "params": {"task": "test", "context": {"k": "v"}}},

@@ -27,7 +27,9 @@ def _generate_executive_summary(analysis: MarketAnalysis) -> str:
     if not analysis.insights:
         return "No significant findings from the analysis."
 
-    parts = [f"基于{FRAMEWORK_NAMES.get(analysis.framework, analysis.framework)}框架的市场分析结果："]
+    parts = [
+        f"基于{FRAMEWORK_NAMES.get(analysis.framework, analysis.framework)}框架的市场分析结果："
+    ]
     for insight in analysis.insights:
         parts.append(f"- {insight}")
 

@@ -79,9 +79,7 @@ def create_mcp_server() -> object:
         Assembles sections, priorities, constraints, acceptance criteria,
         and a glossary from the analysis results and user-provided answers.
         """
-        parsed_analysis = (
-            RequirementAnalysis.model_validate(analysis) if analysis else None
-        )
+        parsed_analysis = RequirementAnalysis.model_validate(analysis) if analysis else None
         result = _build(answers, parsed_analysis, title)
         return result.model_dump()
 

@@ -23,12 +23,8 @@ AMBIGUITY_PATTERNS = [
 
 # Patterns for gap detection -- things that are typically needed but missing
 GAP_INDICATORS = {
-    "missing_user_role": re.compile(
-        r"(?:用户|user)", re.IGNORECASE
-    ),
-    "missing_error_handling": re.compile(
-        r"(?:功能|feature|操作|operation)", re.IGNORECASE
-    ),
+    "missing_user_role": re.compile(r"(?:用户|user)", re.IGNORECASE),
+    "missing_error_handling": re.compile(r"(?:功能|feature|操作|operation)", re.IGNORECASE),
     "missing_performance": re.compile(
         r"(?:响应|response|处理|process|并发|concurrent)", re.IGNORECASE
     ),
@@ -66,17 +62,52 @@ _DATA_DETAIL_RE = re.compile(
 
 # Priority keywords
 HIGH_PRIORITY_KEYWORDS = [
-    "必须", "关键", "核心", "重要", "must", "critical", "essential",
-    "key", "important", "required", "登录", "注册", "支付", "安全",
-    "login", "register", "payment", "security", "auth",
+    "必须",
+    "关键",
+    "核心",
+    "重要",
+    "must",
+    "critical",
+    "essential",
+    "key",
+    "important",
+    "required",
+    "登录",
+    "注册",
+    "支付",
+    "安全",
+    "login",
+    "register",
+    "payment",
+    "security",
+    "auth",
 ]
 MEDIUM_PRIORITY_KEYWORDS = [
-    "应该", "需要", "支持", "should", "need", "support", "管理",
-    "manage", "查询", "search", "导出", "export",
+    "应该",
+    "需要",
+    "支持",
+    "should",
+    "need",
+    "support",
+    "管理",
+    "manage",
+    "查询",
+    "search",
+    "导出",
+    "export",
 ]
 LOW_PRIORITY_KEYWORDS = [
-    "可以", "建议", "最好", "nice.to.have", "could", "optional",
-    "如果可能", "未来", "future", "扩展", "enhancement",
+    "可以",
+    "建议",
+    "最好",
+    "nice.to.have",
+    "could",
+    "optional",
+    "如果可能",
+    "未来",
+    "future",
+    "扩展",
+    "enhancement",
 ]
 
 
@@ -132,8 +163,8 @@ def _extract_key_terms(text: str) -> list[str]:
     # Extract quoted terms
     quoted = re.findall(r'[""\u201c](.+?)[""\u201d]', text)
     # Extract technical terms (CamelCase, snake_case with 3+ chars)
-    technical = re.findall(r'\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b', text)
-    technical += re.findall(r'\b(\w{3,}(?:_\w{2,})+)\b', text)
+    technical = re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text)
+    technical += re.findall(r"\b(\w{3,}(?:_\w{2,})+)\b", text)
     # Deduplicate while preserving order
     seen: set[str] = set()
     terms: list[str] = []
@@ -149,7 +180,7 @@ def _categorize_priorities(text: str) -> dict[str, list[str]]:
     priorities: dict[str, list[str]] = {"high": [], "medium": [], "low": []}
 
     # Split into sentences
-    sentences = re.split(r'[。！？.!?\n]+', text)
+    sentences = re.split(r"[。！？.!?\n]+", text)
     sentences = [s.strip() for s in sentences if len(s.strip()) > 2]
 
     for sentence in sentences:
@@ -175,13 +206,15 @@ def _detect_contradictions(text: str) -> list[str]:
     contradictions: list[str] = []
 
     # Check for conflicting time requirements
-    if re.search(r"实时|real.?[Tt]ime", text, re.IGNORECASE) and \
-       re.search(r"批量|batch|异步|async", text, re.IGNORECASE):
+    if re.search(r"实时|real.?[Tt]ime", text, re.IGNORECASE) and re.search(
+        r"批量|batch|异步|async", text, re.IGNORECASE
+    ):
         contradictions.append("同时要求实时处理和批量/异步处理")
 
     # Check for conflicting access requirements
-    if re.search(r"公开|public|匿名|anonymous", text, re.IGNORECASE) and \
-       re.search(r"私密|private|仅限|restricted", text, re.IGNORECASE):
+    if re.search(r"公开|public|匿名|anonymous", text, re.IGNORECASE) and re.search(
+        r"私密|private|仅限|restricted", text, re.IGNORECASE
+    ):
         contradictions.append("同时要求公开访问和私密访问")
 
     return contradictions

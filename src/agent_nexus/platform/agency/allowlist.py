@@ -1,5 +1,6 @@
 """Allowlist loader and validator for agency-agents imports."""
 
+import re
 from pathlib import Path
 
 import yaml
@@ -96,16 +97,20 @@ def _validate_output_contract(entry: dict, errors: list[str]) -> None:
         errors.append("'output_contract' must be a non-empty string")
 
 
+_SAFE_SOURCE_PATH = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_/-]*\.md$")
+
+
 def _validate_source_path(entry: dict, errors: list[str]) -> None:
     if "source_path" not in entry:
         return
     sp = entry["source_path"]
     if not isinstance(sp, str) or not sp.endswith(".md"):
         errors.append("'source_path' must be a string ending with '.md'")
-    elif sp.startswith("/") or sp.startswith("~"):
-        errors.append("'source_path' must not be an absolute path or start with '~'")
-    elif ".." in Path(sp).parts:
-        errors.append("'source_path' must not contain '..' path components")
+    elif not _SAFE_SOURCE_PATH.match(sp):
+        errors.append(
+            "'source_path' must contain only alphanumeric, underscore, "
+            "hyphen, forward-slash characters (no '..', '~', '\\', or absolute paths)"
+        )
 
 
 def _validate_string_list(value: object, field_name: str, errors: list[str]) -> None:

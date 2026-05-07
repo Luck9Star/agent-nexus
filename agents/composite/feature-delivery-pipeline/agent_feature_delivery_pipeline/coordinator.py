@@ -50,7 +50,9 @@ _SIMULATED_RESULTS: dict[str, dict[str, Any]] = {
 }
 
 
-def _simulate_agent_execution(agent_name: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+def _simulate_agent_execution(
+    agent_name: str, context: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Simulate Atomic Agent execution for POC.
 
     In production, this would invoke the agent via ProcessManager subprocess.
@@ -69,7 +71,9 @@ def _simulate_agent_execution(agent_name: str, context: dict[str, Any] | None = 
     return result
 
 
-async def _simulate_agent_execution_async(agent_name: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+async def _simulate_agent_execution_async(
+    agent_name: str, context: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Async version of _simulate_agent_execution for use with asyncio.gather."""
     return _simulate_agent_execution(agent_name, context)
 
@@ -183,9 +187,7 @@ class FeatureDeliveryCoordinator:
 
                     if not task.blocked_by:
                         for remaining_id in (
-                            tid
-                            for grp in execution_order[group_idx + 1 :]
-                            for tid in grp
+                            tid for grp in execution_order[group_idx + 1 :] for tid in grp
                         ):
                             remaining_task = composition.tasks[remaining_id]
                             group_results.append(
@@ -217,7 +219,5 @@ class FeatureDeliveryCoordinator:
             spec=spec,
             stages=stages,
             artifacts=artifacts,
-            success=all_success and all(
-                s.status == StageStatus.COMPLETED for s in stages
-            ),
+            success=all_success and all(s.status == StageStatus.COMPLETED for s in stages),
         )

@@ -36,8 +36,7 @@ def main() -> None:
         except ImportError as e:
             print(f"Error: {e}", file=sys.stderr)
             print(
-                "Install full dependencies with: "
-                "pip install agent-requirements-analyzer[full]",
+                "Install full dependencies with: pip install agent-requirements-analyzer[full]",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -47,9 +46,7 @@ def _run_cli() -> None:
     """Simple CLI interface for development and testing."""
     from agent_requirements_analyzer.agent import RequirementsAnalyzerAgent
 
-    parser = argparse.ArgumentParser(
-        description="requirements-analyzer -- 多轮对话需求分析专家"
-    )
+    parser = argparse.ArgumentParser(description="requirements-analyzer -- 多轮对话需求分析专家")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # analyze command
@@ -57,18 +54,14 @@ def _run_cli() -> None:
     analyze_parser.add_argument("text", help="Requirement text to analyze")
 
     # questions command
-    questions_parser = subparsers.add_parser(
-        "questions", help="Generate clarifying questions"
-    )
+    questions_parser = subparsers.add_parser("questions", help="Generate clarifying questions")
     questions_parser.add_argument(
         "--analysis", required=True, help="JSON string of RequirementAnalysis"
     )
 
     # build command
     build_parser = subparsers.add_parser("build", help="Build requirement specification")
-    build_parser.add_argument(
-        "--answers", required=True, help="JSON string of answers"
-    )
+    build_parser.add_argument("--answers", required=True, help="JSON string of answers")
     build_parser.add_argument("--title", default="需求说明书", help="Specification title")
 
     args = parser.parse_args()
@@ -89,11 +82,13 @@ def _run_cli() -> None:
 
         analysis = RequirementAnalysis.model_validate(analysis_data)
         questions = agent.questions(analysis)
-        print(json.dumps(
-            {"questions": [q.model_dump() for q in questions]},
-            indent=2,
-            ensure_ascii=False,
-        ))
+        print(
+            json.dumps(
+                {"questions": [q.model_dump() for q in questions]},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
 
     elif args.command == "build":
         try:

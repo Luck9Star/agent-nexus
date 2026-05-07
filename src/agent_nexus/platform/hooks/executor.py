@@ -92,6 +92,29 @@ class HookExecutor:
     # Construction helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _parse_hooks_for_event(
+        event: HookEvent,
+        hook_list: list[Any],
+        source_path: Path,
+    ) -> list[HookDefinition]:
+        hooks: list[HookDefinition] = []
+        for hook_dict in hook_list:
+            if not isinstance(hook_dict, dict):
+                continue
+            hook_dict_with_event = {**hook_dict, "event": event}
+            try:
+                hooks.append(HookDefinition.model_validate(hook_dict_with_event))
+            except Exception:
+                logger.warning(
+                    "Invalid hook definition in %s under event %r: %s",
+                    source_path,
+                    event.value,
+                    hook_dict,
+                    exc_info=True,
+                )
+        return hooks
+
     @classmethod
     def from_yaml(
         cls,
@@ -143,20 +166,7 @@ class HookExecutor:
                 )
                 continue
 
-            for hook_dict in hook_list:
-                if not isinstance(hook_dict, dict):
-                    continue
-                hook_dict_with_event = {**hook_dict, "event": event}
-                try:
-                    hooks.append(HookDefinition.model_validate(hook_dict_with_event))
-                except Exception:
-                    logger.warning(
-                        "Invalid hook definition in %s under event %r: %s",
-                        yaml_path,
-                        event_name,
-                        hook_dict,
-                        exc_info=True,
-                    )
+            hooks.extend(cls._parse_hooks_for_event(event, hook_list, yaml_path))
 
         return cls(hooks=hooks, allowed_commands=allowed_commands or [])
 

@@ -93,7 +93,12 @@ def _check_missing_clauses(clauses: Sequence[ClauseInfo]) -> list[RiskItem]:
     existing_types = {c.type for c in clauses}
 
     for rule in RISK_RULES:
-        if rule.get("check") == "no_limitation" and "indemnification" not in existing_types or rule.get("check") == "no_dispute" and "governing_law" not in existing_types:
+        if (
+            rule.get("check") == "no_limitation"
+            and "indemnification" not in existing_types
+            or rule.get("check") == "no_dispute"
+            and "governing_law" not in existing_types
+        ):
             risks.append(
                 RiskItem(
                     category=rule["category"],

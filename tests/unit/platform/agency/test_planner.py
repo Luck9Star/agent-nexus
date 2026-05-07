@@ -7,6 +7,7 @@ from agent_nexus.platform.agency.planner import (
     DynamicCompositePlanner,
     PlannerInput,
     SubtaskDef,
+    _validate_toml_field,
     generate_toml,
 )
 
@@ -455,3 +456,30 @@ class TestSmartDependencyResolution:
         assert broad.blocked_by == []
         # unrelated has no overlap at all → not blocked
         assert unrelated.blocked_by == []
+
+
+# ---------------------------------------------------------------------------
+# _validate_toml_field
+# ---------------------------------------------------------------------------
+
+
+class TestValidateTomlField:
+    """Unit tests for the _validate_toml_field helper."""
+
+    def test_valid_alphanumeric_passes(self) -> None:
+        _validate_toml_field("hello123", "test-context")
+
+    def test_valid_string_with_spaces_passes(self) -> None:
+        _validate_toml_field("task name", "test-context")
+
+    def test_null_byte_raises(self) -> None:
+        with pytest.raises(ValueError, match="null byte"):
+            _validate_toml_field("bad\x00value", "test-context")
+
+    def test_empty_string_raises(self) -> None:
+        with pytest.raises(ValueError, match="must not be empty"):
+            _validate_toml_field("", "test-context")
+
+    def test_special_chars_only_raises(self) -> None:
+        with pytest.raises(ValueError, match="invalid characters"):
+            _validate_toml_field("!@#$", "test-context")

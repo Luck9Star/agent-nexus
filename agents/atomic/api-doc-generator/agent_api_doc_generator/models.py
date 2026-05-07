@@ -28,9 +28,11 @@ class EndpointInfo(BaseModel):
     summary: str = ""
     parameters: list[dict[str, str]] = Field(default_factory=list)
     request_body: str = ""
-    responses: dict[str, str] = Field(default_factory=lambda: {
-        "200": "Successful response",
-    })
+    responses: dict[str, str] = Field(
+        default_factory=lambda: {
+            "200": "Successful response",
+        }
+    )
 
 
 class SchemaInfo(BaseModel):
@@ -56,11 +58,15 @@ class OpenAPISpec(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     openapi_version: str = "3.1.0"
-    info: dict = Field(default_factory=lambda: {
-        "title": "API Documentation",
-        "version": "1.0.0",
-    })
+    info: dict = Field(
+        default_factory=lambda: {
+            "title": "API Documentation",
+            "version": "1.0.0",
+        }
+    )
     paths: dict = Field(default_factory=dict)
-    components: dict = Field(default_factory=lambda: {
-        "schemas": {},
-    })
+    components: dict = Field(
+        default_factory=lambda: {
+            "schemas": {},
+        }
+    )

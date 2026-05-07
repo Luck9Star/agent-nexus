@@ -322,9 +322,7 @@ class TestInferTypeFromAnnotation:
     def test_subscript_annotation(self) -> None:
         import ast
 
-        node = ast.Subscript(
-            value=ast.Name(id="list"), slice=ast.Name(id="str")
-        )
+        node = ast.Subscript(value=ast.Name(id="list"), slice=ast.Name(id="str"))
         assert _infer_type_from_annotation(node) == "list"
 
 
@@ -531,24 +529,18 @@ class TestGenerateFixtures:
 class TestTestSuiteGeneratorAgent:
     """Tests for TestSuiteGeneratorAgent class."""
 
-    def test_analyze_code(
-        self, agent: TestSuiteGeneratorAgent, sample_file: str
-    ) -> None:
+    def test_analyze_code(self, agent: TestSuiteGeneratorAgent, sample_file: str) -> None:
         result = agent.analyze_code_for_tests(sample_file)
         assert isinstance(result, TestAnalysis)
         assert len(result.units) > 0
 
-    def test_generate_test_cases(
-        self, agent: TestSuiteGeneratorAgent, sample_file: str
-    ) -> None:
+    def test_generate_test_cases(self, agent: TestSuiteGeneratorAgent, sample_file: str) -> None:
         analysis = agent.analyze_code_for_tests(sample_file)
         cases = agent.generate_test_cases(analysis)
         assert len(cases) > 0
         assert all(isinstance(c, TestCase) for c in cases)
 
-    def test_build_test_suite(
-        self, agent: TestSuiteGeneratorAgent, sample_file: str
-    ) -> None:
+    def test_build_test_suite(self, agent: TestSuiteGeneratorAgent, sample_file: str) -> None:
         analysis = agent.analyze_code_for_tests(sample_file)
         cases = agent.generate_test_cases(analysis)
         suite = agent.build_test_suite(cases, "pytest")
@@ -556,9 +548,7 @@ class TestTestSuiteGeneratorAgent:
         assert suite.framework == "pytest"
         assert len(suite.cases) > 0
 
-    def test_full_pipeline(
-        self, agent: TestSuiteGeneratorAgent, sample_file: str
-    ) -> None:
+    def test_full_pipeline(self, agent: TestSuiteGeneratorAgent, sample_file: str) -> None:
         # Phase 1: analyze
         analysis = agent.analyze_code_for_tests(sample_file)
         assert len(analysis.units) >= 5  # 2 functions + 1 class + 3 methods
@@ -576,9 +566,7 @@ class TestTestSuiteGeneratorAgent:
         with pytest.raises(FileNotFoundError):
             agent.analyze_code_for_tests("/nonexistent.py")
 
-    def test_empty_file(
-        self, agent: TestSuiteGeneratorAgent, empty_file: str
-    ) -> None:
+    def test_empty_file(self, agent: TestSuiteGeneratorAgent, empty_file: str) -> None:
         analysis = agent.analyze_code_for_tests(empty_file)
         assert analysis.units == []
         cases = agent.generate_test_cases(analysis)
@@ -617,9 +605,7 @@ class TestMCPAdapter:
 class TestLocalAdapter:
     """Tests for local adapter message handling."""
 
-    def test_handle_analyze(
-        self, agent: TestSuiteGeneratorAgent, sample_file: str
-    ) -> None:
+    def test_handle_analyze(self, agent: TestSuiteGeneratorAgent, sample_file: str) -> None:
         response = handle_message(
             agent,
             {
@@ -630,9 +616,7 @@ class TestLocalAdapter:
         assert response["status"] == "ok"
         assert len(response["result"]["units"]) > 0
 
-    def test_handle_generate(
-        self, agent: TestSuiteGeneratorAgent, sample_file: str
-    ) -> None:
+    def test_handle_generate(self, agent: TestSuiteGeneratorAgent, sample_file: str) -> None:
         # First analyze
         analyze_resp = handle_message(
             agent,
@@ -650,9 +634,7 @@ class TestLocalAdapter:
         assert response["status"] == "ok"
         assert len(response["result"]) > 0
 
-    def test_handle_build(
-        self, agent: TestSuiteGeneratorAgent, sample_file: str
-    ) -> None:
+    def test_handle_build(self, agent: TestSuiteGeneratorAgent, sample_file: str) -> None:
         analyze_resp = handle_message(
             agent,
             {
@@ -684,22 +666,16 @@ class TestLocalAdapter:
         assert "Unknown method" in response["error"]
 
     def test_handle_missing_file_path(self, agent: TestSuiteGeneratorAgent) -> None:
-        response = handle_message(
-            agent, {"method": "analyze_code_for_tests", "params": {}}
-        )
+        response = handle_message(agent, {"method": "analyze_code_for_tests", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
     def test_handle_missing_analysis(self, agent: TestSuiteGeneratorAgent) -> None:
-        response = handle_message(
-            agent, {"method": "generate_test_cases", "params": {}}
-        )
+        response = handle_message(agent, {"method": "generate_test_cases", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
     def test_handle_missing_cases(self, agent: TestSuiteGeneratorAgent) -> None:
-        response = handle_message(
-            agent, {"method": "build_test_suite", "params": {}}
-        )
+        response = handle_message(agent, {"method": "build_test_suite", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]

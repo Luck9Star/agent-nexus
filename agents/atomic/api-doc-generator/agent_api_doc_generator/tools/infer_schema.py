@@ -49,7 +49,9 @@ TYPESCRIPT_FIELD_RE = re.compile(
 
 def _is_python_type_info(type_info: str) -> bool:
     """Check if the type info looks like Python annotations."""
-    return bool(re.search(r"(?:class\s+\w+:|:\s*(?:str|int|float|bool|Optional|list|dict))", type_info))
+    return bool(
+        re.search(r"(?:class\s+\w+:|:\s*(?:str|int|float|bool|Optional|list|dict))", type_info)
+    )
 
 
 def _is_typescript_type_info(type_info: str) -> bool:

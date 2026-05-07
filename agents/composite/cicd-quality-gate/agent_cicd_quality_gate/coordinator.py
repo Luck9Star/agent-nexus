@@ -44,13 +44,17 @@ _DEFAULT_THRESHOLDS = {
 
 def _simulate_agent_check(agent_name: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
     """Simulate quality gate agent execution for POC."""
-    result = dict(_AGENT_RESULTS.get(agent_name, {"output": f"{agent_name} completed", "score": 100.0}))
+    result = dict(
+        _AGENT_RESULTS.get(agent_name, {"output": f"{agent_name} completed", "score": 100.0})
+    )
     if context:
         result["input_context"] = bool(context)
     return result
 
 
-async def _simulate_agent_check_async(agent_name: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+async def _simulate_agent_check_async(
+    agent_name: str, context: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Async version of _simulate_agent_check for use with asyncio.gather."""
     return _simulate_agent_check(agent_name, context)
 
@@ -76,9 +80,13 @@ def _make_gate_decision(
         total_score += check.score
 
         if check.agent == "security-scanner" and check.score < thresholds["security_threshold"]:
-            blockers.append(f"Security score {check.score} below threshold {thresholds['security_threshold']}")
+            blockers.append(
+                f"Security score {check.score} below threshold {thresholds['security_threshold']}"
+            )
         elif check.agent == "code-reviewer" and check.score < thresholds["review_threshold"]:
-            blockers.append(f"Review score {check.score} below threshold {thresholds['review_threshold']}")
+            blockers.append(
+                f"Review score {check.score} below threshold {thresholds['review_threshold']}"
+            )
         elif not check.passed:
             blockers.append(f"{check.agent}: {', '.join(check.findings)}")
         elif check.findings:
@@ -190,7 +198,9 @@ class QualityGateCoordinator:
             config = {}
         return asyncio.run(self._run_gate_async(code_path, config))
 
-    async def run_gate_async(self, code_path: str, config: dict[str, Any] | None = None) -> GateResult:
+    async def run_gate_async(
+        self, code_path: str, config: dict[str, Any] | None = None
+    ) -> GateResult:
         """Async version of run_gate for use inside an existing event loop."""
         if config is None:
             config = {}
@@ -245,9 +255,7 @@ class QualityGateCoordinator:
                         checks.append(converter(result))
 
             if merge_task is not None:
-                overall_passed, gate_score, blockers, warnings = _make_gate_decision(
-                    checks, config
-                )
+                overall_passed, gate_score, blockers, warnings = _make_gate_decision(checks, config)
                 return GateResult(
                     checks=checks,
                     overall_passed=overall_passed,
@@ -256,9 +264,7 @@ class QualityGateCoordinator:
                     warnings=warnings,
                 )
 
-        overall_passed, gate_score, blockers, warnings = _make_gate_decision(
-            checks, config
-        )
+        overall_passed, gate_score, blockers, warnings = _make_gate_decision(checks, config)
         return GateResult(
             checks=checks,
             overall_passed=overall_passed,

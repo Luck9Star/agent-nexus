@@ -175,80 +175,76 @@ class FunctionRule(SecurityRule):
         "f",
     }
 
+    @staticmethod
+    def _make_violation(node: ast.Call, node_type: str, message: str) -> SecurityViolation:
+        return SecurityViolation(
+            rule_type="function",
+            node_type=node_type,
+            code_snippet=ast.unparse(node),
+            message=message,
+        )
+
+    def _check_bare_call(
+        self, node: ast.Call, func_name: str, violations: list[SecurityViolation]
+    ) -> None:
+        if func_name in self.forbidden and isinstance(node.func, ast.Name):
+            violations.append(
+                self._make_violation(
+                    node,
+                    "Call",
+                    f"Forbidden function call: '{func_name}' at line {node.lineno}",
+                )
+            )
+
+    def _check_attribute_call(
+        self, node: ast.Call, func_name: str, violations: list[SecurityViolation]
+    ) -> None:
+        if func_name in self.forbidden and isinstance(node.func, ast.Attribute):
+            violations.append(
+                self._make_violation(
+                    node,
+                    "AttributeCall",
+                    f"Forbidden function call via attribute: '{func_name}' at line {node.lineno}",
+                )
+            )
+
+    def _check_indirect_call(
+        self, node: ast.Call, func_name: str, violations: list[SecurityViolation]
+    ) -> None:
+        if func_name in self.forbidden and not violations:
+            violations.append(
+                self._make_violation(
+                    node,
+                    "Call",
+                    f"Forbidden function call (indirect): '{func_name}' at line {node.lineno}",
+                )
+            )
+
+    def _check_qualified_call(self, node: ast.Call, violations: list[SecurityViolation]) -> None:
+        if (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in self.qualified_calls
+            and node.func.attr in self.qualified_calls[node.func.value.id]
+        ):
+            qualified = f"{node.func.value.id}.{node.func.attr}"
+            violations.append(
+                self._make_violation(
+                    node,
+                    "QualifiedCall",
+                    f"Forbidden qualified call: '{qualified}' at line {node.lineno}",
+                )
+            )
+
     def check(self, node: ast.AST) -> list[SecurityViolation]:
         violations: list[SecurityViolation] = []
 
         if isinstance(node, ast.Call):
             func_name = self._get_function_name(node.func)
-            # Only check bare function calls (ast.Name) against the
-            # forbidden list.  Method calls (ast.Attribute) like
-            # ``re.compile()`` should NOT be flagged here -- the
-            # AttributeRule already covers dangerous attribute access
-            # such as ``__builtins__``.
-            if func_name in self.forbidden and isinstance(node.func, ast.Name):
-                violations.append(
-                    SecurityViolation(
-                        rule_type="function",
-                        node_type="Call",
-                        code_snippet=ast.unparse(node),
-                        message=f"Forbidden function call: '{func_name}' at line {node.lineno}",
-                    )
-                )
-
-            # Also catch attribute-based calls: builtins.eval(...),
-            # __builtins__.exec(...), etc.
-            if func_name in self.forbidden and isinstance(node.func, ast.Attribute):
-                violations.append(
-                    SecurityViolation(
-                        rule_type="function",
-                        node_type="AttributeCall",
-                        code_snippet=ast.unparse(node),
-                        message=(
-                            f"Forbidden function call via attribute: "
-                            f"'{func_name}' at line {node.lineno}"
-                        ),
-                    )
-                )
-
-            # Catch-all: indirect calls like (exec)("code") where node.func
-            # is ast.Call or ast.Subscript, not ast.Name/ast.Attribute.
-            if func_name in self.forbidden and not violations:
-                violations.append(
-                    SecurityViolation(
-                        rule_type="function",
-                        node_type="Call",
-                        code_snippet=ast.unparse(node),
-                        message=(
-                            f"Forbidden function call (indirect): "
-                            f"'{func_name}' at line {node.lineno}"
-                        ),
-                    )
-                )
-
-            # Qualified-call check: block os.system(), subprocess.run(), etc.
-            # without false-positive on generic names like pipeline.run().
-            if (
-                isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id in self.qualified_calls
-                and node.func.attr in self.qualified_calls[node.func.value.id]
-            ):
-                qualified = f"{node.func.value.id}.{node.func.attr}"
-                violations.append(
-                    SecurityViolation(
-                        rule_type="function",
-                        node_type="QualifiedCall",
-                        code_snippet=ast.unparse(node),
-                        message=f"Forbidden qualified call: '{qualified}' at line {node.lineno}",
-                    )
-                )
-
-            # --- Bypass-vector protection ---
-            # Detect forbidden function names passed as *arguments* to other
-            # calls.  This catches patterns like:
-            #   map(__import__, ["os"])
-            #   sorted(data, key=exec)
-            #   filter(compile, items)
+            self._check_bare_call(node, func_name, violations)
+            self._check_attribute_call(node, func_name, violations)
+            self._check_indirect_call(node, func_name, violations)
+            self._check_qualified_call(node, violations)
             violations.extend(self._check_callback_args(node))
 
         return violations

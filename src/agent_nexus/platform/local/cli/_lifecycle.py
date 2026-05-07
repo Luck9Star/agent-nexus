@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import signal
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -153,41 +154,28 @@ async def _uninstall(name: str) -> None:
         raise typer.Exit(code=1) from None
 
 
-async def _update(name: str | None, all_agents: bool) -> None:
-    """Async update implementation."""
-    from agent_nexus.platform.local.installer import (
-        AgentNotFoundError,
-        GitInstaller,
-    )
-
-    _loader, lockfile, sources, config_dir = _init_managers()
-    installer = GitInstaller(sources, lockfile, config_dir)
-
+def _resolve_update_targets(
+    name: str | None, all_agents: bool, lockfile: LockfileManager
+) -> list[str] | None:
+    """Return list of agent names to update, or None if no agents."""
     if all_agents:
         lockfile_data = lockfile.load()
-        agents_to_update = list(lockfile_data.agents.keys())
-        if not agents_to_update:
+        agents = list(lockfile_data.agents.keys())
+        if not agents:
             typer.echo("No installed agents to update.")
-            return
-    elif name:
-        agents_to_update = [name]
-    else:
-        typer.echo("Specify an agent name or use --all.")
-        raise typer.Exit(code=1)
+            return None
+        return agents
+    if name:
+        return [name]
+    typer.echo("Specify an agent name or use --all.")
+    raise typer.Exit(code=1)
 
-    async def _update_one(a_name: str):
-        return await installer.update(a_name)
 
-    semaphore = asyncio.Semaphore(4)  # limit concurrent git operations
-
-    async def _bounded_update(a_name: str):
-        async with semaphore:
-            return await _update_one(a_name)
-
-    results = await asyncio.gather(
-        *[_bounded_update(n) for n in agents_to_update],
-        return_exceptions=True,
-    )
+def _report_update_results(
+    agents_to_update: list[str], results: Sequence[object]
+) -> None:
+    """Print per-agent update results and raise on all-fail."""
+    from agent_nexus.platform.local.installer import AgentNotFoundError
 
     updated_count = 0
     for agent_name, result in zip(agents_to_update, results, strict=False):
@@ -206,6 +194,31 @@ async def _update(name: str | None, all_agents: bool) -> None:
     typer.echo(f"Updated {updated_count}/{len(agents_to_update)} agent(s).")
     if updated_count == 0 and any(isinstance(r, BaseException) for r in results):
         raise typer.Exit(code=1)
+
+
+async def _update(name: str | None, all_agents: bool) -> None:
+    """Async update implementation."""
+    from agent_nexus.platform.local.installer import GitInstaller
+
+    _loader, lockfile, sources, config_dir = _init_managers()
+    installer = GitInstaller(sources, lockfile, config_dir)
+
+    agents_to_update = _resolve_update_targets(name, all_agents, lockfile)
+    if agents_to_update is None:
+        return
+
+    semaphore = asyncio.Semaphore(4)
+
+    async def _bounded_update(a_name: str):
+        async with semaphore:
+            return await installer.update(a_name)
+
+    results = await asyncio.gather(
+        *[_bounded_update(n) for n in agents_to_update],
+        return_exceptions=True,
+    )
+
+    _report_update_results(agents_to_update, results)
 
 
 async def _list_agents(json_output: bool = False) -> None:

@@ -343,7 +343,9 @@ class TestGateDecision:
 
     def test_one_fails(self) -> None:
         checks = [
-            GateCheck(agent="security-scanner", passed=False, findings=["CVE-2024-1234"], score=30.0),
+            GateCheck(
+                agent="security-scanner", passed=False, findings=["CVE-2024-1234"], score=30.0
+            ),
             GateCheck(agent="code-reviewer", passed=True, score=90.0),
         ]
         passed, score, blockers, warnings = _make_gate_decision(checks, {})
@@ -370,9 +372,7 @@ class TestGateDecision:
         checks = [
             GateCheck(agent="code-reviewer", passed=True, score=60.0),
         ]
-        passed, score, blockers, warnings = _make_gate_decision(
-            checks, {"review_threshold": 70.0}
-        )
+        passed, score, blockers, warnings = _make_gate_decision(checks, {"review_threshold": 70.0})
         assert passed is False
         assert any("Review" in b for b in blockers)
 
@@ -393,9 +393,7 @@ class TestGateDecision:
         assert passed is True
 
         # With higher threshold, should fail
-        passed, _, blockers, _ = _make_gate_decision(
-            checks, {"security_threshold": 90.0}
-        )
+        passed, _, blockers, _ = _make_gate_decision(checks, {"security_threshold": 90.0})
         assert passed is False
 
 
@@ -484,9 +482,7 @@ class TestQualityGateCoordinator:
         assert result.checks == []
         assert result.overall_passed is False
 
-    def test_run_gate_with_simulated_failure(
-        self, coordinator: QualityGateCoordinator
-    ) -> None:
+    def test_run_gate_with_simulated_failure(self, coordinator: QualityGateCoordinator) -> None:
         """Test that gate handles agent failures."""
         with patch(
             "agent_cicd_quality_gate.coordinator._simulate_agent_check",

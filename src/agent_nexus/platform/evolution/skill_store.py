@@ -40,6 +40,17 @@ logger = logging.getLogger(__name__)
 ConnFactory = Callable[..., AbstractContextManager[sqlite3.Connection]]
 
 
+def _safe_json_loads(value: str | None, default: Any) -> Any:
+    """Parse JSON from a DB column, returning *default* on corruption."""
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Corrupt JSON in database column, using default")
+        return default
+
+
 class SkillStore:
     """SQLite-backed persistence for skill records, lineage, and agent records.
 
@@ -350,7 +361,7 @@ class SkillStore:
             logger.error("Database error during skill evolution: %s", exc, exc_info=True)
             return EvolveResult(
                 success=False,
-                error=f"Database error during evolution: {exc}",
+                error="Database error during evolution",
             )
 
         return EvolveResult(success=True, new_record=new_record)
@@ -716,7 +727,7 @@ class SkillStore:
             "agent_id": row[0],
             "name": row[1],
             "type": row[2],
-            "skill_ids": json.loads(row[3]) if row[3] else [],
+            "skill_ids": _safe_json_loads(row[3], []),
             "orchestration_toml": row[4],
             "effective_rate": row[5],
             "avg_steps": row[6],

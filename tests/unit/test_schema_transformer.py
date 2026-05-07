@@ -4,6 +4,9 @@ from pydantic import BaseModel
 
 from agent_nexus.platform.gateway.schema_transformer import SchemaTransformer
 
+import logging
+import pytest
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -461,3 +464,14 @@ class TestAllOfInlineSchema:
         t = _make_transformer()
         model = t.resolve({"allOf": [{"type": "string"}, {"type": "integer"}]})
         assert issubclass(model, BaseModel)
+
+
+class TestExternalRefWarning:
+    """Verify that _resolve_ref logs a warning on external $ref."""
+
+    def test_external_ref_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        t = _make_transformer()
+        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.gateway.schema_transformer"):
+            result = t.resolve({"$ref": "https://other-host.com/schemas/X"})
+        assert result is str
+        assert any("External $ref" in rec.message for rec in caplog.records)

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from .executor import ProfileBasedExecutor
 from .integrator import Artifact, IntegratedArtifact, Integrator
-from .planner import CompositionDAG, DynamicCompositePlanner, SubtaskDef
+from .planner import CompositionDAG, DAGTask, DynamicCompositePlanner, SubtaskDef
 from .qa_gate import QAGate, QAGateInput
 from .registry import ExpertRegistry
 from .selector import SelectionRequest, SelectionResult, SpecialistSelector
@@ -413,6 +413,29 @@ class TaskComposer:
 
         return list(dispatch_result.artifacts.values()), skipped
 
+    @staticmethod
+    def _check_deadline(deadline: float | None, timeout_seconds: float | None) -> None:
+        if deadline is not None and time.monotonic() > deadline:
+            raise TimeoutError(
+                f"TaskComposer pipeline timed out after {timeout_seconds}s"
+            )
+
+    @staticmethod
+    def _should_skip_task(
+        task_def: DAGTask,
+        executed: set[str],
+        failed: set[str],
+        specialist_ids: set[str],
+    ) -> bool | None:
+        """Return True if task should be skipped, False if ready, None if pending."""
+        if task_def.id in executed or task_def.id not in specialist_ids:
+            return True
+        if any(dep in failed for dep in task_def.blocked_by):
+            return False  # blocked by failure — mark failed
+        if not all(dep in executed for dep in task_def.blocked_by):
+            return None  # still waiting for deps
+        return None  # ready to execute (all deps done, none failed)
+
     def _dispatch_legacy(
         self,
         dag: CompositionDAG,
@@ -432,13 +455,11 @@ class TaskComposer:
 
         for _ in range(len(dag.tasks)):
             for task_def in dag.tasks:
-                if deadline is not None and time.monotonic() > deadline:
-                    raise TimeoutError(
-                        f"TaskComposer pipeline timed out after {timeout_seconds}s"
-                    )
-                if task_def.id in executed or task_def.id not in specialist_ids:
+                self._check_deadline(deadline, timeout_seconds)
+                verdict = self._should_skip_task(task_def, executed, failed, specialist_ids)
+                if verdict is True:
                     continue
-                if any(dep in failed for dep in task_def.blocked_by):
+                if verdict is False:
                     if task_def.id not in skipped:
                         logger.warning(
                             "Skipping task '%s' (agent '%s'): blocked by failed dependency %s",
@@ -449,6 +470,7 @@ class TaskComposer:
                         skipped.add(task_def.id)
                     failed.add(task_def.id)
                     continue
+                # verdict is None and deps are satisfied
                 if all(dep in executed for dep in task_def.blocked_by):
                     try:
                         artifact = executor(task_def.agent, task)

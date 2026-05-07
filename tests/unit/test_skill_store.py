@@ -23,7 +23,7 @@ from agent_nexus.models.evolution import (
     SkillRecord,
 )
 from agent_nexus.platform.evolution._shared import _SCHEMA_SQL
-from agent_nexus.platform.evolution.skill_store import SkillStore
+from agent_nexus.platform.evolution.skill_store import SkillStore, _safe_json_loads
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -494,3 +494,26 @@ class TestRowToRecordEdgeCases:
         loaded = store.get_skill_record("skill-1")
         assert loaded is not None
         assert loaded.lineage.origin == SkillOrigin.CAPTURED
+
+
+# ============================================================================
+# _safe_json_loads
+# ============================================================================
+
+
+class TestSafeJsonLoads:
+    def test_none_returns_default(self) -> None:
+        assert _safe_json_loads(None, {"key": "val"}) == {"key": "val"}
+
+    def test_empty_string_returns_default(self) -> None:
+        assert _safe_json_loads("", "fallback") == "fallback"
+
+    def test_valid_json_returns_parsed(self) -> None:
+        result = _safe_json_loads('{"a": 1}', None)
+        assert result == {"a": 1}
+
+    def test_corrupt_json_returns_default(self) -> None:
+        assert _safe_json_loads("{not-json{{{", "default") == "default"
+
+    def test_type_error_input_returns_default(self) -> None:
+        assert _safe_json_loads(123, "default") == "default"  # type: ignore[arg-type]

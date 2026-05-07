@@ -41,12 +41,14 @@ def _extract_path_params(path: str) -> list[dict[str, str]]:
     """Extract path parameters from a URL path."""
     params: list[dict[str, str]] = []
     for match in PATH_PARAM_RE.finditer(path):
-        params.append({
-            "name": match.group(1),
-            "in": "path",
-            "required": "true",
-            "schema": "string",
-        })
+        params.append(
+            {
+                "name": match.group(1),
+                "in": "path",
+                "required": "true",
+                "schema": "string",
+            }
+        )
     return params
 
 
@@ -56,12 +58,14 @@ def _scan_fastapi(content: str) -> list[EndpointInfo]:
     for match in FASTAPI_PATTERN.finditer(content):
         method = match.group(1).upper()
         path = match.group(2)
-        endpoints.append(EndpointInfo(
-            path=path,
-            method=method,
-            parameters=_extract_path_params(path),
-            summary=f"{method} {path}",
-        ))
+        endpoints.append(
+            EndpointInfo(
+                path=path,
+                method=method,
+                parameters=_extract_path_params(path),
+                summary=f"{method} {path}",
+            )
+        )
     return endpoints
 
 
@@ -77,12 +81,14 @@ def _scan_flask(content: str) -> list[EndpointInfo]:
             methods = ["GET"]
 
         for method in methods:
-            endpoints.append(EndpointInfo(
-                path=path,
-                method=method.upper(),
-                parameters=_extract_path_params(path),
-                summary=f"{method.upper()} {path}",
-            ))
+            endpoints.append(
+                EndpointInfo(
+                    path=path,
+                    method=method.upper(),
+                    parameters=_extract_path_params(path),
+                    summary=f"{method.upper()} {path}",
+                )
+            )
     return endpoints
 
 
@@ -92,12 +98,14 @@ def _scan_express(content: str) -> list[EndpointInfo]:
     for match in EXPRESS_PATTERN.finditer(content):
         method = match.group(1).upper()
         path = match.group(2)
-        endpoints.append(EndpointInfo(
-            path=path,
-            method=method,
-            parameters=_extract_path_params(path),
-            summary=f"{method} {path}",
-        ))
+        endpoints.append(
+            EndpointInfo(
+                path=path,
+                method=method,
+                parameters=_extract_path_params(path),
+                summary=f"{method} {path}",
+            )
+        )
     return endpoints
 
 
@@ -120,12 +128,14 @@ def _scan_spring(content: str) -> list[EndpointInfo]:
         method = method_map.get(annotation_type, "GET")
 
         # Spring uses {param} syntax same as OpenAPI
-        endpoints.append(EndpointInfo(
-            path=path,
-            method=method,
-            parameters=_extract_path_params(path),
-            summary=f"{method} {path}",
-        ))
+        endpoints.append(
+            EndpointInfo(
+                path=path,
+                method=method,
+                parameters=_extract_path_params(path),
+                summary=f"{method} {path}",
+            )
+        )
     return endpoints
 
 

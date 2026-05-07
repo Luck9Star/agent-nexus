@@ -122,25 +122,27 @@ def _fill_xml_fallback(
     shutil.copy2(template_path, output_path)
 
     # Read and replace in all XML files within the zip
-    with zipfile.ZipFile(output_path, "r") as zin, \
-         zipfile.ZipFile(output_path + ".tmp", "w") as zout:
-            for item in zin.infolist():
-                data = zin.read(item.filename)
-                if item.filename.endswith(".xml"):
-                    text = data.decode("utf-8")
+    with (
+        zipfile.ZipFile(output_path, "r") as zin,
+        zipfile.ZipFile(output_path + ".tmp", "w") as zout,
+    ):
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename.endswith(".xml"):
+                text = data.decode("utf-8")
 
-                    # Find all placeholder names in this XML
-                    found = PLACEHOLDER_RE.findall(text)
-                    for name in found:
-                        if name in values:
-                            text = text.replace("{{" + name + "}}", values[name])
-                            filled_count += 1
-                        else:
-                            if name not in unfilled:
-                                unfilled.append(name)
+                # Find all placeholder names in this XML
+                found = PLACEHOLDER_RE.findall(text)
+                for name in found:
+                    if name in values:
+                        text = text.replace("{{" + name + "}}", values[name])
+                        filled_count += 1
+                    else:
+                        if name not in unfilled:
+                            unfilled.append(name)
 
-                    data = text.encode("utf-8")
-                zout.writestr(item, data)
+                data = text.encode("utf-8")
+            zout.writestr(item, data)
 
     # Replace original with the new file
     Path(output_path + ".tmp").rename(output_path)
@@ -202,6 +204,7 @@ def fill_template(
     except Exception:
         # python-docx may fail on minimal/malformed docx files
         import logging
+
         logging.getLogger(__name__).debug(
             "python-docx fill failed, falling back to XML", exc_info=True
         )

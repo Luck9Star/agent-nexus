@@ -45,13 +45,17 @@ _DIMENSION_RESULTS: dict[str, dict[str, Any]] = {
 
 def _simulate_agent_check(agent_name: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
     """Simulate compliance agent execution for POC."""
-    result = dict(_DIMENSION_RESULTS.get(agent_name, {"dimension": agent_name, "issues": [], "score": 100.0}))
+    result = dict(
+        _DIMENSION_RESULTS.get(agent_name, {"dimension": agent_name, "issues": [], "score": 100.0})
+    )
     if context:
         result["input_context"] = bool(context)
     return result
 
 
-async def _simulate_agent_check_async(agent_name: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+async def _simulate_agent_check_async(
+    agent_name: str, context: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Async version of _simulate_agent_check for use with asyncio.gather."""
     return _simulate_agent_check(agent_name, context)
 
@@ -162,13 +166,17 @@ class ComplianceCoordinator:
             jurisdictions = []
         return asyncio.run(self._check_compliance_async(document, jurisdictions))
 
-    async def check_compliance_async(self, document: str, jurisdictions: list[str] | None = None) -> ComplianceResult:
+    async def check_compliance_async(
+        self, document: str, jurisdictions: list[str] | None = None
+    ) -> ComplianceResult:
         """Async version of check_compliance for use inside an existing event loop."""
         if jurisdictions is None:
             jurisdictions = []
         return await self._check_compliance_async(document, jurisdictions)
 
-    async def _check_compliance_async(self, document: str, jurisdictions: list[str]) -> ComplianceResult:
+    async def _check_compliance_async(
+        self, document: str, jurisdictions: list[str]
+    ) -> ComplianceResult:
         try:
             composition = self.load_composition()
         except CompositionError:
@@ -205,7 +213,8 @@ class ComplianceCoordinator:
                     if isinstance(result, Exception):
                         logger.exception(
                             "Compliance check failed for task '%s' (agent='%s')",
-                            task.id, task.agent,
+                            task.id,
+                            task.agent,
                         )
                         checks.append(
                             ComplianceCheck(

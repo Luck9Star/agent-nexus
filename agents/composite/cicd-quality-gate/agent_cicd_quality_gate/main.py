@@ -33,8 +33,7 @@ def main() -> None:
         except ImportError as e:
             print(f"Error: {e}", file=sys.stderr)
             print(
-                "Install full dependencies with: "
-                "pip install agent-cicd-quality-gate[full]",
+                "Install full dependencies with: pip install agent-cicd-quality-gate[full]",
                 file=sys.stderr,
             )
             sys.exit(1)

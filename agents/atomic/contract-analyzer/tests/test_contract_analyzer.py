@@ -72,7 +72,8 @@ Section 1. Definitions
 For purposes of this Agreement, the following terms shall have the meanings set forth below.
 
 Section 2. Obligations
-The Buyer shall make all payments in a timely manner. The Seller shall deliver the goods as specified.
+The Buyer shall make all payments in a timely manner.
+The Seller shall deliver the goods as specified.
 
 Section 3. Payment
 Payment terms are negotiable and to be agreed upon by both parties.
@@ -308,7 +309,9 @@ class TestExtractObligations:
         assert len(obs) >= 1
 
     def test_english_obligations(self) -> None:
-        obs = _extract_obligations("The party shall pay within 30 days. The seller must deliver goods.")
+        obs = _extract_obligations(
+            "The party shall pay within 30 days. The seller must deliver goods."
+        )
         assert len(obs) >= 1
 
     def test_no_obligations(self) -> None:
@@ -563,7 +566,11 @@ class TestCheckCompliance:
     def test_us_with_indemnification(self) -> None:
         clauses = [
             ClauseInfo(clause_id="1", type="governing_law", content="Governing law"),
-            ClauseInfo(clause_id="2", type="indemnification", content="Indemnification clause with liability cap"),
+            ClauseInfo(
+                clause_id="2",
+                type="indemnification",
+                content="Indemnification clause with liability cap",
+            ),
         ]
         result = check_compliance(clauses, "US")
         assert result.compliant is True
@@ -731,16 +738,12 @@ class TestLocalAdapter:
         assert "Unknown method" in response["error"]
 
     def test_handle_missing_text(self, agent: ContractAnalyzerAgent) -> None:
-        response = handle_message(
-            agent, {"method": "extract_clauses", "params": {}}
-        )
+        response = handle_message(agent, {"method": "extract_clauses", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
     def test_handle_missing_clauses(self, agent: ContractAnalyzerAgent) -> None:
-        response = handle_message(
-            agent, {"method": "analyze_risks", "params": {}}
-        )
+        response = handle_message(agent, {"method": "analyze_risks", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 

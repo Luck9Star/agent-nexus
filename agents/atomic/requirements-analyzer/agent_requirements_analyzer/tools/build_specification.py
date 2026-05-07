@@ -40,15 +40,31 @@ def _build_sections(
         functional_items.append(item)
     # Incorporate answers that relate to functionality
     for key, value in answers.items():
-        if any(kw in key for kw in ["功能", "角色", "认证", "数据", "流程", "feature", "role", "auth", "data", "process"]):
+        if any(
+            kw in key
+            for kw in [
+                "功能",
+                "角色",
+                "认证",
+                "数据",
+                "流程",
+                "feature",
+                "role",
+                "auth",
+                "data",
+                "process",
+            ]
+        ):
             functional_items.append(f"{key}: {value}")
 
     if functional_items:
-        sections.append(RequirementSection(
-            title="功能需求",
-            items=functional_items,
-            priority="high",
-        ))
+        sections.append(
+            RequirementSection(
+                title="功能需求",
+                items=functional_items,
+                priority="high",
+            )
+        )
 
     # Non-functional requirements section
     non_functional_items: list[str] = []
@@ -59,11 +75,13 @@ def _build_sections(
             non_functional_items.append(f"{key}: {value}")
 
     if non_functional_items:
-        sections.append(RequirementSection(
-            title="非功能需求",
-            items=non_functional_items,
-            priority="medium",
-        ))
+        sections.append(
+            RequirementSection(
+                title="非功能需求",
+                items=non_functional_items,
+                priority="medium",
+            )
+        )
 
     # Constraints section (from contradictions and gap answers)
     constraint_items: list[str] = []
@@ -74,11 +92,13 @@ def _build_sections(
             constraint_items.append(contradiction)
 
     if constraint_items:
-        sections.append(RequirementSection(
-            title="约束条件",
-            items=constraint_items,
-            priority="high",
-        ))
+        sections.append(
+            RequirementSection(
+                title="约束条件",
+                items=constraint_items,
+                priority="high",
+            )
+        )
 
     return sections
 
@@ -135,7 +155,10 @@ def _build_constraints(
 
     # Add constraint-related answers
     for key, value in answers.items():
-        if any(kw in key for kw in ["约束", "限制", "constraint", "限制", "技术", "tech", "时间", "time"]):
+        if any(
+            kw in key
+            for kw in ["约束", "限制", "constraint", "限制", "技术", "tech", "时间", "time"]
+        ):
             constraints.append(f"{key}: {value}")
 
     return constraints

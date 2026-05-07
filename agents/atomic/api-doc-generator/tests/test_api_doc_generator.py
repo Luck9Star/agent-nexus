@@ -49,7 +49,7 @@ def agent() -> APIDocGeneratorAgent:
     return APIDocGeneratorAgent()
 
 
-FASTAPI_CODE = '''from fastapi import FastAPI
+FASTAPI_CODE = """from fastapi import FastAPI
 
 app = FastAPI()
 
@@ -68,9 +68,9 @@ def get_user(user_id: int):
 @router.put("/users/{user_id}")
 def update_user(user_id: int):
     pass
-'''
+"""
 
-FLASK_CODE = '''from flask import Flask
+FLASK_CODE = """from flask import Flask
 
 app = Flask(__name__)
 
@@ -85,17 +85,17 @@ def create_item():
 @app.route("/api/items/<item_id>", methods=["GET"])
 def get_item(item_id):
     pass
-'''
+"""
 
-EXPRESS_CODE = '''const express = require("express");
+EXPRESS_CODE = """const express = require("express");
 const router = express.Router();
 
 router.get("/products", (req, res) => {});
 router.post("/products", (req, res) => {});
 router.delete("/products/{id}", (req, res) => {});
-'''
+"""
 
-SPRING_CODE = '''@RestController
+SPRING_CODE = """@RestController
 @RequestMapping("/api")
 class UserController {
     @GetMapping("/users")
@@ -107,23 +107,23 @@ class UserController {
     @GetMapping("/users/{id}")
     User getUser(@PathVariable Long id) {}
 }
-'''
+"""
 
-PYTHON_TYPES = '''class User:
+PYTHON_TYPES = """class User:
     name: str
     age: int
     email: Optional[str]
     is_active: bool
     tags: list
-'''
+"""
 
-TYPESCRIPT_TYPES = '''interface Product {
+TYPESCRIPT_TYPES = """interface Product {
     name: string;
     price: number;
     inStock: boolean;
     description?: string;
 }
-'''
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -478,9 +478,7 @@ class TestAPIDocGeneratorAgent:
         result = agent.extract("/nonexistent.py")
         assert result == []
 
-    def test_extract_fastapi(
-        self, agent: APIDocGeneratorAgent, tmp_dir: str
-    ) -> None:
+    def test_extract_fastapi(self, agent: APIDocGeneratorAgent, tmp_dir: str) -> None:
         path = os.path.join(tmp_dir, "api.py")
         Path(path).write_text(FASTAPI_CODE)
         endpoints = agent.extract(path)
@@ -497,9 +495,7 @@ class TestAPIDocGeneratorAgent:
         assert isinstance(spec, OpenAPISpec)
         assert "/test" in spec.paths
 
-    def test_full_pipeline(
-        self, agent: APIDocGeneratorAgent, tmp_dir: str
-    ) -> None:
+    def test_full_pipeline(self, agent: APIDocGeneratorAgent, tmp_dir: str) -> None:
         # Phase 1: extract
         path = os.path.join(tmp_dir, "api.py")
         Path(path).write_text(FASTAPI_CODE)
@@ -553,9 +549,7 @@ class TestMCPAdapter:
 class TestLocalAdapter:
     """Tests for local adapter message handling."""
 
-    def test_handle_extract(
-        self, agent: APIDocGeneratorAgent, tmp_dir: str
-    ) -> None:
+    def test_handle_extract(self, agent: APIDocGeneratorAgent, tmp_dir: str) -> None:
         path = os.path.join(tmp_dir, "api.py")
         Path(path).write_text(FASTAPI_CODE)
         response = handle_message(
@@ -565,12 +559,8 @@ class TestLocalAdapter:
         assert response["status"] == "ok"
         assert len(response["result"]["endpoints"]) >= 4
 
-    def test_handle_extract_missing_path(
-        self, agent: APIDocGeneratorAgent
-    ) -> None:
-        response = handle_message(
-            agent, {"method": "extract", "params": {}}
-        )
+    def test_handle_extract_missing_path(self, agent: APIDocGeneratorAgent) -> None:
+        response = handle_message(agent, {"method": "extract", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
@@ -582,12 +572,8 @@ class TestLocalAdapter:
         assert response["status"] == "ok"
         assert response["result"]["name"] == "User"
 
-    def test_handle_infer_missing_type_info(
-        self, agent: APIDocGeneratorAgent
-    ) -> None:
-        response = handle_message(
-            agent, {"method": "infer", "params": {}}
-        )
+    def test_handle_infer_missing_type_info(self, agent: APIDocGeneratorAgent) -> None:
+        response = handle_message(agent, {"method": "infer", "params": {}})
         assert response["status"] == "error"
 
     def test_handle_generate(self, agent: APIDocGeneratorAgent) -> None:
@@ -602,24 +588,16 @@ class TestLocalAdapter:
         assert response["status"] == "ok"
         assert response["result"]["openapi_version"] == "3.1.0"
 
-    def test_handle_generate_missing_endpoints(
-        self, agent: APIDocGeneratorAgent
-    ) -> None:
-        response = handle_message(
-            agent, {"method": "generate", "params": {}}
-        )
+    def test_handle_generate_missing_endpoints(self, agent: APIDocGeneratorAgent) -> None:
+        response = handle_message(agent, {"method": "generate", "params": {}})
         assert response["status"] == "error"
 
-    def test_handle_unknown_method(
-        self, agent: APIDocGeneratorAgent
-    ) -> None:
+    def test_handle_unknown_method(self, agent: APIDocGeneratorAgent) -> None:
         response = handle_message(agent, {"method": "unknown", "params": {}})
         assert response["status"] == "error"
         assert "Unknown method" in response["error"]
 
-    def test_handle_extract_nonexistent_file(
-        self, agent: APIDocGeneratorAgent
-    ) -> None:
+    def test_handle_extract_nonexistent_file(self, agent: APIDocGeneratorAgent) -> None:
         response = handle_message(
             agent,
             {"method": "extract", "params": {"file_path": "/nonexistent.py"}},

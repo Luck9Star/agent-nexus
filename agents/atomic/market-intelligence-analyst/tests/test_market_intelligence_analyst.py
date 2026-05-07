@@ -641,16 +641,12 @@ class TestLocalAdapter:
         assert "Unknown method" in response["error"]
 
     def test_handle_missing_data(self, agent: MarketIntelligenceAgent) -> None:
-        response = handle_message(
-            agent, {"method": "analyze_market", "params": {}}
-        )
+        response = handle_message(agent, {"method": "analyze_market", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
     def test_handle_missing_analysis(self, agent: MarketIntelligenceAgent) -> None:
-        response = handle_message(
-            agent, {"method": "generate_briefing", "params": {}}
-        )
+        response = handle_message(agent, {"method": "generate_briefing", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 

@@ -53,9 +53,7 @@ def _simulate_market_intel(query: str, framework: str = "porter") -> dict:
     }
 
 
-def _simulate_doc_filler(
-    analysis: dict, template_path: str | None = None
-) -> dict:
+def _simulate_doc_filler(analysis: dict, template_path: str | None = None) -> dict:
     """Simulate doc-filler output.
 
     Returns a dict mirroring FillResult.model_dump().
@@ -82,9 +80,7 @@ def _simulate_doc_filler(
     }
 
 
-def _simulate_localization(
-    text: str, target_lang: str
-) -> dict:
+def _simulate_localization(text: str, target_lang: str) -> dict:
     """Simulate localization-specialist output.
 
     Returns a dict mirroring LocalizationResult.model_dump().
@@ -150,7 +146,9 @@ class CompetitiveIntelCoordinator:
         """
         if target_langs is None:
             target_langs = ["en"]
-        return asyncio.run(self._generate_briefing_async(query, target_langs, template_path, framework))
+        return asyncio.run(
+            self._generate_briefing_async(query, target_langs, template_path, framework)
+        )
 
     async def generate_briefing_async(
         self,
@@ -279,9 +277,7 @@ class CompetitiveIntelCoordinator:
             success=True,
         )
 
-    def _build_steps(
-        self, query: str, template_path: str | None = None
-    ) -> list[PipelineStep]:
+    def _build_steps(self, query: str, template_path: str | None = None) -> list[PipelineStep]:
         """Build the initial pipeline steps (all pending).
 
         Returns:
@@ -375,9 +371,7 @@ class CompetitiveIntelCoordinator:
 
             for dep in blocked_by:
                 if dep not in task_ids:
-                    errors.append(
-                        f"Task '{task_id}' references unknown dependency '{dep}'"
-                    )
+                    errors.append(f"Task '{task_id}' references unknown dependency '{dep}'")
 
             if task_id in blocked_by:
                 errors.append(f"Task '{task_id}' cannot depend on itself")

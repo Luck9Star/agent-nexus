@@ -108,7 +108,9 @@ class TestSecurityFinding:
         assert f == f2
 
     def test_json_serialization(self) -> None:
-        f = SecurityFinding(severity="high", category="injection", location="a.py:1", cwe_id="CWE-89")
+        f = SecurityFinding(
+            severity="high", category="injection", location="a.py:1", cwe_id="CWE-89"
+        )
         json_str = f.model_dump_json()
         data = json.loads(json_str)
         assert data["severity"] == "high"
@@ -276,10 +278,7 @@ class TestScanCode:
         assert all(f.remediation for f in result.findings)
 
     def test_severity_ordering(self, tmp_dir: str) -> None:
-        code = (
-            'cursor.execute(f"SELECT * FROM t WHERE id={x}")\n'
-            'password = "secret_pass_123"\n'
-        )
+        code = 'cursor.execute(f"SELECT * FROM t WHERE id={x}")\npassword = "secret_pass_123"\n'
         path = _write_file(tmp_dir, "order.py", code)
         result = scan_code(path)
         if len(result.findings) >= 2:
@@ -540,9 +539,7 @@ class TestMCPAdapter:
 class TestLocalAdapter:
     """Tests for local adapter message handling."""
 
-    def test_handle_scan_code(
-        self, agent: SecurityScannerAgent, tmp_dir: str
-    ) -> None:
+    def test_handle_scan_code(self, agent: SecurityScannerAgent, tmp_dir: str) -> None:
         path = _write_file(tmp_dir, "test.py", "x = 1\n")
         response = handle_message(
             agent,
@@ -552,9 +549,7 @@ class TestLocalAdapter:
         assert "result" in response
 
     def test_handle_scan_code_missing_path(self, agent: SecurityScannerAgent) -> None:
-        response = handle_message(
-            agent, {"method": "scan_code", "params": {}}
-        )
+        response = handle_message(agent, {"method": "scan_code", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
@@ -567,9 +562,7 @@ class TestLocalAdapter:
         assert response["result"]["total_scanned"] == 1
 
     def test_handle_check_dependencies_missing(self, agent: SecurityScannerAgent) -> None:
-        response = handle_message(
-            agent, {"method": "check_dependencies", "params": {}}
-        )
+        response = handle_message(agent, {"method": "check_dependencies", "params": {}})
         assert response["status"] == "error"
 
     def test_handle_generate_report(self, agent: SecurityScannerAgent) -> None:
@@ -578,9 +571,7 @@ class TestLocalAdapter:
             {
                 "method": "generate_report",
                 "params": {
-                    "findings": [
-                        {"severity": "high", "category": "xss", "location": "a.py:1"}
-                    ]
+                    "findings": [{"severity": "high", "category": "xss", "location": "a.py:1"}]
                 },
             },
         )

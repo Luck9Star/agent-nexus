@@ -69,8 +69,7 @@ TYPE_PRIORITY: dict[str, int] = {
 
 # Pre-computed lowercase keywords for _classify_type
 TYPE_KEYWORDS_LOWER: dict[str, list[str]] = {
-    ct: [kw.lower() for kw in kws]
-    for ct, kws in TYPE_KEYWORDS.items()
+    ct: [kw.lower() for kw in kws] for ct, kws in TYPE_KEYWORDS.items()
 }
 
 # Pre-compiled obligation patterns (module level)

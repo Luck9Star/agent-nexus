@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class TestUnit(BaseModel):  # noqa: N801 — domain name, not a pytest class
     """A testable unit identified in source code."""
+
     __test__ = False  # prevent pytest collection
 
     model_config = ConfigDict(frozen=True)
@@ -24,6 +25,7 @@ class TestUnit(BaseModel):  # noqa: N801 — domain name, not a pytest class
 
 class TestAnalysis(BaseModel):  # noqa: N801
     """Result of analyzing source code for testable units."""
+
     __test__ = False  # prevent pytest collection
 
     model_config = ConfigDict(frozen=True)
@@ -35,6 +37,7 @@ class TestAnalysis(BaseModel):  # noqa: N801
 
 class TestCase(BaseModel):  # noqa: N801
     """A single test case."""
+
     __test__ = False  # prevent pytest collection
 
     model_config = ConfigDict(frozen=True)
@@ -48,6 +51,7 @@ class TestCase(BaseModel):  # noqa: N801
 
 class TestSuite(BaseModel):  # noqa: N801
     """Assembled test suite ready for code generation."""
+
     __test__ = False  # prevent pytest collection
 
     model_config = ConfigDict(frozen=True)

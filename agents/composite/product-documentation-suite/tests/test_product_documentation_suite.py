@@ -162,10 +162,7 @@ class TestCompositionParsing:
 
     def test_parse_actual_file(self, composition_data: dict) -> None:
         assert "composition" in composition_data
-        assert (
-            composition_data["composition"]["name"]
-            == "product-documentation-suite"
-        )
+        assert composition_data["composition"]["name"] == "product-documentation-suite"
 
     def test_has_three_tasks(self, composition_data: dict) -> None:
         tasks = composition_data["tasks"]
@@ -353,9 +350,7 @@ class TestContentHash:
 class TestDocumentationSuiteCoordinator:
     """Tests for DocumentationSuiteCoordinator."""
 
-    def test_generate_docs_basic(
-        self, coordinator: DocumentationSuiteCoordinator
-    ) -> None:
+    def test_generate_docs_basic(self, coordinator: DocumentationSuiteCoordinator) -> None:
         result = coordinator.generate_docs("/path/to/api.py")
         assert result.success is True
         assert len(result.artifacts) > 0
@@ -363,9 +358,7 @@ class TestDocumentationSuiteCoordinator:
     def test_generate_docs_with_localization(
         self, coordinator: DocumentationSuiteCoordinator
     ) -> None:
-        result = coordinator.generate_docs(
-            "/path/to/api.py", target_langs=["zh", "en", "ja"]
-        )
+        result = coordinator.generate_docs("/path/to/api.py", target_langs=["zh", "en", "ja"])
         assert result.success is True
         lang_set = {a.language for a in result.artifacts if a.type == "localization"}
         assert "zh" in lang_set
@@ -389,9 +382,7 @@ class TestDocumentationSuiteCoordinator:
     def test_artifacts_contain_localization(
         self, coordinator: DocumentationSuiteCoordinator
     ) -> None:
-        result = coordinator.generate_docs(
-            "/path/to/api.py", target_langs=["zh"]
-        )
+        result = coordinator.generate_docs("/path/to/api.py", target_langs=["zh"])
         types = {a.type for a in result.artifacts}
         assert "localization" in types
 
@@ -399,9 +390,7 @@ class TestDocumentationSuiteCoordinator:
         result = coordinator.generate_docs("/path/to/api.py")
         assert 0.0 <= result.coverage_score <= 1.0
 
-    def test_drift_report_not_empty(
-        self, coordinator: DocumentationSuiteCoordinator
-    ) -> None:
+    def test_drift_report_not_empty(self, coordinator: DocumentationSuiteCoordinator) -> None:
         result = coordinator.generate_docs("/path/to/api.py")
         assert result.drift_report != ""
 
@@ -416,21 +405,15 @@ class TestDocumentationSuiteCoordinator:
         lang_set = {a.language for a in result.artifacts if a.type == "localization"}
         assert "en" in lang_set
 
-    def test_artifact_hashes(
-        self, coordinator: DocumentationSuiteCoordinator
-    ) -> None:
+    def test_artifact_hashes(self, coordinator: DocumentationSuiteCoordinator) -> None:
         result = coordinator.generate_docs("/path/to/api.py")
         for artifact in result.artifacts:
             assert artifact.content_hash != ""
             assert len(artifact.content_hash) == 16
 
-    def test_total_artifact_count(
-        self, coordinator: DocumentationSuiteCoordinator
-    ) -> None:
+    def test_total_artifact_count(self, coordinator: DocumentationSuiteCoordinator) -> None:
         """2 source artifacts + N localization artifacts."""
-        result = coordinator.generate_docs(
-            "/path/to/api.py", target_langs=["en", "zh"]
-        )
+        result = coordinator.generate_docs("/path/to/api.py", target_langs=["en", "zh"])
         # 1 openapi_spec + 1 review_report + 2 localizations = 4
         assert len(result.artifacts) == 4
 
@@ -469,9 +452,7 @@ class TestMCPAdapter:
 class TestLocalAdapter:
     """Tests for local adapter message handling."""
 
-    def test_handle_generate_docs(
-        self, coordinator: DocumentationSuiteCoordinator
-    ) -> None:
+    def test_handle_generate_docs(self, coordinator: DocumentationSuiteCoordinator) -> None:
         from agent_product_documentation_suite.main import _handle_message
 
         response = _handle_message(
@@ -481,9 +462,7 @@ class TestLocalAdapter:
         assert response["status"] == "ok"
         assert response["result"]["success"] is True
 
-    def test_handle_with_target_langs(
-        self, coordinator: DocumentationSuiteCoordinator
-    ) -> None:
+    def test_handle_with_target_langs(self, coordinator: DocumentationSuiteCoordinator) -> None:
         from agent_product_documentation_suite.main import _handle_message
 
         response = _handle_message(
@@ -498,24 +477,16 @@ class TestLocalAdapter:
         )
         assert response["status"] == "ok"
 
-    def test_handle_unknown_method(
-        self, coordinator: DocumentationSuiteCoordinator
-    ) -> None:
+    def test_handle_unknown_method(self, coordinator: DocumentationSuiteCoordinator) -> None:
         from agent_product_documentation_suite.main import _handle_message
 
-        response = _handle_message(
-            coordinator, {"method": "unknown", "params": {}}
-        )
+        response = _handle_message(coordinator, {"method": "unknown", "params": {}})
         assert response["status"] == "error"
         assert "Unknown method" in response["error"]
 
-    def test_handle_missing_code_path(
-        self, coordinator: DocumentationSuiteCoordinator
-    ) -> None:
+    def test_handle_missing_code_path(self, coordinator: DocumentationSuiteCoordinator) -> None:
         from agent_product_documentation_suite.main import _handle_message
 
-        response = _handle_message(
-            coordinator, {"method": "generate_docs", "params": {}}
-        )
+        response = _handle_message(coordinator, {"method": "generate_docs", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]

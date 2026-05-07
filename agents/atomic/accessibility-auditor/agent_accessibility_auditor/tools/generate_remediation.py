@@ -67,9 +67,7 @@ def generate_remediation(issues: list) -> RemediationPlan:
 
     # Sort: Level A first (must fix for any conformance), then AA
     level_order = {"A": 0, "AA": 1, "AAA": 2}
-    sorted_issues = sorted(
-        normalized, key=lambda i: (level_order.get(i.level, 99), i.criterion)
-    )
+    sorted_issues = sorted(normalized, key=lambda i: (level_order.get(i.level, 99), i.criterion))
 
     # Build priority order (unique criteria in fix order)
     seen_criteria: set[str] = set()

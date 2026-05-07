@@ -903,3 +903,47 @@ class TestFromYamlAllowedCommandsPreserved:
         )
         assert executor._hooks == []
         assert "git" in executor._allowed_commands
+
+
+# ---------------------------------------------------------------------------
+# _parse_hooks_for_event
+# ---------------------------------------------------------------------------
+
+
+class TestParseHooksForEvent:
+    """Unit tests for HookExecutor._parse_hooks_for_event static method."""
+
+    def test_valid_hook_dicts_return_definitions(self) -> None:
+        hook_list = [{"type": "command", "command": "echo hello"}]
+        result = HookExecutor._parse_hooks_for_event(
+            HookEvent.PRE_EXECUTION, hook_list, Path("test.yaml")
+        )
+        assert len(result) == 1
+        assert isinstance(result[0], HookDefinition)
+        assert result[0].type == HookType.COMMAND
+        assert result[0].event == HookEvent.PRE_EXECUTION
+
+    def test_non_dict_entries_are_skipped(self) -> None:
+        hook_list = ["not_a_dict", 42, None]
+        result = HookExecutor._parse_hooks_for_event(
+            HookEvent.PRE_EXECUTION, hook_list, Path("test.yaml")
+        )
+        assert result == []
+
+    def test_invalid_hook_dicts_are_skipped_not_exception(self) -> None:
+        """A dict that fails model_validate is skipped, not raised."""
+        hook_list = [
+            {"type": "command", "command": "echo ok"},
+            {"not_a_valid_field": True},  # missing 'type', will fail validation
+        ]
+        result = HookExecutor._parse_hooks_for_event(
+            HookEvent.PRE_EXECUTION, hook_list, Path("test.yaml")
+        )
+        assert len(result) == 1
+        assert result[0].command == "echo ok"
+
+    def test_empty_list_returns_empty_list(self) -> None:
+        result = HookExecutor._parse_hooks_for_event(
+            HookEvent.PRE_EXECUTION, [], Path("test.yaml")
+        )
+        assert result == []

@@ -23,10 +23,12 @@ class TestMCPAdapter:
         """When fastmcp is not installed, create_mcp_server raises ImportError."""
         from agent_code_reviewer.mcp_adapter import create_mcp_server
 
-        with patch.dict("sys.modules", {"fastmcp": None}), \
-             patch("builtins.__import__", side_effect=ImportError("no fastmcp")), \
-             pytest.raises(ImportError):
-                create_mcp_server()
+        with (
+            patch.dict("sys.modules", {"fastmcp": None}),
+            patch("builtins.__import__", side_effect=ImportError("no fastmcp")),
+            pytest.raises(ImportError),
+        ):
+            create_mcp_server()
 
     def test_create_mcp_server_success(self) -> None:
         """When fastmcp is installed, the server is created successfully."""
@@ -58,4 +60,5 @@ class TestMCPAdapter:
         with patch("agent_code_reviewer.mcp_adapter.create_mcp_server") as _mock_create:
             # We just verify the module-level import path is correct
             import agent_code_reviewer.mcp_adapter as mod
+
             assert callable(mod.create_mcp_server)

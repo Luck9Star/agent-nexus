@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from agent_nexus.platform.agency.allowlist import (
+    _SAFE_SOURCE_PATH,
     _validate_capabilities,
     _validate_id,
     _validate_output_contract,
@@ -372,3 +373,39 @@ class TestValidateTools:
         errors: list[str] = []
         _validate_tools({"tools": {}}, errors)
         assert errors == []
+
+
+# ===================================================================
+# _SAFE_SOURCE_PATH regex
+# ===================================================================
+
+
+class TestSafeSourcePathRegex:
+    """Direct tests for the _SAFE_SOURCE_PATH compiled regex."""
+
+    def test_valid_simple_path(self):
+        assert _SAFE_SOURCE_PATH.match("expert.md")
+
+    def test_valid_nested_path(self):
+        assert _SAFE_SOURCE_PATH.match("skills/expert.md")
+
+    def test_valid_deep_nested_path(self):
+        assert _SAFE_SOURCE_PATH.match("my-agent/skills/review.md")
+
+    def test_windows_style_path_fails(self):
+        assert _SAFE_SOURCE_PATH.match("C:\\etc\\passwd.md") is None
+
+    def test_backslash_path_fails(self):
+        assert _SAFE_SOURCE_PATH.match("skills\\expert.md") is None
+
+    def test_parent_traversal_fails(self):
+        assert _SAFE_SOURCE_PATH.match("../etc/expert.md") is None
+
+    def test_tilde_path_fails(self):
+        assert _SAFE_SOURCE_PATH.match("~/expert.md") is None
+
+    def test_absolute_path_fails(self):
+        assert _SAFE_SOURCE_PATH.match("/etc/expert.md") is None
+
+    def test_url_encoded_traversal_fails(self):
+        assert _SAFE_SOURCE_PATH.match("%2e%2e/expert.md") is None

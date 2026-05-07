@@ -589,9 +589,7 @@ class TestLocalAdapter:
         assert "Unknown method" in response["error"]
 
     def test_handle_missing_template_path(self, agent: DocFillerAgent) -> None:
-        response = handle_message(
-            agent, {"method": "analyze", "params": {}}
-        )
+        response = handle_message(agent, {"method": "analyze", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
@@ -604,7 +602,5 @@ class TestLocalAdapter:
         assert "FileNotFoundError" in response.get("error_type", "")
 
     def test_handle_fill_missing_template_path(self, agent: DocFillerAgent) -> None:
-        response = handle_message(
-            agent, {"method": "fill", "params": {"values": {"a": "1"}}}
-        )
+        response = handle_message(agent, {"method": "fill", "params": {"values": {"a": "1"}}})
         assert response["status"] == "error"

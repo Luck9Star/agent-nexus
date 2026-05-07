@@ -81,9 +81,7 @@ def localize(
     )
 
 
-def _detect_untranslated(
-    text: str, target_lang: str, warnings: list[str]
-) -> None:
+def _detect_untranslated(text: str, target_lang: str, warnings: list[str]) -> None:
     """Detect potentially untranslated technical terms.
 
     Heuristic: if target language is CJK and text still contains long

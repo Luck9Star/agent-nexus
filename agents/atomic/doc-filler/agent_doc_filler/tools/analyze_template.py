@@ -72,7 +72,9 @@ def _guess_field_type(name: str) -> str:
     name_lower = name.lower()
     if "date" in name_lower or "time" in name_lower:
         return "date"
-    if any(kw in name_lower for kw in ("amount", "price", "total", "count", "number", "num", "qty")):
+    if any(
+        kw in name_lower for kw in ("amount", "price", "total", "count", "number", "num", "qty")
+    ):
         return "number"
     if "image" in name_lower or "photo" in name_lower or "logo" in name_lower:
         return "image_ref"
@@ -230,7 +232,7 @@ def _analyze_with_docx(template_path: str) -> TemplateAnalysis:
 
         header_row = rows_data[0] if rows_data else []
         num_cols = max((len(r) for r in rows_data), default=0)
-        preview = rows_data[:MAX_TABLE_PREVIEW_ROWS + 1]  # header + preview rows
+        preview = rows_data[: MAX_TABLE_PREVIEW_ROWS + 1]  # header + preview rows
 
         tables.append(
             TableInfo(
@@ -311,10 +313,7 @@ def _analyze_xml_fallback(template_path: str) -> TemplateAnalysis:
     with zipfile.ZipFile(template_path, "r") as zf:
         # Scan main document
         xml_files = [n for n in zf.namelist() if n.endswith(".xml")]
-        image_count = sum(
-            1 for n in zf.namelist()
-            if n.startswith("word/media/")
-        )
+        image_count = sum(1 for n in zf.namelist() if n.startswith("word/media/"))
         for xml_name in xml_files:
             content = zf.read(xml_name).decode("utf-8")
             # Remove XML tags to get raw text for placeholder scanning
@@ -345,7 +344,7 @@ def _analyze_xml_fallback(template_path: str) -> TemplateAnalysis:
             # This is a rough heuristic — look for <w:pStyle w:val="HeadingN"/>
             heading_pattern = re.compile(
                 r'<w:pStyle\s+w:val="Heading(\d+)"[^/]*/>'
-                r'.*?<w:t[^>]*>([^<]+)</w:t>',
+                r".*?<w:t[^>]*>([^<]+)</w:t>",
                 re.DOTALL,
             )
             for match in heading_pattern.finditer(doc_xml):

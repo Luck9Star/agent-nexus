@@ -349,9 +349,7 @@ class DocumentationSuiteCoordinator:
 
             for dep in blocked_by:
                 if dep not in task_ids:
-                    errors.append(
-                        f"Task '{task_id}' references unknown dependency '{dep}'"
-                    )
+                    errors.append(f"Task '{task_id}' references unknown dependency '{dep}'")
 
             if task_id in blocked_by:
                 errors.append(f"Task '{task_id}' cannot depend on itself")

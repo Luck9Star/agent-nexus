@@ -215,10 +215,12 @@ def _count_functions(content: str, language: str) -> int:
     if language == "python":
         return len(re.findall(r"^\s*def\s+\w+", content, re.MULTILINE))
     elif language in ("javascript", "typescript"):
-        return len(re.findall(
-            r"(?:function\s+\w+|(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>)",
-            content,
-        ))
+        return len(
+            re.findall(
+                r"(?:function\s+\w+|(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>)",
+                content,
+            )
+        )
     elif language == "rust":
         return len(re.findall(r"fn\s+\w+", content))
     elif language in ("java", "kotlin"):
@@ -282,7 +284,7 @@ def _run_rules(content: str, language: str) -> list[CodeIssue]:
     # Pre-compute line start offsets for O(log n) line-number lookup
     line_offsets = [0]
     for i, ch in enumerate(content):
-        if ch == '\n':
+        if ch == "\n":
             line_offsets.append(i + 1)
 
     for rule in rules:
@@ -292,18 +294,22 @@ def _run_rules(content: str, language: str) -> list[CodeIssue]:
         assert isinstance(severity, str)
         for match in pattern.finditer(content):
             line_num = bisect.bisect_right(line_offsets, match.start()) - 1
-            issues.append(CodeIssue(
-                line=line_num,
-                severity=severity,
-                category=rule["category"],  # type: ignore[arg-type]
-                message=rule["message"],     # type: ignore[arg-type]
-                rule_id=rule["rule_id"],     # type: ignore[arg-type]
-            ))
+            issues.append(
+                CodeIssue(
+                    line=line_num,
+                    severity=severity,
+                    category=rule["category"],  # type: ignore[arg-type]
+                    message=rule["message"],  # type: ignore[arg-type]
+                    rule_id=rule["rule_id"],  # type: ignore[arg-type]
+                )
+            )
 
     return issues
 
 
-def _calculate_avg_function_length(content: str, language: str, lines: list[str] | None = None) -> float:
+def _calculate_avg_function_length(
+    content: str, language: str, lines: list[str] | None = None
+) -> float:
     """Calculate average function length in lines."""
     if language == "python":
         # Find function start lines

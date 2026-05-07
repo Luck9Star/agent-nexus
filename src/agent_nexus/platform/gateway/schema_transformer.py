@@ -7,9 +7,12 @@ full JSON Schema support including ``$ref`` resolution, ``allOf`` merging,
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from pydantic import BaseModel, Field, create_model
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Primitive type mapping
@@ -137,7 +140,9 @@ class SchemaTransformer:
     def _resolve_ref(self, ref: str, _name: str = "RefModel") -> type:
         """Resolve a ``$ref`` pointer (``#/$defs/X`` or ``#/definitions/X``)."""
         if not ref.startswith("#/"):
-            # External refs are not supported — degrade to str
+            logger.warning(
+                "External $ref %r is not supported — degrading to str", ref
+            )
             return str
 
         parts = ref[2:].split("/")
