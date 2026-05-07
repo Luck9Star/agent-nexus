@@ -186,11 +186,18 @@ class ExternalMcpAdapter:
                 raise ValueError(
                     f"STDIO transport requires 'command' for server '{self._config.name}'"
                 )
-            if any(c in self._config.command for c in ("|", ">", "<", "&", ";", "`", "$")):
+            _shell_chars = ("|", ">", "<", "&", ";", "`", "$")
+            if any(c in self._config.command for c in _shell_chars):
                 raise ValueError(
                     f"STDIO command contains disallowed shell characters for server "
                     f"'{self._config.name}': {self._config.command!r}"
                 )
+            for i, arg in enumerate(self._config.args or ()):
+                if any(c in arg for c in _shell_chars):
+                    raise ValueError(
+                        f"STDIO args[{i}] contains disallowed shell characters for "
+                        f"server '{self._config.name}': {arg!r}"
+                    )
             logger.info(
                 "STDIO transport for '%s': command=%s args=%s",
                 self._config.name,

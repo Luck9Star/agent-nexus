@@ -351,7 +351,12 @@ class LLMClient:
         return GenericCLIBackend(config)
 
     def close(self) -> None:
-        """Close the underlying resources."""
+        """Close the underlying resources.
+
+        For API providers the httpx connection pool is managed internally
+        by LiteLLM and is released when the process exits.  For CLI
+        backends there are no persistent resources to clean up.
+        """
         if self._cli_backend is not None:
             pass  # GenericCLIBackend has no resources to close
 
@@ -560,7 +565,10 @@ class LLMClient:
                 provider=self._provider_name,
             )
         except Exception as e:
-            self._hooks.dispatch(HookEvent.ON_ERROR, ctx=ctx, error=e)
+            try:
+                self._hooks.dispatch(HookEvent.ON_ERROR, ctx=ctx, error=e)
+            except Exception:
+                logger.debug("Hook dispatch failed during error handling", exc_info=True)
             raise
 
     # ------------------------------------------------------------------

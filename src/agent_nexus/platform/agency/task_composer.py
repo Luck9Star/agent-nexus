@@ -243,58 +243,33 @@ class TaskComposer:
             When True, use ThreadPoolExecutor for parallel LLM calls.
             Passed through to DAGDispatcher.
         """
-        # Detect output intent (e.g. "输出到文件给我", "save to report.md")
         output_target = detect_output_target(input.task)
-
         executor = expert_executor or ProfileBasedExecutor(self.registry)
 
         # Step 1: Infer capabilities (LLM or keyword fallback)
-        if llm_planner is not None:
-            planner_output = llm_planner.analyze_task(input.task)
-            required_caps = planner_output.capabilities
-        else:
-            required_caps = infer_capabilities(input.task)
-
+        required_caps = self._infer_capabilities(input.task, llm_planner)
         logger.info("TaskComposer: inferred capabilities: %s", required_caps)
 
         # Step 2: Select specialists
-        selection_request = SelectionRequest(
-            task_type=input.mode,
-            required_capabilities=required_caps,
-            optional_capabilities=[],
-            max_agents=5,
-            permissions="plan",
+        selected = self.selector.select(
+            SelectionRequest(
+                task_type=input.mode,
+                required_capabilities=required_caps,
+                optional_capabilities=[],
+                max_agents=5,
+                permissions="plan",
+            )
         )
-        selected = self.selector.select(selection_request)
-
         logger.info(
-            "TaskComposer: selected %d experts: %s", len(selected), [s.agent_id for s in selected]
+            "TaskComposer: selected %d experts: %s",
+            len(selected),
+            [s.agent_id for s in selected],
         )
-
         if not selected:
             return TaskComposerResult(task=input.task, output_target=output_target)
 
-        # Step 3: Build subtask definitions and generate DAG
-        subtasks: list[SubtaskDef] = []
-        for sel in selected:
-            profile = self.registry.get(sel.agent_id)
-            artifact_type = (
-                profile.get("output_contract", {}).get("artifact_type", "report")
-                if profile
-                else "report"
-            )
-            subtasks.append(
-                SubtaskDef(
-                    id=sel.agent_id.replace("agency.", ""),
-                    goal=input.task,
-                    needed_capabilities=profile.get("capabilities", [])
-                    if profile
-                    else required_caps,
-                    output_contract=artifact_type,
-                    assigned_agent=sel.agent_id,
-                )
-            )
-
+        # Step 3: Build subtasks and DAG
+        subtasks = self._build_subtasks(selected, input.task, required_caps)
         dag = self.planner.resolve_dependencies(
             subtasks,
             composition_name=f"task-composer-{input.mode}",
@@ -302,93 +277,15 @@ class TaskComposer:
         )
 
         # Step 4: Dispatch experts
-        artifacts: list[Artifact] = []
-        skipped: set[str] = set()
-
         if task_graph is not None:
-            # Dispatch through TaskGraph-backed DAGDispatcher (G4 bridge)
-            from .dag_dispatcher import DAGDispatcher
-
-            dispatcher = DAGDispatcher(
-                graph=task_graph,
-                executor=executor,
-                max_parallel=input.max_parallel,
-                timeout_seconds=input.timeout_seconds,
-                concurrent=concurrent,
+            artifacts, skipped = self._dispatch_via_graph(
+                dag, input.task, executor, task_graph, input.timeout_seconds,
+                input.max_parallel, concurrent,
             )
-            try:
-                dispatch_result = dispatcher.dispatch(dag, input.task)
-            finally:
-                dispatcher.close()
-
-            if dispatch_result.timed_out:
-                raise TimeoutError(
-                    f"TaskComposer pipeline timed out after {input.timeout_seconds}s"
-                )
-
-            # Propagate partial execution info: track which tasks failed/skipped
-            if dispatch_result.failed or dispatch_result.cancelled:
-                all_failed = dispatch_result.failed + dispatch_result.cancelled
-                logger.warning(
-                    "TaskComposer: %d of %d specialist tasks failed (%d cancelled): %s",
-                    len(dispatch_result.failed),
-                    len(dag.specialist_tasks),
-                    len(dispatch_result.cancelled),
-                    all_failed,
-                )
-                # Log specific error messages for root cause diagnosis
-                for tid, err_msg in dispatch_result.errors.items():
-                    logger.error(
-                        "TaskComposer: task '%s' failed because: %s",
-                        tid,
-                        err_msg,
-                    )
-                skipped.update(dispatch_result.failed)
-                skipped.update(dispatch_result.cancelled)
-
-            # Preserve ordering: artifacts in the order they completed
-            artifacts = list(dispatch_result.artifacts.values())
         else:
-            # Legacy in-process topological loop (backward compatible)
-            specialist_ids = {t.id for t in dag.specialist_tasks}
-            executed: set[str] = set()
-            failed: set[str] = set()
-            deadline = (
-                time.monotonic() + input.timeout_seconds
-                if input.timeout_seconds is not None
-                else None
+            artifacts, skipped = self._dispatch_legacy(
+                dag, input.task, executor, input.timeout_seconds,
             )
-            for _ in range(len(dag.tasks)):
-                for task in dag.tasks:
-                    if deadline is not None and time.monotonic() > deadline:
-                        raise TimeoutError(
-                            f"TaskComposer pipeline timed out after {input.timeout_seconds}s"
-                        )
-                    if task.id in executed or task.id not in specialist_ids:
-                        continue
-                    if any(dep in failed for dep in task.blocked_by):
-                        if task.id not in skipped:
-                            logger.warning(
-                                "Skipping task '%s' (agent '%s'): blocked by failed dependency %s",
-                                task.id,
-                                task.agent,
-                                [d for d in task.blocked_by if d in failed],
-                            )
-                            skipped.add(task.id)
-                        failed.add(task.id)  # treat as failed so dependents skip too
-                        continue
-                    if all(dep in executed for dep in task.blocked_by):
-                        try:
-                            artifact = executor(task.agent, input.task)
-                            executed.add(task.id)
-                            artifacts.append(artifact)
-                        except Exception:
-                            logger.exception(
-                                "Executor failed for task '%s' (agent '%s') in legacy path",
-                                task.id,
-                                task.agent,
-                            )
-                            failed.add(task.id)
 
         if not artifacts:
             reason = "no specialists selected" if not selected else "all specialists failed"
@@ -406,37 +303,16 @@ class TaskComposer:
 
         # Step 5: Integrate (LLM or rule-based fallback)
         logger.info("TaskComposer: integrating %d artifacts", len(artifacts))
-        if llm_integrator is not None:
-            integrated = llm_integrator.synthesize(artifacts, task=input.task)
-        else:
-            integrated = Integrator.merge(artifacts)
+        integrated = (
+            llm_integrator.synthesize(artifacts, task=input.task)
+            if llm_integrator is not None
+            else Integrator.merge(artifacts)
+        )
 
-        # Step 6: QA Gate validation (LLM or structural-only)
-        # Determine required sections from first selected agent's output contract
-        first_profile = self.registry.get(selected[0].agent_id)
-        required_sections: list[str] = []
-        if first_profile:
-            required_sections = first_profile.get("output_contract", {}).get(
-                "required_sections", []
-            )
-
-        if llm_qa_gate is not None:
-            # When using LLM integration, skip structural required_sections check.
-            # The integrator produces synthesized keys (summary, recommendations,
-            # etc.) that differ from individual agent output contract keys.
-            qa_result = llm_qa_gate.evaluate(
-                integrated,
-                task=input.task,
-                required_sections=[] if llm_integrator else required_sections,
-                task_type=input.mode,
-            )
-        else:
-            gate_input = QAGateInput(
-                output={"sections": integrated.merged_sections},
-                required_sections=required_sections,
-                task_type=input.mode,
-            )
-            qa_result = QAGate.run(gate_input)
+        # Step 6: QA Gate validation
+        qa_result = self._run_qa_gate(
+            integrated, selected, input, llm_qa_gate, llm_integrator is not None,
+        )
 
         return TaskComposerResult(
             task=input.task,
@@ -447,3 +323,174 @@ class TaskComposer:
             skipped_tasks=list(skipped),
             output_target=output_target,
         )
+
+    # ------------------------------------------------------------------
+    # Private helpers (extracted from run() to reduce complexity)
+    # ------------------------------------------------------------------
+
+    def _infer_capabilities(
+        self, task: str, llm_planner: LLMPlanner | None,
+    ) -> list[str]:
+        """Infer required capabilities from the task description."""
+        if llm_planner is not None:
+            return llm_planner.analyze_task(task).capabilities
+        return infer_capabilities(task)
+
+    def _build_subtasks(
+        self,
+        selected: list[SelectionResult],
+        task: str,
+        required_caps: list[str],
+    ) -> list[SubtaskDef]:
+        """Build subtask definitions from selected specialists."""
+        subtasks: list[SubtaskDef] = []
+        for sel in selected:
+            profile = self.registry.get(sel.agent_id)
+            artifact_type = (
+                profile.get("output_contract", {}).get("artifact_type", "report")
+                if profile
+                else "report"
+            )
+            subtasks.append(
+                SubtaskDef(
+                    id=sel.agent_id.replace("agency.", ""),
+                    goal=task,
+                    needed_capabilities=profile.get("capabilities", [])
+                    if profile
+                    else required_caps,
+                    output_contract=artifact_type,
+                    assigned_agent=sel.agent_id,
+                )
+            )
+        return subtasks
+
+    def _dispatch_via_graph(
+        self,
+        dag: CompositionDAG,
+        task: str,
+        executor: ExpertExecutor,
+        task_graph: TaskGraph,
+        timeout_seconds: float | None,
+        max_parallel: int,
+        concurrent: bool,
+    ) -> tuple[list[Artifact], set[str]]:
+        """Dispatch through TaskGraph-backed DAGDispatcher."""
+        from .dag_dispatcher import DAGDispatcher
+
+        dispatcher = DAGDispatcher(
+            graph=task_graph,
+            executor=executor,
+            max_parallel=max_parallel,
+            timeout_seconds=timeout_seconds,
+            concurrent=concurrent,
+        )
+        try:
+            dispatch_result = dispatcher.dispatch(dag, task)
+        finally:
+            dispatcher.close()
+
+        if dispatch_result.timed_out:
+            raise TimeoutError(
+                f"TaskComposer pipeline timed out after {timeout_seconds}s"
+            )
+
+        skipped: set[str] = set()
+        if dispatch_result.failed or dispatch_result.cancelled:
+            all_failed = dispatch_result.failed + dispatch_result.cancelled
+            logger.warning(
+                "TaskComposer: %d of %d specialist tasks failed (%d cancelled): %s",
+                len(dispatch_result.failed),
+                len(dag.specialist_tasks),
+                len(dispatch_result.cancelled),
+                all_failed,
+            )
+            for tid, err_msg in dispatch_result.errors.items():
+                logger.error(
+                    "TaskComposer: task '%s' failed because: %s", tid, err_msg,
+                )
+            skipped.update(dispatch_result.failed)
+            skipped.update(dispatch_result.cancelled)
+
+        return list(dispatch_result.artifacts.values()), skipped
+
+    def _dispatch_legacy(
+        self,
+        dag: CompositionDAG,
+        task: str,
+        executor: ExpertExecutor,
+        timeout_seconds: float | None,
+    ) -> tuple[list[Artifact], set[str]]:
+        """Dispatch via legacy in-process topological loop."""
+        specialist_ids = {t.id for t in dag.specialist_tasks}
+        executed: set[str] = set()
+        failed: set[str] = set()
+        skipped: set[str] = set()
+        artifacts: list[Artifact] = []
+        deadline = (
+            time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+        )
+
+        for _ in range(len(dag.tasks)):
+            for task_def in dag.tasks:
+                if deadline is not None and time.monotonic() > deadline:
+                    raise TimeoutError(
+                        f"TaskComposer pipeline timed out after {timeout_seconds}s"
+                    )
+                if task_def.id in executed or task_def.id not in specialist_ids:
+                    continue
+                if any(dep in failed for dep in task_def.blocked_by):
+                    if task_def.id not in skipped:
+                        logger.warning(
+                            "Skipping task '%s' (agent '%s'): blocked by failed dependency %s",
+                            task_def.id,
+                            task_def.agent,
+                            [d for d in task_def.blocked_by if d in failed],
+                        )
+                        skipped.add(task_def.id)
+                    failed.add(task_def.id)
+                    continue
+                if all(dep in executed for dep in task_def.blocked_by):
+                    try:
+                        artifact = executor(task_def.agent, task)
+                        executed.add(task_def.id)
+                        artifacts.append(artifact)
+                    except Exception:
+                        logger.exception(
+                            "Executor failed for task '%s' (agent '%s') in legacy path",
+                            task_def.id,
+                            task_def.agent,
+                        )
+                        failed.add(task_def.id)
+
+        return artifacts, skipped
+
+    def _run_qa_gate(
+        self,
+        integrated: IntegratedArtifact,
+        selected: list[SelectionResult],
+        input: TaskComposerInput,
+        llm_qa_gate: LLMQualityGate | None,
+        using_llm_integration: bool,
+    ):
+        """Run QA gate validation (LLM or structural)."""
+        first_profile = self.registry.get(selected[0].agent_id)
+        required_sections: list[str] = []
+        if first_profile:
+            required_sections = first_profile.get("output_contract", {}).get(
+                "required_sections", []
+            )
+
+        if llm_qa_gate is not None:
+            return llm_qa_gate.evaluate(
+                integrated,
+                task=input.task,
+                required_sections=[] if using_llm_integration else required_sections,
+                task_type=input.mode,
+            )
+
+        gate_input = QAGateInput(
+            output={"sections": integrated.merged_sections},
+            required_sections=required_sections,
+            task_type=input.mode,
+        )
+        return QAGate.run(gate_input)
