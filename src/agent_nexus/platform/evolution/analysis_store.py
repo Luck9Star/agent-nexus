@@ -26,6 +26,66 @@ logger = logging.getLogger(__name__)
 ConnFactory = Callable[..., AbstractContextManager[sqlite3.Connection]]
 
 
+def _build_judgment_rows(
+    analysis_id: str,
+    judgments: list[dict[str, Any]] | None,
+) -> list[tuple]:
+    """Convert judgment dicts into SQL insert rows."""
+    return [
+        (
+            str(uuid.uuid4()),
+            analysis_id,
+            j.get("skill_id"),
+            int(j.get("selected", False)),
+            int(j.get("applied", False)),
+            int(j.get("completed", False)),
+            int(j.get("fell_back", False)),
+        )
+        for j in (judgments or [])
+        if j.get("skill_id")
+    ]
+
+
+def _validate_counter_invariant(judgment: dict[str, Any]) -> tuple[bool, bool, bool, bool]:
+    """Validate counter invariants and return extracted boolean flags."""
+    selected = bool(judgment.get("selected", False))
+    applied = bool(judgment.get("applied", False))
+    completed = bool(judgment.get("completed", False))
+    fell_back = bool(judgment.get("fell_back", False))
+
+    if applied and not selected:
+        raise ValueError("applied requires selected=True")
+    if completed and not applied:
+        raise ValueError("completed requires applied=True")
+    if fell_back and not selected:
+        raise ValueError("fell_back requires selected=True")
+
+    return selected, applied, completed, fell_back
+
+
+def _compute_deltas(
+    judgments: list[dict[str, Any]] | None,
+) -> dict[str, dict[str, int]]:
+    """Aggregate counter deltas per skill from validated judgments."""
+    deltas: dict[str, dict[str, int]] = {}
+    for j in judgments or []:
+        sid = j.get("skill_id")
+        if not sid:
+            continue
+        selected, applied, completed, fell_back = _validate_counter_invariant(j)
+
+        d = deltas.setdefault(sid, {"sel": 0, "app": 0, "comp": 0, "fb": 0})
+        if selected:
+            d["sel"] += 1
+        if applied:
+            d["app"] += 1
+        if completed:
+            d["comp"] += 1
+        if fell_back:
+            d["fb"] += 1
+    return deltas
+
+
 class AnalysisStore:
     """SQLite-backed persistence for execution analyses and skill judgments.
 
@@ -84,19 +144,7 @@ class AnalysisStore:
         evolution_suggestions: list[dict[str, Any]] | None = None,
         judgments: list[dict[str, Any]] | None = None,
     ) -> str:
-        """Insert analysis + judgments + update counters in one transaction.
-
-        Args:
-            task_id: The task being analyzed.
-            agent_name: Agent that executed the task.
-            analysis_text: LLM analysis text.
-            evolution_suggestions: List of evolution suggestion dicts.
-            judgments: List of judgment dicts with keys:
-                skill_id, selected, applied, completed, fell_back.
-
-        Returns:
-            The analysis ID.
-        """
+        """Insert analysis + judgments + update counters in one transaction."""
         analysis_id = str(uuid.uuid4())
         now = _now_iso()
         suggestions_json = json.dumps(evolution_suggestions or [], ensure_ascii=False)
@@ -109,29 +157,10 @@ class AnalysisStore:
                     evolution_suggestions, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    analysis_id,
-                    task_id,
-                    agent_name,
-                    analysis_text,
-                    suggestions_json,
-                    now,
-                ),
+                (analysis_id, task_id, agent_name, analysis_text, suggestions_json, now),
             )
 
-            judgment_rows = [
-                (
-                    str(uuid.uuid4()),
-                    analysis_id,
-                    j.get("skill_id"),
-                    int(j.get("selected", False)),
-                    int(j.get("applied", False)),
-                    int(j.get("completed", False)),
-                    int(j.get("fell_back", False)),
-                )
-                for j in (judgments or [])
-                if j.get("skill_id")
-            ]
+            judgment_rows = _build_judgment_rows(analysis_id, judgments)
             if judgment_rows:
                 conn.executemany(
                     "INSERT INTO skill_judgments (id, analysis_id, skill_id, "
@@ -139,35 +168,7 @@ class AnalysisStore:
                     judgment_rows,
                 )
 
-            # Validate counter invariants and batch increment counters
-            deltas: dict[str, dict[str, int]] = {}
-            for j in judgments or []:
-                sid = j.get("skill_id")
-                if not sid:
-                    continue
-                selected = bool(j.get("selected", False))
-                applied = bool(j.get("applied", False))
-                completed = bool(j.get("completed", False))
-                fell_back = bool(j.get("fell_back", False))
-
-                # Inline invariant validation (same as SkillStore._validate_counter_invariants)
-                if applied and not selected:
-                    raise ValueError("applied requires selected=True")
-                if completed and not applied:
-                    raise ValueError("completed requires applied=True")
-                if fell_back and not selected:
-                    raise ValueError("fell_back requires selected=True")
-
-                d = deltas.setdefault(sid, {"sel": 0, "app": 0, "comp": 0, "fb": 0})
-                if selected:
-                    d["sel"] += 1
-                if applied:
-                    d["app"] += 1
-                if completed:
-                    d["comp"] += 1
-                if fell_back:
-                    d["fb"] += 1
-
+            deltas = _compute_deltas(judgments)
             for sid, d in deltas.items():
                 conn.execute(
                     "UPDATE skill_records SET "

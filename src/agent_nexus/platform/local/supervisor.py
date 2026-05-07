@@ -425,12 +425,9 @@ class AgentSupervisor:
     def _resolve_package_name(self, agent_name: str, agent_dir: Path) -> str | None:
         """Discover the Python package name inside an installed agent directory.
 
-        Looks for a subdirectory with ``__init__.py`` (the Python package) and
-        prefers the one that also contains ``main.py``.  Falls back to reading
-        ``pyproject.toml`` [tool.hatch.build.targets.wheel] packages.
-
-        Results are cached per ``agent_name`` since the mapping is
-        deterministic for a given agent directory.
+        Tries three heuristics in order: subdir with ``__init__.py`` + ``main.py``,
+        any subdir with ``__init__.py``, then ``pyproject.toml`` hatch config.
+        Results are cached per ``agent_name``.
         """
         cached = self._resolved_packages.get(agent_name)
         if cached is not None:
@@ -439,9 +436,19 @@ class AgentSupervisor:
         if not agent_dir.is_dir():
             return None
 
-        result: str | None = None
+        result = (
+            self._find_package_with_main(agent_dir)
+            or self._find_package_with_init(agent_dir)
+            or self._read_hatch_packages(agent_dir)
+        )
 
-        # Heuristic 1: find subdir with __init__.py + main.py
+        if result is not None:
+            self._resolved_packages[agent_name] = result
+
+        return result
+
+    @staticmethod
+    def _find_package_with_main(agent_dir: Path) -> str | None:
         for child in sorted(agent_dir.iterdir()):
             if (
                 child.is_dir()
@@ -449,44 +456,39 @@ class AgentSupervisor:
                 and (child / "__init__.py").exists()
                 and (child / "main.py").exists()
             ):
-                result = child.name
-                break
+                return child.name
+        return None
 
-        # Heuristic 2: find any subdir with __init__.py
-        if result is None:
-            for child in sorted(agent_dir.iterdir()):
-                if (
-                    child.is_dir()
-                    and not child.name.startswith((".", "_"))
-                    and (child / "__init__.py").exists()
-                ):
-                    result = child.name
-                    break
+    @staticmethod
+    def _find_package_with_init(agent_dir: Path) -> str | None:
+        for child in sorted(agent_dir.iterdir()):
+            if (
+                child.is_dir()
+                and not child.name.startswith((".", "_"))
+                and (child / "__init__.py").exists()
+            ):
+                return child.name
+        return None
 
-        # Heuristic 3: read pyproject.toml
-        if result is None:
-            pyproject = agent_dir / "pyproject.toml"
-            if pyproject.exists():
-                try:
-                    raw = toml.loads(pyproject.read_text(encoding="utf-8"))
-                    packages = (
-                        raw.get("tool", {})
-                        .get("hatch", {})
-                        .get("build", {})
-                        .get("targets", {})
-                        .get("wheel", {})
-                        .get("packages", [])
-                    )
-                    if packages:
-                        result = packages[0]
-                except Exception:
-                    logger.debug("Failed to read pyproject.toml for package name", exc_info=True)
-
-        # Cache any non-None result so we skip directory scans on subsequent calls.
-        if result is not None:
-            self._resolved_packages[agent_name] = result
-
-        return result
+    @staticmethod
+    def _read_hatch_packages(agent_dir: Path) -> str | None:
+        pyproject = agent_dir / "pyproject.toml"
+        if not pyproject.exists():
+            return None
+        try:
+            raw = toml.loads(pyproject.read_text(encoding="utf-8"))
+            packages = (
+                raw.get("tool", {})
+                .get("hatch", {})
+                .get("build", {})
+                .get("targets", {})
+                .get("wheel", {})
+                .get("packages", [])
+            )
+            return packages[0] if packages else None
+        except Exception:
+            logger.debug("Failed to read pyproject.toml for package name", exc_info=True)
+            return None
 
     def _resolve_agent_dir(self, agent_name: str) -> Path:
         """Resolve the installed agent directory.
