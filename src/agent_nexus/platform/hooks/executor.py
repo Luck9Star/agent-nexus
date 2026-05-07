@@ -251,6 +251,88 @@ class HookExecutor:
             )
         return await handler(hook, ctx)
 
+    @staticmethod
+    def _validate_command_args(
+        hook: HookDefinition,
+    ) -> tuple[list[str] | None, HookExecution | None]:
+        """Validate and parse COMMAND hook arguments.
+
+        Returns (args, error_result).  If *error_result* is set the
+        caller should return it immediately.
+        """
+        if not hook.command:
+            return None, HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error="COMMAND hook missing 'command' field",
+            )
+        try:
+            args = shlex.split(hook.command)
+        except ValueError as exc:
+            return None, HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error=f"Malformed command string: {exc}",
+                duration_ms=0.0,
+            )
+        if not args:
+            return None, HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error="COMMAND hook has empty command after parsing",
+            )
+        return args, None
+
+    def _check_command_allowlist(
+        self,
+        hook: HookDefinition,
+        base_command: str,
+    ) -> HookExecution | None:
+        """Return an error result if *base_command* is not allowed, else None."""
+        if self._allowed_commands and base_command in self._allowed_commands:
+            return None
+        return HookExecution(
+            hook=hook,
+            passed=False,
+            blocked=hook.block_on_failure,
+            error=f"COMMAND hook base command '{base_command}' not in allowlist",
+        )
+
+    @staticmethod
+    def _build_command_result(
+        hook: HookDefinition,
+        returncode: int,
+        stdout_bytes: bytes,
+        stderr_bytes: bytes,
+        duration_ms: float,
+    ) -> HookExecution:
+        """Build a HookExecution from subprocess exit status."""
+        passed = returncode == 0
+        output = stdout_bytes.decode("utf-8", errors="replace").strip() or None
+        error_text = stderr_bytes.decode("utf-8", errors="replace").strip() or None
+        if not passed and error_text is None:
+            error_text = f"Command exited with code {returncode}"
+        return HookExecution(
+            hook=hook,
+            passed=passed,
+            blocked=(not passed and hook.block_on_failure),
+            output=output,
+            error=error_text if not passed else None,
+            duration_ms=round(duration_ms, 2),
+        )
+
+    @staticmethod
+    async def _kill_subprocess(proc: asyncio.subprocess.Process) -> None:
+        """Best-effort kill + wait for a subprocess."""
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            logger.debug("Failed to kill subprocess", exc_info=True)
+
     # ------------------------------------------------------------------
     # Type-specific executors
     # ------------------------------------------------------------------
@@ -266,46 +348,18 @@ class HookExecutor:
         safety.  The *context* dict is serialized to JSON and passed via
         stdin pipe.  Exit code 0 = pass, non-zero = fail.
         """
-        if not hook.command:
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error="COMMAND hook missing 'command' field",
-            )
+        # --- input validation ---
+        args, validation_err = self._validate_command_args(hook)
+        if validation_err is not None:
+            return validation_err
 
-        # Security: validate the base command against the allowlist.
-        # The allowlist is empty by default, which means COMMAND hooks
-        # are rejected unless the platform operator explicitly allows
-        # specific commands.
-        try:
-            args = shlex.split(hook.command)
-        except ValueError as exc:
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error=f"Malformed command string: {exc}",
-                duration_ms=0.0,
-            )
-        if not args:
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error="COMMAND hook has empty command after parsing",
-            )
-        if not self._allowed_commands or args[0] not in self._allowed_commands:
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error=f"COMMAND hook base command '{args[0]}' not in allowlist",
-            )
+        allowlist_err = self._check_command_allowlist(hook, args[0])
+        if allowlist_err is not None:
+            return allowlist_err
 
+        # --- run subprocess ---
         stdin_data = json.dumps(context).encode("utf-8")
         timeout = hook.timeout_seconds
-
         start = time.monotonic()
         proc: asyncio.subprocess.Process | None = None
         try:
@@ -320,31 +374,14 @@ class HookExecutor:
                 timeout=timeout,
             )
             duration_ms = (time.monotonic() - start) * 1000
-
-            passed = proc.returncode == 0
-            output = stdout_bytes.decode("utf-8", errors="replace").strip() or None
-            error_text = stderr_bytes.decode("utf-8", errors="replace").strip() or None
-
-            if not passed and error_text is None:
-                error_text = f"Command exited with code {proc.returncode}"
-
-            return HookExecution(
-                hook=hook,
-                passed=passed,
-                blocked=(not passed and hook.block_on_failure),
-                output=output,
-                error=error_text if not passed else None,
-                duration_ms=round(duration_ms, 2),
+            return self._build_command_result(
+                hook, proc.returncode, stdout_bytes, stderr_bytes, duration_ms,
             )
 
         except TimeoutError:
             duration_ms = (time.monotonic() - start) * 1000
-            try:
-                if proc is not None:
-                    proc.kill()
-                    await proc.wait()
-            except Exception:
-                logger.debug("Failed to kill timed-out hook subprocess", exc_info=True)
+            if proc is not None:
+                await self._kill_subprocess(proc)
             return HookExecution(
                 hook=hook,
                 passed=False,
@@ -354,14 +391,8 @@ class HookExecutor:
             )
 
         except asyncio.CancelledError:
-            # CancelledError is BaseException, NOT caught by "except Exception".
-            # Must kill the subprocess to prevent orphans on task cancellation/shutdown.
             if proc is not None:
-                try:
-                    proc.kill()
-                    await proc.wait()
-                except Exception:
-                    logger.debug("Failed to kill cancelled hook subprocess", exc_info=True)
+                await self._kill_subprocess(proc)
             raise
 
         except Exception as exc:
