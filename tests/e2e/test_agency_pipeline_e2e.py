@@ -366,7 +366,7 @@ class TestDAGDispatcherWithTaskGraph:
             SubtaskDef(
                 id="reviewer",
                 goal="Review",
-                needed_capabilities=["architecture_review", "code_review"],
+                needed_capabilities=["architecture_review"],
                 output_contract="report",
                 assigned_agent="agency.code-reviewer",
             ),
@@ -437,7 +437,7 @@ class TestFailureCascade:
             SubtaskDef(
                 id="reviewer",
                 goal="Review",
-                needed_capabilities=["architecture_review", "code_review"],
+                needed_capabilities=["architecture_review"],
                 output_contract="report",
                 assigned_agent="agency.code-reviewer",
             ),

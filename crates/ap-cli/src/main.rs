@@ -139,6 +139,25 @@ enum Commands {
         action: RuntimeAction,
     },
 
+    /// Make an LLM call via configured CLI backends
+    Llm {
+        /// The prompt to send to the model
+        #[arg(short, long)]
+        message: String,
+
+        /// Model string (e.g. "claude-sonnet"). Uses default from config if omitted.
+        #[arg(short = 'M', long)]
+        model: Option<String>,
+
+        /// System prompt for the model
+        #[arg(long)]
+        system: Option<String>,
+
+        /// Session ID for multi-turn conversation continuity
+        #[arg(long)]
+        session: Option<String>,
+    },
+
     /// Print resolved environment snapshot
     Env,
 
@@ -459,6 +478,10 @@ fn run(cli: Cli, output: &OutputFormatter) -> anyhow::Result<()> {
                     commands::runtime::run_exec(&agent, &args, output)?;
                 }
             },
+
+            Commands::Llm { message, model, system, session } => {
+                commands::run::run_llm(&message, model.as_deref(), system.as_deref(), session.as_deref(), output)?;
+            }
 
             Commands::Env => commands::env::run(output)?,
 

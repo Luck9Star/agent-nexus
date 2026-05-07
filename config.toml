@@ -4,33 +4,65 @@ uv_path = "uv"
 
 [models]
 default = "openai:gpt-4o"
+streaming_default = true
 
 [models.providers.anthropic]
 base_url = ""
 api_key_env = "ANTHROPIC_API_KEY"
 api = "anthropic-messages"
+streaming = true
 
 [models.providers.minimax]
 base_url = ""
 api_key_env = "MINIMAX_API_KEY"
 api = "openai-compatible"
+streaming = true
 
 [models.providers.openai]
 base_url = ""
 api_key_env = "OPENAI_API_KEY"
 api = "openai-compatible"
+streaming = true
 
 [models.providers.deepseek]
 base_url = "https://api.deepseek.com/v1"
 api_key_env = "DEEPSEEK_API_KEY"
 api = "openai-compatible"
+streaming = false
 
 [models.providers.qwen]
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 api_key_env = "DASHSCOPE_API_KEY"
 api = "openai-compatible"
+streaming = false
 
 [models.providers.ollama]
 base_url = "http://localhost:11434/v1"
 api_key_env = ""
 api = "ollama"
+streaming = true
+
+# ── CLI Backend Integration ──
+# CLI tools used as LLM backends. Shared by Python (via ConfigLoader)
+# and Rust (via CLIConfigFile serde). Single source of truth.
+
+[cli_backends.claude-code]
+command = "claude"
+args = ["-p", "--bare", "--output-format", "json"]
+system_prompt_flag = "--system-prompt"
+session_flag = "--resume"
+output_format = "json"
+json_paths = { text = "result", model = "model", session_id = "session_id" }
+timeout_secs = 300
+
+[cli_backends.codex]
+command = "codex"
+args = ["exec"]
+output_format = "text"
+text_patterns = { text = "(?s)(.*)" }
+timeout_secs = 300
+
+[cli_routing]
+default = "claude-code"
+fallback_enabled = true
+fallback_chain = ["codex"]

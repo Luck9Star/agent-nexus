@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import logging
+from collections.abc import Sequence
 from typing import ClassVar
 
 from agent_nexus.models.runtime import SecurityViolation
@@ -44,10 +45,10 @@ _DEFAULT_FORBIDDEN_IMPORTS = [
     "socket",
     "http",
     "urllib",
-    "pathlib",   # Path provides file read/write, bypassing open() block
-    "tempfile",   # temp file creation bypasses path_rules
-    "builtins",   # access to eval/exec/compile via builtins module
-    "pdb",        # interactive debugger can escape sandbox
+    "pathlib",  # Path provides file read/write, bypassing open() block
+    "tempfile",  # temp file creation bypasses path_rules
+    "builtins",  # access to eval/exec/compile via builtins module
+    "pdb",  # interactive debugger can escape sandbox
 ]
 
 _DEFAULT_FORBIDDEN_FUNCTIONS = [
@@ -77,12 +78,19 @@ _DEFAULT_FORBIDDEN_QUALIFIED_CALLS: dict[str, set[str]] = {
 }
 
 _DEFAULT_FORBIDDEN_ATTRIBUTES = [
+    "__class__",  # class object access → __mro__/__subclasses__ escape chain
     "__subclasses__",
     "__globals__",
     "__code__",
     "__builtins__",
     "__bases__",  # MRO chain traversal → sandbox escape
-    "__mro__",    # method resolution order → class hierarchy access
+    "__mro__",  # method resolution order → class hierarchy access
+    "__traceback__",  # exception traceback → frame introspection
+    "tb_frame",  # traceback frame → f_globals/f_builtins access
+    "f_globals",  # frame globals → module-level imports/functions
+    "f_builtins",  # frame builtins → __import__, eval, exec
+    "f_locals",  # frame locals → scope variable access
+    "f_code",  # frame code object → code replacement attacks
 ]
 
 _DEFAULT_REGEX_PATTERNS = [
@@ -90,6 +98,9 @@ _DEFAULT_REGEX_PATTERNS = [
     r"__builtins__\s*\[",
     r"__builtins__\s*\.\s*__getitem__\s*\(",
     r"\b__builtins__\b",  # bare __builtins__ Name access bypasses AttributeRule
+    r"map\s*\(\s*(?:__import__|exec|eval|compile)\b",  # map(__import__, ...) bypass
+    r"filter\s*\(\s*(?:__import__|exec|eval|compile)\b",  # filter(exec, ...) bypass
+    r"__traceback__",  # traceback reflection bypass
 ]
 
 
@@ -120,7 +131,7 @@ class SecurityChecker:
         ),
     ]
 
-    def __init__(self, rules: list[SecurityRule] | None = None) -> None:
+    def __init__(self, rules: Sequence[SecurityRule] | None = None) -> None:
         """Initialize SecurityChecker with specified rules.
 
         Args:
@@ -236,11 +247,13 @@ class SecurityChecker:
                         type(node).__name__,
                         exc_info=True,
                     )
-                    violations.append(SecurityViolation(
-                        rule_type=type(rule).__name__,
-                        node_type=type(node).__name__,
-                        message=f"Security rule {type(rule).__name__!r} raised an exception — execution blocked for safety",
-                    ))
+                    violations.append(
+                        SecurityViolation(
+                            rule_type=type(rule).__name__,
+                            node_type=type(node).__name__,
+                            message=f"Security rule {type(rule).__name__!r} raised an exception — execution blocked for safety",  # noqa: E501
+                        )
+                    )
 
         # Regex rules: once on full source
         for rule in self._regex_rules:
@@ -252,11 +265,13 @@ class SecurityChecker:
                     type(rule).__name__,
                     exc_info=True,
                 )
-                violations.append(SecurityViolation(
-                    rule_type=type(rule).__name__,
-                    node_type="source",
-                    message=f"Security rule {type(rule).__name__!r} raised an exception — execution blocked for safety",
-                ))
+                violations.append(
+                    SecurityViolation(
+                        rule_type=type(rule).__name__,
+                        node_type="source",
+                        message=f"Security rule {type(rule).__name__!r} raised an exception — execution blocked for safety",  # noqa: E501
+                    )
+                )
 
         result = tuple(violations)
 

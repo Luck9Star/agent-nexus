@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import json
+import logging
+import shutil
 import sys
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
+from agent_nexus.platform.config.defaults import DEFAULT_LLM_CALL_TIMEOUT, DEFAULT_PIPELINE_TIMEOUT
+
 from .importer import AgencyImporter
+
+if TYPE_CHECKING:
+    from .task_composer import TaskComposerResult
 from .planner import DynamicCompositePlanner, SubtaskDef
 from .qa_gate import QAGate, QAGateInput
 from .registry import ExpertRegistry
@@ -28,23 +38,40 @@ def _find_repo_root() -> Path:
 _SCHEMA_PATH = _find_repo_root() / "schemas" / "expert-profile.schema.json"
 
 
+def _resolve_defaults(vendor_path: str | None, allowlist: str | None) -> tuple[str, str]:
+    """Resolve vendor_path and allowlist to repo-internal defaults if not provided."""
+    repo_root = _find_repo_root()
+    vp = vendor_path or str(repo_root / "vendor" / "agency-agents")
+    al = allowlist or str(repo_root / "config" / "agency-agents-minimal.allowlist.yaml")
+    return vp, al
+
+
 @click.group()
 def cli() -> None:
     """Agency agents management commands."""
 
 
 @cli.command("import-experts")
-@click.option("--vendor-path", required=True, help="Path to the agency-agents vendor repo")
-@click.option("--allowlist", required=True, help="Path to the allowlist YAML file")
+@click.option(
+    "--vendor-path",
+    default=None,
+    help="Path to agency-agents vendor repo (default: <repo>/vendor/agency-agents)",
+)
+@click.option(
+    "--allowlist",
+    default=None,
+    help="Path to allowlist YAML (default: <repo>/config/agency-agents-minimal.allowlist.yaml)",
+)
 @click.option("--output-dir", required=True, help="Directory for imported profiles")
 @click.option("--dry-run", is_flag=True, default=False, help="Preview without writing files")
 def import_experts(
-    vendor_path: str,
-    allowlist: str,
+    vendor_path: str | None,
+    allowlist: str | None,
     output_dir: str,
     dry_run: bool,
 ) -> None:
     """Import agency-agents from the vendor repo using an allowlist."""
+    vendor_path, allowlist = _resolve_defaults(vendor_path, allowlist)
     importer = AgencyImporter(
         vendor_path=vendor_path,
         allowlist_path=allowlist,
@@ -68,21 +95,30 @@ def import_experts(
 
 
 @cli.command("plan-composition")
-@click.option("--task", required=True, help="Task description to plan")
+@click.option("--message", "-m", "--task", required=True, help="Task description to plan")
 @click.option("--mode", default="plan", help="Task mode (plan, review, implementation_plan)")
 @click.option("--max-parallel", default=3, type=int, help="Max parallel experts")
-@click.option("--vendor-path", required=True, help="Path to the agency-agents vendor repo")
-@click.option("--allowlist", required=True, help="Path to the allowlist YAML file")
+@click.option(
+    "--vendor-path",
+    default=None,
+    help="Path to agency-agents vendor repo (default: <repo>/vendor/agency-agents)",
+)
+@click.option(
+    "--allowlist",
+    default=None,
+    help="Path to allowlist YAML (default: <repo>/config/agency-agents-minimal.allowlist.yaml)",
+)
 def plan_composition(
-    task: str,
+    message: str,
     mode: str,
     max_parallel: int,
-    vendor_path: str,
-    allowlist: str,
+    vendor_path: str | None,
+    allowlist: str | None,
 ) -> None:
     """Plan a composition DAG for a given task."""
     import tempfile
 
+    vendor_path, allowlist = _resolve_defaults(vendor_path, allowlist)
     tmpdir = tempfile.mkdtemp(prefix="agency-plan-")
     try:
         importer = AgencyImporter(
@@ -96,6 +132,7 @@ def plan_composition(
         sys.exit(1)
     finally:
         import shutil
+
         shutil.rmtree(tmpdir, ignore_errors=True)
 
     registry = ExpertRegistry()
@@ -109,7 +146,7 @@ def plan_composition(
     # Infer capabilities from task
     from .task_composer import infer_capabilities
 
-    required_caps = infer_capabilities(task)
+    required_caps = infer_capabilities(message)
     request = SelectionRequest(
         task_type=mode,
         required_capabilities=required_caps,
@@ -135,15 +172,11 @@ def plan_composition(
         )
         # Use the agent's ACTUAL capabilities (not the task-inferred ones)
         # so resolve_dependencies can compute correct dependency edges.
-        agent_caps = (
-            profile.get("capabilities", required_caps)
-            if profile
-            else required_caps
-        )
+        agent_caps = profile.get("capabilities", required_caps) if profile else required_caps
         subtasks.append(
             SubtaskDef(
                 id=sel.agent_id.replace("agency.", ""),
-                goal=task,
+                goal=message,
                 needed_capabilities=agent_caps,
                 output_contract=artifact_type,
                 assigned_agent=sel.agent_id,
@@ -201,25 +234,31 @@ def validate_output(
     else:
         click.echo("Validation FAILED")
         if result.contract_result.missing_sections:
-            click.echo(
-                f"  Missing sections: {', '.join(result.contract_result.missing_sections)}"
-            )
+            click.echo(f"  Missing sections: {', '.join(result.contract_result.missing_sections)}")
         if not result.gitnexus_result.passed:
             click.echo(
-                f"  GitNexus gate failures: "
-                f"{', '.join(result.gitnexus_result.failed_checks)}"
+                f"  GitNexus gate failures: {', '.join(result.gitnexus_result.failed_checks)}"
             )
         sys.exit(1)
 
 
 @cli.command("list-experts")
-@click.option("--vendor-path", required=True, help="Path to the agency-agents vendor repo")
-@click.option("--allowlist", required=True, help="Path to the allowlist YAML file")
+@click.option(
+    "--vendor-path",
+    default=None,
+    help="Path to agency-agents vendor repo (default: <repo>/vendor/agency-agents)",
+)
+@click.option(
+    "--allowlist",
+    default=None,
+    help="Path to allowlist YAML (default: <repo>/config/agency-agents-minimal.allowlist.yaml)",
+)
 def list_experts(
-    vendor_path: str,
-    allowlist: str,
+    vendor_path: str | None,
+    allowlist: str | None,
 ) -> None:
     """Preview experts available for import from the vendor repo."""
+    vendor_path, allowlist = _resolve_defaults(vendor_path, allowlist)
     try:
         importer = AgencyImporter(
             vendor_path=vendor_path,
@@ -314,52 +353,211 @@ def check_profiles(output_dir: str) -> None:
         click.echo(f"All {checked} profiles passed validation.")
 
 
+def _format_section_value(value: object) -> list[str]:
+    """Format a merged section value as markdown lines."""
+    if isinstance(value, list):
+        if not value:
+            return []
+        return [f"- {item}" for item in value]
+    if isinstance(value, dict):
+        if not value:
+            return []
+        return [f"- **{k}**: {v}" for k, v in value.items()]
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return []
+    return [str(value)]
+
+
+def _print_result(result: TaskComposerResult) -> None:
+    """Print composition result to stdout."""
+    click.echo("\n=== Composition Result ===")
+    click.echo(f"Selected: {len(result.selected_agents)} experts")
+    click.echo(f"QA passed: {result.qa_passed}")
+    if result.skipped_tasks:
+        click.echo(f"Skipped: {result.skipped_tasks}")
+
+    if result.integrated:
+        click.echo("\n--- Merged Output ---")
+        for key, value in result.integrated.merged_sections.items():
+            formatted = _format_section_value(value)
+            if not formatted:
+                continue
+            click.echo(f"\n## {key}")
+            for line in formatted:
+                click.echo(line)
+    else:
+        click.echo("No artifacts produced — all experts failed.")
+
+
+def _validate_output_path(path: Path) -> Path:
+    """Resolve and validate an output path, blocking traversal attacks.
+
+    Checks ``..`` segments and verifies the resolved path does not land in
+    sensitive system directories (``/etc``, ``/usr``, ``~/.ssh``, etc.).
+    Symlink targets are resolved before the check.
+    """
+    if ".." in path.parts:
+        raise ValueError(f"Output path must not contain '..' segments: {path}")
+    resolved = path.resolve()
+    home = Path.home().resolve()
+    sensitive_prefixes = [
+        Path("/etc").resolve(),
+        Path("/usr").resolve(),
+        Path("/bin").resolve(),
+        Path("/sbin").resolve(),
+        Path("/var/db").resolve(),
+        Path("/System"),
+        home / ".ssh",
+        home / ".aws",
+        home / ".gnupg",
+    ]
+    for prefix in sensitive_prefixes:
+        prefix_str = str(prefix)
+        resolved_str = str(resolved)
+        if resolved_str == prefix_str or resolved_str.startswith(prefix_str + "/"):
+            raise ValueError(f"Output path resolves to sensitive location: {resolved}")
+    return resolved
+
+
+def _write_report(result: TaskComposerResult, path: Path) -> None:
+    """Write composition result as markdown to the given path."""
+    path = _validate_output_path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines: list[str] = []
+    lines.append("# Composition Report")
+    lines.append("")
+    lines.append(f"- **Generated**: {datetime.now(UTC).isoformat()}")
+    lines.append(f"- **Task**: {result.task}")
+    lines.append(f"- **QA passed**: {result.qa_passed}")
+    agents = [s.agent_id for s in result.selected_agents]
+    lines.append(f"- **Experts**: {', '.join(agents)}")
+    if result.skipped_tasks:
+        lines.append(f"- **Skipped**: {', '.join(result.skipped_tasks)}")
+    lines.append("")
+
+    if result.integrated:
+        for key, value in result.integrated.merged_sections.items():
+            formatted = _format_section_value(value)
+            if not formatted:
+                continue
+            lines.append(f"## {key}")
+            lines.append("")
+            lines.extend(formatted)
+            lines.append("")
+    else:
+        lines.append("No artifacts produced — all experts failed.")
+
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+    # Also print summary + file path to stdout
+    click.echo("\n=== Composition Result ===")
+    click.echo(f"Selected: {len(result.selected_agents)} experts")
+    click.echo(f"QA passed: {result.qa_passed}")
+    if result.skipped_tasks:
+        click.echo(f"Skipped: {result.skipped_tasks}")
+    if result.integrated:
+        sections = list(result.integrated.merged_sections.keys())
+        click.echo(f"Sections: {', '.join(sections)}")
+    click.echo(f"\nReport written to: {path}")
+
+
 @cli.command("run-composition")
-@click.option("--task", required=True, help="Task description to plan and execute")
+@click.option("--message", "-m", "--task", required=True, help="Task message to plan and execute")
 @click.option("--mode", default="plan", help="Task mode (plan, review, implementation_plan)")
 @click.option("--max-parallel", default=3, type=int, help="Max concurrent expert executions")
-@click.option("--vendor-path", required=True, help="Path to the agency-agents vendor repo")
-@click.option("--allowlist", required=True, help="Path to the allowlist YAML file")
 @click.option(
-    "--model", default=None,
+    "--vendor-path",
+    default=None,
+    help="Path to agency-agents vendor repo (default: <repo>/vendor/agency-agents)",
+)
+@click.option(
+    "--allowlist",
+    default=None,
+    help="Path to allowlist YAML (default: <repo>/config/agency-agents-minimal.allowlist.yaml)",
+)
+@click.option(
+    "--model",
+    default=None,
     help="Override model string (e.g. 'api:MiniMax-M2.7-highspeed')",
 )
 @click.option(
-    "--config-dir", default=None,
+    "--config-dir",
+    default=None,
     help="Config directory (default: ~/.agent-nexus/)",
 )
 @click.option(
-    "--use-llm", is_flag=True, default=False,
+    "--use-llm",
+    is_flag=True,
+    default=False,
     help="Use LLM for planning, integration, and QA (requires API config)",
 )
 @click.option(
-    "--temperature", default=None, type=float,
+    "--temperature",
+    default=None,
+    type=float,
     help="LLM sampling temperature (default: provider default)",
 )
+@click.option(
+    "--timeout",
+    default=DEFAULT_PIPELINE_TIMEOUT,
+    type=int,
+    help="Overall pipeline timeout in seconds (default: 300)",
+)
+@click.option(
+    "--call-timeout",
+    default=None,
+    type=int,
+    help=f"Per-LLM-call HTTP timeout in seconds (default: {DEFAULT_LLM_CALL_TIMEOUT})",
+)
 def run_composition(
-    task: str,
+    message: str,
     mode: str,
     max_parallel: int,
-    vendor_path: str,
-    allowlist: str,
+    vendor_path: str | None,
+    allowlist: str | None,
     model: str | None,
     config_dir: str | None,
     use_llm: bool,
     temperature: float | None,
+    timeout: int | None,
+    call_timeout: int | None,
 ) -> None:
-    """Full pipeline: load experts, select, build DAG, execute, integrate, QA."""
+    """Full pipeline: load experts, select, build DAG, execute, integrate, QA.
+
+    The --message/-m content may include an output file path hint, e.g.:
+
+    \b
+        --message "设计架构，输出到 docs/arch.md"
+        --message "Review the API design, output to reviews/api-review.md"
+
+    If a path is detected, the final report is written there.
+    Otherwise the result is printed to stdout.
+    """
+    # Resolve vendor_path / allowlist to repo defaults
+    vendor_path, allowlist = _resolve_defaults(vendor_path, allowlist)
+
+    # Configure logging from config.toml [runtime].log_level
+    from agent_nexus.platform.config.loader import ConfigLoader
+
+    _cfg_dir = Path(config_dir) if config_dir else None
+    _log_level = ConfigLoader(_cfg_dir).load_config().runtime.log_level
+    logging.basicConfig(
+        level=getattr(logging, _log_level.upper(), logging.INFO),
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     # Load .env from config dir so API keys are available
     _env_dir = config_dir or "~/.agent-nexus"
     _env_path = Path(_env_dir).expanduser() / ".env"
     if _env_path.is_file():
         from dotenv import load_dotenv
+
         load_dotenv(_env_path)
 
     try:
         # Step 1: Load experts
-        import shutil
-        import tempfile
-
         tmpdir = tempfile.mkdtemp(prefix="agency-run-")
         importer = AgencyImporter(
             vendor_path=vendor_path,
@@ -387,6 +585,10 @@ def run_composition(
     llm_integrator = None
     llm_qa_gate = None
     shared_registry = None
+    planner_client = None
+    integrator_client = None
+    qa_client = None
+    shared_client = None
 
     if use_llm:
         try:
@@ -399,33 +601,38 @@ def run_composition(
 
             config_path = Path(config_dir) if config_dir else None
             shared_registry = ModelCapabilityRegistry()
-            planner_client = LLMClient(
-                model_string=model, stage="planning", config_dir=config_path,
+            # One shared client for all pipeline stages — SDK connection
+            # pools (openai.OpenAI / anthropic.Anthropic) are created once
+            # and reused, instead of 3 independent pools per stage.
+            shared_client = LLMClient(
+                model_string=model,
+                stage="planning",
+                config_dir=config_path,
                 capability_registry=shared_registry,
             )
-            integrator_client = LLMClient(
-                model_string=model, stage="integration", config_dir=config_path,
-                capability_registry=shared_registry,
-            )
-            qa_client = LLMClient(
-                model_string=model, stage="qa", config_dir=config_path,
-                capability_registry=shared_registry,
-            )
+            planner_client = shared_client
+            integrator_client = shared_client
+            qa_client = shared_client
             llm_planner = LLMPlanner(
-                registry=registry, client=planner_client, temperature=temperature,
+                registry=registry,
+                client=planner_client,
+                temperature=temperature,
             )
             llm_integrator = LLMIntegrator(client=integrator_client, temperature=temperature)
             llm_qa_gate = LLMQualityGate(client=qa_client, temperature=temperature)
             click.echo("LLM-powered planning, integration, and QA enabled")
-        except Exception as exc:
+        except (ImportError, ValueError, KeyError, OSError) as exc:
             click.echo(
-                f"Warning: LLM components unavailable ({exc}), "
-                "using rule-based fallback. Check config.toml and API key.",
+                f"LLM config unavailable ({exc}), falling back to profile-based executor",
                 err=True,
             )
 
     # Create executor (LLM for experts if config available)
     from .executor import LLMExecutor, ProfileBasedExecutor
+
+    effective_call_timeout = (
+        float(call_timeout) if call_timeout else float(DEFAULT_LLM_CALL_TIMEOUT)
+    )
 
     try:
         executor = LLMExecutor(
@@ -434,51 +641,56 @@ def run_composition(
             config_dir=Path(config_dir) if config_dir else None,
             default_temperature=temperature,
             capability_registry=shared_registry if use_llm else None,
+            timeout=effective_call_timeout,
+            client=shared_client,
         )
         click.echo(f"Using LLM executor (model: {executor.model_name})")
     except Exception as exc:
         click.echo(
-            f"LLM config unavailable ({exc}), "
-            "falling back to profile-based executor",
+            f"LLM config unavailable ({exc}), falling back to profile-based executor",
             err=True,
         )
         executor = ProfileBasedExecutor(registry=registry)
 
     from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
-    graph = TaskGraph(":memory:")
-    composer = TaskComposer(registry)
-    composer_input = TaskComposerInput(
-        task=task,
-        mode=mode,
-        max_parallel=max_parallel,
-        timeout_seconds=120.0,
-    )
-    composer_result = composer.run(
-        composer_input,
-        expert_executor=executor,
-        task_graph=graph,
-        llm_planner=llm_planner,
-        llm_integrator=llm_integrator,
-        llm_qa_gate=llm_qa_gate,
-        concurrent=True,
-    )
-    graph.close()
+    with TaskGraph(":memory:") as graph:
+        composer = TaskComposer(registry)
+        composer_input = TaskComposerInput(
+            task=message,
+            mode=mode,
+            max_parallel=max_parallel,
+            timeout_seconds=float(timeout or DEFAULT_PIPELINE_TIMEOUT),
+        )
+        try:
+            composer_result = composer.run(
+                composer_input,
+                expert_executor=executor,
+                task_graph=graph,
+                llm_planner=llm_planner,
+                llm_integrator=llm_integrator,
+                llm_qa_gate=llm_qa_gate,
+                concurrent=True,
+            )
+        finally:
+            if isinstance(executor, LLMExecutor):
+                executor.close()
+            if shared_client is not None:
+                shared_client.close()
 
-    # Output results
-    click.echo("\n=== Composition Result ===")
-    click.echo(f"Selected: {len(composer_result.selected_agents)} experts")
-    click.echo(f"QA passed: {composer_result.qa_passed}")
-    if composer_result.skipped_tasks:
-        click.echo(f"Skipped: {composer_result.skipped_tasks}")
-
-    if composer_result.integrated:
-        click.echo("\n--- Merged Output ---")
-        for key, value in composer_result.integrated.merged_sections.items():
-            click.echo(f"\n## {key}")
-            click.echo(str(value))
+    # Output results — consume pipeline-detected output intent
+    _output_target = composer_result.output_target
+    if _output_target is not None:
+        if _output_target == "file":
+            # Generic "output to file" intent — generate default filename
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            _output_path = Path(f"composition-report-{ts}.md")
+        else:
+            # Specific path from task intent (e.g. "docs/review.md")
+            _output_path = Path(_output_target)
+        _write_report(composer_result, _output_path)
     else:
-        click.echo("No artifacts produced — all experts failed.")
+        _print_result(composer_result)
 
 
 if __name__ == "__main__":

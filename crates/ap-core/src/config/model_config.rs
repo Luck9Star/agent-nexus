@@ -124,6 +124,7 @@ mod tests {
             models: ModelConfig {
                 default: "openai:gpt-4o".into(),
                 stages: HashMap::new(),
+                streaming_default: true,
                 providers: {
                     let mut m = HashMap::new();
                     m.insert(
@@ -132,6 +133,7 @@ mod tests {
                             base_url: "https://api.openai.com/v1".into(),
                             api_key_env: "OPENAI_API_KEY".into(),
                             api: ProviderApiType::OpenaiCompatible,
+                            streaming: None,
                         },
                     );
                     m.insert(
@@ -140,6 +142,7 @@ mod tests {
                             base_url: "https://api.deepseek.com/v1".into(),
                             api_key_env: "DEEPSEEK_API_KEY".into(),
                             api: ProviderApiType::OpenaiCompatible,
+                            streaming: None,
                         },
                     );
                     m.insert(
@@ -148,6 +151,7 @@ mod tests {
                             base_url: "http://localhost:11434/v1".into(),
                             api_key_env: String::new(),
                             api: ProviderApiType::Ollama,
+                            streaming: None,
                         },
                     );
                     m

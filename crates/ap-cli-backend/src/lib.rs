@@ -7,4 +7,7 @@ pub mod parser;
 pub mod registry;
 pub mod router;
 pub mod session;
+pub mod setup;
 pub mod types;
+
+pub use setup::{call_llm, CLISetup};

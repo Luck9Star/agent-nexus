@@ -1,6 +1,6 @@
 # Agent Nexus 测试全景文档
 
-> 最后更新: 2026-04-22 | 测试总数: **3554** (全部通过) | 全量运行耗时: ~33s
+> 最后更新: 2026-04-30 | 测试总数: **3634** (3554 平台 + 80 能力) | 全量运行耗时: ~33s
 
 ---
 
@@ -219,6 +219,22 @@ agents/
 | cicd-quality-gate | 44 | 全并行质量关卡 |
 
 ---
+
+
+## 能力契约测试
+
+> 详见 [capability-testing.md](capability-testing.md)
+
+能力测试（`tests/capabilities/`，80 个测试）验证 Agent 作为黑盒的端到端行为，采用契约驱动架构：
+
+- **三层能力**: 11 Atomic + 5 Composite + 1 Agency Pipeline
+- **两种模式**: CLI（subprocess）+ API（LLMClient 真实调用）
+- **两级验证**: CI Gate（结构断言）+ Release（语义质量）
+
+```bash
+uv run pytest tests/capabilities/ -v                          # CI 快速门禁
+uv run pytest tests/capabilities/ --run-release --run-api -v  # 发版前全量
+```
 
 ## 已知短板
 

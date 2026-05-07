@@ -45,8 +45,7 @@ def _check_manifest(path: Path, dir_name: str) -> tuple[list[str], dict | None]:
 
     if "name" in data and data["name"] != dir_name:
         errors.append(
-            f"agent-manifest.yaml: name '{data['name']}' does not match "
-            f"directory name '{dir_name}'"
+            f"agent-manifest.yaml: name '{data['name']}' does not match directory name '{dir_name}'"
         )
 
     return errors, data

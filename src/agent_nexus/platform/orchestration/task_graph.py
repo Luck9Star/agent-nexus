@@ -30,7 +30,6 @@ import asyncio
 import json
 import logging
 import sqlite3
-
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
@@ -122,13 +121,20 @@ class TaskGraph:
             self._mem_conn.close()
             self._mem_conn = None
 
+    def __enter__(self) -> TaskGraph:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
     def __del__(self) -> None:
         if hasattr(self, "_mem_conn"):
             self.close()
 
     @contextmanager
     def _conn(
-        self, immediate: bool = False,
+        self,
+        immediate: bool = False,
     ) -> Generator[sqlite3.Connection, None, None]:
         """Context manager for DB connections.
 
@@ -158,9 +164,7 @@ class TaskGraph:
         """
         with self._conn(immediate=True) as conn:
             # 1. Check duplicate
-            row = conn.execute(
-                "SELECT id FROM tasks WHERE id = ?", (task.id,)
-            ).fetchone()
+            row = conn.execute("SELECT id FROM tasks WHERE id = ?", (task.id,)).fetchone()
             if row is not None:
                 raise ValueError(f"Task '{task.id}' already exists")
 
@@ -177,9 +181,7 @@ class TaskGraph:
                 existing_ids.add(task.id)
                 missing = set(task.blocked_by) - existing_ids
                 if missing:
-                    raise ValueError(
-                        f"blocked_by references non-existent tasks: {missing}"
-                    )
+                    raise ValueError(f"blocked_by references non-existent tasks: {missing}")
 
             # 3. Cycle detection
             if task.blocked_by and self._would_create_cycle(conn, task.id, task.blocked_by):
@@ -251,9 +253,7 @@ class TaskGraph:
                 ).fetchall()
                 existing_ids.update(r[0] for r in rows)
             if existing_ids:
-                raise ValueError(
-                    f"Tasks already exist: {existing_ids}"
-                )
+                raise ValueError(f"Tasks already exist: {existing_ids}")
 
             # 2. Validate all blocked_by references (must exist in DB or in this batch)
             #    Collect external deps, then validate in a single query.
@@ -272,16 +272,15 @@ class TaskGraph:
                     chunk = ext_list[i : i + _SQL_CHUNK_SIZE]
                     ph = ",".join("?" * len(chunk))
                     found.update(
-                        r[0] for r in conn.execute(
+                        r[0]
+                        for r in conn.execute(
                             f"SELECT id FROM tasks WHERE id IN ({ph})",
                             tuple(chunk),
                         ).fetchall()
                     )
                 missing = external_deps - found
                 if missing:
-                    raise ValueError(
-                        f"blocked_by references non-existent tasks: {missing}"
-                    )
+                    raise ValueError(f"blocked_by references non-existent tasks: {missing}")
 
             # 3. Batch insert all tasks
             task_rows = [
@@ -312,9 +311,7 @@ class TaskGraph:
             # 5. Single cycle-detection pass
             cycles = self._detect_cycles_conn(conn)
             if cycles:
-                raise ValueError(
-                    f"Adding batch tasks would create cycles: {cycles}"
-                )
+                raise ValueError(f"Adding batch tasks would create cycles: {cycles}")
 
     def start_task(self, task_id: str) -> TaskItem:
         """Transition task to in_progress.
@@ -331,16 +328,12 @@ class TaskGraph:
                 raise ValueError(f"Task '{task_id}' not found")
 
             if task.state != TaskState.PENDING:
-                raise ValueError(
-                    f"Task '{task_id}' is {task.state.value}, expected pending"
-                )
+                raise ValueError(f"Task '{task_id}' is {task.state.value}, expected pending")
 
             # Check all blockers are completed
             unresolved = self._get_unresolved_blockers(conn, task_id)
             if unresolved:
-                raise ValueError(
-                    f"Task '{task_id}' has unresolved dependencies: {unresolved}"
-                )
+                raise ValueError(f"Task '{task_id}' has unresolved dependencies: {unresolved}")
 
             now = _now_iso()
             conn.execute(
@@ -349,9 +342,7 @@ class TaskGraph:
             )
 
             # Return updated copy instead of re-querying the DB
-            return task.model_copy(
-                update={"state": TaskState.IN_PROGRESS, "updated_at": now}
-            )
+            return task.model_copy(update={"state": TaskState.IN_PROGRESS, "updated_at": now})
 
     def complete_task(self, task_id: str) -> TaskItem:
         """Transition task to completed.
@@ -365,9 +356,7 @@ class TaskGraph:
                 raise ValueError(f"Task '{task_id}' not found")
 
             if task.state != TaskState.IN_PROGRESS:
-                raise ValueError(
-                    f"Task '{task_id}' is {task.state.value}, expected in_progress"
-                )
+                raise ValueError(f"Task '{task_id}' is {task.state.value}, expected in_progress")
 
             now = _now_iso()
             conn.execute(
@@ -376,9 +365,7 @@ class TaskGraph:
             )
 
             # Return updated copy instead of re-querying the DB
-            return task.model_copy(
-                update={"state": TaskState.COMPLETED, "updated_at": now}
-            )
+            return task.model_copy(update={"state": TaskState.COMPLETED, "updated_at": now})
 
     def fail_task(self, task_id: str) -> TaskItem:
         """Transition task to failed.
@@ -394,8 +381,7 @@ class TaskGraph:
 
             if task.state not in (TaskState.IN_PROGRESS, TaskState.PENDING):
                 raise ValueError(
-                    f"Task '{task_id}' is {task.state.value}, "
-                    f"expected in_progress or pending"
+                    f"Task '{task_id}' is {task.state.value}, expected in_progress or pending"
                 )
 
             now = _now_iso()
@@ -405,9 +391,7 @@ class TaskGraph:
             )
 
             # Return updated copy instead of re-querying the DB
-            return task.model_copy(
-                update={"state": TaskState.FAILED, "updated_at": now}
-            )
+            return task.model_copy(update={"state": TaskState.FAILED, "updated_at": now})
 
     # ------------------------------------------------------------------
     # Queries
@@ -456,7 +440,8 @@ class TaskGraph:
             return self._rows_to_tasks(conn, rows)
 
     def get_parallel_groups(
-        self, conn: Any | None = None,
+        self,
+        conn: Any | None = None,
     ) -> list[list[TaskItem]]:
         """Get groups of tasks that can run in parallel.
 
@@ -473,13 +458,12 @@ class TaskGraph:
             return self._get_parallel_groups_conn(c)
 
     def _get_parallel_groups_conn(
-        self, conn: Any,
+        self,
+        conn: Any,
     ) -> list[list[TaskItem]]:
         """Internal: compute parallel groups using an existing connection."""
         # Build adjacency: task -> set of tasks it depends on
-        all_rows = conn.execute(
-            "SELECT id FROM tasks ORDER BY created_at"
-        ).fetchall()
+        all_rows = conn.execute("SELECT id FROM tasks ORDER BY created_at").fetchall()
         task_ids = [r[0] for r in all_rows]
 
         if not task_ids:
@@ -487,9 +471,7 @@ class TaskGraph:
 
         task_id_set = set(task_ids)
         dep_map: dict[str, set[str]] = {tid: set() for tid in task_ids}
-        dep_rows = conn.execute(
-            "SELECT task_id, blocked_by_id FROM task_dependencies"
-        ).fetchall()
+        dep_rows = conn.execute("SELECT task_id, blocked_by_id FROM task_dependencies").fetchall()
         for task_id, blocked_by_id in dep_rows:
             # Only track dependencies to tasks that exist in the graph.
             # Unknown deps are logged but don't block grouping.
@@ -525,10 +507,12 @@ class TaskGraph:
             for gi in range(0, len(group_ids), _SQL_CHUNK_SIZE):
                 g_chunk = group_ids[gi : gi + _SQL_CHUNK_SIZE]
                 placeholders = ",".join("?" for _ in g_chunk)
-                group_rows.extend(conn.execute(
-                    f"SELECT {_TASK_COLUMNS} FROM tasks WHERE id IN ({placeholders})",
-                    g_chunk,
-                ).fetchall())
+                group_rows.extend(
+                    conn.execute(
+                        f"SELECT {_TASK_COLUMNS} FROM tasks WHERE id IN ({placeholders})",
+                        g_chunk,
+                    ).fetchall()
+                )
             group_tasks = self._rows_to_tasks(conn, group_rows)
             groups.append(group_tasks)
             assigned.update(group_ids)
@@ -563,12 +547,11 @@ class TaskGraph:
             return self._detect_cycles_conn(conn)
 
     def _detect_cycles_conn(
-        self, conn: sqlite3.Connection,
+        self,
+        conn: sqlite3.Connection,
     ) -> list[list[str]]:
         """Detect cycles using preloaded dependency map (single query)."""
-        dep_rows = conn.execute(
-            "SELECT task_id, blocked_by_id FROM task_dependencies"
-        ).fetchall()
+        dep_rows = conn.execute("SELECT task_id, blocked_by_id FROM task_dependencies").fetchall()
         dep_map: dict[str, list[str]] = {}
         for task_id, blocked_by_id in dep_rows:
             dep_map.setdefault(task_id, []).append(blocked_by_id)
@@ -580,9 +563,7 @@ class TaskGraph:
     def get_snapshot(self) -> TaskGraphSnapshot:
         """Get a full snapshot of the graph state."""
         with self._conn() as conn:
-            rows = conn.execute(
-                f"SELECT {_TASK_COLUMNS} FROM tasks ORDER BY created_at"
-            ).fetchall()
+            rows = conn.execute(f"SELECT {_TASK_COLUMNS} FROM tasks ORDER BY created_at").fetchall()
 
             tasks = self._rows_to_tasks(conn, rows)
 
@@ -647,15 +628,15 @@ class TaskGraph:
             for i in range(0, len(tid_list), _SQL_CHUNK_SIZE):
                 chunk = tid_list[i : i + _SQL_CHUNK_SIZE]
                 placeholders = ",".join("?" * len(chunk))
-                rows.extend(conn.execute(
-                    f"SELECT task_id, blocked_by_id FROM task_dependencies "
-                    f"WHERE task_id IN ({placeholders})",
-                    tuple(chunk),
-                ).fetchall())
+                rows.extend(
+                    conn.execute(
+                        f"SELECT task_id, blocked_by_id FROM task_dependencies "
+                        f"WHERE task_id IN ({placeholders})",
+                        tuple(chunk),
+                    ).fetchall()
+                )
         else:
-            rows = conn.execute(
-                "SELECT task_id, blocked_by_id FROM task_dependencies"
-            ).fetchall()
+            rows = conn.execute("SELECT task_id, blocked_by_id FROM task_dependencies").fetchall()
         for task_id, blocked_by_id in rows:
             deps.setdefault(task_id, []).append(blocked_by_id)
         return deps
@@ -675,21 +656,29 @@ class TaskGraph:
         results: list[TaskItem] = []
         for row in rows:
             try:
-                task_id, description, agent, state_str, vars_json, created_at_str, updated_at_str = row
-                results.append(TaskItem(
-                    id=task_id,
-                    description=description,
-                    agent=agent,
-                    state=TaskState(state_str),
-                    vars=json.loads(vars_json) if vars_json else {},
-                    blocked_by=blocked_map.get(task_id, []),
-                    created_at=datetime.fromisoformat(created_at_str),
-                    updated_at=datetime.fromisoformat(updated_at_str),
-                ))
-            except (ValueError, KeyError, json.JSONDecodeError, TypeError) as exc:
-                logger.error(
-                    "Corrupt task row (id=%s): %s", row[0] if row else "?", exc
+                (
+                    task_id,
+                    description,
+                    agent,
+                    state_str,
+                    vars_json,
+                    created_at_str,
+                    updated_at_str,
+                ) = row
+                results.append(
+                    TaskItem(
+                        id=task_id,
+                        description=description,
+                        agent=agent,
+                        state=TaskState(state_str),
+                        vars=json.loads(vars_json) if vars_json else {},
+                        blocked_by=blocked_map.get(task_id, []),
+                        created_at=datetime.fromisoformat(created_at_str),
+                        updated_at=datetime.fromisoformat(updated_at_str),
+                    )
                 )
+            except (ValueError, KeyError, json.JSONDecodeError, TypeError) as exc:
+                logger.error("Corrupt task row (id=%s): %s", row[0] if row else "?", exc)
                 raise
         return results
 
@@ -721,14 +710,10 @@ class TaskGraph:
         except (ValueError, KeyError, json.JSONDecodeError, TypeError) as exc:
             # Data corruption — log loudly and re-raise so the caller
             # knows a row is damaged rather than merely absent.
-            logger.error(
-                "Corrupt task row (id=%s): %s", row[0] if row else "?", exc
-            )
+            logger.error("Corrupt task row (id=%s): %s", row[0] if row else "?", exc)
             raise
 
-    def _get_blocked_by_conn(
-        self, conn: sqlite3.Connection, task_id: str
-    ) -> list[str]:
+    def _get_blocked_by_conn(self, conn: sqlite3.Connection, task_id: str) -> list[str]:
         """Get blocked_by list for a task (using existing connection)."""
         rows = conn.execute(
             "SELECT blocked_by_id FROM task_dependencies WHERE task_id = ?",
@@ -736,9 +721,7 @@ class TaskGraph:
         ).fetchall()
         return [r[0] for r in rows]
 
-    def _get_task_conn(
-        self, conn: sqlite3.Connection, task_id: str
-    ) -> TaskItem | None:
+    def _get_task_conn(self, conn: sqlite3.Connection, task_id: str) -> TaskItem | None:
         """Get task using an existing connection."""
         row = conn.execute(
             f"SELECT {_TASK_COLUMNS} FROM tasks WHERE id = ?",
@@ -748,18 +731,14 @@ class TaskGraph:
             return None
         return self._task_from_row(conn, row)
 
-    def _get_task_conn_required(
-        self, conn: sqlite3.Connection, task_id: str
-    ) -> TaskItem:
+    def _get_task_conn_required(self, conn: sqlite3.Connection, task_id: str) -> TaskItem:
         """Get task using an existing connection, raising on missing."""
         result = self._get_task_conn(conn, task_id)
         if result is None:
             raise ValueError(f"Task '{task_id}' disappeared during update")
         return result
 
-    def _get_unresolved_blockers(
-        self, conn: sqlite3.Connection, task_id: str
-    ) -> list[str]:
+    def _get_unresolved_blockers(self, conn: sqlite3.Connection, task_id: str) -> list[str]:
         """Get list of blocked_by IDs that are not completed."""
         rows = conn.execute(
             "SELECT td.blocked_by_id FROM task_dependencies td "

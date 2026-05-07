@@ -25,9 +25,7 @@ app = typer.Typer(
 
 @app.callback()
 def _main(
-    version: bool = typer.Option(
-        False, "--version", "-v", help="Show version and exit"
-    ),
+    version: bool = typer.Option(False, "--version", "-v", help="Show version and exit"),
 ) -> None:
     """Agent Nexus -- MCP-native Agent Platform"""
     if version:
@@ -56,7 +54,9 @@ from agent_nexus.platform.local.cli._lifecycle import (
 app.command("install")(install_agent)
 app.command("uninstall")(uninstall)
 app.command("update")(update)
-app.command("run", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})(run_agent)
+app.command("run", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})(
+    run_agent
+)
 app.command("list")(list_agents)
 app.command()(search)
 app.command()(info)

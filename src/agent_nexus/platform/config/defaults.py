@@ -30,6 +30,19 @@ LOCKFILE: str = "lockfile.json"
 PROJECT_CONFIG_FILE: str = "agent-nexus.toml"
 
 # ---------------------------------------------------------------------------
+# Timeout and URL constants
+# ---------------------------------------------------------------------------
+
+DEFAULT_OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
+"""Default base URL for Ollama API endpoint."""
+
+DEFAULT_PIPELINE_TIMEOUT: int = 300
+"""Default overall pipeline timeout in seconds."""
+
+DEFAULT_LLM_CALL_TIMEOUT: int = 120
+"""Default per-LLM-call HTTP timeout in seconds."""
+
+# ---------------------------------------------------------------------------
 # Built-in provider definitions
 # ---------------------------------------------------------------------------
 
@@ -58,7 +71,7 @@ DEFAULT_PROVIDERS: dict[str, dict[str, object]] = {
         "api": ProviderApiType.OPENAI_COMPATIBLE,
     },
     "ollama": {
-        "base_url": "http://localhost:11434/v1",
+        "base_url": DEFAULT_OLLAMA_BASE_URL,
         "api_key_env": "",
         "api": ProviderApiType.OPENAI_COMPATIBLE,
     },

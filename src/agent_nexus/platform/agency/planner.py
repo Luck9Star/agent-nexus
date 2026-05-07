@@ -170,11 +170,13 @@ class DynamicCompositePlanner:
         earlier one.
 
         Dependency rule:
-            A task B is blocked by task A only when B's capabilities are a
-            strict subset of A's — i.e., A fully subsumes B's scope.  Mere
-            capability overlap (e.g., both need ``code_review`` but have
-            different other capabilities) does NOT create a dependency, so
-            those agents execute in parallel.
+            A task B is blocked by an earlier task A when **every** capability
+            that B needs is already provided by A (i.e. B's
+            ``needed_capabilities`` are a subset of A's).  This models the
+            case where B is a narrower specialist whose work is subsumed by
+            A's broader scope, so B should wait for A to finish first.
+            Mere overlap (neither set is a subset of the other) does **not**
+            create a dependency — those tasks run in parallel.
 
         Raises:
             ValueError: If subtasks is empty or contains duplicate IDs.
@@ -183,35 +185,20 @@ class DynamicCompositePlanner:
 
         effective_parallel = max(1, max_parallel)
 
-        # Build capability -> producing task mapping (first task that declares it wins)
-        cap_producer: dict[str, str] = {}
-        for st in subtasks:
-            for cap in st.needed_capabilities:
-                if cap not in cap_producer:
-                    cap_producer[cap] = st.id
-
-        # Build specialist tasks with dynamic blocked_by
-        # Only serialize when one task's capabilities are a strict subset
-        # of the producer's — meaning the producer fully subsumes the
-        # downstream task's scope.  Mere capability overlap does NOT
-        # create a dependency (both agents can work in parallel).
-        subtask_caps: dict[str, set[str]] = {
-            st.id: set(st.needed_capabilities) for st in subtasks
-        }
+        # Build specialist tasks with dynamic blocked_by.
+        # Subset rule: task B is blocked by earlier task A when ALL of B's
+        # capabilities are contained in A's (B is narrower than A).
+        # Mere overlap does NOT create a dependency.
         dag_tasks: list[DAGTask] = []
         for st in subtasks:
             blocked_by: list[str] = []
-            my_caps = subtask_caps[st.id]
-            for cap in st.needed_capabilities:
-                producer = cap_producer.get(cap)
-                if producer and producer != st.id and producer not in blocked_by:
-                    producer_caps = subtask_caps[producer]
-                    # Block if this task's capabilities are a STRICT subset
-                    # of the producer's (producer fully subsumes this task's
-                    # scope but has additional capabilities).  Identical
-                    # capability sets → parallel execution (no dependency).
-                    if my_caps < producer_caps:
-                        blocked_by.append(producer)
+            for earlier in subtasks:
+                if earlier.id == st.id:
+                    continue
+                if set(st.needed_capabilities) < set(earlier.needed_capabilities):
+                    # st's caps are a strict subset of earlier's caps → dep
+                    if earlier.id not in blocked_by:
+                        blocked_by.append(earlier.id)
             dag_tasks.append(
                 DAGTask(
                     id=st.id,

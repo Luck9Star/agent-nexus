@@ -1,4 +1,5 @@
 """CLIRouter — 4-strategy priority routing with fallback chain."""
+
 from __future__ import annotations
 
 import fnmatch
@@ -71,9 +72,7 @@ class CLIRouter:
                     logger.info("Fallback: using backend '%s'", name)
                     return backend
             except KeyError:
-                logger.warning(
-                    "Fallback backend '%s' not registered, skipping", name
-                )
+                logger.warning("Fallback backend '%s' not registered, skipping", name)
 
         raise RuntimeError(
             f"All backends unavailable. Primary: {explicit_backend or self._config.default}, "

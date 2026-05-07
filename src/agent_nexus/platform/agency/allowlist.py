@@ -33,9 +33,7 @@ def load_allowlist(path: str) -> dict:
         entry_errors = validate_allowlist_entry(entry)
         if entry_errors:
             errs = "; ".join(entry_errors)
-            raise ValueError(
-                f"Agent entry #{i} ({entry.get('id', 'unknown')}): {errs}"
-            )
+            raise ValueError(f"Agent entry #{i} ({entry.get('id', 'unknown')}): {errs}")
         entry_id = entry.get("id", "")
         if entry_id in seen_ids:
             raise ValueError(f"Duplicate agent id '{entry_id}' in allowlist")
@@ -110,8 +108,6 @@ def validate_allowlist_entry(entry: dict) -> list[str]:
             if isinstance(allowed, list) and isinstance(denied, list):
                 overlap = set(allowed) & set(denied)
                 if overlap:
-                    errors.append(
-                        f"tools cannot be in both allowed and denied: {sorted(overlap)}"
-                    )
+                    errors.append(f"tools cannot be in both allowed and denied: {sorted(overlap)}")
 
     return errors

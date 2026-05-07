@@ -1,7 +1,11 @@
 """End-to-end test configuration.
 
-E2E tests require external services (running agents, network endpoints).
-They are skipped by default. Run with: pytest -m e2e --run-e2e
+E2E tests exercise internal subsystems end-to-end (real SQLite, mock LLM,
+in-process runtime). They run by default in normal CI.
+
+Tests that genuinely require external services (real API keys, network)
+should be marked ``@pytest.mark.requires_api`` — those are gated behind
+``--run-e2e``.
 """
 
 import pytest
@@ -26,16 +30,20 @@ def pytest_addoption(parser):
         "--run-e2e",
         action="store_true",
         default=False,
-        help="Run e2e tests (requires external services)",
+        help="Run e2e tests that require external services (requires_api marker)",
     )
 
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "e2e: requires --run-e2e flag")
+    config.addinivalue_line("markers", "e2e: end-to-end subsystem tests (runs by default)")
+    config.addinivalue_line(
+        "markers", "requires_api: requires real API/network access (needs --run-e2e)"
+    )
 
 
 def pytest_runtest_setup(item):
-    if "e2e" in [m.name for m in item.iter_markers()] and not item.config.getoption(
+    """Only skip tests marked ``requires_api`` when ``--run-e2e`` is absent."""
+    if "requires_api" in [m.name for m in item.iter_markers()] and not item.config.getoption(
         "--run-e2e"
     ):
-        pytest.skip("e2e tests require --run-e2e flag")
+        pytest.skip("requires --run-e2e flag (external service needed)")

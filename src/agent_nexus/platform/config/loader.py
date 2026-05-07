@@ -23,7 +23,15 @@ from agent_nexus.models.config import (
     RuntimeConfig,
 )
 from agent_nexus.models.distribution import SourceEntry
+from agent_nexus.models.external_mcp import (
+    ExternalServerConfig,
+    TransportType,
+)
 
+from .config_templates import (
+    load_backend_configs_from_cli_backends,
+    load_routing_config,
+)
 from .defaults import (
     CONFIG_FILE,
     DEFAULT_CONFIG_DIR,
@@ -100,6 +108,7 @@ class ConfigLoader:
         runtime = RuntimeConfig(
             python_path=runtime_raw.get("python_path", "python3"),
             uv_path=runtime_raw.get("uv_path", "uv"),
+            log_level=runtime_raw.get("log_level", "INFO"),
         )
 
         # --- Models section ---
@@ -130,6 +139,7 @@ class ConfigLoader:
             default=default_model,
             providers=providers,
             stages=stages,
+            streaming_default=models_raw.get("streaming_default", True),
         )
 
         # --- Sources section ---
@@ -165,29 +175,70 @@ class ConfigLoader:
         return self._load_sources_from_yaml()
 
     def load_cli_backends(self) -> dict[str, Any]:
-        """Load CLI backend configs from config.toml [models.providers.*] sections.
+        """Load CLI backend configs from config.toml.
 
-        Only providers with api = "cli" are included.
+        Sources (merged, ``[cli_backends.*]`` takes precedence):
+        1. Providers with ``api = "cli"`` under ``[models.providers.*]``
+        2. Explicit ``[cli_backends.*]`` sections
         """
-        from agent_nexus.platform.agency.cli_backend.config_templates import (
-            load_backend_configs_from_providers,
-        )
+        from .config_templates import load_backend_configs_from_providers
 
         raw = self._load_raw()
-        providers = raw.get("models", {}).get("providers", {})
-        if not isinstance(providers, dict):
-            return {}
-        return load_backend_configs_from_providers(providers)
+
+        # 1) Providers with api = "cli"
+        providers_raw = raw.get("models", {}).get("providers", {})
+        if not isinstance(providers_raw, dict):
+            providers_raw = {}
+        backends = load_backend_configs_from_providers(providers_raw)
+
+        # 2) Explicit [cli_backends.*] (overrides provider-derived entries)
+        cli_backends = raw.get("cli_backends", {})
+        if isinstance(cli_backends, dict):
+            backends.update(load_backend_configs_from_cli_backends(cli_backends))
+
+        return backends
+
+    def load_external_servers(self) -> list[ExternalServerConfig]:
+        """Load ``[[mcp.external_servers]]`` entries from config.toml.
+
+        Each entry is parsed into an :class:`ExternalServerConfig`.
+        Entries with ``enabled = false`` are skipped.  Malformed entries
+        are logged and skipped.
+
+        Returns:
+            List of enabled external server configurations.
+        """
+        raw = self._load_raw()
+        mcp_section = raw.get("mcp", {})
+        if not isinstance(mcp_section, dict):
+            logger.warning("config.toml [mcp] is not a mapping, skipping external servers")
+            return []
+
+        servers_list = mcp_section.get("external_servers", [])
+        if not isinstance(servers_list, list):
+            logger.warning("config.toml [mcp].external_servers is not a list, skipping")
+            return []
+
+        configs: list[ExternalServerConfig] = []
+        for item in servers_list:
+            if not isinstance(item, dict):
+                logger.warning("Skipping non-mapping external server entry")
+                continue
+            try:
+                config = self._parse_external_server(item)
+                if config is not None:
+                    configs.append(config)
+            except Exception as exc:
+                name = item.get("name", "<unknown>")
+                logger.warning("Skipping invalid external server '%s': %s", name, exc)
+
+        return configs
 
     def load_cli_routing(self) -> Any:
         """Load [cli_routing] section from config.toml.
 
         Returns None when the section is absent.
         """
-        from agent_nexus.platform.agency.cli_backend.config_templates import (
-            load_routing_config,
-        )
-
         raw = self._load_raw()
         if "cli_routing" not in raw:
             return None
@@ -203,9 +254,7 @@ class ConfigLoader:
         except toml.TomlDecodeError:
             return {}
 
-    def load_project_config(
-        self, project_dir: Path | None = None
-    ) -> PlatformConfig | None:
+    def load_project_config(self, project_dir: Path | None = None) -> PlatformConfig | None:
         """Load optional project-level ``agent-nexus.toml``.
 
         Searches *project_dir* (defaults to cwd) for ``agent-nexus.toml``.
@@ -246,9 +295,7 @@ class ConfigLoader:
             ),
         )
 
-    def load_merged_config(
-        self, project_dir: Path | None = None
-    ) -> PlatformConfig:
+    def load_merged_config(self, project_dir: Path | None = None) -> PlatformConfig:
         """Load global config merged with optional project-level overrides.
 
         Project config values win where non-empty. Priority:
@@ -294,9 +341,65 @@ class ConfigLoader:
         logger.debug("Config dir ensured: %s", self.config_dir)
         return self.config_dir
 
+    def invalidate_cache(self) -> None:
+        """Clear the cached config so the next load re-reads config.toml."""
+        self._config_cache = None
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_external_server(item: dict[str, Any]) -> ExternalServerConfig | None:
+        """Parse a single ``[[mcp.external_servers]]`` entry.
+
+        Returns None if the entry is disabled or has a missing name.
+        """
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            logger.warning("External server entry missing 'name', skipping")
+            return None
+
+        enabled = item.get("enabled", True)
+        if isinstance(enabled, str):
+            enabled = enabled.lower() in ("true", "1", "yes")
+        if not enabled:
+            logger.debug("External server '%s' is disabled, skipping", name)
+            return None
+
+        transport_str = item.get("transport", "stdio")
+        try:
+            transport = TransportType(transport_str)
+        except ValueError:
+            valid = [t.value for t in TransportType]
+            logger.warning(
+                "Invalid transport '%s' for external server '%s'. Valid: %s. "
+                "Defaulting to 'stdio'.",
+                transport_str,
+                name,
+                valid,
+            )
+            transport = TransportType.STDIO
+
+        args = item.get("args", [])
+        if not isinstance(args, list):
+            logger.warning("External server '%s' has non-list 'args', using empty list", name)
+            args = []
+
+        headers = item.get("headers", {})
+        if not isinstance(headers, dict):
+            logger.warning("External server '%s' has non-dict 'headers', using empty dict", name)
+            headers = {}
+
+        return ExternalServerConfig(
+            name=name,
+            transport=transport,
+            command=item.get("command", ""),
+            args=args,
+            url=item.get("url", ""),
+            headers=headers,
+            enabled=bool(enabled),
+        )
 
     @staticmethod
     def _parse_sources_from_raw(raw: dict[str, Any]) -> list[SourceEntry]:
@@ -422,7 +525,9 @@ class ConfigLoader:
                 logger.warning(
                     "Invalid api type '%s' in provider '%s'. Valid: %s. "
                     "Defaulting to 'openai-compatible'.",
-                    api_str, name, valid,
+                    api_str,
+                    name,
+                    valid,
                 )
                 api_type = ProviderApiType.OPENAI_COMPATIBLE
 
@@ -432,12 +537,14 @@ class ConfigLoader:
                     base_url=raw.get("base_url", existing.base_url),
                     api_key_env=raw.get("api_key_env", existing.api_key_env),
                     api=api_type,
+                    streaming=raw.get("streaming", existing.streaming),
                 )
             else:
                 merged[name] = ProviderConfig(
                     base_url=raw.get("base_url", ""),
                     api_key_env=raw.get("api_key_env", ""),
                     api=api_type,
+                    streaming=raw.get("streaming"),
                 )
 
         return merged

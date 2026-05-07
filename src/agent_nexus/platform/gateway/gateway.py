@@ -32,7 +32,10 @@ from typing import TYPE_CHECKING, Any
 from fastmcp import FastMCP
 
 from agent_nexus.models.agent import AgentManifest
+from agent_nexus.models.external_mcp import ExternalServerConfig
 from agent_nexus.platform.gateway.deferred_registry import DeferredAgentRegistry
+from agent_nexus.platform.gateway.external_mcp_adapter import ExternalMcpAdapter
+from agent_nexus.platform.gateway.schema_transformer import SchemaTransformer
 from agent_nexus.platform.gateway.tool_adapter import (
     McpToolAdapter,
     remove_all_locks,
@@ -46,42 +49,6 @@ if TYPE_CHECKING:
     from agent_nexus.platform.router.router import PlatformRouter
 
 logger = logging.getLogger(__name__)
-
-# Pre-computed JSON Schema → Python type mapping (used by _build_params)
-_JSON_SCHEMA_TYPE_MAP: dict[str, type] = {
-    "integer": int,
-    "number": float,
-    "boolean": bool,
-    "array": list,
-    "object": dict,
-}
-
-
-def _resolve_json_schema_type(prop_def: dict) -> tuple[type, bool]:
-    """Resolve a JSON Schema property definition to a Python type.
-
-    Handles ``anyOf`` / ``oneOf`` (nullable types) by extracting the
-    first non-null type and returning an ``Optional`` annotation.
-
-    Returns:
-        ``(py_type, is_nullable)`` tuple.
-    """
-    type_str = prop_def.get("type")
-    if isinstance(type_str, str):
-        py_type = _JSON_SCHEMA_TYPE_MAP.get(type_str, str)
-        return py_type, False
-
-    # Handle anyOf / oneOf (e.g. [{"type": "string"}, {"type": "null"}])
-    for combiner_key in ("anyOf", "oneOf"):
-        variants = prop_def.get(combiner_key)
-        if isinstance(variants, list):
-            non_null = [v for v in variants if isinstance(v, dict) and v.get("type") != "null"]
-            has_null = any(isinstance(v, dict) and v.get("type") == "null" for v in variants)
-            if non_null:
-                inner = _JSON_SCHEMA_TYPE_MAP.get(non_null[0].get("type", ""), str)
-                return inner, bool(has_null)
-
-    return str, False
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +77,7 @@ class MCPGateway:
         self._registered_agents: set[str] = set()
         self._reg_lock = asyncio.Lock()
         self._registered_tool_names: set[str] = set()
+        self._external_adapters: dict[str, ExternalMcpAdapter] = {}
         self._registry = DeferredAgentRegistry(process_manager)
         self._mcp = FastMCP("agent-nexus-gateway")
         self._setup_core_tools()
@@ -146,24 +114,16 @@ class MCPGateway:
             try:
                 schemas = await self._registry.activate_agent(manifest.name)
                 await self._register_agent_tools(manifest.name)
-                return (
-                    f"- {manifest.name}: {manifest.description} "
-                    f"({len(schemas)} tools loaded)"
-                )
+                return f"- {manifest.name}: {manifest.description} ({len(schemas)} tools loaded)"
             except Exception as exc:
                 logger.error(
                     "Failed to activate agent '%s': %s",
                     manifest.name,
                     exc,
                 )
-                return (
-                    f"- {manifest.name}: activation failed "
-                    f"[{type(exc).__name__}] {exc}"
-                )
+                return f"- {manifest.name}: activation failed [{type(exc).__name__}] {exc}"
 
-        activated = await asyncio.gather(
-            *[_activate_one(m) for m in results]
-        )
+        activated = await asyncio.gather(*[_activate_one(m) for m in results])
 
         header = "Found and activated the following agents "
         header += "(tools now available):\n"
@@ -317,8 +277,7 @@ class MCPGateway:
             info = self._registry.get_agent_info(agent_name)
             if info is None or info.tool_schemas is None:
                 logger.debug(
-                    "Skipping tool registration for '%s': "
-                    "info=%s, schemas=%s",
+                    "Skipping tool registration for '%s': info=%s, schemas=%s",
                     agent_name,
                     "found" if info else "missing",
                     "available" if info and info.tool_schemas else "none",
@@ -351,13 +310,9 @@ class MCPGateway:
                     full_name = disambiguated
 
                 try:
-                    self._mcp.tool(
-                        self._make_tool_func(adapter, registered_name=full_name)
-                    )
+                    self._mcp.tool(self._make_tool_func(adapter, registered_name=full_name))
                     self._registered_tool_names.add(full_name)
-                    logger.debug(
-                        "Registered gateway tool: %s", full_name
-                    )
+                    logger.debug("Registered gateway tool: %s", full_name)
                 except Exception as exc:
                     # FastMCP may raise if tool name already registered
                     logger.warning(
@@ -388,12 +343,16 @@ class MCPGateway:
             except Exception:
                 logger.debug(
                     "Failed to close IPC stream during cleanup for '%s'",
-                    agent_name, exc_info=True,
+                    agent_name,
+                    exc_info=True,
                 )
         remove_lock(agent_name)
 
     def _make_tool_func(
-        self, adapter: McpToolAdapter, *, registered_name: str | None = None,
+        self,
+        adapter: McpToolAdapter,
+        *,
+        registered_name: str | None = None,
     ) -> Any:
         """Create an async callable that the FastMCP server can invoke.
 
@@ -456,7 +415,8 @@ class MCPGateway:
         # instead of **kwargs (which it rejects with ValueError).
         params, annotations = self._build_params(adapter)
         _invoke.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-            parameters=params, return_annotation=str,
+            parameters=params,
+            return_annotation=str,
         )
         annotations["return"] = str
         _invoke.__annotations__ = annotations
@@ -483,31 +443,206 @@ class MCPGateway:
         params: list[inspect.Parameter] = []
         annotations: dict[str, Any] = {}
 
+        transformer = SchemaTransformer(schema)
         for prop_name, prop_def in properties.items():
             if not isinstance(prop_def, dict):
                 continue
-            py_type, is_nullable = _resolve_json_schema_type(prop_def)
-            if is_nullable:
-                effective_type = py_type | None  # type: ignore[assignment]
-            else:
-                effective_type = py_type
-            annotations[prop_name] = effective_type
+            py_type = transformer.resolve(prop_def, name=prop_name)
+            annotations[prop_name] = py_type
 
             if prop_name in required:
                 params.append(
                     inspect.Parameter(
                         prop_name,
                         inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        annotation=effective_type,
+                        annotation=py_type,
                     )
                 )
             else:
-                default = prop_def.get("default")
+                has_default = "default" in prop_def
+                if has_default:
+                    default = prop_def["default"]
+                else:
+                    default = None
+                    py_type = py_type | None  # type: ignore[assignment]
+                annotations[prop_name] = py_type
                 params.append(
                     inspect.Parameter(
                         prop_name,
                         inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        annotation=effective_type,
+                        annotation=py_type,
+                        default=default,
+                    )
+                )
+
+        return params, annotations
+
+    # ------------------------------------------------------------------
+    # External MCP Server registration
+    # ------------------------------------------------------------------
+
+    async def register_external_server(self, config: ExternalServerConfig) -> None:
+        """Register an external MCP Server and aggregate its tools.
+
+        Connects to the external server, discovers its tools, and
+        registers each as a gateway tool with the naming convention
+        ``ext__{server_name}__{tool_name}``.
+
+        Connection failures are logged and silently skipped -- the
+        gateway continues operating without this server's tools.
+
+        Args:
+            config: External server connection configuration.
+        """
+        adapter = ExternalMcpAdapter(config)
+        await adapter.connect()
+
+        if not adapter.is_alive or not adapter.tool_schemas:
+            logger.info(
+                "External server '%s' connected but has no tools or is not alive, skipping",
+                config.name,
+            )
+            return
+
+        self._external_adapters[config.name] = adapter
+        logger.info(
+            "Registering %d tool(s) from external server '%s'",
+            len(adapter.tool_schemas),
+            config.name,
+        )
+
+        for schema in adapter.tool_schemas:
+            raw_tool_name = schema.get("name", "")
+            if not raw_tool_name:
+                continue
+            # Build external tool name: ext__{server_name}__{tool_name}
+            from agent_nexus.platform.gateway.tool_adapter import _sanitize
+
+            full_name = f"ext__{_sanitize(config.name)}__{_sanitize(raw_tool_name)}"
+
+            if full_name in self._registered_tool_names:
+                logger.warning(
+                    "External tool '%s' already registered, skipping",
+                    full_name,
+                )
+                continue
+
+            # Create a closure that delegates to the adapter.
+            # Use a factory to bind loop variables at definition time (B023).
+            display_name = full_name
+            description = schema.get("description", f"Call {full_name}")
+            input_schema = schema.get("inputSchema", {"type": "object", "properties": {}})
+
+            _invoke = self._make_external_tool_func(adapter, raw_tool_name, display_name)
+
+            # Build signature from inputSchema so FastMCP can parse parameters
+            params, annotations = self._build_params_from_schema(input_schema)
+            _invoke.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+                parameters=params,
+                return_annotation=str,
+            )
+            annotations["return"] = str
+            _invoke.__annotations__ = annotations
+            _invoke.__name__ = display_name
+            _invoke.__doc__ = description
+
+            try:
+                self._mcp.tool(_invoke, name=display_name)
+                self._registered_tool_names.add(full_name)
+                logger.debug("Registered external gateway tool: %s", full_name)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to register external tool '%s': %s",
+                    full_name,
+                    exc,
+                )
+
+    async def _stop_external_servers(self) -> None:
+        """Disconnect all external MCP server adapters."""
+        for name, adapter in self._external_adapters.items():
+            try:
+                await adapter.disconnect()
+            except Exception:
+                logger.debug(
+                    "Error disconnecting external server '%s'",
+                    name,
+                    exc_info=True,
+                )
+        self._external_adapters.clear()
+
+    @staticmethod
+    def _make_external_tool_func(
+        adapter: ExternalMcpAdapter,
+        tool_name: str,
+        display_name: str,
+    ) -> Any:
+        """Create an async callable that delegates to an external MCP tool.
+
+        Parameters are captured at call time (not loop-variable binding time)
+        to avoid B023 issues.
+        """
+
+        async def _invoke(**kwargs: Any) -> str:
+            try:
+                return await adapter.call_tool(tool_name, kwargs)
+            except RuntimeError as exc:
+                return f"Error: {exc}"
+            except Exception as exc:
+                logger.error(
+                    "External tool '%s' call failed: %s [%s]",
+                    display_name,
+                    exc,
+                    type(exc).__name__,
+                )
+                return f"Error: {type(exc).__name__}: {exc}"
+
+        return _invoke
+
+    @staticmethod
+    def _build_params_from_schema(
+        input_schema: dict,
+    ) -> tuple[list[inspect.Parameter], dict[str, Any]]:
+        """Build inspect.Parameter list from a JSON-schema dict.
+
+        Similar to _build_params but works directly with a raw schema
+        dict instead of a McpToolAdapter.
+        """
+        if not input_schema or "properties" not in input_schema:
+            return [], {"return": str}
+
+        properties = input_schema.get("properties", {})
+        required = set(input_schema.get("required", []))
+        params: list[inspect.Parameter] = []
+        annotations: dict[str, Any] = {}
+
+        transformer = SchemaTransformer(input_schema)
+        for prop_name, prop_def in properties.items():
+            if not isinstance(prop_def, dict):
+                continue
+            py_type = transformer.resolve(prop_def, name=prop_name)
+            annotations[prop_name] = py_type
+
+            if prop_name in required:
+                params.append(
+                    inspect.Parameter(
+                        prop_name,
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        annotation=py_type,
+                    )
+                )
+            else:
+                has_default = "default" in prop_def
+                if has_default:
+                    default = prop_def["default"]
+                else:
+                    default = None
+                    py_type = py_type | None  # type: ignore[assignment]
+                annotations[prop_name] = py_type
+                params.append(
+                    inspect.Parameter(
+                        prop_name,
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        annotation=py_type,
                         default=default,
                     )
                 )
@@ -547,13 +682,15 @@ class MCPGateway:
         """Stop all agents and shut down the gateway.
 
         Delegates to ProcessManager to gracefully stop all running
-        agent subprocesses.  Cleans up class-level IPC locks to
-        prevent memory leaks across stop/start cycles.
+        agent subprocesses.  Disconnects external MCP servers.
+        Cleans up class-level IPC locks to prevent memory leaks
+        across stop/start cycles.
         """
         logger.info("Stopping MCP Gateway and all agents")
         try:
             await self._pm.stop_all()
         finally:
+            await self._stop_external_servers()
             remove_all_locks()
 
     # ------------------------------------------------------------------

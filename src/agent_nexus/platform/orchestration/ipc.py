@@ -19,6 +19,7 @@ import logging
 from collections import deque
 from typing import Any
 
+from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.models.ipc import (
     AgentToPlatform,
     AgentToPlatformType,
@@ -26,6 +27,7 @@ from agent_nexus.models.ipc import (
     PlatformToAgentType,
 )
 from agent_nexus.models.task import TaskItem
+from agent_nexus.platform.config.defaults import DEFAULT_PIPELINE_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,7 @@ _INTERNAL_CID = "__internal__"
 # ---------------------------------------------------------------------------
 
 
-class IPCError(Exception):
+class IPCError(AgentNexusError):
     """Base IPC error."""
 
 
@@ -124,9 +126,7 @@ class IPCStream:
             raise IPCConnectionError("Agent stdout closed (EOF)")
 
         if len(raw) > _MAX_MESSAGE_SIZE:
-            raise IPCError(
-                f"Agent message too large ({len(raw)} bytes, max {_MAX_MESSAGE_SIZE})"
-            )
+            raise IPCError(f"Agent message too large ({len(raw)} bytes, max {_MAX_MESSAGE_SIZE})")
 
         # Whitespace-only lines (e.g. b"\n") indicate the agent sent no
         # payload — treat as connection issue rather than JSON error.
@@ -142,9 +142,7 @@ class IPCStream:
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError as exc:
-            raise IPCError(
-                f"Agent sent non-UTF-8 data ({len(raw)} bytes): {exc}"
-            ) from exc
+            raise IPCError(f"Agent sent non-UTF-8 data ({len(raw)} bytes): {exc}") from exc
 
         try:
             data = json.loads(text)
@@ -186,9 +184,9 @@ class IPCStream:
         # Drain any remaining stdout to avoid BrokenPipeError on the
         # agent side.  Upper bound prevents a misbehaving agent from
         # delaying close() indefinitely.
-        _MAX_DRAIN_CHUNKS = 64
+        _max_drain_chunks = 64
         try:
-            for _ in range(_MAX_DRAIN_CHUNKS):
+            for _ in range(_max_drain_chunks):
                 chunk = await asyncio.wait_for(self._stdout.read(4096), timeout=1.0)
                 if not chunk:
                     break
@@ -221,6 +219,7 @@ class IPCProtocol:
     def __init__(self, stream: IPCStream) -> None:
         self._stream = stream
         self._peek_buffer: deque[AgentToPlatform] = deque()
+        self._discarded_count: int = 0
 
     @property
     def stream(self) -> IPCStream:
@@ -236,9 +235,12 @@ class IPCProtocol:
         message is discarded to make room (FIFO eviction).
         """
         if len(self._peek_buffer) >= self._MAX_PEEK_BUFFER_SIZE:
+            self._discarded_count += 1
             logger.warning(
-                "IPC peek buffer reached max size (%d); discarding oldest message",
+                "IPC peek buffer reached max size (%d); "
+                "discarding oldest message (total discarded: %d)",
                 self._MAX_PEEK_BUFFER_SIZE,
+                self._discarded_count,
             )
             self._peek_buffer.popleft()
         self._peek_buffer.append(msg)
@@ -303,7 +305,7 @@ class IPCProtocol:
     async def receive_until_result(
         self,
         task_id: str | None = None,
-        timeout: float = 300.0,
+        timeout: float = DEFAULT_PIPELINE_TIMEOUT,
         progress_callback: Any | None = None,
     ) -> AgentToPlatform:
         """Receive messages until a final result or error arrives.
@@ -320,16 +322,14 @@ class IPCProtocol:
         deadline = loop.time() + timeout
         # Minimum per-receive timeout to avoid stream corruption from
         # prematurely interrupting a partial readline.
-        _MIN_RECEIVE_TIMEOUT: float = 1.0
+        _min_receive_timeout: float = 1.0
 
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
-                raise IPCTimeoutError(
-                    f"Timed out after {timeout:.1f}s waiting for final result"
-                )
+                raise IPCTimeoutError(f"Timed out after {timeout:.1f}s waiting for final result")
 
-            msg = await self.receive_result(timeout=max(remaining, _MIN_RECEIVE_TIMEOUT))
+            msg = await self.receive_result(timeout=max(remaining, _min_receive_timeout))
 
             # Optional task-id filter
             if task_id is not None and msg.task_id != task_id:
@@ -389,7 +389,8 @@ class IPCProtocol:
         except (TimeoutError, IPCError) as exc:
             logger.debug(
                 "Heartbeat failed for agent: [%s] %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             return False
 

@@ -14,6 +14,7 @@ Actions:
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -106,18 +107,20 @@ class AgentPromoter:
             if not skill.directory:
                 continue
 
-            candidates.append(PromotionCandidate(
-                skill_id=skill.id,
-                skill_name=skill.name,
-                effective_rate=effective_rate,
-                total_selections=skill.total_selections,
-                directory=skill.directory,
-                reason=(
-                    f"effective_rate={effective_rate:.2f}, "
-                    f"total_selections={skill.total_selections}, "
-                    f"independent workflow"
-                ),
-            ))
+            candidates.append(
+                PromotionCandidate(
+                    skill_id=skill.id,
+                    skill_name=skill.name,
+                    effective_rate=effective_rate,
+                    total_selections=skill.total_selections,
+                    directory=skill.directory,
+                    reason=(
+                        f"effective_rate={effective_rate:.2f}, "
+                        f"total_selections={skill.total_selections}, "
+                        f"independent workflow"
+                    ),
+                )
+            )
 
         return candidates
 
@@ -210,10 +213,8 @@ class AgentPromoter:
             else:
                 # Pre-existing directory — only remove files we wrote.
                 for f in written_files:
-                    try:
+                    with contextlib.suppress(OSError):
                         f.unlink()
-                    except OSError:
-                        pass
             return PromotionResult(
                 success=False,
                 error=f"Failed to write agent files: {e}",
@@ -227,94 +228,86 @@ class AgentPromoter:
             entry_point_path=str(entry_path),
         )
 
-    def _generate_init_py(
-        self, candidate: PromotionCandidate, pkg_name: str
-    ) -> str:
+    def _generate_init_py(self, candidate: PromotionCandidate, pkg_name: str) -> str:
         """Generate __init__.py for the promoted agent package."""
         class_name = to_class_name(candidate.skill_name)
         return (
             f'"""agent-{candidate.skill_name} — Auto-promoted agent.\n'
-            f'\n'
-            f'{candidate.skill_name} agent, auto-promoted from skill '
-            f'{candidate.skill_id}.\n'
+            f"\n"
+            f"{candidate.skill_name} agent, auto-promoted from skill "
+            f"{candidate.skill_id}.\n"
             f'"""\n'
-            f'\n'
-            f'from {pkg_name}.agent import {class_name}Agent\n'
-            f'\n'
-            f'__all__ = [\n'
+            f"\n"
+            f"from {pkg_name}.agent import {class_name}Agent\n"
+            f"\n"
+            f"__all__ = [\n"
             f'    "{class_name}Agent",\n'
-            f']\n'
+            f"]\n"
         )
 
-    def _generate_mcp_adapter(
-        self, candidate: PromotionCandidate, pkg_name: str
-    ) -> str:
+    def _generate_mcp_adapter(self, candidate: PromotionCandidate, pkg_name: str) -> str:
         """Generate mcp_adapter.py for the promoted agent."""
         return (
             f'"""MCP adapter — expose {candidate.skill_name} as an MCP Server.\n'
-            f'\n'
-            f'Requires the ``fastmcp`` package.\n'
+            f"\n"
+            f"Requires the ``fastmcp`` package.\n"
             f'"""\n'
-            f'\n'
-            f'from __future__ import annotations\n'
-            f'\n'
-            f'\n'
-            f'def create_mcp_server() -> object:\n'
+            f"\n"
+            f"from __future__ import annotations\n"
+            f"\n"
+            f"\n"
+            f"def create_mcp_server() -> object:\n"
             f'    """Create and return a FastMCP server for {candidate.skill_name}."""\n'
-            f'    from fastmcp import FastMCP\n'
-            f'\n'
+            f"    from fastmcp import FastMCP\n"
+            f"\n"
             f'    mcp = FastMCP("{candidate.skill_name}")\n'
-            f'\n'
-            f'    @mcp.tool()\n'
-            f'    async def run(task: str, context: dict | None = None) -> str:\n'
+            f"\n"
+            f"    @mcp.tool()\n"
+            f"    async def run(task: str, context: dict | None = None) -> str:\n"
             f'        """Execute the {candidate.skill_name} agent task."""\n'
-            f'        from {pkg_name}.agent import {candidate.skill_name.replace("-", "_")}_run\n'
-            f'        return await {candidate.skill_name.replace("-", "_")}_run(task, context)\n'
-            f'\n'
-            f'    return mcp\n'
+            f"        from {pkg_name}.agent import {candidate.skill_name.replace('-', '_')}_run\n"
+            f"        return await {candidate.skill_name.replace('-', '_')}_run(task, context)\n"
+            f"\n"
+            f"    return mcp\n"
         )
 
-    def _generate_pyproject(
-        self, candidate: PromotionCandidate, pkg_name: str
-    ) -> str:
+    def _generate_pyproject(self, candidate: PromotionCandidate, pkg_name: str) -> str:
         """Generate pyproject.toml with hatch build config."""
         return (
-            f'[project]\n'
+            f"[project]\n"
             f'name = "agent-{candidate.skill_name}"\n'
             f'version = "0.1.0"\n'
             f'description = "Auto-promoted from skill {candidate.skill_id}"\n'
             f'requires-python = ">=3.12"\n'
-            f'dependencies = [\n'
+            f"dependencies = [\n"
             f'    "pydantic>=2.0",\n'
-            f']\n'
-            f'\n'
-            f'[project.optional-dependencies]\n'
-            f'full = [\n'
+            f"]\n"
+            f"\n"
+            f"[project.optional-dependencies]\n"
+            f"full = [\n"
             f'    "fastmcp>=2.0",\n'
-            f']\n'
-            f'dev = [\n'
+            f"]\n"
+            f"dev = [\n"
             f'    "pytest>=8.0",\n'
             f'    "pytest-asyncio>=0.23",\n'
-            f']\n'
-            f'\n'
-            f'[build-system]\n'
+            f"]\n"
+            f"\n"
+            f"[build-system]\n"
             f'requires = ["hatchling"]\n'
             f'build-backend = "hatchling.build"\n'
-            f'\n'
-            f'[tool.hatch.build.targets.wheel]\n'
+            f"\n"
+            f"[tool.hatch.build.targets.wheel]\n"
             f'packages = ["{pkg_name}"]\n'
-            f'\n'
-            f'[tool.ruff]\n'
+            f"\n"
+            f"[tool.ruff]\n"
             f'target-version = "py312"\n'
-            f'line-length = 100\n'
-            f'\n'
-            f'[tool.ruff.lint]\n'
+            f"line-length = 100\n"
+            f"\n"
+            f"[tool.ruff.lint]\n"
             f'select = ["E", "F", "I", "N", "UP", "B", "SIM"]\n'
         )
 
-    def _generate_manifest(
-        self, candidate: PromotionCandidate
-    ) -> str:
+    def _generate_manifest(self, candidate: PromotionCandidate) -> str:
         """Generate an agent-manifest.yaml for the promoted agent.
 
         Produces a flat dict compatible with ``AgentManifest(**data)``.
@@ -346,62 +339,58 @@ class AgentPromoter:
         }
         return yaml.safe_dump(manifest_data, default_flow_style=False, sort_keys=False)
 
-    def _generate_entry_point(
-        self, candidate: PromotionCandidate
-    ) -> str:
+    def _generate_entry_point(self, candidate: PromotionCandidate) -> str:
         """Generate a minimal agent.py skeleton for the promoted agent."""
         class_name = to_class_name(candidate.skill_name)
         return (
             f'"""Auto-promoted agent: {candidate.skill_name}.\n'
-            f'\n'
-            f'Promoted from skill {candidate.skill_id} with\n'
-            f'effective_rate={candidate.effective_rate:.2f} and\n'
-            f'total_selections={candidate.total_selections}.\n'
+            f"\n"
+            f"Promoted from skill {candidate.skill_id} with\n"
+            f"effective_rate={candidate.effective_rate:.2f} and\n"
+            f"total_selections={candidate.total_selections}.\n"
             f'"""\n'
-            f'\n'
-            f'\n'
-            f'class {class_name}Agent:\n'
+            f"\n"
+            f"\n"
+            f"class {class_name}Agent:\n"
             f'    """Auto-promoted agent from skill {candidate.skill_id}."""\n'
-            f'\n'
-            f'    async def run(self, task: str, context: dict | None = None) -> str:\n'
+            f"\n"
+            f"    async def run(self, task: str, context: dict | None = None) -> str:\n"
             f'        """Execute the agent task.\n'
-            f'\n'
-            f'        Args:\n'
-            f'            task: Task description.\n'
-            f'            context: Optional context dictionary.\n'
-            f'\n'
-            f'        Returns:\n'
-            f'            Task result as string.\n'
+            f"\n"
+            f"        Args:\n"
+            f"            task: Task description.\n"
+            f"            context: Optional context dictionary.\n"
+            f"\n"
+            f"        Returns:\n"
+            f"            Task result as string.\n"
             f'        """\n'
-            f'        # NOTE: Implement agent logic based on promoted skill\n'
+            f"        # NOTE: Implement agent logic based on promoted skill\n"
             f'        return f"Agent {candidate.skill_name!r} executed: {{task}}"\n'
-            f'\n'
-            f'\n'
-            f'async def {candidate.skill_name.replace("-", "_")}_run('
-            f'task: str, context: dict | None = None) -> str:\n'
+            f"\n"
+            f"\n"
+            f"async def {candidate.skill_name.replace('-', '_')}_run("
+            f"task: str, context: dict | None = None) -> str:\n"
             f'    """Module-level entry point for MCP adapter."""\n'
-            f'    agent = {class_name}Agent()\n'
-            f'    return await agent.run(task, context)\n'
+            f"    agent = {class_name}Agent()\n"
+            f"    return await agent.run(task, context)\n"
         )
 
-    def _generate_skill_md(
-        self, candidate: PromotionCandidate
-    ) -> str:
+    def _generate_skill_md(self, candidate: PromotionCandidate) -> str:
         """Generate a SKILL.md for the promoted agent."""
         return (
-            f'# {candidate.skill_name}\n'
-            f'\n'
-            f'Auto-promoted from skill `{candidate.skill_id}`.\n'
-            f'\n'
-            f'## Metrics\n'
-            f'\n'
-            f'- Effective rate: {candidate.effective_rate:.2%}\n'
-            f'- Total selections: {candidate.total_selections}\n'
-            f'- Original directory: `{candidate.directory}`\n'
-            f'\n'
-            f'## Workflow\n'
-            f'\n'
-            f'NOTE: Document the workflow that was captured and promoted.\n'
+            f"# {candidate.skill_name}\n"
+            f"\n"
+            f"Auto-promoted from skill `{candidate.skill_id}`.\n"
+            f"\n"
+            f"## Metrics\n"
+            f"\n"
+            f"- Effective rate: {candidate.effective_rate:.2%}\n"
+            f"- Total selections: {candidate.total_selections}\n"
+            f"- Original directory: `{candidate.directory}`\n"
+            f"\n"
+            f"## Workflow\n"
+            f"\n"
+            f"NOTE: Document the workflow that was captured and promoted.\n"
         )
 
     @property

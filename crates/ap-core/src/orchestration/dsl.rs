@@ -33,6 +33,8 @@ pub enum DslError {
 pub struct DslTask {
     #[serde(alias = "id")]
     pub name: String,
+    #[serde(default)]
+    pub description: String,
     pub agent: String,
     #[serde(default)]
     pub phase: u32,

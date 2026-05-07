@@ -19,6 +19,7 @@ import uuid
 
 import agent_nexus.platform.orchestration.ipc as _ipc_mod
 from agent_nexus.models.ipc import AgentToPlatformType
+from agent_nexus.platform.config.defaults import DEFAULT_PIPELINE_TIMEOUT
 from agent_nexus.platform.orchestration.ipc import IPCError, get_ipc_lock
 from agent_nexus.platform.orchestration.process_manager import AgentHandle
 from agent_nexus.platform.utils import make_error_result as _make_error_result
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Default timeout (seconds) for waiting on an agent subprocess to
 # return a final result via IPC.  Used by both McpToolAdapter and
 # PlatformRouter — keep in sync via this single definition.
-DEFAULT_IPC_EXECUTE_TIMEOUT: float = 300.0
+DEFAULT_IPC_EXECUTE_TIMEOUT: float = float(DEFAULT_PIPELINE_TIMEOUT)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -47,7 +48,7 @@ def _sanitize(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def remove_lock(agent_name: str) -> None:
+def remove_lock(_agent_name: str) -> None:
     """No-op: IPC lock for *agent_name* is intentionally retained.
 
     Despite the function name, the lock dict entry is NOT deleted — popping
@@ -122,28 +123,34 @@ class McpToolAdapter:
                 "ProcessNotAliveError",
             )
 
-        payload = json.dumps(
-            {"tool": self._original_tool_name, "arguments": arguments}
-        )
+        payload = json.dumps({"tool": self._original_tool_name, "arguments": arguments})
 
         try:
             lock = get_ipc_lock(self.agent_name)
             async with lock:
-                await handle.ipc.send_chat(payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__")
-                response = await handle.ipc.receive_until_result(timeout=DEFAULT_IPC_EXECUTE_TIMEOUT)
+                await handle.ipc.send_chat(
+                    payload, conversation_id=f"__tool_{uuid.uuid4().hex[:8]}__"
+                )
+                response = await handle.ipc.receive_until_result(
+                    timeout=DEFAULT_IPC_EXECUTE_TIMEOUT
+                )
         except (TimeoutError, OSError, ConnectionError, IPCError) as exc:
-            logger.error(
-                "IPC error executing tool '%s': %s", self.full_name, exc
-            )
+            logger.error("IPC error executing tool '%s': %s", self.full_name, exc)
             return _make_error_result(f"IPC error: {exc}", type(exc).__name__)
 
         if response.type == AgentToPlatformType.ERROR:
-            return _make_error_result(
-                response.error or "Agent returned an error", "AgentError"
-            )
+            return _make_error_result(response.error or "Agent returned an error", "AgentError")
+
+        content = response.content or ""
+        structured = None
+        try:
+            structured = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            pass
 
         return {
-            "output": response.content or "",
+            "output": content,
+            "structured": structured,
             "success": response.is_success,
         }
 
@@ -158,7 +165,8 @@ class McpToolAdapter:
         return {
             "name": self.full_name,
             "description": self.description,
-            "inputSchema": self._input_schema or {
+            "inputSchema": self._input_schema
+            or {
                 "type": "object",
                 "properties": {},
             },

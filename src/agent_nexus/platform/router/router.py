@@ -25,6 +25,7 @@ import uuid
 from collections import deque
 from typing import Any
 
+from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.models.ipc import AgentToPlatformType
 from agent_nexus.platform.gateway.tool_adapter import (
     DEFAULT_IPC_EXECUTE_TIMEOUT,
@@ -46,7 +47,7 @@ from .subtask import SubtaskController
 from .workflow import WorkflowContext, WorkflowPhase, WorkflowResult
 
 
-class AgentExecutionError(Exception):
+class AgentExecutionError(AgentNexusError):
     """Raised when an agent interaction fails with a non-IPC error.
 
     Carries ``error`` (human-readable message) and ``error_type`` (exception
@@ -113,16 +114,16 @@ class PlatformRouter:
     ) -> None:
         self._pm = process_manager
         self._subtask = subtask_controller or SubtaskController()
-        self._composite_defs: dict[str, OrchestrationDefinition] = (
-            composite_definitions or {}
-        )
+        self._composite_defs: dict[str, OrchestrationDefinition] = composite_definitions or {}
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def register_composite(
-        self, name: str, definition: OrchestrationDefinition,
+        self,
+        name: str,
+        definition: OrchestrationDefinition,
     ) -> None:
         """Register a composite agent definition for routing.
 
@@ -246,12 +247,15 @@ class PlatformRouter:
 
         # 3. Execute phases
         try:
+
             async def _run_phases() -> None:
                 nonlocal message, completed, last_error, last_error_type
                 for phase in _PHASE_ORDER:
                     ctx.current_phase = phase
                     try:
-                        result = await self._execute_phase(ctx, phase, definition, message, role_agents=role_agents)
+                        result = await self._execute_phase(
+                            ctx, phase, definition, message, role_agents=role_agents
+                        )
                         phase_results[phase] = result
                         completed += 1
 
@@ -272,10 +276,7 @@ class PlatformRouter:
                     timeout=_DEFAULT_COMPOSITE_TIMEOUT,
                 )
             except TimeoutError:
-                last_error = (
-                    f"Composite workflow timed out after "
-                    f"{_DEFAULT_COMPOSITE_TIMEOUT:.0f}s"
-                )
+                last_error = f"Composite workflow timed out after {_DEFAULT_COMPOSITE_TIMEOUT:.0f}s"
                 last_error_type = "TimeoutError"
                 logger.error(last_error)
         finally:
@@ -326,7 +327,9 @@ class PlatformRouter:
             return _make_error_result(f"Agent '{atomic_name}' not found", "KeyError")
 
         if not handle.is_alive:
-            return _make_error_result(f"Agent '{atomic_name}' process is not alive", "ProcessNotAliveError")
+            return _make_error_result(
+                f"Agent '{atomic_name}' process is not alive", "ProcessNotAliveError"
+            )
 
         try:
             content = await self._ipc_chat(atomic_name, message, conversation_id)
@@ -364,14 +367,13 @@ class PlatformRouter:
                 return []
             try:
                 async with get_ipc_lock(name):
-                    await handle.ipc.send_chat(
-                        _LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID
-                    )
+                    await handle.ipc.send_chat(_LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID)
                     response = await handle.ipc.receive_until_result(timeout=10.0)
                 if response.type == AgentToPlatformType.ERROR:
                     logger.warning(
                         "Agent '%s' returned error during tool discovery: %s",
-                        name, response.error or "unknown error",
+                        name,
+                        response.error or "unknown error",
                     )
                     return []
                 if response.content:
@@ -384,7 +386,8 @@ class PlatformRouter:
                         except (json.JSONDecodeError, ValueError) as exc:
                             logger.warning(
                                 "Agent '%s' returned invalid JSON tool definitions: %s",
-                                name, exc,
+                                name,
+                                exc,
                             )
                 return []
             except (TimeoutError, IPCError, OSError, RuntimeError) as exc:
@@ -460,9 +463,7 @@ class PlatformRouter:
             phase_agents = list(role_agents.get(role, []))
         else:
             phase_agents = [
-                name
-                for name, agent_def in definition.agents.items()
-                if agent_def.role == role
+                name for name, agent_def in definition.agents.items() if agent_def.role == role
             ]
 
         if not phase_agents:
@@ -471,7 +472,8 @@ class PlatformRouter:
             logger.warning(
                 "No agents with role '%s' found for %s phase, "
                 "falling back to default agent selection",
-                role, phase.value,
+                role,
+                phase.value,
             )
             if phase == WorkflowPhase.research:
                 root_tasks = definition.get_root_tasks()
@@ -495,9 +497,7 @@ class PlatformRouter:
         else:
             # Single agent execution (synthesis, verification)
             agent_name = phase_agents[0]
-            return await self._execute_single_agent(
-                agent_name, phase_message, ctx.conversation_id
-            )
+            return await self._execute_single_agent(agent_name, phase_message, ctx.conversation_id)
 
     async def _execute_parallel_agents(
         self,
@@ -523,9 +523,7 @@ class PlatformRouter:
             cid = f"{conversation_id}__{name}__{uuid.uuid4().hex[:8]}"
             try:
                 return await self._subtask.run_with_retry(
-                    coro_factory=lambda n=name, c=cid: self._execute_single_agent(
-                        n, message, c
-                    ),
+                    coro_factory=lambda n=name, c=cid: self._execute_single_agent(n, message, c),
                     timeout=DEFAULT_IPC_EXECUTE_TIMEOUT,
                 )
             except AgentExecutionError as exc:
@@ -601,7 +599,7 @@ class PlatformRouter:
                 raise AgentExecutionError(
                     f"IPC send error for agent '{agent_name}': {exc}",
                     type(exc).__name__,
-                )
+                ) from exc
 
             try:
                 response = await handle.ipc.receive_until_result(timeout=timeout)
@@ -611,7 +609,7 @@ class PlatformRouter:
                 raise AgentExecutionError(
                     f"IPC error communicating with agent '{agent_name}': {exc}",
                     type(exc).__name__,
-                )
+                ) from exc
 
             if response.type == AgentToPlatformType.ERROR:
                 raise AgentExecutionError(
@@ -676,9 +674,7 @@ class PlatformRouter:
                     in_degree[t.id] += 1
                     dependents[dep_id].append(t.id)
 
-        queue: deque[str] = deque(
-            tid for tid, deg in in_degree.items() if deg == 0
-        )
+        queue: deque[str] = deque(tid for tid, deg in in_degree.items() if deg == 0)
         sorted_tasks: list[Any] = []
 
         while queue:

@@ -99,9 +99,7 @@ def _gen_top_level_agent(name: str, tools: list[str]) -> str:
         )
 
     # pipeline: analyze / execute / report
-    imports = "\n".join(
-        f"from {pkg}.agent import {fn}_{t}" for t in tools
-    )
+    imports = "\n".join(f"from {pkg}.agent import {fn}_{t}" for t in tools)
     handlers = "\n\n".join(
         f"async def {t}(task: str, _context: dict | None = None) -> str:\n"
         f'    """{t.capitalize()} phase for {name}."""\n'
@@ -166,40 +164,40 @@ def _gen_skill_md(name: str, description: str, tools: list[str]) -> str:
 def _gen_pyproject(name: str) -> str:
     pkg = _agent_name_to_package(name)
     return (
-        f'[project]\n'
+        f"[project]\n"
         f'name = "agent-{name}"\n'
         f'version = "0.1.0"\n'
         f'description = "TODO: agent description"\n'
         f'requires-python = ">=3.12"\n'
-        f'dependencies = [\n'
+        f"dependencies = [\n"
         f'    "pydantic>=2.0",\n'
-        f']\n'
-        f'\n'
-        f'[project.optional-dependencies]\n'
-        f'full = [\n'
+        f"]\n"
+        f"\n"
+        f"[project.optional-dependencies]\n"
+        f"full = [\n"
         f'    "fastmcp>=2.0",\n'
-        f']\n'
-        f'dev = [\n'
+        f"]\n"
+        f"dev = [\n"
         f'    "pytest>=8.0",\n'
         f'    "pytest-asyncio>=0.23",\n'
-        f']\n'
-        f'\n'
-        f'[build-system]\n'
+        f"]\n"
+        f"\n"
+        f"[build-system]\n"
         f'requires = ["hatchling"]\n'
         f'build-backend = "hatchling.build"\n'
-        f'\n'
-        f'[tool.hatch.build.targets.wheel]\n'
+        f"\n"
+        f"[tool.hatch.build.targets.wheel]\n"
         f'packages = ["{pkg}"]\n'
-        f'\n'
-        f'[tool.pytest.ini_options]\n'
+        f"\n"
+        f"[tool.pytest.ini_options]\n"
         f'testpaths = ["tests"]\n'
         f'asyncio_mode = "auto"\n'
-        f'\n'
-        f'[tool.ruff]\n'
+        f"\n"
+        f"[tool.ruff]\n"
         f'target-version = "py312"\n'
-        f'line-length = 100\n'
-        f'\n'
-        f'[tool.ruff.lint]\n'
+        f"line-length = 100\n"
+        f"\n"
+        f"[tool.ruff.lint]\n"
         f'select = ["E", "F", "I", "N", "UP", "B", "SIM"]\n'
     )
 
@@ -301,7 +299,7 @@ def _gen_main_entry(name: str) -> str:
         f"\n"
         f"from {pkg}.mcp_adapter import create_mcp_server\n"
         f"\n"
-        f'\n'
+        f"\n"
         f"if __name__ == '__main__':\n"
         f"    server = create_mcp_server()\n"
         f"    transport = os.environ.get('MCP_TRANSPORT', 'stdio')\n"
@@ -323,7 +321,7 @@ def _gen_mcp_adapter(name: str, tools: list[str]) -> str:
         return (
             f'"""MCP adapter — expose {name} as an MCP Server.\n'
             f"\n"
-            f'Requires the ``fastmcp`` package.\n'
+            f"Requires the ``fastmcp`` package.\n"
             f'"""\n'
             f"\n"
             f"from __future__ import annotations\n"
@@ -355,7 +353,7 @@ def _gen_mcp_adapter(name: str, tools: list[str]) -> str:
     return (
         f'"""MCP adapter — expose {name} as an MCP Server.\n'
         f"\n"
-        f'Requires the ``fastmcp`` package.\n'
+        f"Requires the ``fastmcp`` package.\n"
         f'"""\n'
         f"\n"
         f"from __future__ import annotations\n"
@@ -437,7 +435,11 @@ def scaffold_agent(
 
     files: dict[Path, str] = {
         agent_dir / "agent-manifest.yaml": _gen_manifest(
-            name, description, tools, recommended_model, fallback_model,
+            name,
+            description,
+            tools,
+            recommended_model,
+            fallback_model,
         ),
         agent_dir / "main.py": _gen_main_entry(name),
         agent_dir / "agent.py": _gen_top_level_agent(name, tools),
@@ -465,17 +467,28 @@ create_app = typer.Typer(help="Create and scaffold new agents")
 def create_agent(
     name: str = typer.Argument(help="Agent name (kebab-case, e.g. my-agent)"),
     description: str | None = typer.Option(
-        None, "--description", "-d", help="Agent description",
+        None,
+        "--description",
+        "-d",
+        help="Agent description",
     ),
     tools: str = typer.Option(
-        "simple", "--tools", "-t",
+        "simple",
+        "--tools",
+        "-t",
         help="Tool pattern: simple (run) or pipeline (analyze/execute/report)",
     ),
     wizard: bool = typer.Option(
-        False, "--wizard", "-w", help="Run interactive wizard",
+        False,
+        "--wizard",
+        "-w",
+        help="Run interactive wizard",
     ),
     output_dir: str | None = typer.Option(
-        None, "--output", "-o", help="Output directory (default: agents/atomic/)",
+        None,
+        "--output",
+        "-o",
+        help="Output directory (default: agents/atomic/)",
     ),
 ) -> None:
     """Scaffold a new Atomic Agent with all required files."""
@@ -491,7 +504,8 @@ def create_agent(
             raise typer.Exit(1)
         if tools not in _TOOLS_MODE_MAP:
             typer.echo(
-                f"Error: --tools must be one of: {', '.join(_TOOLS_MODE_MAP)}", err=True,
+                f"Error: --tools must be one of: {', '.join(_TOOLS_MODE_MAP)}",
+                err=True,
             )
             raise typer.Exit(1)
         desc = description
@@ -511,13 +525,15 @@ def create_agent(
         )
     except (ValueError, FileExistsError) as exc:
         typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     tool_list = _TOOLS_MODE_MAP[tools_key]
     typer.echo(f"Created agent: {agent_dir}")
     typer.echo(f"  Tools: {', '.join(tool_list)}")
     typer.echo(f"  Files: {len(list(agent_dir.rglob('*')))} generated")
     typer.echo("\nNext steps:")
-    typer.echo(f"  1. Edit {agent_dir / _agent_name_to_package(name) / 'agent.py'} — implement logic")
+    typer.echo(
+        f"  1. Edit {agent_dir / _agent_name_to_package(name) / 'agent.py'} — implement logic"
+    )
     typer.echo(f"  2. Edit {agent_dir / 'SKILL.md'} — document capabilities")
     typer.echo(f"  3. Test:  cd {agent_dir} && uv run pytest")

@@ -21,6 +21,7 @@ This directory contains the complete design documentation for Agent Nexus. All d
 | 11 | [11-agency-agents-integration.md](11-agency-agents-integration.md) | Agency Agents content-pack integration, expert profiles, dynamic Composite Agent orchestration | Proposal |
 | A | [appendix.md](appendix.md) | OrchestrationDSL TOML schemas, Agent type comparison, model tier config, reference projects | Implemented |
 | T | [testing.md](testing.md) | Test suite overview, coverage, conventions, run instructions | Live document |
+| C | [capability-testing.md](capability-testing.md) | Contract-driven capability tests: 80 tests, 3 agent tiers × 2 modes × 2 validation levels | Live document |
 |   | [configuration.md](configuration.md) | Full config schema, environment variables, priority chain, migration | Live document |
 |   | [cli.md](cli.md) | Complete CLI reference — 17 commands with usage examples | Live document |
 |   | [quick-start.md](quick-start.md) | 5-minute setup guide: install → init → config → run | Live document |
@@ -59,3 +60,4 @@ For new contributors, the recommended reading order is:
 11. **11-agency-agents-integration.md** — How external expert profiles can power dynamic Composite Agents
 12. **appendix.md** — Reference material
 13. **testing.md** — Testing conventions and coverage
+14. **capability-testing.md** — Agent capability contract testing framework

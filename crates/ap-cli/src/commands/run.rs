@@ -280,3 +280,54 @@ fn uuid_or_fallback() -> String {
         .as_nanos();
     format!("conv-{ts:x}")
 }
+
+/// `agent-nexus llm --message <msg> [--model <model>] [--system <prompt>] [--session <id>]`
+pub fn run_llm(
+    message: &str,
+    model: Option<&str>,
+    system_prompt: Option<&str>,
+    session_id: Option<&str>,
+    output: &OutputFormatter,
+) -> Result<()> {
+    let root = commands::find_project_root(
+        &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    );
+    let config_path = root.join("config.toml");
+
+    let setup = if config_path.exists() {
+        ap_cli_backend::CLISetup::from_file_or_default(&config_path)
+    } else {
+        ap_cli_backend::CLISetup::empty()
+    };
+
+    if setup.registry.is_empty() {
+        anyhow::bail!(
+            "No CLI backends configured. Add [cli_backends.<name>] sections to config.toml."
+        );
+    }
+
+    output.info(&format!(
+        "Calling LLM via CLI backend (model={})...",
+        model.unwrap_or("default")
+    ));
+
+    let rt = tokio::runtime::Runtime::new()?;
+    let result = rt.block_on(ap_cli_backend::call_llm(
+        &setup,
+        system_prompt.unwrap_or(""),
+        message,
+        model,
+        session_id,
+    ))?;
+
+    if result.returncode != 0 {
+        anyhow::bail!(
+            "CLI backend exited with code {}: {}",
+            result.returncode,
+            result.raw_stderr.chars().take(500).collect::<String>()
+        );
+    }
+
+    println!("{}", result.text);
+    Ok(())
+}

@@ -10,11 +10,12 @@ Sources are searched by priority (official first, then by order in the file).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -139,9 +140,7 @@ class SourceManager:
             if index is None:
                 continue
             for entry in index:
-                searchable = " ".join(
-                    [entry.name, entry.description] + entry.tags
-                ).lower()
+                searchable = " ".join([entry.name, entry.description] + entry.tags).lower()
                 if query.lower() in searchable:
                     results.append((source, entry))
         return results
@@ -232,15 +231,13 @@ class SourceManager:
                 os.fsync(f.fileno())
             os.replace(tmp_path, str(self._path))
         except BaseException:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
             raise
 
         # Invalidate the loader's config cache so it picks up the changes
         if self._loader is not None:
-            self._loader._config_cache = None
+            self._loader.invalidate_cache()
 
         try:
             self._cache_mtime = os.path.getmtime(self._path)
@@ -333,10 +330,8 @@ class SourceManager:
                 os.fsync(f.fileno())
             os.replace(tmp_path, str(self._path))
         except BaseException:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
             raise
         try:
             self._cache_mtime = os.path.getmtime(self._path)
@@ -351,6 +346,7 @@ class SourceManager:
     def _get_cache_path(self, source: SourceEntry) -> Path:
         """Compute cache path matching GitInstaller._get_cache_path."""
         from agent_nexus.platform.utils import cache_path_for_url
+
         return cache_path_for_url(self._path.parent, source.url)
 
     def _load_source_index(self, source: SourceEntry) -> list[IndexEntry] | None:
@@ -396,15 +392,17 @@ class SourceManager:
                     raise ValueError("Index entry missing required 'version' field")
                 if not raw_type:
                     raise ValueError("Index entry missing required 'type' field")
-                entries.append(IndexEntry(
-                    name=raw_name,
-                    version=raw_version,
-                    type=AgentType(raw_type),
-                    description=item.get("description", ""),
-                    tags=item.get("tags", []),
-                    dependencies=item.get("dependencies", []),
-                    path=item.get("path", ""),
-                ))
+                entries.append(
+                    IndexEntry(
+                        name=raw_name,
+                        version=raw_version,
+                        type=AgentType(raw_type),
+                        description=item.get("description", ""),
+                        tags=item.get("tags", []),
+                        dependencies=item.get("dependencies", []),
+                        path=item.get("path", ""),
+                    )
+                )
             except Exception as exc:
                 logger.warning("Skipping invalid index entry %s: %s", item, exc)
 

@@ -28,12 +28,8 @@ logger = logging.getLogger(__name__)
 
 def install_agent(
     name: str = typer.Argument(help="Agent name to install"),
-    version: str | None = typer.Option(
-        None, "--version", "-v", help="Specific version"
-    ),
-    source: str | None = typer.Option(
-        None, "--source", "-s", help="Git URL (direct install)"
-    ),
+    version: str | None = typer.Option(None, "--version", "-v", help="Specific version"),
+    source: str | None = typer.Option(None, "--source", "-s", help="Git URL (direct install)"),
     local: bool = typer.Option(
         False, "--local", "-l", help="Install from local project agents/ directory"
     ),
@@ -49,9 +45,7 @@ def uninstall(name: str = typer.Argument(help="Agent name to uninstall")) -> Non
 
 def update(
     name: str | None = typer.Argument(None, help="Agent name to update"),
-    all_agents: bool = typer.Option(
-        False, "--all", help="Update all installed agents"
-    ),
+    all_agents: bool = typer.Option(False, "--all", help="Update all installed agents"),
 ) -> None:
     """Update an agent to the latest version."""
     if not name and not all_agents:
@@ -88,12 +82,8 @@ def info(name: str = typer.Argument(help="Agent name")) -> None:
 def run_agent(
     ctx: typer.Context,
     name: str = typer.Argument(help="Agent name to run"),
-    mode: str = typer.Option(
-        "mcp", "--mode", "-m", help="Run mode: mcp, router, cli"
-    ),
-    transport: str = typer.Option(
-        "stdio", "--transport", "-t", help="Transport: stdio, sse"
-    ),
+    mode: str = typer.Option("mcp", "--mode", "-m", help="Run mode: mcp, router, cli"),
+    transport: str = typer.Option("stdio", "--transport", "-t", help="Transport: stdio, sse"),
 ) -> None:
     """Run an agent in the specified mode.
 
@@ -110,9 +100,7 @@ def run_agent(
 # =====================================================================
 
 
-async def _install(
-    name: str, version: str | None, source_url: str | None, local: bool
-) -> None:
+async def _install(name: str, version: str | None, source_url: str | None, local: bool) -> None:
     """Async install implementation."""
     from agent_nexus.platform.local.installer import (
         AgentNotFoundError,
@@ -133,10 +121,10 @@ async def _install(
     except AgentNotFoundError as exc:
         typer.echo(f"Error: {exc}", err=True)
         typer.echo("Hint: Use --local to install from the local project directory.")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     except Exception as exc:
         typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 async def _uninstall(name: str) -> None:
@@ -157,7 +145,7 @@ async def _uninstall(name: str) -> None:
         raise
     except Exception as exc:
         typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 async def _update(name: str | None, all_agents: bool) -> None:
@@ -197,7 +185,7 @@ async def _update(name: str | None, all_agents: bool) -> None:
     )
 
     updated_count = 0
-    for agent_name, result in zip(agents_to_update, results):
+    for agent_name, result in zip(agents_to_update, results, strict=False):
         if isinstance(result, BaseException):
             if isinstance(result, AgentNotFoundError):
                 typer.echo(f"Agent '{agent_name}' is not installed.", err=True)
@@ -243,8 +231,7 @@ async def _list_agents(json_output: bool = False) -> None:
     typer.echo("-" * 65)
     for agent_name, entry in agents.items():
         typer.echo(
-            f"{agent_name:<25} {entry.version:<12} "
-            f"{entry.agent_type.value:<12} {entry.source}"
+            f"{agent_name:<25} {entry.version:<12} {entry.agent_type.value:<12} {entry.source}"
         )
 
     typer.echo(f"\n{len(agents)} agent(s) installed.")
@@ -354,8 +341,7 @@ async def _run(name: str, mode: str, transport: str, extra_args: list[str] | Non
     entry = lockfile.get_entry(name)
     if entry is None:
         typer.echo(
-            f"Agent '{name}' is not installed. "
-            f"Use 'agent-nexus install {name}' first.",
+            f"Agent '{name}' is not installed. Use 'agent-nexus install {name}' first.",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -390,10 +376,10 @@ async def _run(name: str, mode: str, transport: str, extra_args: list[str] | Non
             os.execvpe(command[0], command, spawn_env)
         except FileNotFoundError:
             typer.echo(f"Command not found: {command[0]}", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
         except OSError as exc:
             typer.echo(f"Failed to exec agent: {exc}", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
     elif mode == "router":
         try:
@@ -404,7 +390,7 @@ async def _run(name: str, mode: str, transport: str, extra_args: list[str] | Non
                 f"Router mode requires additional modules: {exc}",
                 err=True,
             )
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
         pm = ProcessManager()
         supervisor = AgentSupervisor(
@@ -469,15 +455,13 @@ async def _run(name: str, mode: str, transport: str, extra_args: list[str] | Non
             os.execvpe(exec_argv[0], exec_argv, spawn_env)
         except FileNotFoundError:
             typer.echo(f"Command not found: {command[0]}", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
         except OSError as exc:
             typer.echo(f"Failed to exec agent: {exc}", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
     else:
-        typer.echo(
-            f"Unknown mode '{mode}'. Use: mcp, router, cli.", err=True
-        )
+        typer.echo(f"Unknown mode '{mode}'. Use: mcp, router, cli.", err=True)
         raise typer.Exit(code=1)
 
 

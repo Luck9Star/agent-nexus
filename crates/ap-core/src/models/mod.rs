@@ -20,7 +20,7 @@ pub use context::{ContextBudget, ContextLevel, BudgetAlertLevel, TokenUsage};
 pub use distribution::{SourceType, InstallationStatus, SourceEntry, LockfileEntry, Lockfile, PackageSource, IndexEntry};
 pub use evolution::{SkillRecord, EvolutionType, SkillOrigin, SkillLineage, EvolutionMetrics, EvolutionContext};
 pub use hooks::{HookType, HookEvent, HookDefinition, HookExecution};
-pub use ipc::{PlatformToAgent, AgentToPlatform, IPCMessage, MessageDirection};
+pub use ipc::{PlatformToAgent, AgentToPlatform, IPCMessage, IpcPayload, MessageDirection};
 pub use permission::{PermissionConfig, PermissionMode, PermissionDecision};
 pub use task::{TaskItem, TaskState, TaskGraphSnapshot};
 pub use composition::{Composition, CompositionTask, WorkflowPhaseEntry, WorkflowResult, WorkflowContext};

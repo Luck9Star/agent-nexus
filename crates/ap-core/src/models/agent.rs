@@ -168,21 +168,42 @@ impl AgentManifest {
 /// A SKILL.md file parsed into structured form.
 ///
 /// Python source: models/agent.py:142-158 `SkillDefinition`
+/// Superset of Python fields: includes both Python fields (agent_type, triggers,
+/// compatible_agents, capabilities, body, resources) and legacy Rust fields
+/// (triggers_alt, inputs, outputs, examples) via serde aliases.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SkillDefinition {
     pub name: String,
     #[serde(default)]
     pub description: String,
-    #[serde(default)]
-    pub content: String,
-    #[serde(default)]
-    pub trigger: Option<String>,
-    #[serde(default)]
-    pub inputs: Vec<String>,
-    #[serde(default)]
-    pub outputs: Vec<String>,
-    #[serde(default)]
-    pub examples: Vec<String>,
+    /// Python: `agent_type: AgentType`. Optional in Rust for backward compat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<AgentType>,
+    /// Python: `triggers: list[str]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triggers: Option<Vec<String>>,
+    /// Python: `compatible_agents: list[str]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compatible_agents: Option<Vec<String>>,
+    /// Python: `capabilities: list[str]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Vec<String>>,
+    /// Python: `body: str | None`. Alias `content` for legacy Rust format.
+    #[serde(default, alias = "content", skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// Python: `resources: str | None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resources: Option<String>,
+    // Legacy Rust-only fields (kept for backward compatibility)
+    /// Legacy Rust field, alias `trigger` for old format.
+    #[serde(default, alias = "trigger", skip_serializing_if = "Option::is_none")]
+    pub triggers_alt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outputs: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub examples: Option<Vec<String>>,
 }
 
 /// A slash command or tool definition.

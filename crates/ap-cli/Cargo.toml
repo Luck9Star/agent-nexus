@@ -13,6 +13,7 @@ ap-core = { workspace = true }
 ap-runtime = { workspace = true }
 ap-gateway = { workspace = true }
 ap-fetcher = { workspace = true }
+ap-cli-backend = { workspace = true }
 ap-evolution = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }

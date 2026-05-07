@@ -29,7 +29,7 @@ def parse_frontmatter(md_content: str) -> dict:
     if first_newline == -1:
         raise ValueError("No frontmatter delimiters found: single '---' without newline")
 
-    rest = stripped[first_newline + 1:]
+    rest = stripped[first_newline + 1 :]
 
     # Find the closing --- by counting matches: only the first standalone
     # delimiter line after the opening one closes the frontmatter.  Using

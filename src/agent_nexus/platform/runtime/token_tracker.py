@@ -96,9 +96,7 @@ class TokenTracker:
         """
         self._budget = budget if budget is not None else ContextBudget()
         if max_tokens < 1:
-            raise ValueError(
-                f"max_tokens must be >= 1, got {max_tokens}"
-            )
+            raise ValueError(f"max_tokens must be >= 1, got {max_tokens}")
         self._max_tokens = max_tokens
         self._session_id = session_id or uuid.uuid4().hex[:12]
         self._total: int = 0
@@ -128,9 +126,7 @@ class TokenTracker:
             ValueError: If tokens_used is negative.
         """
         if tokens_used < 0:
-            raise ValueError(
-                f"tokens_used must be non-negative, got {tokens_used}"
-            )
+            raise ValueError(f"tokens_used must be non-negative, got {tokens_used}")
         self._turn += 1
         self._total += tokens_used
 

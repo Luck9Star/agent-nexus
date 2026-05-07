@@ -37,21 +37,28 @@ fallback_chain = ["gemini-cli"]
 
 
 class TestCLIBackendE2E:
-    @patch("agent_nexus.platform.agency.cli_backend.base.shutil.which", return_value="/usr/bin/claude")
-    @patch("agent_nexus.platform.agency.cli_backend.base.subprocess.run")
-    def test_config_to_llm_response(self, mock_run, mock_which, tmp_path: Path):
+    @patch(
+        "agent_nexus.platform.agency.cli_backend.base.shutil.which",
+        return_value="/usr/bin/claude",
+    )
+    @patch("agent_nexus.platform.agency.cli_backend.base.subprocess.Popen")
+    def test_config_to_llm_response(
+        self, mock_popen, mock_which, tmp_path: Path
+    ):
         """Full pipeline: config.toml -> ConfigLoader -> LLMClient -> LLMResponse."""
         (tmp_path / "config.toml").write_text(CLI_E2E_CONFIG)
-        mock_run.return_value = MagicMock(
-            stdout=json.dumps({
+        mock_proc = MagicMock()
+        mock_proc.communicate.return_value = (
+            json.dumps({
                 "result": "E2E test passed",
                 "session_id": "sess-e2e",
                 "model": "claude-sonnet-4-20250514",
                 "usage": {"input_tokens": 200, "output_tokens": 100},
             }),
-            stderr="",
-            returncode=0,
+            "",
         )
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
 
         from agent_nexus.models.capability import ModelCapability, ModelCapabilityRegistry
         from agent_nexus.platform.agency.llm_client import LLMClient
@@ -97,9 +104,14 @@ class TestCLIBackendE2E:
         assert routing is not None
         assert routing.default == "claude-code"
 
-    @patch("agent_nexus.platform.agency.cli_backend.base.shutil.which", return_value="/usr/bin/claude")
+    @patch(
+        "agent_nexus.platform.agency.cli_backend.base.shutil.which",
+        return_value="/usr/bin/claude",
+    )
     @patch("agent_nexus.platform.agency.cli_backend.base.subprocess.run")
-    def test_session_store_records_execution(self, mock_run, mock_which, tmp_path: Path):
+    def test_session_store_records_execution(
+        self, mock_run, mock_which, tmp_path: Path
+    ):
         """SessionStore records executions when wired into LLMClient."""
         from agent_nexus.platform.agency.cli_backend.session_store import CLISessionStore
 
@@ -135,7 +147,6 @@ class TestCLIBackendE2E:
         from agent_nexus.platform.agency.cli_backend.base import GenericCLIBackend
         from agent_nexus.platform.agency.cli_backend.registry import CLIBackendRegistry
         from agent_nexus.platform.agency.cli_backend.router import CLIRouter
-        from agent_nexus.platform.agency.cli_backend.types import BackendConfig, RoutingConfig
         from agent_nexus.platform.config.loader import ConfigLoader
 
         (tmp_path / "config.toml").write_text(CLI_E2E_CONFIG)

@@ -104,16 +104,89 @@ impl AgentToPlatform {
     }
 }
 
+// ── Payload union (matches Python's tagged union with model_validator) ─
+
+/// Typed IPC payload that validates at deserialization time.
+///
+/// Python source: `models/ipc.py:98-125` — `IPCMessage.payload: PlatformToAgent | AgentToPlatform`
+/// with a `model_validator(mode="before")` that resolves the union based on `direction`.
+///
+/// Uses untagged representation: the payload itself has no direction field.
+/// Direction discrimination is handled by the `IPCMessage` envelope via
+/// `#[serde(deserialize_with)]`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum IpcPayload {
+    PlatformToAgent(PlatformToAgent),
+    AgentToPlatform(AgentToPlatform),
+}
+
 // ── Envelope ───────────────────────────────────────────────────────
 
 /// Envelope for any IPC message, with direction tagging.
 ///
 /// Python source: models/ipc.py:98-125
 /// Used for deserialization of raw JSON-lines from stdin/stdout pipes.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+///
+/// Wire format matches Python exactly:
+/// ```json
+/// {"direction": "platform_to_agent", "payload": {"type": "chat", "content": "..."}}
+/// ```
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct IPCMessage {
     pub direction: MessageDirection,
-    pub payload: serde_json::Value,
+    pub payload: IpcPayload,
+}
+
+impl<'de> Deserialize<'de> for IPCMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw: std::collections::HashMap<String, serde_json::Value> =
+            std::collections::HashMap::deserialize(deserializer)?;
+        let direction_str = raw
+            .get("direction")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| serde::de::Error::missing_field("direction"))?;
+        let direction: MessageDirection = serde_json::from_value(serde_json::json!(direction_str))
+            .map_err(serde::de::Error::custom)?;
+        let payload_val = raw
+            .get("payload")
+            .ok_or_else(|| serde::de::Error::missing_field("payload"))?
+            .clone();
+        let payload = match direction {
+            MessageDirection::PlatformToAgent => {
+                let typed: PlatformToAgent =
+                    serde_json::from_value(payload_val).map_err(serde::de::Error::custom)?;
+                IpcPayload::PlatformToAgent(typed)
+            }
+            MessageDirection::AgentToPlatform => {
+                let typed: AgentToPlatform =
+                    serde_json::from_value(payload_val).map_err(serde::de::Error::custom)?;
+                IpcPayload::AgentToPlatform(typed)
+            }
+        };
+        Ok(IPCMessage { direction, payload })
+    }
+}
+
+impl IPCMessage {
+    /// Create a PlatformToAgent message.
+    pub fn platform_to_agent(payload: PlatformToAgent) -> Self {
+        Self {
+            direction: MessageDirection::PlatformToAgent,
+            payload: IpcPayload::PlatformToAgent(payload),
+        }
+    }
+
+    /// Create an AgentToPlatform message.
+    pub fn agent_to_platform(payload: AgentToPlatform) -> Self {
+        Self {
+            direction: MessageDirection::AgentToPlatform,
+            payload: IpcPayload::AgentToPlatform(payload),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -311,5 +384,67 @@ mod tests {
             output: None,
         };
         assert!(msg.is_success());
+    }
+
+    #[test]
+    fn ipc_message_roundtrip_platform_to_agent() {
+        let payload = PlatformToAgent {
+            msg_type: PlatformToAgentType::Chat,
+            content: "hello".to_string(),
+            task_id: None,
+            conversation_id: Some("c1".to_string()),
+            ref_id: None,
+            summary: None,
+        };
+        let msg = IPCMessage::platform_to_agent(payload.clone());
+        let json = serde_json::to_string(&msg).unwrap();
+        // Verify wire format matches Python: {"direction":"platform_to_agent","payload":{...}}
+        assert!(json.contains(r#""direction":"platform_to_agent""#));
+        assert!(json.contains(r#""payload":{"type":"chat""#));
+        let de: IPCMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(de.direction, MessageDirection::PlatformToAgent);
+        match de.payload {
+            IpcPayload::PlatformToAgent(p) => assert_eq!(p, payload),
+            _ => panic!("Expected PlatformToAgent variant"),
+        }
+    }
+
+    #[test]
+    fn ipc_message_roundtrip_agent_to_platform() {
+        let payload = AgentToPlatform {
+            msg_type: AgentToPlatformType::Result,
+            content: "done".to_string(),
+            task_id: Some("t-1".to_string()),
+            message: None,
+            progress_pct: None,
+            error: None,
+            status: Some("completed".to_string()),
+            output: None,
+        };
+        let msg = IPCMessage::agent_to_platform(payload.clone());
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""direction":"agent_to_platform""#));
+        assert!(json.contains(r#""payload":{"type":"result""#));
+        let de: IPCMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(de.direction, MessageDirection::AgentToPlatform);
+        match de.payload {
+            IpcPayload::AgentToPlatform(p) => assert_eq!(p, payload),
+            _ => panic!("Expected AgentToPlatform variant"),
+        }
+    }
+
+    #[test]
+    fn deserialize_python_ipc_message() {
+        // This matches what Python would serialize for an IPCMessage
+        let json = r#"{"direction":"platform_to_agent","payload":{"type":"chat","content":"hello","conversation_id":"c1"}}"#;
+        let msg: IPCMessage = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.direction, MessageDirection::PlatformToAgent);
+        match &msg.payload {
+            IpcPayload::PlatformToAgent(p) => {
+                assert_eq!(p.msg_type, PlatformToAgentType::Chat);
+                assert_eq!(p.content, "hello");
+            }
+            _ => panic!("Expected PlatformToAgent variant"),
+        }
     }
 }

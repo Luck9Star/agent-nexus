@@ -81,7 +81,7 @@ class LockfileEntry(FrozenModel):
     version: str = Field(
         min_length=1,
         pattern=r"^[a-zA-Z0-9._-]+$",
-        description="Version string used in git ref construction; alphanumeric, dots, hyphens, underscores",
+        description="Version string used in git ref construction; alphanumeric, dots, hyphens, underscores",  # noqa: E501
     )
     source: str = Field(min_length=1)
     commit_sha: str = Field(
@@ -144,7 +144,5 @@ class IndexEntry(FrozenModel):
         non-empty value must not contain ``..``.
         """
         if self.path and ".." in Path(self.path).parts:
-            raise ValueError(
-                f"IndexEntry.path must not contain '..': got '{self.path}'"
-            )
+            raise ValueError(f"IndexEntry.path must not contain '..': got '{self.path}'")
         return self

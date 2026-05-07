@@ -93,7 +93,7 @@ def _correct_skill_ids(
 
         # Scale max_dist with suffix length to avoid loose matches on short IDs
         # e.g. "x__ab" matching "x__wxyz" at distance 4 is clearly wrong.
-        _suffix = raw_id[len(pfx):]
+        _suffix = raw_id[len(pfx) :]
         _suffix_len = len(_suffix)
         if len(candidates) > 20:
             max_dist = 2
@@ -151,9 +151,7 @@ class ExecutionAnalyzer:
         skills_by_id = {s.id: s for s in active_skills}
 
         # Correct any hallucinated skill IDs from the context
-        corrected_ids = _correct_skill_ids(
-            ctx.skill_ids_used, known_ids
-        )
+        corrected_ids = _correct_skill_ids(ctx.skill_ids_used, known_ids)
 
         # Build judgments for each skill referenced in the task
         applied_set = set(ctx.skills_applied)
@@ -169,18 +167,18 @@ class ExecutionAnalyzer:
             fell_back = skill_id in fell_back_set
             completed = applied and ctx.task_completed
 
-            judgments.append({
-                "skill_id": skill_id,
-                "selected": True,
-                "applied": applied,
-                "completed": completed,
-                "fell_back": fell_back,
-            })
+            judgments.append(
+                {
+                    "skill_id": skill_id,
+                    "selected": True,
+                    "applied": applied,
+                    "completed": completed,
+                    "fell_back": fell_back,
+                }
+            )
 
         # Generate evolution suggestions
-        suggestions = self._generate_suggestions(
-            corrected_ids, skills_by_id, ctx
-        )
+        suggestions = self._generate_suggestions(corrected_ids, skills_by_id, ctx)
 
         # Build analysis text
         analysis_text = self._build_analysis_text(ctx, judgments, suggestions)
@@ -240,15 +238,16 @@ class ExecutionAnalyzer:
 
         # CAPTURED suggestion if task succeeded with no skills involved
         if ctx.task_completed and not skill_ids:
-            suggestions.append(EvolutionSuggestion(
-                evolution_type=EvolutionType.CAPTURED,
-                target_skill_ids=[],
-                direction=(
-                    "Successful task with no skills used — "
-                    "pattern may be worth capturing"
-                ),
-                confidence=0.6,
-            ))
+            suggestions.append(
+                EvolutionSuggestion(
+                    evolution_type=EvolutionType.CAPTURED,
+                    target_skill_ids=[],
+                    direction=(
+                        "Successful task with no skills used — pattern may be worth capturing"
+                    ),
+                    confidence=0.6,
+                )
+            )
 
         # Deduplicate: same (evolution_type, skill_id) can trigger from
         # multiple thresholds — keep the one with highest confidence.
@@ -289,10 +288,7 @@ class ExecutionAnalyzer:
             parts.append("\nEvolution Suggestions:")
             for s in suggestions:
                 targets = ", ".join(s.target_skill_ids) or "(new)"
-                parts.append(
-                    f"  - [{s.evolution_type.value}] {targets}: "
-                    f"{s.direction}"
-                )
+                parts.append(f"  - [{s.evolution_type.value}] {targets}: {s.direction}")
 
         if ctx.execution_error:
             parts.append(f"\nExecution Error: {ctx.execution_error}")

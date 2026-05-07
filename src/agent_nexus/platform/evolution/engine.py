@@ -224,9 +224,7 @@ class EvolutionEngine:
         """
         return self._health_checker.diagnose_all()
 
-    def promote_candidate(
-        self, candidate: PromotionCandidate
-    ) -> PromotionResult:
+    def promote_candidate(self, candidate: PromotionCandidate) -> PromotionResult:
         """Promote a skill candidate to a standalone agent.
 
         Args:

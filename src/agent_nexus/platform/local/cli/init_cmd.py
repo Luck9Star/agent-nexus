@@ -11,6 +11,7 @@ from pathlib import Path
 
 import typer
 
+from agent_nexus.platform.config.defaults import DEFAULT_OLLAMA_BASE_URL
 from agent_nexus.platform.local.cli._shared import (
     ConfigMigrator,
     _get_config_dir,
@@ -69,6 +70,7 @@ def doctor() -> None:
     config_key_envs: list[str] = []
     try:
         import toml
+
         raw = toml.loads(config_path.read_text(encoding="utf-8"))
         providers = raw.get("models", {}).get("providers", {})
         config_key_envs = [
@@ -81,15 +83,14 @@ def doctor() -> None:
     # Fallback to built-in defaults if config has no providers
     if not config_key_envs:
         from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
+
         config_key_envs = [
             str(p["api_key_env"])
             for p in DEFAULT_PROVIDERS.values()
             if isinstance(p, dict) and "api_key_env" in p
         ]
     has_key = any(os.environ.get(k) for k in config_key_envs)
-    checks.append(
-        ("API key configured", has_key, "at least one set" if has_key else "none set")
-    )
+    checks.append(("API key configured", has_key, "at least one set" if has_key else "none set"))
 
     # Check 3: git on PATH
     git_path = shutil.which("git")
@@ -175,14 +176,17 @@ def init(
     has_official = any(s.name == "official" for s in config.sources)
     if not has_official:
         import toml
+
         raw = toml.loads(config_path.read_text(encoding="utf-8"))
         raw.setdefault("sources", [])
-        raw["sources"].append({
-            "name": "official",
-            "type": "git",
-            "url": "https://github.com/anthropics/agent-nexus-packages.git",
-            "branch": "main",
-        })
+        raw["sources"].append(
+            {
+                "name": "official",
+                "type": "git",
+                "url": "https://github.com/anthropics/agent-nexus-packages.git",
+                "branch": "main",
+            }
+        )
         config_path.write_text(toml.dumps(raw), encoding="utf-8")
         typer.echo("Registered official source.")
     else:
@@ -197,9 +201,9 @@ def init(
         "DASHSCOPE_API_KEY": "qwen",
         "OLLAMA_HOST": "ollama",
     }
-    detected = sorted(set(
-        provider for env_var, provider in key_envs.items() if os.environ.get(env_var)
-    ))
+    detected = sorted(
+        set(provider for env_var, provider in key_envs.items() if os.environ.get(env_var))
+    )
     if detected:
         typer.echo(f"Detected API keys for: {', '.join(detected)}")
     else:
@@ -306,7 +310,9 @@ def _run_wizard(config_path: Path) -> None:
         except Exception:
             raw = {}
         raw.setdefault("models", {})["default"] = f"{provider}:{model}"
-        prov_section = raw.setdefault("models", {}).setdefault("providers", {}).setdefault(provider, {})
+        prov_section = (
+            raw.setdefault("models", {}).setdefault("providers", {}).setdefault(provider, {})
+        )
         if base_url:
             prov_section["base_url"] = base_url
         if key_env:
@@ -323,8 +329,13 @@ def _run_wizard(config_path: Path) -> None:
     _preset_models = {
         "openai": ("OPENAI_API_KEY", "openai-compatible", None, "gpt-4o"),
         "anthropic": ("ANTHROPIC_API_KEY", "anthropic-messages", None, "claude-sonnet-4-20250514"),
-        "deepseek": ("DEEPSEEK_API_KEY", "openai-compatible", "https://api.deepseek.com/v1", "deepseek-chat"),
-        "ollama": (None, "openai-compatible", "http://localhost:11434/v1", "llama3"),
+        "deepseek": (
+            "DEEPSEEK_API_KEY",
+            "openai-compatible",
+            "https://api.deepseek.com/v1",
+            "deepseek-chat",
+        ),
+        "ollama": (None, "openai-compatible", DEFAULT_OLLAMA_BASE_URL, "llama3"),
     }
     key_env, api_type, base_url, default_model = _preset_models[provider]
 
@@ -350,7 +361,9 @@ def _run_wizard(config_path: Path) -> None:
     if key_env:
         prov_section["api_key_env"] = key_env
     if api_key and key_env:
-        typer.echo(f"  Note: API key stored. Add to shell profile: export {key_env}={api_key[:4]}...")
+        typer.echo(
+            f"  Note: API key stored. Add to shell profile: export {key_env}=****"
+        )
     if api_type != "openai-compatible":
         prov_section["api"] = api_type
     config_path.write_text(toml.dumps(raw), encoding="utf-8")
@@ -363,7 +376,7 @@ def _run_wizard(config_path: Path) -> None:
 
 def _default_config_template() -> str:
     """Return the default config.toml template content."""
-    return """\
+    return f"""\
 # Agent Nexus Configuration
 # Schema version: 1.0
 
@@ -400,6 +413,6 @@ api_key_env = "DASHSCOPE_API_KEY"
 api = "openai-compatible"
 
 [models.providers.ollama]
-base_url = "http://localhost:11434/v1"
+base_url = "{DEFAULT_OLLAMA_BASE_URL}"
 api = "ollama"
 """

@@ -18,6 +18,7 @@ from typing import Any
 
 import toml
 
+from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.models.task import TaskItem, TaskState
 
 # ---------------------------------------------------------------------------
@@ -170,7 +171,7 @@ class OrchestrationDefinition:
 # ---------------------------------------------------------------------------
 
 
-class DSLError(Exception):
+class DSLError(AgentNexusError):
     """Base DSL parsing error."""
 
 
@@ -257,17 +258,13 @@ class OrchestrationDSL:
         # 1. task.agent references
         for task in definition.tasks:
             if task.agent not in agent_names:
-                errors.append(
-                    f"Task '{task.id}' references unknown agent '{task.agent}'"
-                )
+                errors.append(f"Task '{task.id}' references unknown agent '{task.agent}'")
 
         # 2. task.blocked_by references
         for task in definition.tasks:
             for dep_id in task.blocked_by:
                 if dep_id not in task_ids:
-                    errors.append(
-                        f"Task '{task.id}' blocked_by unknown task '{dep_id}'"
-                    )
+                    errors.append(f"Task '{task.id}' blocked_by unknown task '{dep_id}'")
 
         # 2b. Self-reference check
         for task in definition.tasks:
@@ -289,9 +286,7 @@ class OrchestrationDSL:
         # 5. Global preload_agents references
         for agent_name in definition.tool_loading.preload_agents:
             if agent_name not in agent_names:
-                errors.append(
-                    f"preload_agents references unknown agent '{agent_name}'"
-                )
+                errors.append(f"preload_agents references unknown agent '{agent_name}'")
 
         return ValidationResult(errors=errors, warnings=warnings)
 
@@ -379,14 +374,10 @@ class OrchestrationDSL:
                 )
             agent = raw_task.get("agent")
             if not agent or not isinstance(agent, str):
-                raise DSLSyntaxError(
-                    f"tasks[{idx}] ({task_id}): .agent must be a non-empty string"
-                )
+                raise DSLSyntaxError(f"tasks[{idx}] ({task_id}): .agent must be a non-empty string")
             blocked_by = raw_task.get("blocked_by", [])
             if not isinstance(blocked_by, list):
-                raise DSLSyntaxError(
-                    f"tasks[{idx}] ({task_id}): .blocked_by must be a list"
-                )
+                raise DSLSyntaxError(f"tasks[{idx}] ({task_id}): .blocked_by must be a list")
             for dep_idx, dep in enumerate(blocked_by):
                 if not isinstance(dep, str) or not dep:
                     raise DSLSyntaxError(
@@ -395,9 +386,7 @@ class OrchestrationDSL:
                     )
             task_vars = raw_task.get("vars", {})
             if not isinstance(task_vars, dict):
-                raise DSLSyntaxError(
-                    f"tasks[{idx}] ({task_id}): .vars must be a table"
-                )
+                raise DSLSyntaxError(f"tasks[{idx}] ({task_id}): .vars must be a table")
             tasks.append(
                 DSLTask(
                     id=task_id,
@@ -464,14 +453,10 @@ class OrchestrationDSL:
 
         goal = composition.get("description", "")
         if not goal or not isinstance(goal, str):
-            raise DSLSyntaxError(
-                "[composition].description must be a non-empty string"
-            )
+            raise DSLSyntaxError("[composition].description must be a non-empty string")
         agent_name = composition.get("name", "")
         if not agent_name or not isinstance(agent_name, str):
-            raise DSLSyntaxError(
-                "[composition].name must be a non-empty string"
-            )
+            raise DSLSyntaxError("[composition].name must be a non-empty string")
 
         # -- [tasks.X] (dict-of-tables) → list of DSLTask --
         raw_tasks = raw.get("tasks", {})
@@ -494,16 +479,12 @@ class OrchestrationDSL:
                 name = task_id
             agent = task_def.get("agent", "")
             if not isinstance(agent, str) or not agent:
-                raise DSLSyntaxError(
-                    f"tasks.{task_id}.agent must be a non-empty string"
-                )
+                raise DSLSyntaxError(f"tasks.{task_id}.agent must be a non-empty string")
             agent_names_seen.add(agent)
 
             blocked_by = task_def.get("blocked_by", [])
             if not isinstance(blocked_by, list):
-                raise DSLSyntaxError(
-                    f"tasks.{task_id}.blocked_by must be a list"
-                )
+                raise DSLSyntaxError(f"tasks.{task_id}.blocked_by must be a list")
             for dep_idx, dep in enumerate(blocked_by):
                 if not isinstance(dep, str) or not dep:
                     raise DSLSyntaxError(
@@ -540,8 +521,7 @@ class OrchestrationDSL:
         result = self.validate(definition)
         if result.errors:
             raise DSLValidationError(
-                "DSL validation failed:\n"
-                + "\n".join(f"  - {e}" for e in result.errors)
+                "DSL validation failed:\n" + "\n".join(f"  - {e}" for e in result.errors)
             )
 
         return definition
@@ -571,7 +551,5 @@ class OrchestrationDSL:
 
         return detect_cycles_dfs(
             nodes=task_map.keys(),
-            get_deps=lambda name: [
-                dep for dep in task_map[name].blocked_by if dep in task_map
-            ],
+            get_deps=lambda name: [dep for dep in task_map[name].blocked_by if dep in task_map],
         )

@@ -8,6 +8,7 @@ Provides:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import tempfile
@@ -16,15 +17,29 @@ from typing import Any
 
 import toml
 
+from agent_nexus.platform.config.defaults import DEFAULT_OLLAMA_BASE_URL
+
 logger = logging.getLogger(__name__)
 
 
-_BLOCKED_ENV_VARS = frozenset({
-    "PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH",
-    "PYTHONHOME", "HOME", "USER", "SHELL", "IFS",
-    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
-    "LD_AUDIT", "DYLD_FRAMEWORK_PATH", "DYLD_ROOT_PATH",
-})
+_BLOCKED_ENV_VARS = frozenset(
+    {
+        "PATH",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "HOME",
+        "USER",
+        "SHELL",
+        "IFS",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "DYLD_FRAMEWORK_PATH",
+        "DYLD_ROOT_PATH",
+    }
+)
 
 
 def _get_config_dir() -> Path:
@@ -36,6 +51,7 @@ def _get_config_dir() -> Path:
     if env:
         return Path(env)
     from agent_nexus.platform.config.defaults import DEFAULT_CONFIG_DIR
+
     return DEFAULT_CONFIG_DIR
 
 
@@ -148,10 +164,8 @@ class ConfigMigrator:
                 os.fsync(f.fileno())
             os.replace(tmp_path, str(config_path))
         except BaseException:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
             raise
         logger.info(
             "Config migrated: %s -> %s",
@@ -207,7 +221,7 @@ class ConfigMigrator:
                         "api": "openai-compatible",
                     },
                     "ollama": {
-                        "base_url": "http://localhost:11434/v1",
+                        "base_url": DEFAULT_OLLAMA_BASE_URL,
                         "api_key_env": "",
                         "api": "ollama",
                     },
@@ -224,11 +238,7 @@ class ConfigMigrator:
         """Merge defaults into user config. User values always win."""
         result = dict(defaults)
         for key, user_val in user.items():
-            if (
-                key in result
-                and isinstance(result[key], dict)
-                and isinstance(user_val, dict)
-            ):
+            if key in result and isinstance(result[key], dict) and isinstance(user_val, dict):
                 result[key] = cls._deep_merge(result[key], user_val)
             else:
                 result[key] = user_val

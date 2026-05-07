@@ -13,6 +13,7 @@ from agent_nexus.platform.agency.task_composer import (
     TaskComposer,
     TaskComposerInput,
     TaskComposerResult,
+    detect_output_target,
     infer_capabilities,
 )
 
@@ -214,3 +215,40 @@ class TestChineseCapabilityInference:
         assert "system_design" in caps
         # Count occurrences
         assert caps.count("system_design") == 1
+
+
+class TestDetectOutputTarget:
+    """Tests for detect_output_target() — pipeline-level output intent detection."""
+
+    def test_chinese_specific_path(self) -> None:
+        assert detect_output_target("设计架构，输出到 docs/arch.md") == "docs/arch.md"
+
+    def test_english_specific_path(self) -> None:
+        assert detect_output_target("Review the API, output to reviews/api.md") == "reviews/api.md"
+
+    def test_save_to_path(self) -> None:
+        assert detect_output_target("save to reports/result.md") == "reports/result.md"
+
+    def test_chinese_write_to_path(self) -> None:
+        assert detect_output_target("写入 docs/plan.md") == "docs/plan.md"
+
+    def test_generic_file_intent_chinese(self) -> None:
+        assert detect_output_target("输出到文件给我") == "file"
+
+    def test_generic_file_intent_english(self) -> None:
+        assert detect_output_target("output to file") == "file"
+
+    def test_save_to_file_intent(self) -> None:
+        assert detect_output_target("save to file") == "file"
+
+    def test_no_intent(self) -> None:
+        assert detect_output_target("Review the architecture design") is None
+
+    def test_generic_wins_when_no_path(self) -> None:
+        """'写入文件' without a specific path returns 'file', not None."""
+        assert detect_output_target("写入文件") == "file"
+
+    def test_specific_wins_over_generic(self) -> None:
+        """When both specific and generic patterns match, specific path wins."""
+        result = detect_output_target("输出到 report.md 文件")
+        assert result == "report.md"

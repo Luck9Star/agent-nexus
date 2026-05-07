@@ -1,4 +1,4 @@
-"""Self-Evolution Engine models: SkillRecord, EvolutionType, SkillOrigin, SkillLineage, EvolutionContext, EvolutionMetrics."""
+"""Self-Evolution Engine models: SkillRecord, EvolutionType, SkillOrigin, SkillLineage, EvolutionContext, EvolutionMetrics."""  # noqa: E501
 
 from __future__ import annotations
 
@@ -76,13 +76,12 @@ class SkillRecord(FrozenModel):
     first_seen: datetime = Field(default_factory=_utc_now)
     last_updated: datetime = Field(default_factory=_utc_now)
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def _validate_counters(self) -> SkillRecord:
-        if self.total_selections == 0:
-            if self.total_applied != 0 or self.total_fallbacks != 0:
-                raise ValueError(
-                    "counter invariant violated: zero selections requires zero applied and zero fallbacks"
-                )
+        if self.total_selections == 0 and (self.total_applied != 0 or self.total_fallbacks != 0):
+            raise ValueError(
+                "counter invariant violated: zero selections requires zero applied and zero fallbacks"  # noqa: E501
+            )
         if self.total_applied > self.total_selections:
             raise ValueError("total_applied cannot exceed total_selections")
         if self.total_completions > self.total_applied:
@@ -105,13 +104,12 @@ class EvolutionMetrics(FrozenModel):
     total_completions: int = Field(default=0, ge=0)
     total_fallbacks: int = Field(default=0, ge=0)
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def _validate_counters(self) -> EvolutionMetrics:
-        if self.total_selections == 0:
-            if self.total_applied != 0 or self.total_fallbacks != 0:
-                raise ValueError(
-                    "counter invariant violated: zero selections requires zero applied and zero fallbacks"
-                )
+        if self.total_selections == 0 and (self.total_applied != 0 or self.total_fallbacks != 0):
+            raise ValueError(
+                "counter invariant violated: zero selections requires zero applied and zero fallbacks"  # noqa: E501
+            )
         if self.total_applied > self.total_selections:
             raise ValueError("total_applied cannot exceed total_selections")
         if self.total_completions > self.total_applied:

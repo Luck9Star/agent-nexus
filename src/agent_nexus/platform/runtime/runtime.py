@@ -38,7 +38,9 @@ class PythonRuntime:
 
         runtime = PythonRuntime()
         runtime.inject_variable(Variable(name="data", description="input data", value=[1, 2, 3]))
-        runtime.inject_function(Function(name="process", description="process data", signature="(x: list) -> list"))
+        runtime.inject_function(
+            Function(name="process", description="process data", signature="(x: list) -> list")
+        )
         result = await runtime.execute("result = process(data)")
     """
 

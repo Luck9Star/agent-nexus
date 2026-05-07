@@ -15,6 +15,7 @@ import ast
 import logging
 import re
 from abc import ABC, abstractmethod
+from typing import ClassVar
 
 from agent_nexus.models.runtime import SecurityViolation
 
@@ -99,10 +100,7 @@ class ImportRule(SecurityRule):
                                 rule_type="import",
                                 node_type="ImportFrom",
                                 code_snippet=f"from . import {alias.name}",
-                                message=(
-                                    f"Forbidden import: '{alias.name}' "
-                                    f"at line {node.lineno}"
-                                ),
+                                message=(f"Forbidden import: '{alias.name}' at line {node.lineno}"),
                             )
                         )
 
@@ -136,6 +134,16 @@ class FunctionRule(SecurityRule):
         self.forbidden: set[str] = set(forbidden)
         self.qualified_calls: dict[str, set[str]] = qualified_calls or {}
 
+    # Keyword argument names that accept callables (e.g. sorted(..., key=exec))
+    _CALLBACK_KWARGS: ClassVar[set[str]] = {
+        "key",
+        "func",
+        "function",
+        "callback",
+        "fn",
+        "f",
+    }
+
     def check(self, node: ast.AST) -> list[SecurityViolation]:
         violations: list[SecurityViolation] = []
 
@@ -158,10 +166,7 @@ class FunctionRule(SecurityRule):
 
             # Also catch attribute-based calls: builtins.eval(...),
             # __builtins__.exec(...), etc.
-            if (
-                func_name in self.forbidden
-                and isinstance(node.func, ast.Attribute)
-            ):
+            if func_name in self.forbidden and isinstance(node.func, ast.Attribute):
                 violations.append(
                     SecurityViolation(
                         rule_type="function",
@@ -188,9 +193,65 @@ class FunctionRule(SecurityRule):
                         rule_type="function",
                         node_type="QualifiedCall",
                         code_snippet=ast.unparse(node),
+                        message=f"Forbidden qualified call: '{qualified}' at line {node.lineno}",
+                    )
+                )
+
+            # --- Bypass-vector protection ---
+            # Detect forbidden function names passed as *arguments* to other
+            # calls.  This catches patterns like:
+            #   map(__import__, ["os"])
+            #   sorted(data, key=exec)
+            #   filter(compile, items)
+            violations.extend(self._check_callback_args(node))
+
+        return violations
+
+    def _check_callback_args(self, call_node: ast.Call) -> list[SecurityViolation]:
+        """Detect forbidden function names used as callback arguments.
+
+        Higher-order functions like map(), filter(), sorted() accept a
+        callable as their first (or keyword) argument.  Passing a
+        forbidden function name bypasses the normal Call check because
+        the forbidden name is not the function *being* called -- it is
+        an argument that will be invoked later.
+
+        We also check ALL keyword arguments whose name suggests a
+        callable parameter (key=, func=, callback=, etc.).
+        """
+        violations: list[SecurityViolation] = []
+
+        # Check positional arguments for forbidden function names.
+        # Catches: map(__import__, ...), filter(exec, ...), etc.
+        for arg in call_node.args:
+            if isinstance(arg, ast.Name) and arg.id in self.forbidden:
+                violations.append(
+                    SecurityViolation(
+                        rule_type="function",
+                        node_type="CallArgument",
+                        code_snippet=ast.unparse(call_node),
                         message=(
-                            f"Forbidden qualified call: "
-                            f"'{qualified}' at line {node.lineno}"
+                            f"Forbidden function passed as argument: "
+                            f"'{arg.id}' at line {call_node.lineno}"
+                        ),
+                    )
+                )
+
+        # Check keyword arguments whose name suggests a callable value.
+        for kw in call_node.keywords:
+            if (
+                kw.arg in self._CALLBACK_KWARGS
+                and isinstance(kw.value, ast.Name)
+                and kw.value.id in self.forbidden
+            ):
+                violations.append(
+                    SecurityViolation(
+                        rule_type="function",
+                        node_type="CallKeywordArgument",
+                        code_snippet=ast.unparse(call_node),
+                        message=(
+                            f"Forbidden function passed as keyword argument "
+                            f"'{kw.arg}': '{kw.value.id}' at line {call_node.lineno}"
                         ),
                     )
                 )
@@ -223,16 +284,15 @@ class AttributeRule(SecurityRule):
     def check(self, node: ast.AST) -> list[SecurityViolation]:
         violations: list[SecurityViolation] = []
 
-        if isinstance(node, ast.Attribute):
-            if node.attr in self.forbidden:
-                violations.append(
-                    SecurityViolation(
-                        rule_type="attribute",
-                        node_type="Attribute",
-                        code_snippet=f".{node.attr}",
-                        message=f"Forbidden attribute access: '{node.attr}' at line {node.lineno}",
-                    )
+        if isinstance(node, ast.Attribute) and node.attr in self.forbidden:
+            violations.append(
+                SecurityViolation(
+                    rule_type="attribute",
+                    node_type="Attribute",
+                    code_snippet=f".{node.attr}",
+                    message=f"Forbidden attribute access: '{node.attr}' at line {node.lineno}",
                 )
+            )
 
         return violations
 

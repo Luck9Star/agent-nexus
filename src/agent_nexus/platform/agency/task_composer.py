@@ -49,6 +49,50 @@ class TaskComposerResult:
     integrated: IntegratedArtifact | None = None
     qa_passed: bool | None = None
     skipped_tasks: list[str] = field(default_factory=list)
+    output_target: str | None = None
+    """Detected output intent: ``None``, ``"file"`` (generic), or a specific file path."""
+
+
+# ---------------------------------------------------------------------------
+# Output-intent detection (pipeline-level, used by TaskComposer + CLI)
+# ---------------------------------------------------------------------------
+
+_SPECIFIC_PATH_PATTERNS: list[str] = [
+    r"输出到\s+(\S+\.\w+)",
+    r"output\s+to\s+(\S+\.\w+)",
+    r"save\s+to\s+(\S+\.\w+)",
+    r"写入\s+(\S+\.\w+)",
+]
+_GENERIC_FILE_PATTERNS: list[str] = [
+    r"输出到\s*文件",
+    r"output\s+to\s+file",
+    r"save\s+to\s+file",
+    r"写入\s*文件",
+]
+
+
+def detect_output_target(task: str) -> str | None:
+    """Extract output intent from task description.
+
+    Returns a specific file path (e.g. ``"docs/review.md"``) or ``"file"``
+    for generic "output to file" intent.  Returns ``None`` when no output
+    intent is detected.
+
+    Extracted paths are sanitized: only forward slashes, alphanumeric
+    characters, hyphens, underscores, dots, and spaces are kept.
+    """
+    for pat in _SPECIFIC_PATH_PATTERNS:
+        m = re.search(pat, task, re.IGNORECASE)
+        if m:
+            raw = m.group(1)
+            sanitized = re.sub(r"[^A-Za-z0-9/_\-. ]", "", raw)
+            return sanitized
+
+    for pat in _GENERIC_FILE_PATTERNS:
+        if re.search(pat, task, re.IGNORECASE):
+            return "file"
+
+    return None
 
 
 # Task type → required capabilities mapping
@@ -130,6 +174,7 @@ def infer_capabilities(task: str) -> list[str]:
     task_lower = task.lower()
     for keyword, caps in _TASK_CAPABILITY_MAP.items():
         if len(keyword) < 3:
+            logger.warning("Skipping short keyword '%s' (< 3 chars) in capability map", keyword)
             continue
         if re.search(rf"\b{re.escape(keyword)}\b", task_lower):
             matched.extend(caps)
@@ -197,6 +242,9 @@ class TaskComposer:
             When True, use ThreadPoolExecutor for parallel LLM calls.
             Passed through to DAGDispatcher.
         """
+        # Detect output intent (e.g. "输出到文件给我", "save to report.md")
+        output_target = detect_output_target(input.task)
+
         executor = expert_executor or ProfileBasedExecutor(self.registry)
 
         # Step 1: Infer capabilities (LLM or keyword fallback)
@@ -205,6 +253,8 @@ class TaskComposer:
             required_caps = planner_output.capabilities
         else:
             required_caps = infer_capabilities(input.task)
+
+        logger.info("TaskComposer: inferred capabilities: %s", required_caps)
 
         # Step 2: Select specialists
         selection_request = SelectionRequest(
@@ -216,8 +266,12 @@ class TaskComposer:
         )
         selected = self.selector.select(selection_request)
 
+        logger.info(
+            "TaskComposer: selected %d experts: %s", len(selected), [s.agent_id for s in selected]
+        )
+
         if not selected:
-            return TaskComposerResult(task=input.task)
+            return TaskComposerResult(task=input.task, output_target=output_target)
 
         # Step 3: Build subtask definitions and generate DAG
         subtasks: list[SubtaskDef] = []
@@ -257,11 +311,14 @@ class TaskComposer:
             dispatcher = DAGDispatcher(
                 graph=task_graph,
                 executor=executor,
-                max_batch_size=input.max_parallel,
+                max_parallel=input.max_parallel,
                 timeout_seconds=input.timeout_seconds,
                 concurrent=concurrent,
             )
-            dispatch_result = dispatcher.dispatch(dag, input.task)
+            try:
+                dispatch_result = dispatcher.dispatch(dag, input.task)
+            finally:
+                dispatcher.close()
 
             if dispatch_result.timed_out:
                 raise TimeoutError(
@@ -269,12 +326,14 @@ class TaskComposer:
                 )
 
             # Propagate partial execution info: track which tasks failed/skipped
-            if dispatch_result.failed:
+            if dispatch_result.failed or dispatch_result.cancelled:
+                all_failed = dispatch_result.failed + dispatch_result.cancelled
                 logger.warning(
-                    "TaskComposer: %d of %d specialist tasks failed: %s",
+                    "TaskComposer: %d of %d specialist tasks failed (%d cancelled): %s",
                     len(dispatch_result.failed),
                     len(dag.specialist_tasks),
-                    dispatch_result.failed,
+                    len(dispatch_result.cancelled),
+                    all_failed,
                 )
                 # Log specific error messages for root cause diagnosis
                 for tid, err_msg in dispatch_result.errors.items():
@@ -284,6 +343,7 @@ class TaskComposer:
                         err_msg,
                     )
                 skipped.update(dispatch_result.failed)
+                skipped.update(dispatch_result.cancelled)
 
             # Preserve ordering: artifacts in the order they completed
             artifacts = list(dispatch_result.artifacts.values())
@@ -318,8 +378,8 @@ class TaskComposer:
                         continue
                     if all(dep in executed for dep in task.blocked_by):
                         try:
-                            executed.add(task.id)
                             artifact = executor(task.agent, input.task)
+                            executed.add(task.id)
                             artifacts.append(artifact)
                         except Exception:
                             logger.exception(
@@ -328,9 +388,6 @@ class TaskComposer:
                                 task.agent,
                             )
                             failed.add(task.id)
-                        else:
-                            # executed.add already done above before executor call
-                            pass
 
         if not artifacts:
             reason = "no specialists selected" if not selected else "all specialists failed"
@@ -343,9 +400,11 @@ class TaskComposer:
                 dag=dag,
                 qa_passed=False,
                 skipped_tasks=list(skipped),
+                output_target=output_target,
             )
 
         # Step 5: Integrate (LLM or rule-based fallback)
+        logger.info("TaskComposer: integrating %d artifacts", len(artifacts))
         if llm_integrator is not None:
             integrated = llm_integrator.synthesize(artifacts, task=input.task)
         else:
@@ -361,10 +420,13 @@ class TaskComposer:
             )
 
         if llm_qa_gate is not None:
+            # When using LLM integration, skip structural required_sections check.
+            # The integrator produces synthesized keys (summary, recommendations,
+            # etc.) that differ from individual agent output contract keys.
             qa_result = llm_qa_gate.evaluate(
                 integrated,
                 task=input.task,
-                required_sections=required_sections,
+                required_sections=[] if llm_integrator else required_sections,
                 task_type=input.mode,
             )
         else:
@@ -382,4 +444,5 @@ class TaskComposer:
             integrated=integrated,
             qa_passed=qa_result.passed,
             skipped_tasks=list(skipped),
+            output_target=output_target,
         )
