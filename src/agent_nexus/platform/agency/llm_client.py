@@ -12,6 +12,7 @@ strings and prompts.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -439,7 +440,10 @@ class LLMClient:
             else False,
         }
 
-        effective_max_tokens = max_tokens or self._capability.max_output_tokens
+        effective_max_tokens = (
+            max_tokens if max_tokens is not None
+            else self._capability.max_output_tokens
+        )
         if effective_max_tokens:
             kwargs["max_tokens"] = effective_max_tokens
 
@@ -496,8 +500,6 @@ class LLMClient:
         -------
         LLMResponse
         """
-        import time
-
         ctx = CallContext(
             model=self._model_name,
             system_prompt=system_prompt,
