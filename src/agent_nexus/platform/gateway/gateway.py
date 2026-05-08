@@ -407,6 +407,7 @@ class MCPGateway:
             info, health_err = self._check_agent_health(adapter.agent_name, adapter)
             if health_err:
                 return health_err
+            assert info is not None  # guaranteed when health_err is None
 
             try:
                 result = await adapter.execute(info.handle, kwargs)

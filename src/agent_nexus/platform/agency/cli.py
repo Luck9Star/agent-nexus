@@ -18,6 +18,13 @@ from agent_nexus.platform.config.defaults import DEFAULT_LLM_CALL_TIMEOUT, DEFAU
 from .importer import AgencyImporter
 
 if TYPE_CHECKING:
+    from agent_nexus.models.capability import ModelCapabilityRegistry
+
+    from .executor import LLMExecutor, ProfileBasedExecutor
+    from .llm_client import LLMClient
+    from .llm_integrator import LLMIntegrator
+    from .llm_planner import LLMPlanner
+    from .llm_qa_gate import LLMQualityGate
     from .task_composer import TaskComposerResult
 from .planner import DynamicCompositePlanner, SubtaskDef
 from .qa_gate import QAGate, QAGateInput
@@ -306,6 +313,7 @@ def check_profiles(output_dir: str) -> None:
         if read_err is not None:
             errors.append(read_err)
             continue
+        assert profile is not None  # when read_err is None, profile is not None
         checked += 1
         errors.extend(_validate_profile(profile, jf.name, schema))
 
@@ -421,10 +429,11 @@ def _setup_llm_components(
     temperature: float | None,
     registry: ExpertRegistry,
 ) -> tuple[
-    object | None,  # llm_planner
-    object | None,  # llm_integrator
-    object | None,  # llm_qa_gate
-    object | None,  # shared_client
+    LLMPlanner | None,
+    LLMIntegrator | None,
+    LLMQualityGate | None,
+    LLMClient | None,
+    ModelCapabilityRegistry | None,
 ]:
     """Initialize LLM planner/integrator/QA-gate if config is available."""
     shared_client = None
@@ -452,7 +461,7 @@ def _setup_llm_components(
         llm_integrator = LLMIntegrator(client=shared_client, temperature=temperature)
         llm_qa_gate = LLMQualityGate(client=shared_client, temperature=temperature)
         click.echo("LLM-powered planning, integration, and QA enabled")
-        return llm_planner, llm_integrator, llm_qa_gate, shared_client
+        return llm_planner, llm_integrator, llm_qa_gate, shared_client, shared_registry
     except (ImportError, ValueError, KeyError, OSError) as exc:
         if shared_client is not None:
             shared_client.close()
@@ -460,7 +469,7 @@ def _setup_llm_components(
             f"LLM config unavailable ({exc}), falling back to profile-based executor",
             err=True,
         )
-        return None, None, None, None
+        return None, None, None, None, None
 
 
 def _create_executor(
@@ -468,11 +477,11 @@ def _create_executor(
     config_dir: str | None,
     temperature: float | None,
     registry: ExpertRegistry,
-    shared_registry: object | None,
-    shared_client: object | None,
+    shared_registry: ModelCapabilityRegistry | None,
+    shared_client: LLMClient | None,
     effective_call_timeout: float,
     reasoning_protocol: bool,
-) -> tuple[object, bool]:
+) -> tuple[LLMExecutor | ProfileBasedExecutor, bool]:
     """Create the executor, trying LLM first then falling back to profile-based."""
     from .executor import LLMExecutor, ProfileBasedExecutor
 
@@ -711,13 +720,18 @@ def run_composition(
     shared_registry = None
 
     if use_llm:
-        llm_planner, llm_integrator, llm_qa_gate, shared_client = _setup_llm_components(
+        (
+            llm_planner,
+            llm_integrator,
+            llm_qa_gate,
+            shared_client,
+            shared_registry,
+        ) = _setup_llm_components(
             model,
             config_dir,
             temperature,
             registry,
         )
-        shared_registry = shared_client  # for capability_registry passthrough
     else:
         llm_planner = None
         llm_integrator = None

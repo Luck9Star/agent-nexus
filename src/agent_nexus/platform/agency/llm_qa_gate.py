@@ -133,6 +133,7 @@ class LLMQualityGate:
         structural_result: QAGateResult,
     ) -> QAGateResult:
         """Run LLM-based semantic evaluation."""
+        assert self._client is not None  # guarded by evaluate
         sections_preview = "\n".join(
             f"  {k}: {str(v)[:200]}..." for k, v in list(integrated.merged_sections.items())[:10]
         )

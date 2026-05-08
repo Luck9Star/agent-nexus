@@ -311,7 +311,7 @@ class TestSetupLLMComponentsResourceCleanup:
                 temperature=None,
                 registry=MagicMock(),
             )
-            assert result == (None, None, None, None)
+            assert result == (None, None, None, None, None)
             mock_client.close.assert_called_once()
 
     def test_client_not_created_when_import_fails(self):
@@ -334,7 +334,7 @@ class TestSetupLLMComponentsResourceCleanup:
                     temperature=None,
                     registry=MagicMock(),
                 )
-                assert result == (None, None, None, None)
+                assert result == (None, None, None, None, None)
             finally:
                 if orig is not None:
                     sys.modules["agent_nexus.models.capability"] = orig

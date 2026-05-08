@@ -200,6 +200,7 @@ class ExternalMcpAdapter:
 
     async def _open_stdio_transport(self) -> tuple[Any, Any]:
         """Open STDIO transport with shell character validation."""
+        assert self._exit_stack is not None  # guarded by connect()
         if not self._config.command:
             raise ValueError(f"STDIO transport requires 'command' for server '{self._config.name}'")
         _shell_chars = ("|", ">", "<", "&", ";", "`", "$")
@@ -228,6 +229,7 @@ class ExternalMcpAdapter:
 
     async def _open_sse_transport(self) -> tuple[Any, Any]:
         """Open SSE transport."""
+        assert self._exit_stack is not None  # guarded by connect()
         if not self._config.url:
             raise ValueError(f"SSE transport requires 'url' for server '{self._config.name}'")
         return await self._exit_stack.enter_async_context(
@@ -239,6 +241,7 @@ class ExternalMcpAdapter:
 
     async def _open_http_transport(self) -> tuple[Any, Any]:
         """Open HTTP Stream transport."""
+        assert self._exit_stack is not None  # guarded by connect()
         if not self._config.url:
             raise ValueError(
                 f"HTTP_STREAM transport requires 'url' for server '{self._config.name}'"

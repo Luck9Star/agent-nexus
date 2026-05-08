@@ -997,7 +997,7 @@ class TestDAGDispatcherCleanup:
 
     def test_close_shuts_down_pool(self) -> None:
         graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor, concurrent=True)
+        dispatcher = DAGDispatcher(graph, _ok_executor, use_concurrency=True)
         # Force pool creation by triggering a concurrent dispatch path
         assert dispatcher._pool is None
         dispatcher.close()
@@ -1006,7 +1006,7 @@ class TestDAGDispatcherCleanup:
 
     def test_del_with_active_pool_does_not_crash(self) -> None:
         graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor, concurrent=True)
+        dispatcher = DAGDispatcher(graph, _ok_executor, use_concurrency=True)
         # Simulate pool being created but never closed
         import concurrent.futures
 
@@ -1047,7 +1047,7 @@ class TestParallelRaceCondition:
             ],
         )
         graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _controlled_executor, concurrent=True)
+        dispatcher = DAGDispatcher(graph, _controlled_executor, use_concurrency=True)
 
         result = dispatcher.dispatch(dag, "test task")
         # fast_ok should be in completed, not in cancelled
@@ -1072,7 +1072,7 @@ class TestParallelRaceCondition:
             ],
         )
         graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _fail_immediately, concurrent=True)
+        dispatcher = DAGDispatcher(graph, _fail_immediately, use_concurrency=True)
 
         result = dispatcher.dispatch(dag, "test task")
         # At least one should be failed, the rest cancelled

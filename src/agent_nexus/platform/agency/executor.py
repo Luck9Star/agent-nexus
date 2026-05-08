@@ -98,6 +98,9 @@ class ProfileBasedExecutor:
             metadata={"synthetic": True},
         )
 
+    def close(self) -> None:
+        """No-op close for duck-type compatibility with LLMExecutor."""
+
     def _generate_sections(
         self,
         name: str,
@@ -278,7 +281,7 @@ class LLMExecutor:
             response.provider,
         )
 
-        metadata = {
+        metadata: dict[str, object] = {
             "llm": True,
             "model": response.model,
             "provider": response.provider,

@@ -106,8 +106,8 @@ def _check_api_keys(config_path: Path) -> tuple[str, bool, str]:
             for v in providers.values()
             if isinstance(v, dict) and "api_key_env" in v
         ]
-    except Exception:
-        pass
+    except (OSError, ValueError, KeyError):
+        pass  # config file missing or malformed; fall through to defaults
     if not config_key_envs:
         from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
 

@@ -194,6 +194,7 @@ class LLMPlanner:
 
     def _llm_analyze(self, task: str) -> PlannerOutput:
         """Perform LLM-based task analysis with Pydantic validation (N3)."""
+        assert self._client is not None  # guarded by analyze_task
         all_profiles = self._get_all_profiles()
         system_prompt = self._build_planning_prompt(all_profiles)
         response = self._client.call(

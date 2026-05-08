@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import toml
 
@@ -321,7 +321,7 @@ class OrchestrationDSL:
                 raise DSLSyntaxError(
                     f"{context}.blocked_by[{dep_idx}] must be a non-empty string, got {dep!r}"
                 )
-        return list(blocked_by)
+        return cast("list[str]", blocked_by)
 
     @staticmethod
     def _parse_canonical_agents(raw: dict[str, Any]) -> dict[str, DSLAgent]:
@@ -332,6 +332,7 @@ class OrchestrationDSL:
         for idx, raw_agent in enumerate(raw_agents):
             if not isinstance(raw_agent, dict):
                 raise DSLSyntaxError(f"agents[{idx}] must be a table")
+            raw_agent = cast("dict[str, Any]", raw_agent)
             name = raw_agent.get("name")
             if not name or not isinstance(name, str):
                 raise DSLSyntaxError(f"agents[{idx}].name must be a non-empty string")
@@ -361,6 +362,7 @@ class OrchestrationDSL:
         for idx, raw_task in enumerate(raw_tasks):
             if not isinstance(raw_task, dict):
                 raise DSLSyntaxError(f"tasks[{idx}] must be a table")
+            raw_task = cast("dict[str, Any]", raw_task)
             task = OrchestrationDSL._parse_single_task(raw_task, idx, seen_task_ids)
             seen_task_ids.add(task.id)
             tasks.append(task)
@@ -538,7 +540,7 @@ class OrchestrationDSL:
         try:
             return DSLToolLoading(
                 strategy=tl_strategy,
-                preload_agents=list(tl_preload),
+                preload_agents=cast("list[str]", tl_preload),
             )
         except ValueError as exc:
             raise DSLSyntaxError(f"[tool_loading]: {exc}") from exc

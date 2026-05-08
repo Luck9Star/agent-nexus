@@ -406,7 +406,7 @@ class TaskComposer:
             executor=executor,
             max_parallel=max_parallel,
             timeout_seconds=timeout_seconds,
-            concurrent=concurrent,
+            use_concurrency=concurrent,
         )
         try:
             dispatch_result = dispatcher.dispatch(dag, task)

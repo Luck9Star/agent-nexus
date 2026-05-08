@@ -91,7 +91,7 @@ class Integrator:
                 type(existing).__name__,
                 type(value).__name__,
             )
-            converted: list[object] = existing if isinstance(existing, list) else [existing]
+            converted = list(existing) if isinstance(existing, list) else [existing]
             converted.append(value)
             merged_sections[key] = converted
 

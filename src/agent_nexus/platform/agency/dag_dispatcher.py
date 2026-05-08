@@ -181,7 +181,7 @@ class DAGDispatcher:
         executor: ExpertExecutor,
         max_parallel: int | None = None,
         timeout_seconds: float | None = None,
-        concurrent: bool = False,
+        use_concurrency: bool = False,
         *,
         max_batch_size: int | None = None,
     ) -> None:
@@ -197,7 +197,7 @@ class DAGDispatcher:
         self._executor = executor
         self._max_batch_size = max(1, effective)
         self._timeout_seconds = timeout_seconds
-        self._concurrent = concurrent
+        self._concurrent = use_concurrency
         # Persistent thread pool for concurrent execution (reused across batches)
         self._pool: concurrent.futures.ThreadPoolExecutor | None = None
 

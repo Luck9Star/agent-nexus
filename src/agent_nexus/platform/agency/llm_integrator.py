@@ -112,6 +112,7 @@ class LLMIntegrator:
         task: str,
     ) -> IntegratedArtifact:
         """Perform LLM-based synthesis."""
+        assert self._client is not None  # guarded by synthesize
         system_prompt = self._build_synthesis_prompt(artifacts)
         user_message = (
             f"Original task: {task}\n\n"
