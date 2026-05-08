@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import string as _string
 from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -187,18 +188,26 @@ class Integrator:
         ]
 
 
+def _extract_strings_from_value(value: Any) -> list[str]:
+    """Extract string descriptions from a section value (list or str)."""
+    if isinstance(value, list):
+        result: list[str] = []
+        for item in value:
+            if isinstance(item, dict) and "description" in item:
+                result.append(item["description"])
+            elif isinstance(item, str):
+                result.append(item)
+        return result
+    if isinstance(value, str):
+        return [value]
+    return []
+
+
 def _extract_risks(artifact: Artifact, risks: list[str]) -> None:
     """Extract risk descriptions from an artifact's sections."""
     for key, value in artifact.sections.items():
         if "risk" in key.lower() or "severity" in key.lower():
-            if isinstance(value, list):
-                for item in value:
-                    if isinstance(item, dict) and "description" in item:
-                        risks.append(item["description"])
-                    elif isinstance(item, str):
-                        risks.append(item)
-            elif isinstance(value, str):
-                risks.append(value)
+            risks.extend(_extract_strings_from_value(value))
 
 
 def _normalize_severity(value: str) -> str:
@@ -321,11 +330,7 @@ def _extract_risk_sets(artifacts: list[Artifact]) -> dict[str, list[str]]:
         risks_found: list[str] = []
         for key, value in artifact.sections.items():
             if "risk" in key.lower() and isinstance(value, list):
-                for item in value:
-                    if isinstance(item, dict) and "description" in item:
-                        risks_found.append(item["description"])
-                    elif isinstance(item, str):
-                        risks_found.append(item)
+                risks_found.extend(_extract_strings_from_value(value))
         if risks_found:
             risk_sets[artifact.source_agent] = risks_found
     return risk_sets

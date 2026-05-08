@@ -294,31 +294,32 @@ class SourceManager:
     # Internal: sources.yaml mode (backward compat)
     # ------------------------------------------------------------------
 
-    def _load(self) -> None:
-        """Load ``sources.yaml``.  Create with defaults if absent."""
+    def _read_raw_yaml(self) -> list[Any] | None:
+        """Read and validate ``sources.yaml``.
+
+        Returns the sources list on success, ``None`` on any failure
+        (missing file, parse error, invalid structure).
+        """
         if not self._path.exists():
             logger.debug("sources.yaml not found at %s, creating defaults", self._path)
-            self._sources = [_OFFICIAL_SOURCE]
-            return
-
+            return None
         try:
             raw = yaml.safe_load(self._path.read_text(encoding="utf-8"))
         except Exception as exc:
             logger.warning("Failed to parse %s: %s", self._path, exc)
-            self._sources = [_OFFICIAL_SOURCE]
-            return
-
+            return None
         if not raw or "sources" not in raw:
             logger.warning("sources.yaml empty or missing 'sources' key")
-            self._sources = [_OFFICIAL_SOURCE]
-            return
-
+            return None
         sources_list = raw["sources"]
         if not isinstance(sources_list, list):
             logger.warning("sources.yaml 'sources' key is not a list, using defaults")
-            self._sources = [_OFFICIAL_SOURCE]
-            return
+            return None
+        return sources_list
 
+    @staticmethod
+    def _parse_entries(sources_list: list[Any]) -> list[SourceEntry]:
+        """Parse source entries from raw list, skipping invalid items."""
         entries: list[SourceEntry] = []
         for item in sources_list:
             if not isinstance(item, dict):
@@ -327,7 +328,16 @@ class SourceManager:
             entry = _parse_source_entry(item)
             if entry is not None:
                 entries.append(entry)
+        return entries
 
+    def _load(self) -> None:
+        """Load ``sources.yaml``.  Create with defaults if absent."""
+        sources_list = self._read_raw_yaml()
+        if sources_list is None:
+            self._sources = [_OFFICIAL_SOURCE]
+            return
+
+        entries = self._parse_entries(sources_list)
         if sources_list and not entries:
             logger.warning("All source entries invalid, using defaults")
             self._sources = [_OFFICIAL_SOURCE]

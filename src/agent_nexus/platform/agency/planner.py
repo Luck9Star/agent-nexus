@@ -57,6 +57,13 @@ _RESERVED_IDS = {"integrate", "validate"}
 _INVALID_ID_CHARS = {'"', "#", "\n", "\t", "[", "\r", "\\"}
 
 
+def _check_invalid_chars(text: str, label: str) -> None:
+    """Raise ValueError if *text* contains TOML-special characters."""
+    for ch in _INVALID_ID_CHARS:
+        if ch in text:
+            raise ValueError(f"{label} contains invalid character: {ch!r}")
+
+
 def _validate_subtasks(subtasks: list[SubtaskDef], composition_name: str) -> None:
     """Validate subtask list and composition name.
 
@@ -67,28 +74,16 @@ def _validate_subtasks(subtasks: list[SubtaskDef], composition_name: str) -> Non
     if not subtasks:
         raise ValueError("Need at least one subtask to plan a composition")
 
-    # Validate IDs don't contain TOML-special characters
-    for st in subtasks:
-        for ch in _INVALID_ID_CHARS:
-            if ch in st.id:
-                raise ValueError(f"Subtask id '{st.id}' contains invalid character: {ch!r}")
+    _check_invalid_chars(composition_name, "composition_name")
 
-    # Validate composition_name for TOML-special characters
-    for ch in _INVALID_ID_CHARS:
-        if ch in composition_name:
-            raise ValueError(f"composition_name contains invalid character: {ch!r}")
-
-    # Validate no duplicate IDs
     seen_ids: set[str] = set()
     for st in subtasks:
+        _check_invalid_chars(st.id, f"Subtask id '{st.id}'")
         if st.id in seen_ids:
             raise ValueError(f"Duplicate subtask id: '{st.id}'")
-        seen_ids.add(st.id)
-
-    # Validate no reserved IDs
-    for st in subtasks:
         if st.id in _RESERVED_IDS:
             raise ValueError(f"Subtask id '{st.id}' is reserved for synthetic tasks")
+        seen_ids.add(st.id)
 
 
 class DynamicCompositePlanner:

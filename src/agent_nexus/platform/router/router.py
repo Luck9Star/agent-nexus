@@ -177,6 +177,69 @@ class PlatformRouter:
 
         return await self.route_to_atomic(agent_name, message, conv_id)
 
+    def _setup_task_graph(
+        self,
+        ctx: WorkflowContext,
+        definition: OrchestrationDefinition,
+    ) -> tuple[str, str] | None:
+        """Populate *ctx.task_graph* from *definition*.
+
+        Returns ``(error_msg, error_type)`` on failure, ``None`` on success.
+        """
+        ctx.task_graph = TaskGraph(":memory:")
+        try:
+            sorted_tasks = self._topological_sort_tasks(definition.tasks)
+            ctx.task_graph.add_tasks([dsl_task.to_task_item() for dsl_task in sorted_tasks])
+            return None
+        except (ValueError, KeyError, TypeError, RuntimeError, sqlite3.Error) as exc:
+            error = f"TaskGraph setup failed: {exc}"
+            logger.error(error, exc_info=exc)
+            return error, type(exc).__name__
+
+    async def _execute_phases(
+        self,
+        ctx: WorkflowContext,
+        definition: OrchestrationDefinition,
+        message: str,
+        role_agents: dict[str, list[str]],
+        phase_results: dict[WorkflowPhase, str],
+    ) -> tuple[int, str | None, str | None]:
+        """Run all workflow phases with an overall timeout.
+
+        Returns ``(completed_count, last_error, last_error_type)``.
+        """
+        completed = 0
+        last_error: str | None = None
+        last_error_type: str | None = None
+
+        async def _run_phases() -> None:
+            nonlocal message, completed, last_error, last_error_type
+            for phase in _PHASE_ORDER:
+                ctx.current_phase = phase
+                try:
+                    result = await self._execute_phase(
+                        ctx, phase, definition, message, role_agents=role_agents
+                    )
+                    phase_results[phase] = result
+                    completed += 1
+                    message = self._build_phase_message(phase, result)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    last_error = f"Phase {phase.value} failed: {exc}"
+                    last_error_type = type(exc).__name__
+                    logger.error(last_error, exc_info=exc)
+                    break
+
+        try:
+            await asyncio.wait_for(_run_phases(), timeout=_DEFAULT_COMPOSITE_TIMEOUT)
+        except TimeoutError:
+            last_error = f"Composite workflow timed out after {_DEFAULT_COMPOSITE_TIMEOUT:.0f}s"
+            last_error_type = "TimeoutError"
+            logger.error(last_error)
+
+        return completed, last_error, last_error_type
+
     async def route_composite(
         self,
         definition: OrchestrationDefinition,
@@ -190,96 +253,40 @@ class PlatformRouter:
         2. Populate TaskGraph from the OrchestrationDefinition's tasks.
         3. Execute each phase in order, collecting results.
         4. Return WorkflowResult with aggregated outputs.
-
-        Args:
-            definition: Parsed TOML orchestration definition.
-            message: User message / goal for the workflow.
-            conversation_id: Conversation identifier.
-
-        Returns:
-            WorkflowResult summarizing the workflow outcome.
         """
-        # 1. Create fresh context per workflow -- no cross-workflow state leakage
         ctx = WorkflowContext(
             conversation_id=conversation_id,
             message=message,
             agent_name=definition.agent_name,
         )
 
-        # Initialize result variables before TaskGraph setup so they are
-        # always defined even if add_task() raises during population.
-        phase_results: dict[WorkflowPhase, str] = {}
-        completed = 0
         total = len(_PHASE_ORDER)
-        last_error: str | None = None
-        last_error_type: str | None = None
 
-        # 2. Create in-memory TaskGraph and populate from definition.
-        #    Tasks must be added in dependency order (deps before dependents)
-        #    so that add_task can validate blocked_by references.  The DSL
-        #    validate() method checks that all blocked_by IDs exist in the
-        #    task set but does NOT enforce topological ordering of the list.
-        ctx.task_graph = TaskGraph(":memory:")
-        try:
-            sorted_tasks = self._topological_sort_tasks(definition.tasks)
-            ctx.task_graph.add_tasks([dsl_task.to_task_item() for dsl_task in sorted_tasks])
-        except (ValueError, KeyError, TypeError, RuntimeError, sqlite3.Error) as exc:
-            last_error = f"TaskGraph setup failed: {exc}"
-            last_error_type = type(exc).__name__
-            logger.error(last_error, exc_info=exc)
+        # 2. Set up TaskGraph — early return on failure.
+        setup_error = self._setup_task_graph(ctx, definition)
+        if setup_error is not None:
+            error_msg, error_type = setup_error
             try:
                 await ctx.aclose()
             except Exception:
                 logger.debug("Failed to close context after TaskGraph error", exc_info=True)
             return WorkflowResult(
-                success=False,
-                final_output="",
-                phase_results=phase_results,
-                total_phases=total,
-                completed_phases=completed,
-                error=last_error,
-                error_type=type(exc).__name__,
+                success=False, final_output="",
+                phase_results={}, total_phases=total, completed_phases=0,
+                error=error_msg, error_type=error_type,
             )
 
-        # Pre-compute role->agent mapping once (deterministic across phases)
+        # Pre-compute role->agent mapping once
         role_agents: dict[str, list[str]] = {}
         for name, agent_def in definition.agents.items():
             role_agents.setdefault(agent_def.role, []).append(name)
 
         # 3. Execute phases
+        phase_results: dict[WorkflowPhase, str] = {}
         try:
-
-            async def _run_phases() -> None:
-                nonlocal message, completed, last_error, last_error_type
-                for phase in _PHASE_ORDER:
-                    ctx.current_phase = phase
-                    try:
-                        result = await self._execute_phase(
-                            ctx, phase, definition, message, role_agents=role_agents
-                        )
-                        phase_results[phase] = result
-                        completed += 1
-
-                        # Feed previous phase output into next phase's message
-                        message = self._build_phase_message(phase, result)
-
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as exc:
-                        last_error = f"Phase {phase.value} failed: {exc}"
-                        last_error_type = type(exc).__name__
-                        logger.error(last_error, exc_info=exc)
-                        break
-
-            try:
-                await asyncio.wait_for(
-                    _run_phases(),
-                    timeout=_DEFAULT_COMPOSITE_TIMEOUT,
-                )
-            except TimeoutError:
-                last_error = f"Composite workflow timed out after {_DEFAULT_COMPOSITE_TIMEOUT:.0f}s"
-                last_error_type = "TimeoutError"
-                logger.error(last_error)
+            completed, last_error, last_error_type = await self._execute_phases(
+                ctx, definition, message, role_agents, phase_results,
+            )
         finally:
             try:
                 await ctx.aclose()
@@ -290,17 +297,13 @@ class PlatformRouter:
         success = completed == total
         final_output = phase_results.get(WorkflowPhase.verification, "")
         if not success and WorkflowPhase.synthesis in phase_results:
-            # Use synthesis output as partial result if available
             final_output = phase_results.get(WorkflowPhase.synthesis, "")
 
         return WorkflowResult(
-            success=success,
-            final_output=final_output,
-            phase_results=phase_results,
-            total_phases=total,
+            success=success, final_output=final_output,
+            phase_results=phase_results, total_phases=total,
             completed_phases=completed,
-            error=last_error,
-            error_type=last_error_type,
+            error=last_error, error_type=last_error_type,
         )
 
     async def route_to_atomic(
@@ -504,6 +507,37 @@ class PlatformRouter:
     # IPC helpers
     # ------------------------------------------------------------------
 
+    async def _ipc_call_safe(
+        self,
+        coro: Any,
+        agent_name: str,
+        operation: str,
+    ) -> Any:
+        """Await *coro*, re-raising IPC errors and wrapping others as AgentExecutionError."""
+        try:
+            return await coro
+        except (IPCConnectionError, IPCTimeoutError, IPCError):
+            raise
+        except (TimeoutError, OSError, RuntimeError) as exc:
+            raise AgentExecutionError(
+                f"IPC {operation} error for agent '{agent_name}': {exc}",
+                type(exc).__name__,
+            ) from exc
+
+    @staticmethod
+    def _check_ipc_response(response: Any, agent_name: str) -> None:
+        """Raise AgentExecutionError if the IPC response indicates failure."""
+        if response.type == AgentToPlatformType.ERROR:
+            raise AgentExecutionError(
+                f"Agent '{agent_name}' error: {response.error or 'unknown'}",
+                "AgentError",
+            )
+        if not response.is_success:
+            raise AgentExecutionError(
+                f"Agent '{agent_name}' returned status: {response.status or 'unknown'}",
+                "AgentStatusError",
+            )
+
     async def _ipc_chat(
         self,
         agent_name: str,
@@ -530,42 +564,17 @@ class PlatformRouter:
                 "ProcessNotAliveError",
             )
 
-        # Serialize send+receive per agent to prevent concurrent IPC
-        # calls from interleaving responses on the same handle.
         lock = get_ipc_lock(agent_name)
         async with lock:
-            try:
-                await handle.ipc.send_chat(message, conversation_id=conversation_id)
-            except (IPCConnectionError, IPCTimeoutError, IPCError):
-                raise
-            except (TimeoutError, OSError, RuntimeError) as exc:
-                raise AgentExecutionError(
-                    f"IPC send error for agent '{agent_name}': {exc}",
-                    type(exc).__name__,
-                ) from exc
-
-            try:
-                response = await handle.ipc.receive_until_result(timeout=timeout)
-            except (IPCConnectionError, IPCTimeoutError, IPCError):
-                raise
-            except (TimeoutError, OSError, RuntimeError) as exc:
-                raise AgentExecutionError(
-                    f"IPC error communicating with agent '{agent_name}': {exc}",
-                    type(exc).__name__,
-                ) from exc
-
-            if response.type == AgentToPlatformType.ERROR:
-                raise AgentExecutionError(
-                    f"Agent '{agent_name}' error: {response.error or 'unknown'}",
-                    "AgentError",
-                )
-
-            if not response.is_success:
-                raise AgentExecutionError(
-                    f"Agent '{agent_name}' returned status: {response.status or 'unknown'}",
-                    "AgentStatusError",
-                )
-
+            await self._ipc_call_safe(
+                handle.ipc.send_chat(message, conversation_id=conversation_id),
+                agent_name, "send",
+            )
+            response = await self._ipc_call_safe(
+                handle.ipc.receive_until_result(timeout=timeout),
+                agent_name, "receive",
+            )
+            self._check_ipc_response(response, agent_name)
             return str(response.content) if response.content is not None else ""
 
     # ------------------------------------------------------------------

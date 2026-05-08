@@ -523,6 +523,18 @@ class DAGDispatcher:
         self._collect_futures(futures, result)
         self._drain_remaining(futures, result)
 
+    def _fail_started_in_batch(
+        self,
+        started_ids: list[str],
+        result: DispatchResult,
+    ) -> None:
+        """Fail tasks started in a batch but not completed (deadline hit)."""
+        for tid in started_ids:
+            task = self._graph.get_task(tid)
+            if task is not None and task.state == TaskState.IN_PROGRESS:
+                _safe_fail(self._graph, tid)
+                result.failed.append(tid)
+
     def _dispatch_sequential(
         self,
         batch: list[TaskItem],
@@ -535,12 +547,7 @@ class DAGDispatcher:
         for task_item in batch:
             if deadline is not None and time.monotonic() > deadline:
                 result.timed_out = True
-                # Fail any tasks we started in this batch but didn't complete
-                for tid in started_in_batch:
-                    task = self._graph.get_task(tid)
-                    if task is not None and task.state == TaskState.IN_PROGRESS:
-                        _safe_fail(self._graph, tid)
-                        result.failed.append(tid)
+                self._fail_started_in_batch(started_in_batch, result)
                 break
 
             self._graph.start_task(task_item.id)

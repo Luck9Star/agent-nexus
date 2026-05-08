@@ -558,7 +558,7 @@ class TestRouteToAtomic:
 
         result = await router.route_to_atomic("agent-a", "hello", "conv-1")
         assert result["success"] is False
-        assert "IPC error" in result["error"]
+        assert "IPC receive error" in result["error"]
         assert "pipe broken" in result["error"]
 
     @pytest.mark.asyncio
@@ -1219,8 +1219,8 @@ class TestExecuteSingleAgentErrorWrapping:
     @pytest.mark.parametrize(
         "recv_side_effect, match_str, expected_error_type",
         [
-            (TimeoutError("IPC timeout"), "IPC error", "TimeoutError"),
-            (ConnectionError("Broken pipe"), "IPC error", "ConnectionError"),
+            (TimeoutError("IPC timeout"), "IPC receive error", "TimeoutError"),
+            (ConnectionError("Broken pipe"), "IPC receive error", "ConnectionError"),
         ],
         ids=["timeout", "connection"],
     )
@@ -1644,7 +1644,7 @@ class TestRouteToAtomicSendChatError:
 
         result = await router.route_to_atomic("agent-a", "hello", "conv-1")
         assert result["success"] is False
-        assert "IPC error" in result["error"]
+        assert "IPC receive error" in result["error"]
         assert "recv fail" in result["error"]
 
 
