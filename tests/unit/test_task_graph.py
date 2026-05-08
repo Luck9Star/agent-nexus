@@ -733,47 +733,32 @@ class TestAddTaskCycleCheckWithBlockedBy:
     It is covered when a new task has blocked_by and the cycle check returns True.
     """
 
-    def test_add_task_blocked_by_creates_cycle_via_chain(self, task_graph: TaskGraph) -> None:
-        """New task blocked_by an existing task that transitively depends on it.
+    def test_cycle_detection_with_preexisting_cycle_in_db(self, task_graph: TaskGraph) -> None:
+        """Adding a non-cyclic task succeeds even when DB has a pre-existing cycle.
 
-        Build: A -> B (B blocked_by A). Then adding C blocked_by B is fine.
-        Then trying to add a task that closes the loop triggers line 185.
+        Build A→B→C→D chain, inject back-edge A→D via raw SQL to create
+        A→D→C→B→A cycle, then verify adding E blocked_by A still works
+        (E is not part of the cycle so no false positive).
         """
         task_graph.add_task(_make_task("A"))
         task_graph.add_task(_make_task("B", blocked_by=["A"]))
         task_graph.add_task(_make_task("C", blocked_by=["B"]))
-
-        # Now try to add D blocked_by C where D already has a dep chain back to A.
-        # This is valid (no cycle): D -> C -> B -> A.
         task_graph.add_task(_make_task("D", blocked_by=["C"]))
-        assert task_graph.get_task("D") is not None
 
-        # To trigger line 185 with a True result: add Z blocked_by D,
-        # then try to add a new task A2 blocked_by Z. But we need to build
-        # a scenario where adding a task's blocked_by creates a cycle.
-        # Since we can't re-add A, we create: A->B, then try to add a
-        # task whose blocked_by references an existing task whose deps
-        # lead back to the new task. We do this by first adding Z
-        # blocked_by D, then trying to add a new task blocked_by Z
-        # where Z also depends back.
-        # Actually the simplest way: use raw SQL to set up the back-edge
-        # so _would_create_cycle returns True on the next add_task.
+        # Inject back-edge to create a cycle in the DB
         import sqlite3
 
         conn = sqlite3.connect(str(task_graph._db_path))
-        # Make A blocked_by D (creating A->D->C->B->A cycle via raw SQL)
         conn.execute("INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES ('A', 'D')")
         conn.commit()
         conn.close()
 
-        # Now adding any task blocked_by A triggers cycle check via A->D->C->B->A
-        # But the new task itself is fine. The key is that _would_create_cycle
-        # walks from blocked_by_id back and checks if it reaches task_id.
-        # Adding E blocked_by A: walk from A -> D -> C -> B -> A.
-        # But A != E, so no cycle detected for E.
-        # The line is covered when blocked_by is non-empty AND cycle check runs.
+        # E blocked_by A is NOT a cycle (E is new, not part of A→D→C→B→A)
         task_graph.add_task(_make_task("E", blocked_by=["A"]))
-        assert task_graph.get_task("E") is not None
+        task_e = task_graph.get_task("E")
+        assert task_e is not None
+        assert task_e.id == "E"
+        assert "A" in task_e.blocked_by
 
     def test_add_task_blocked_by_cycle_detected(self, task_graph: TaskGraph) -> None:
         """New task whose blocked_by would create a cycle is rejected at line 185."""
@@ -947,10 +932,18 @@ class TestSchemaInitTransaction:
 
     def test_init_db_creates_tables(self, tmp_path: Path) -> None:
         """Schema init creates all required tables and indexes."""
-        tg = TaskGraph(tmp_path / "test.db")
-        # If init succeeded, basic operations should work
-        tg.add_task(_make_task("t1"))
-        assert tg.get_task("t1") is not None
+        db_path = tmp_path / "test.db"
+        tg = TaskGraph(db_path)
+        # Verify tables were created by querying sqlite_master
+        import sqlite3
+
+        conn = sqlite3.connect(str(db_path))
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        indexes = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+        conn.close()
+        assert "tasks" in tables
+        assert "task_dependencies" in tables
+        assert len(indexes) >= 1  # at least one index on dependencies
         tg.close()
 
     def test_init_db_idempotent(self, tmp_path: Path) -> None:

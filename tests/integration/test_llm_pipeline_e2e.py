@@ -57,5 +57,5 @@ def test_llm_pipeline_fallback_without_llm(mock_llm_client):
     # Pipeline should complete with rule-based components
     assert result.integrated is not None
     assert isinstance(result.integrated.merged_sections, dict)
-    assert result.qa_passed is not None
+    assert len(result.integrated.merged_sections) > 0
     assert isinstance(result.qa_passed, bool)

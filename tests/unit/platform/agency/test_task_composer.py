@@ -196,10 +196,10 @@ class TestChineseCapabilityInference:
         caps = infer_capabilities("安全评审")
         assert "security_review" in caps
 
-    def test_unknown_chinese_returns_something_or_empty(self) -> None:
-        """Unknown Chinese text returns a list (may be empty if no keywords match)."""
+    def test_unknown_chinese_returns_empty(self) -> None:
+        """Chinese text with no matching keywords returns empty list."""
         caps = infer_capabilities("这是一段随机文字没有关键词")
-        assert isinstance(caps, list)
+        assert caps == []
 
     def test_deduplication_across_maps(self) -> None:
         """Deduplication when both Chinese and English keywords match same capability.

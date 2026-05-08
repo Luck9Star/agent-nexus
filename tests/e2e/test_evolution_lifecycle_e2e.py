@@ -423,6 +423,7 @@ class TestEvolutionEngineErrorPaths:
             problem_description="Tool returns 500 errors",
         )
         assert isinstance(results, list)
+        assert all(hasattr(r, "success") for r in results)
 
     def test_evolve_metric_check_returns_results(
         self, engine_and_store
@@ -433,3 +434,4 @@ class TestEvolutionEngineErrorPaths:
         engine, _ = engine_and_store
         results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
         assert isinstance(results, list)
+        assert all(hasattr(r, "success") for r in results)

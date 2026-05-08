@@ -123,8 +123,8 @@ class TestRegistryLoading:
         assert len(all_agents) > 0
 
     def test_registry_search_by_capability(self, populated_registry):
-        results = populated_registry.search_by_capability(["architecture"])
-        assert isinstance(results, list)
+        results = populated_registry.search_by_capability(["code_review"])
+        assert len(results) > 0
 
     def test_registry_get_returns_profile(self, populated_registry, importer_profiles):
         first_id = importer_profiles[0]["expert_profile"]["id"]
@@ -179,8 +179,8 @@ class TestSpecialistSelection:
             permissions="plan",
         )
         results = selector.select(req)
-        # Should return empty or very few (best effort)
-        assert isinstance(results, list)
+        # No agent has quantum_computing or spaceflight capabilities
+        assert len(results) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +370,8 @@ class TestIntegrationAndConflicts:
             ),
         ]
         integrated = Integrator.merge(artifacts)
-        assert integrated.conflicts is not None
+        # Conflicting recommendations should be detected
+        assert len(integrated.conflicts) > 0
 
 
 # ---------------------------------------------------------------------------

@@ -1343,7 +1343,10 @@ class TestIntegratorAdvanced:
         ]
         integrated = Integrator.merge(artifacts)
         # "x" should be a list (string converted to list + list appended)
-        assert isinstance(integrated.merged_sections["x"], list)
+        merged_x = integrated.merged_sections["x"]
+        assert isinstance(merged_x, list)
+        assert "string_val" in merged_x
+        assert ["list_val"] in merged_x
 
 
 # ---------------------------------------------------------------------------

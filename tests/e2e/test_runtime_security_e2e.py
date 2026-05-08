@@ -85,10 +85,11 @@ class TestSecurityCheckerRuleIntegration:
 class TestSecurityCheckerEdgeCases:
     """AST parsing and rule application edge cases."""
 
-    def test_syntax_error_returns_empty(self) -> None:
+    def test_syntax_error_returns_parse_violation(self) -> None:
         checker = SecurityChecker()
         violations = checker.check_code("def foo(")
-        assert isinstance(violations, list)
+        assert len(violations) >= 1
+        assert violations[0].rule_type == "parse"
 
     def test_empty_code_returns_parse_error(self) -> None:
         checker = SecurityChecker()
@@ -540,15 +541,14 @@ class TestAdvancedBypassVectors:
         assert len(violations) >= 1
 
     def test_compile_run_chain_blocked(self) -> None:
-        """compile() + run chain for code injection is blocked."""
+        """compile() is blocked by FunctionRule at AST level."""
         checker = SecurityChecker()
         violations = checker.check_code(
             "code_obj = compile('import os', '<string>', 'run')"
         )
-        # compile is not itself blocked but the import inside the string
-        # would be caught if run through the checker
-        # At minimum, the code should not crash the checker
-        assert isinstance(violations, list)
+        assert len(violations) >= 1
+        assert violations[0].rule_type == "function"
+        assert "compile" in violations[0].message
 
     def test_base64_decode_exec_blocked(self) -> None:
         """Base64-decoded payload with exec() is blocked at function level."""

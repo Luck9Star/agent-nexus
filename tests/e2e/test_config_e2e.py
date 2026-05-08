@@ -68,8 +68,8 @@ class TestConfigE2E:
         loader = ConfigLoader(config_dir=empty_dir)
         config = loader.load_config()
 
-        # Should use built-in defaults
-        assert config.models.default is not None
+        # Should use built-in defaults (DEFAULT_MODEL_STRING)
+        assert config.models.default == "openai:gpt-4o"
 
     def test_model_capability_registry(self):
         """ModelCapabilityRegistry resolves known model strings."""

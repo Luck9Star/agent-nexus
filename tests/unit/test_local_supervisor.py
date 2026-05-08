@@ -274,8 +274,10 @@ class TestSupervisorBuildCommandVenvFallback:
         with patch.object(Path, "exists", return_value=False):
             cmd = sup._build_command("test-agent", entry)
 
-        # Should fall through to uvx/python3 fallback, not return None
+        # Should fall through to uvx/python3 fallback
         assert cmd is not None
+        assert isinstance(cmd, list)
+        assert len(cmd) > 0
 
 
 class TestStopAgentRemovesFromStartedSet:

@@ -522,7 +522,8 @@ class TestDoubleCheckAfterLock:
             # so line 74 double-check returns it
             executor._shell_lock = ShellSettingLock(original_lock, executor)  # pyright: ignore[reportAttributeAccessIssue]
             shell = await executor._require_shell()
-            assert shell is not None
+            # Double-check should return the pre-set mock, not create a new one
+            assert shell is executor._shell
         finally:
             executor._shell_lock = original_lock
             executor.close()

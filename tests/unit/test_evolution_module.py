@@ -2314,13 +2314,20 @@ class TestEvolutionEngineFacadeDelegation:
         return EvolutionEngine(store, agents_root=tmp_path / "agents")
 
     def test_properties_return_components(self, engine: EvolutionEngine) -> None:
-        """All sub-component properties return non-None instances."""
-        assert engine.store is not None
-        assert engine.analyzer is not None
-        assert engine.evolver is not None
-        assert engine.health_checker is not None
-        assert engine.compaction_guard is not None
-        assert engine.promoter is not None
+        """All sub-component properties return correctly typed instances."""
+        from agent_nexus.platform.evolution.store import EvolutionStore
+        from agent_nexus.platform.evolution.analyzer import ExecutionAnalyzer
+        from agent_nexus.platform.evolution.evolver import SkillEvolver
+        from agent_nexus.platform.evolution.health import HealthChecker
+        from agent_nexus.platform.evolution.compaction import CompactionGuard
+        from agent_nexus.platform.evolution.promotion import AgentPromoter
+
+        assert isinstance(engine.store, EvolutionStore)
+        assert isinstance(engine.analyzer, ExecutionAnalyzer)
+        assert isinstance(engine.evolver, SkillEvolver)
+        assert isinstance(engine.health_checker, HealthChecker)
+        assert isinstance(engine.compaction_guard, CompactionGuard)
+        assert isinstance(engine.promoter, AgentPromoter)
 
     def test_evolve_post_analysis_requires_ctx(self, engine: EvolutionEngine) -> None:
         """trigger=POST_ANALYSIS without ctx raises ValueError."""

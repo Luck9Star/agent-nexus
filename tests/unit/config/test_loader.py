@@ -48,7 +48,8 @@ class TestConfigLoaderInit:
 
     def test_default_config_dir(self):
         loader = ConfigLoader()
-        assert loader.config_dir is not None
+        from agent_nexus.platform.config.defaults import DEFAULT_CONFIG_DIR
+        assert loader.config_dir == DEFAULT_CONFIG_DIR
 
 
 # ---------------------------------------------------------------------------

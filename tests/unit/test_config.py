@@ -546,7 +546,7 @@ class TestConfigLoaderProviderApiTypeValidation:
         config_dir.mkdir()
         loader = ConfigLoader(config_dir=config_dir)
         config = loader.load_config()
-        assert config.models.default is not None
+        assert config.models.default == "openai:gpt-4o"
 
     def test_load_malformed_toml_raises(self, tmp_path: Path) -> None:
         """Malformed TOML raises TomlDecodeError instead of silently falling back."""
