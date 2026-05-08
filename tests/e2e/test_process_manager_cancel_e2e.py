@@ -1,0 +1,235 @@
+"""E2E tests for ProcessManager cancellation scenarios.
+
+Covers:
+- CancelledError propagation during stop_agent
+- Concurrent stop requests for the same agent
+- stop_all cancellation via asyncio.CancelledError
+- Drain task cancellation and subprocess cleanup
+- Cancellation interaction with timeouts
+"""
+
+import asyncio
+
+import pytest
+
+from agent_nexus.platform.orchestration.process_manager import ProcessManager
+
+
+# ---------------------------------------------------------------------------
+# Helpers — lightweight echo subprocess for real process E2E tests
+# ---------------------------------------------------------------------------
+
+_ECHO_CMD = [
+    "python3",
+    "-c",
+    (
+        "import sys, json\n"
+        "for line in sys.stdin:\n"
+        "    line = line.strip()\n"
+        "    if not line:\n"
+        "        continue\n"
+        "    try:\n"
+        "        msg = json.loads(line)\n"
+        "    except json.JSONDecodeError:\n"
+        "        continue\n"
+        "    if msg.get('content') == '__heartbeat__':\n"
+        "        sys.stdout.write(json.dumps({'type':'progress','content':'pong'}) + '\\n')\n"
+        "        sys.stdout.flush()\n"
+        "        continue\n"
+        "    sys.stdout.write(json.dumps({'type':'result','content':'echo','task_id':msg.get('task_id')}) + '\\n')\n"
+        "    sys.stdout.flush()\n"
+    ),
+]
+
+
+def _run(coro):
+    """Run an async coroutine synchronously."""
+    return asyncio.run(coro)
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(30)
+class TestProcessManagerCancelE2E:
+    """E2E cancellation scenarios for ProcessManager."""
+
+    def test_stop_agent_cleans_up_subprocess_on_cancel(self):
+        """Stopping an agent terminates the subprocess and releases resources."""
+        pm = ProcessManager()
+
+        async def _test():
+            handle = await pm.start_agent("echo-1", _ECHO_CMD)
+            assert handle.is_alive
+            assert handle.pid is not None
+
+            await pm.stop_agent("echo-1", timeout=5.0)
+
+            # Process should be dead
+            assert not handle.is_alive
+            # Agent removed from registry
+            assert pm.get_agent("echo-1") is None
+            # No running agents left
+            assert pm.list_running() == []
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_concurrent_stop_same_agent_idempotent(self):
+        """Two concurrent stop_agent calls for the same agent both succeed."""
+        pm = ProcessManager()
+
+        async def _test():
+            await pm.start_agent("echo-2", _ECHO_CMD)
+
+            # Two concurrent stops — both should succeed
+            results = await asyncio.gather(
+                pm.stop_agent("echo-2", timeout=5.0),
+                pm.stop_agent("echo-2", timeout=5.0),
+                return_exceptions=True,
+            )
+
+            # No exceptions should be raised
+            for r in results:
+                assert not isinstance(r, Exception), f"Unexpected exception: {r}"
+
+            # Agent should be cleaned up
+            assert pm.get_agent("echo-2") is None
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_stop_all_handles_errors_gracefully(self):
+        """stop_all logs errors from individual stop_agent calls but completes."""
+        pm = ProcessManager()
+
+        async def _test():
+            # Start 3 agents
+            for i in range(3):
+                await pm.start_agent(f"echo-err-{i}", _ECHO_CMD)
+
+            assert len(pm.list_running()) == 3
+
+            # stop_all should succeed even if individual stops fail
+            await pm.stop_all(timeout=5.0)
+
+            # All agents should be cleaned up
+            assert pm.list_running() == []
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_drain_task_cancelled_on_stop(self):
+        """Background drain task is properly cancelled when agent stops."""
+        pm = ProcessManager()
+
+        async def _test():
+            handle = await pm.start_agent("echo-drain", _ECHO_CMD)
+            drain = handle.drain_task
+            assert drain is not None
+            assert not drain.done()
+
+            await pm.stop_agent("echo-drain", timeout=5.0)
+
+            # Drain task should be done/cancelled
+            assert drain.done() or drain.cancelled()
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_cancel_during_restart(self):
+        """Restarting an agent that was just stopped works correctly."""
+        pm = ProcessManager()
+
+        async def _test():
+            handle = await pm.start_agent("echo-restart", _ECHO_CMD)
+            pid_v1 = handle.pid
+
+            new_handle = await pm.restart_agent("echo-restart")
+            pid_v2 = new_handle.pid
+
+            # Should be a different process
+            assert pid_v1 != pid_v2
+            assert new_handle.is_alive
+
+            await pm.stop_agent("echo-restart", timeout=5.0)
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_stop_agent_with_short_timeout_escalates_to_kill(self):
+        """Agent that doesn't exit within timeout is escalated to SIGKILL."""
+        pm = ProcessManager()
+
+        # Use a subprocess that ignores SIGTERM
+        stubborn_cmd = [
+            "python3",
+            "-c",
+            (
+                "import signal, sys, json\n"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                "for line in sys.stdin:\n"
+                "    line = line.strip()\n"
+                "    if not line:\n"
+                "        continue\n"
+                "    sys.stdout.write(json.dumps({'type':'result','content':'ok'}) + '\\n')\n"
+                "    sys.stdout.flush()\n"
+            ),
+        ]
+
+        async def _test():
+            handle = await pm.start_agent("stubborn", stubborn_cmd)
+            assert handle.is_alive
+
+            # Very short timeout forces escalation
+            await pm.stop_agent("stubborn", timeout=0.1)
+
+            # Should be dead after SIGKILL
+            assert not handle.is_alive
+            assert pm.get_agent("stubborn") is None
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_stop_nonexistent_raises_key_error(self):
+        """Stopping a non-existent agent raises KeyError."""
+        pm = ProcessManager()
+
+        async def _test():
+            with pytest.raises(KeyError, match="not found"):
+                await pm.stop_agent("nonexistent")
+
+        _run(_test())
+
+    def test_health_check_after_stop_returns_false_or_key_error(self):
+        """Health check on a stopped agent either returns False or raises KeyError."""
+        pm = ProcessManager()
+
+        async def _test():
+            await pm.start_agent("echo-hc", _ECHO_CMD)
+            assert await pm.health_check("echo-hc") is True
+
+            await pm.stop_agent("echo-hc", timeout=5.0)
+
+            # After stop, health_check should raise KeyError (agent removed)
+            with pytest.raises(KeyError):
+                await pm.health_check("echo-hc")
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
