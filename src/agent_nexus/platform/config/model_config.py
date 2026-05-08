@@ -45,10 +45,7 @@ class ModelConfigManager:
     # Public API
     # ------------------------------------------------------------------
 
-
-    def _resolve_tier_model(
-        self, agent_name: str, recommended_tier: str | ModelTier
-    ) -> str | None:
+    def _resolve_tier_model(self, agent_name: str, recommended_tier: str | ModelTier) -> str | None:
         """Resolve a model string from a tier recommendation, or ``None``."""
         try:
             tier_key = (

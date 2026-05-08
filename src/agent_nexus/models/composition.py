@@ -64,7 +64,6 @@ class Composition:
 
         return groups
 
-
     @staticmethod
     def _parse_tasks(tasks_raw: dict[str, Any]) -> dict[str, CompositionTask]:
         """Parse the [tasks] section of a composition TOML."""
@@ -86,9 +85,7 @@ class Composition:
         for tid, task in tasks.items():
             for dep in task.blocked_by:
                 if dep not in tasks:
-                    raise CompositionError(
-                        f"Task '{tid}' blocked_by unknown task '{dep}'"
-                    )
+                    raise CompositionError(f"Task '{tid}' blocked_by unknown task '{dep}'")
 
     @classmethod
     def from_toml(cls, path: Path | str) -> Composition:

@@ -270,7 +270,6 @@ class AgentSupervisor:
     # Auto-restart
     # ------------------------------------------------------------------
 
-
     def _find_dead_agents(self) -> list[str]:
         """Identify dead agents eligible for restart (within budget)."""
         lockfile = self._lockfile.load()

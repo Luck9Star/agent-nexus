@@ -359,7 +359,6 @@ class HookExecutor:
     # Type-specific executors
     # ------------------------------------------------------------------
 
-
     async def _kill_and_build_error(
         self,
         hook: HookDefinition,
@@ -428,7 +427,10 @@ class HookExecutor:
 
         except TimeoutError:
             return await self._kill_and_build_error(
-                hook, f"Command timed out after {timeout}s", proc, start,
+                hook,
+                f"Command timed out after {timeout}s",
+                proc,
+                start,
             )
 
         except asyncio.CancelledError:
@@ -438,7 +440,11 @@ class HookExecutor:
 
         except Exception as exc:
             return await self._kill_and_build_error(
-                hook, str(exc), proc, start, error_type=type(exc).__name__,
+                hook,
+                str(exc),
+                proc,
+                start,
+                error_type=type(exc).__name__,
             )
 
     @staticmethod

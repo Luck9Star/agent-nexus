@@ -568,7 +568,6 @@ class GitInstaller:
         except Exception:
             return False
 
-
     def _validate_venv_path(self, venv_path: Path) -> bool:
         """Check if venv path is safe (no symlink escape). Removes existing venv if safe."""
         if not venv_path.exists():
@@ -631,8 +630,11 @@ class GitInstaller:
             )
             stderr = await self._run_uv(
                 [
-                    "pip", "install", install_target,
-                    "--python", str(venv_path / "bin" / "python"),
+                    "pip",
+                    "install",
+                    install_target,
+                    "--python",
+                    str(venv_path / "bin" / "python"),
                 ],
                 f"pip install for {agent_name}",
             )

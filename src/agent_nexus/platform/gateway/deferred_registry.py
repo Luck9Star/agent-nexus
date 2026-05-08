@@ -401,11 +401,8 @@ class DeferredAgentRegistry:
     # Query helpers
     # ------------------------------------------------------------------
 
-
     @staticmethod
-    def _collect_unique_tools(
-        tools: list[dict], seen: set[str], schemas: list[dict]
-    ) -> None:
+    def _collect_unique_tools(tools: list[dict], seen: set[str], schemas: list[dict]) -> None:
         """Append unique tool schemas, skipping names already in *seen*."""
         for schema in schemas:
             name = schema.get("name", "")

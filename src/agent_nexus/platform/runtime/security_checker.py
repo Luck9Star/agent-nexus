@@ -217,7 +217,6 @@ class SecurityChecker:
 
         return list(self._check_cached(code, tree))
 
-
     @staticmethod
     def _apply_rule_batch(
         rules: list[Any],
