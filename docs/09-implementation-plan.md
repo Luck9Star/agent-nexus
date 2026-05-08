@@ -2,8 +2,8 @@
 
 > Agent Nexus Design Doc — §11 实施计划：7 个 Phase、风险矩阵、项目结构
 
-> **Status**: Phase 1-6 已完成 | Phase 7 (Rust 重构) 待实施
-> **Code**: `src/agent_nexus/`, `agents/`, `tests/`
+> **Status**: Phase 1-10 已完成 | Phase 11 (Integration Tests) TODO
+> **Code**: `src/agent_nexus/`, `agents/`, `tests/`, `crates/`
 
 ## §11 实施计划
 
@@ -96,8 +96,131 @@
 
 目标：Python 实现验证后，上层用 Rust 重构
 
-- [ ] ap-core crate：核心类型（AgentId, Version, Manifest, Dependency）
-- [ ] ap-fetcher crate：Git-based 包获取（git2 + semver，替代 ap-registry + ap-client + ap-store）
+#### Phase 7.1：核心类型（ap-core/models）✅
+
+- [x] ipc: IPCMessage, IPCChannel, IPCError
+- [x] agent: AgentId, AgentManifest, AgentStatus, Capability, Dependency
+- [x] task: TaskId, TaskSpec, TaskResult, TaskStatus
+- [x] config: SourceSpec, ModelConfig, ConfigLoader
+- [x] permission: Permission, PermissionScope, PermissionRegistry
+- [x] evolution: EvolutionMetrics, EvolutionThreshold, EvolutionContext
+- [x] runtime: ProcessSpec, ProcessStatus, HealthStatus
+- [x] hooks: HookRegistry, HookEvent, HookContext, SkillContext
+- [x] composition: CompositionGraph, CompositionSpec, CompositionResult
+- [x] context: ContextBudget, ContextSnapshot, ContextDescriber
+- [x] distribution: DistributionSource, VersionSpec, LockEntry
+
+#### Phase 7.2：编排层（ap-core/orchestration）✅
+
+- [x] TaskGraph（blocked_by 环检测）
+- [x] ProcessManager（asyncio.subprocess + 健康检查）
+- [x] IPC 协议（stdin/stdout JSON-lines）
+- [x] OrchestrationDSL TOML 解析器
+- [x] PlatformRouter（4-Phase Workflow）
+- [x] SubtaskController 超时控制
+
+#### Phase 7.3：Hooks + Skills（ap-core/hooks）✅
+
+- [x] HookRegistry 实现
+- [x] SKILL.md 三层渐进式加载
+- [x] 进化 Hooks（FIX/DERIVED/CAPTURED 模式）
+
+#### Phase 7.4：Runtime（ap-runtime）✅
+
+- [x] ProcessManager 重构
+- [x] IPC 协议优化
+- [x] LockManager
+- [x] MCP Client
+
+#### Phase 7.5：Fetcher（ap-fetcher）✅
+
+- [x] SourceManager
+- [x] GitInstaller（clone --sparse → validate → install）
+- [x] Lockfile 管理
+- [x] uv bridge
+
+#### Phase 7.6：Evolution（ap-evolution）✅
+
+- [x] EvolutionStore
+- [x] EvolutionAnalyzer
+- [x] EvolutionEngine
+- [x] Agent Promotion
+
+#### Phase 7.7：Gateway（ap-gateway）✅
+
+- [x] MCP Gateway
+- [x] ToolAdapter
+- [x] DeferredRegistry
+
+#### Phase 7.8：CLI（ap-cli）✅
+
+- [x] init 命令（--wizard）
+- [x] sources 命令
+- [x] install/uninstall/update 命令
+- [x] run 命令
+- [x] create 命令
+- [x] check 命令
+- [x] config 命令
+- [x] evolution 命令
+- [x] runtime 命令
+- [x] env 命令
+- [ ] **shell completion 未实现**
+
+#### Phase 7.9：CLI Backend（ap-cli-backend）✅
+
+- [x] types.py
+- [x] parser.py
+- [x] GenericCLIBackend
+- [x] CLIBackendRegistry
+- [x] CLIRouter
+- [x] SessionStore（SQLite CRUD + archival）
+- [x] Integration tests
+
+### Phase 8：Streaming LLM Client（已完成）✅
+
+目标：使用 litellm 实现流式输出（统一调用层）
+
+> ⚠️ **Note**: 原设计要求官方 SDK，但实现选择了 litellm 作为统一调用层
+
+- [x] streaming_default + per-provider streaming 字段
+- [x] _should_stream 方法
+- [x] litellm streaming 集成
+- [x] SDK lazy 初始化
+- [x] _call_openai streaming
+- [x] _call_anthropic streaming
+- [x] config.toml streaming 设置
+- [x] 测试套件
+
+### Phase 9：Agent Capability Tests（进行中 ~40%）
+
+目标：契约驱动的 Agent 能力测试
+
+- [x] schema + base types
+- [x] StructureValidator
+- [x] OrchestrationValidator
+- [x] CLIProvider
+- [x] Atomic contracts
+- [x] Composite contracts
+- [x] Agency contracts
+- [ ] SemanticValidator
+- [ ] APIProvider
+- [ ] test_atomic_cli.py
+- [ ] test_composite_cli.py
+- [ ] test_agency_cli.py
+- [ ] test_atomic_api.py
+- [ ] test_composite_api.py
+- [ ] test_agency_api.py
+
+### Phase 10：配置整合（已完成）✅
+
+目标：统一配置来源，消除 sources.yaml
+
+- [x] stages + sources 字段加入模型
+- [x] TOML [sources] 解析
+- [x] 项目级配置加载 + merge
+- [x] init 模板更新为 6 providers
+- [x] sources 命令使用 config.toml
+- [ ] **sources.yaml → config.toml 迁移工具**
 - [ ] ap-runtime crate：Agent Supervisor（tokio::process + DashMap）
 - [ ] ap-gateway crate：MCP 网关（rmcp + 多路复用）
 - [ ] ap-cli crate：CLI（clap 命令行）

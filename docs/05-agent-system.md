@@ -2,9 +2,11 @@
 
 > Agent Nexus Design Doc — §7 Agent 体系：两种 Agent 类型、Atomic Agent 组成、Composite Agent 组成、三种运行模式、概念映射表、Agent Package 结构、Agent 目录
 
-> **Status**: ✅ Implemented
+> **Status**: ⚠️ Design Goals (部分实现)
 > **Code**: `src/agent_nexus/models/agent.py`, `agents/atomic/`, `agents/composite/`
 > **Tests**: `tests/unit/test_agent_models.py`
+
+> ⚠️ **Note**: 本文档描述的设计目标，部分功能仍在实现中。当前实现可能与文档描述有差异。
 
 ## §7 Agent 体系
 
