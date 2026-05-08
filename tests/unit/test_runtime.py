@@ -691,7 +691,7 @@ class TestSecurityCheckerExceptionBranches:
         checker = SecurityChecker(rules=[bad_rule])
         # Should NOT raise -- exception is caught and logged
         violations = checker.check_code("x = 1 + 2")
-        assert isinstance(violations, list)
+        assert len(violations) == 1
 
 
 # ============================================================================

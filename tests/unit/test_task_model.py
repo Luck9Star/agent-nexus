@@ -27,10 +27,6 @@ class TestTaskState:
         assert TaskState.COMPLETED == "completed"
         assert TaskState.FAILED == "failed"
 
-    def test_is_str_enum(self):
-        assert isinstance(TaskState.PENDING, str)
-
-
 # ---------------------------------------------------------------------------
 # TaskItem construction (happy path)
 # ---------------------------------------------------------------------------

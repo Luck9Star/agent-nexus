@@ -141,13 +141,8 @@ quality:
     required_fields = ["id", "name", "source", "capabilities", "permissions", "output_contract"]
     for field in required_fields:
         doc = {k: v for k, v in valid_doc.items() if k != field}
-        try:
+        with pytest.raises(jsonschema.ValidationError):
             _validate(EXPERT_PROFILE_SCHEMA_PATH, doc)
-            raise AssertionError(
-                f"Expected validation error when '{field}' is missing, but validation passed"
-            )
-        except jsonschema.ValidationError:
-            pass  # expected
 
 
 # ===================================================================
@@ -191,13 +186,8 @@ required_sections:
 
     for field in ["artifact_type", "required_sections"]:
         doc = {k: v for k, v in valid_doc.items() if k != field}
-        try:
+        with pytest.raises(jsonschema.ValidationError):
             _validate(OUTPUT_CONTRACT_SCHEMA_PATH, doc)
-            raise AssertionError(
-                f"Expected validation error when '{field}' is missing, but validation passed"
-            )
-        except jsonschema.ValidationError:
-            pass  # expected
 
 
 # ===================================================================

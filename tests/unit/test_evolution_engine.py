@@ -106,7 +106,8 @@ class TestEvolveToolDegradation:
         ]
         engine = EvolutionEngine(store)
         results = engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION, tool_key="api-x")
-        assert isinstance(results, list)
+        assert len(results) == 1
+        assert results[0].success is False
 
     def test_tool_degradation_requires_tool_key(self):
         store = _make_store()
@@ -122,7 +123,7 @@ class TestEvolveMetricCheck:
         store = _make_store()
         engine = EvolutionEngine(store)
         results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
-        assert isinstance(results, list)
+        assert results == []
 
 
 class TestEvolveUnknownTrigger:
@@ -220,11 +221,11 @@ class TestEvolveMinSelections:
         engine = EvolutionEngine(store)
         # min_selections=0 is clamped to 1 — should not error
         result = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK, min_selections=0)
-        assert isinstance(result, list)
+        assert result == []
 
     def test_metric_check_min_selections_negative(self) -> None:
         store = _make_store()
         store.get_active_skills.return_value = []
         engine = EvolutionEngine(store)
         result = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK, min_selections=-5)
-        assert isinstance(result, list)
+        assert result == []

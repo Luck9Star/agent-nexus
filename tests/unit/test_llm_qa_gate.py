@@ -91,6 +91,7 @@ def test_llm_qa_gate_fallback_to_structural():
     result = gate.evaluate(_make_integrated(), task="review")
 
     assert isinstance(result, QAGateResult)
+    assert result.passed is True
 
 
 # --- New tests ---
@@ -159,6 +160,7 @@ class TestEvaluateEdgeCases:
         # Score 0.7 < threshold 0.9, but >= trust_floor 0.5 → trust override
         # Actually structural passed + score >= floor → passed
         assert isinstance(result, QAGateResult)
+        assert result.passed is True
 
     def test_required_sections_passed_to_structural(self):
         mock_client = MagicMock()
@@ -176,6 +178,7 @@ class TestEvaluateEdgeCases:
 
         # Structural check should pass because summary exists
         assert isinstance(result, QAGateResult)
+        assert result.passed is True
 
 
 class TestParseEvaluation:
@@ -196,6 +199,7 @@ class TestParseEvaluation:
         result = gate.evaluate(_make_integrated(), task="review")
 
         assert isinstance(result, QAGateResult)
+        assert result.passed is True
 
     def test_structural_trust_override(self):
         """LLM score below threshold but >= trust floor → passes via override."""

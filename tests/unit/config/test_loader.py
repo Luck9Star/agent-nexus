@@ -344,6 +344,7 @@ class TestParseExternalServer:
             "name": "s", "enabled": "true",
         })
         assert result is not None
+        assert result.name == "s"
 
     def test_invalid_transport_defaults_to_stdio(self):
         result = ConfigLoader._parse_external_server({

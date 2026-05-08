@@ -55,9 +55,8 @@ class TestUrlToSourceName:
         assert _url_to_source_name("https://example.com/pkg") == "pkg"
 
     def test_returns_direct_for_empty(self) -> None:
-        # rsplit on "/" gives "" when URL is just ""
-        result = _url_to_source_name("")
-        assert isinstance(result, str)
+        # rsplit on "/" gives "" → falsy → falls back to "direct"
+        assert _url_to_source_name("") == "direct"
 
 
 # ---------------------------------------------------------------------------

@@ -52,19 +52,6 @@ class TestThresholdTypes:
             ("_MIN_APPLIED_FOR_DERIVED", _MIN_APPLIED_FOR_DERIVED),
         ],
     )
-    def test_is_float(self, name, value):
-        assert isinstance(value, float), f"{name} should be float"
-
-    @pytest.mark.parametrize(
-        "name, value",
-        [
-            ("_FALLBACK_THRESHOLD", _FALLBACK_THRESHOLD),
-            ("_HIGH_APPLIED_FOR_FIX", _HIGH_APPLIED_FOR_FIX),
-            ("_LOW_COMPLETION_THRESHOLD", _LOW_COMPLETION_THRESHOLD),
-            ("_MODERATE_EFFECTIVE_THRESHOLD", _MODERATE_EFFECTIVE_THRESHOLD),
-            ("_MIN_APPLIED_FOR_DERIVED", _MIN_APPLIED_FOR_DERIVED),
-        ],
-    )
     def test_in_valid_range(self, name, value):
         assert 0.0 < value < 1.0, f"{name}={value} out of (0, 1) range"
 

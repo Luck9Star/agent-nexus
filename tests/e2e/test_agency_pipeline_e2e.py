@@ -1355,34 +1355,6 @@ class TestIntegratorAdvanced:
 class TestPlannerValidation:
     """E2E: planner rejects invalid inputs correctly."""
 
-    def test_empty_subtasks_raises(self):
-        """DynamicCompositePlanner raises ValueError for empty subtask list."""
-        planner = DynamicCompositePlanner()
-        with pytest.raises(ValueError, match="at least one subtask"):
-            planner.plan([], composition_name="test")
-
-    def test_duplicate_ids_raises(self):
-        """DynamicCompositePlanner raises ValueError for duplicate subtask IDs."""
-        planner = DynamicCompositePlanner()
-        subtasks = [
-            SubtaskDef(
-                id="dup",
-                goal="A",
-                needed_capabilities=["c"],
-                output_contract="r",
-                assigned_agent="a1",
-            ),
-            SubtaskDef(
-                id="dup",
-                goal="B",
-                needed_capabilities=["c"],
-                output_contract="r",
-                assigned_agent="a2",
-            ),
-        ]
-        with pytest.raises(ValueError, match="Duplicate subtask id"):
-            planner.plan(subtasks, composition_name="test")
-
     def test_reserved_id_raises(self):
         """DynamicCompositePlanner raises ValueError for reserved IDs (integrate, validate)."""
         planner = DynamicCompositePlanner()

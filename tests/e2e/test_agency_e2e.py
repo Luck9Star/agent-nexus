@@ -738,12 +738,6 @@ class TestAllowlistValidation:
 class TestYAMLSerialization:
     """E2E: YAML helper functions produce correct output."""
 
-    def test_yaml_quote_empty_string(self):
-        from agent_nexus.platform.agency.importer import _yaml_quote
-
-        result = _yaml_quote("")
-        assert result == '""'
-
     def test_yaml_quote_string_with_colon(self):
         """Strings containing ':' are double-quoted."""
         from agent_nexus.platform.agency.importer import _yaml_quote

@@ -44,11 +44,8 @@ def test_parse_frontmatter():
 @pytest.mark.timeout(30)
 def test_parse_frontmatter_no_delimiter():
     """A string without --- frontmatter should raise ValueError."""
-    try:
+    with pytest.raises(ValueError):
         parse_frontmatter("This is just plain text with no frontmatter at all.")
-        raise AssertionError("Expected ValueError for missing frontmatter delimiters")
-    except ValueError:
-        pass  # expected
 
 
 # ===================================================================
