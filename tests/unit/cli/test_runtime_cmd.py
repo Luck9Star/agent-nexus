@@ -114,12 +114,13 @@ class TestStart:
             "agent_nexus.platform.local.cli.runtime_cmd._make_supervisor",
             new_callable=AsyncMock,
             return_value=(supervisor, config_dir, pm),
-        ):
+        ) as mock_make:
             import asyncio
 
             from agent_nexus.platform.local.cli.runtime_cmd import _start_all
 
             asyncio.run(_start_all())
+            supervisor.start_all.assert_called_once()
 
     def test_start_all_no_agents(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -138,6 +139,7 @@ class TestStart:
             from agent_nexus.platform.local.cli.runtime_cmd import _start_all
 
             asyncio.run(_start_all())
+            supervisor.start_all.assert_called_once()
 
 
 # ── stop ─────────────────────────────────────────────────────────────
@@ -327,6 +329,8 @@ class TestRestart:
             from agent_nexus.platform.local.cli.runtime_cmd import _restart_agent
 
             asyncio.run(_restart_agent("not-running-agent"))
+            supervisor.stop_agent.assert_called_once_with("not-running-agent")
+            supervisor.start_agent.assert_called_once_with("not-running-agent")
 
 
 # ── status ───────────────────────────────────────────────────────────

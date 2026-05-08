@@ -81,6 +81,11 @@ class TestTaskExecutions:
             duration_ms=1500,
             status="success",
         )
+        # record_execution inserts into task_executions which triggers daily_stats
+        stats = store.get_daily_stats()
+        assert len(stats) == 1
+        assert stats[0]["success_calls"] == 1
+        assert stats[0]["total_input_tokens"] == 100
 
     def test_daily_stats_auto_updated_via_trigger(self, store: CLISessionStore):
         store.record_execution(

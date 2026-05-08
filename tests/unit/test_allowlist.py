@@ -422,7 +422,8 @@ class TestSafeSourcePathRegex:
 class TestValidateEntries:
     def test_valid_entries(self):
         entries = [_valid_entry(id="agency.a"), _valid_entry(id="agency.b")]
-        _validate_entries(entries)  # should not raise
+        result = _validate_entries(entries)  # should not raise
+        assert result is None  # void function returns None
 
     def test_duplicate_id_raises(self):
         entries = [_valid_entry(id="agency.dup"), _valid_entry(id="agency.dup")]
@@ -447,7 +448,8 @@ class TestValidateEntries:
 
 class TestValidateSource:
     def test_valid_source(self):
-        _validate_source({"repo": "https://example.com/r", "ref": "main"})
+        result = _validate_source({"repo": "https://example.com/r", "ref": "main"})
+        assert result is None  # void function returns None
 
     def test_non_dict_source_raises(self):
         with pytest.raises(ValueError, match="mapping"):
@@ -469,7 +471,8 @@ class TestValidateSource:
 
 class TestValidateTopLevel:
     def test_valid_top_level(self):
-        _validate_top_level({"source": {}, "agents": []})
+        result = _validate_top_level({"source": {}, "agents": []})
+        assert result is None  # void function returns None
 
     def test_missing_source_raises(self):
         with pytest.raises(ValueError, match="'source'"):

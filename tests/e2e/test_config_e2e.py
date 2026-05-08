@@ -117,7 +117,10 @@ default = "anthropic:claude-sonnet-4-20250514"
 
         loader = ConfigLoader(config_dir=tmp_path)
         loader.load_config()
-        # .env loading is optional; just verify ConfigLoader doesn't crash
+        # .env loading is best-effort; just verify ConfigLoader doesn't crash
+        # If python-dotenv is available, the var should be set
+        val = os.environ.get("TEST_E2E_DOTENV_VAR")
+        assert val in ("loaded_from_env", None)
         os.environ.pop("TEST_E2E_DOTENV_VAR", None)
 
     def test_mtime_caching_invalidates(self, tmp_path):

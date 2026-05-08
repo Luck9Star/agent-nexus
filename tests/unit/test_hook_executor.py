@@ -619,24 +619,20 @@ pre_execution:
         assert executor._hooks[0].command == "echo valid"
 
     def test_from_yaml_invalid_hook_dict_skipped(self, tmp_path: Path) -> None:
-        """Lines 106-107: a dict that fails model_validate -> warning, skip."""
+        """Lines 106-107: a dict without required fields is skipped."""
         yaml_content = """
 pre_execution:
   - type: command
     command: "echo valid"
-  - type: command
-    # missing required fields -- model_validate will fail because
-    # 'event' is injected but the dict has extra garbage that confuses pydantic
-    not_a_real_field: true
+  - not_a_real_field: true
 """
         yaml_file = tmp_path / "hooks.yaml"
         yaml_file.write_text(yaml_content)
 
-        HookExecutor.from_yaml(yaml_file)
-        # The second entry has type=command but no 'command' field set via yaml.
-        # model_validate still succeeds (command is Optional). So let's make one
-        # that truly fails: omit 'type' entirely.
-        pass  # covered by the next test instead
+        executor = HookExecutor.from_yaml(yaml_file)
+        # Second entry lacks 'type' -> model_validate fails -> skipped
+        assert len(executor._hooks) == 1
+        assert executor._hooks[0].command == "echo valid"
 
     def test_from_yaml_hook_missing_type_field(self, tmp_path: Path) -> None:
         """Lines 106-107: hook dict without 'type' -> validation error, skipped."""

@@ -1201,6 +1201,7 @@ class TestEvolutionStoreClose:
         store = EvolutionStore(tmp_path / "evo.db")
         store.close()
         store.close()  # second call is fine
+        assert store._memory_conn is None  # connection cleared after close
 
 
 class TestJudgmentsBatchEvenLimit:
