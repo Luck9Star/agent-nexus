@@ -56,9 +56,7 @@ class TestEvolutionEngineDiagnoseWithSkills:
         yield engine, store
         store.close()
 
-    def test_diagnose_all_with_skills_returns_entries(
-        self, engine_and_store
-    ) -> None:
+    def test_diagnose_all_with_skills_returns_entries(self, engine_and_store) -> None:
         """diagnose_all with seeded skills returns health reports."""
         engine, store = engine_and_store
 
@@ -66,13 +64,10 @@ class TestEvolutionEngineDiagnoseWithSkills:
         store.save_skill_record(_make_skill("s2", name="beta"))
 
         result = engine.diagnose_all()
-        assert isinstance(result, dict)
-        # Should have entries for the skills
-        assert len(result) >= 0  # May return empty if no health issues found
+        # diagnose_all returns a dict keyed by skill id
+        assert len(result) >= 2  # Both seeded skills should appear in report
 
-    def test_check_health_on_existing_skill_returns_suggestions(
-        self, engine_and_store
-    ) -> None:
+    def test_check_health_on_existing_skill_returns_suggestions(self, engine_and_store) -> None:
         """check_health on a valid skill returns a list (may be empty)."""
         engine, store = engine_and_store
 
@@ -81,22 +76,16 @@ class TestEvolutionEngineDiagnoseWithSkills:
         suggestions = engine.check_health("s1")
         assert isinstance(suggestions, list)
 
-    def test_evolve_min_selections_clamped_to_one(
-        self, engine_and_store
-    ) -> None:
+    def test_evolve_min_selections_clamped_to_one(self, engine_and_store) -> None:
         """METRIC_CHECK with min_selections=0 is clamped to 1 internally."""
         from agent_nexus.platform.evolution.evolver import EvolutionTrigger
 
         engine, _ = engine_and_store
         # min_selections=0 should not crash — internally clamped to max(0, 1) = 1
-        results = engine.evolve(
-            trigger=EvolutionTrigger.METRIC_CHECK, min_selections=0
-        )
+        results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK, min_selections=0)
         assert isinstance(results, list)
 
-    def test_evolve_post_analysis_with_valid_ctx(
-        self, engine_and_store
-    ) -> None:
+    def test_evolve_post_analysis_with_valid_ctx(self, engine_and_store) -> None:
         """POST_ANALYSIS with a valid EvolutionContext returns an AnalysisResult."""
         from agent_nexus.models.evolution import EvolutionContext
         from agent_nexus.platform.evolution.evolver import EvolutionTrigger
@@ -135,9 +124,7 @@ class TestEvolutionStoreConcurrentAccess:
         batch = store.get_skill_records_batch([f"s{i}" for i in range(10)])
         assert len(batch) == 10
 
-    def test_evolve_skill_during_active_queries(
-        self, store: EvolutionStore
-    ) -> None:
+    def test_evolve_skill_during_active_queries(self, store: EvolutionStore) -> None:
         """Evolving a skill while querying ancestry works correctly."""
         parent = _make_skill("parent", name="base", generation=0)
         store.save_skill_record(parent)
@@ -169,9 +156,7 @@ class TestEvolutionStoreConcurrentAccess:
         parent_record = store.get_skill_record("parent")
         assert parent_record is not None and parent_record.is_active is False
 
-    def test_record_analysis_with_counter_updates(
-        self, store: EvolutionStore
-    ) -> None:
+    def test_record_analysis_with_counter_updates(self, store: EvolutionStore) -> None:
         """Recording analysis updates counters atomically."""
         store.save_skill_record(_make_skill("s1"))
 
@@ -215,23 +200,17 @@ class TestEvolutionStoreConcurrentAccess:
 class TestEvolutionStoreEdgeCases:
     """Edge cases in EvolutionStore that affect data integrity."""
 
-    def test_get_skill_records_batch_with_empty_list(
-        self, store: EvolutionStore
-    ) -> None:
+    def test_get_skill_records_batch_with_empty_list(self, store: EvolutionStore) -> None:
         """Batch retrieval with empty list returns empty dict."""
         result = store.get_skill_records_batch([])
         assert result == {}
 
-    def test_get_judgments_batch_with_empty_set(
-        self, store: EvolutionStore
-    ) -> None:
+    def test_get_judgments_batch_with_empty_set(self, store: EvolutionStore) -> None:
         """Judgments batch retrieval with empty set returns empty dict."""
         result = store.get_judgments_batch(set())
         assert result == {}
 
-    def test_increment_counters_all_false_is_noop(
-        self, store: EvolutionStore
-    ) -> None:
+    def test_increment_counters_all_false_is_noop(self, store: EvolutionStore) -> None:
         """Incrementing counters with all False flags is a no-op."""
         store.save_skill_record(_make_skill("s1"))
 
@@ -252,9 +231,7 @@ class TestEvolutionStoreEdgeCases:
         assert after is not None
         assert after.total_selections == sel_before
 
-    def test_get_all_skills_pagination_beyond_end(
-        self, store: EvolutionStore
-    ) -> None:
+    def test_get_all_skills_pagination_beyond_end(self, store: EvolutionStore) -> None:
         """Pagination with offset beyond total returns empty list."""
         for i in range(3):
             store.save_skill_record(_make_skill(f"s{i}"))
@@ -262,9 +239,7 @@ class TestEvolutionStoreEdgeCases:
         result = store.get_all_skills(limit=5, offset=100)
         assert result == []
 
-    def test_deactivate_nonexistent_skill_returns_false(
-        self, store: EvolutionStore
-    ) -> None:
+    def test_deactivate_nonexistent_skill_returns_false(self, store: EvolutionStore) -> None:
         """Deactivating a non-existent skill returns False."""
         result = store.deactivate_skill("ghost")
         assert result is False

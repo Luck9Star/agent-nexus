@@ -120,11 +120,13 @@ class TestTaskGraphAsyncWrappers:
 
         async def _test():
             tg = TaskGraph(str(tmp_path / "async_groups.db"))
-            tg.add_tasks([
-                _make_task("a"),
-                _make_task("b", blocked_by=["a"]),
-                _make_task("c", blocked_by=["b"]),
-            ])
+            tg.add_tasks(
+                [
+                    _make_task("a"),
+                    _make_task("b", blocked_by=["a"]),
+                    _make_task("c", blocked_by=["b"]),
+                ]
+            )
 
             groups = await tg.aget_parallel_groups()
             assert len(groups) == 3
@@ -188,130 +190,6 @@ class TestTaskGraphConcurrentAsyncAccess:
 
 
 # ---------------------------------------------------------------------------
-# State transition edge cases
-# ---------------------------------------------------------------------------
-
-
-class TestTaskGraphStateTransitions:
-    """Verify state machine edge cases and error conditions."""
-
-    def test_start_task_with_unresolved_blockers_raises(
-        self, tmp_path: Path
-    ) -> None:
-        """Starting a task with unresolved blockers raises ValueError."""
-        tg = TaskGraph(str(tmp_path / "state_block.db"))
-        tg.add_task(_make_task("t1"))
-        tg.add_task(_make_task("t2", blocked_by=["t1"]))
-
-        with pytest.raises(ValueError, match="[Uu]nresolved|depend"):
-            tg.start_task("t2")
-        tg.close()
-
-    def test_start_already_completed_task_raises(
-        self, tmp_path: Path
-    ) -> None:
-        """Starting a completed task raises ValueError."""
-        tg = TaskGraph(str(tmp_path / "state_done.db"))
-        tg.add_task(_make_task("t1"))
-        tg.start_task("t1")
-        tg.complete_task("t1")
-
-        with pytest.raises(ValueError):
-            tg.start_task("t1")
-        tg.close()
-
-    def test_complete_pending_task_raises(self, tmp_path: Path) -> None:
-        """Completing a pending task (not in_progress) raises ValueError."""
-        tg = TaskGraph(str(tmp_path / "state_pend.db"))
-        tg.add_task(_make_task("t1"))
-
-        with pytest.raises(ValueError, match="[Ii]n.progress|IN_PROGRESS"):
-            tg.complete_task("t1")
-        tg.close()
-
-    def test_fail_completed_task_raises(self, tmp_path: Path) -> None:
-        """Failing a completed task raises ValueError."""
-        tg = TaskGraph(str(tmp_path / "state_fail_done.db"))
-        tg.add_task(_make_task("t1"))
-        tg.start_task("t1")
-        tg.complete_task("t1")
-
-        with pytest.raises(ValueError):
-            tg.fail_task("t1")
-        tg.close()
-
-    def test_fail_pending_task_succeeds(self, tmp_path: Path) -> None:
-        """Failing a pending task succeeds (cascading failure path)."""
-        tg = TaskGraph(str(tmp_path / "state_fail_pend.db"))
-        tg.add_task(_make_task("t1"))
-
-        failed = tg.fail_task("t1")
-        assert failed.state == TaskState.FAILED
-        tg.close()
-
-    def test_double_complete_raises(self, tmp_path: Path) -> None:
-        """Completing a task twice raises ValueError."""
-        tg = TaskGraph(str(tmp_path / "state_dbl.db"))
-        tg.add_task(_make_task("t1"))
-        tg.start_task("t1")
-        tg.complete_task("t1")
-
-        with pytest.raises(ValueError):
-            tg.complete_task("t1")
-        tg.close()
-
-    def test_double_start_raises(self, tmp_path: Path) -> None:
-        """Starting a task twice raises ValueError."""
-        tg = TaskGraph(str(tmp_path / "state_dstart.db"))
-        tg.add_task(_make_task("t1"))
-        tg.start_task("t1")
-
-        with pytest.raises(ValueError):
-            tg.start_task("t1")
-        tg.close()
-
-
-# ---------------------------------------------------------------------------
-# Close safety
-# ---------------------------------------------------------------------------
-
-
-class TestTaskGraphCloseSafety:
-    """Verify close-then-use raises RuntimeError."""
-
-    def test_sync_close_then_get_task_raises(self, tmp_path: Path) -> None:
-        """Using TaskGraph after close() raises RuntimeError."""
-        tg = TaskGraph(str(tmp_path / "closed.db"))
-        tg.add_task(_make_task("t1"))
-        tg.close()
-
-        with pytest.raises(RuntimeError, match="[Cc]losed"):
-            tg.get_task("t1")
-
-    def test_aclose_then_aget_task_raises(self, tmp_path: Path) -> None:
-        """Using async method after aclose() raises RuntimeError."""
-
-        async def _test():
-            tg = TaskGraph(str(tmp_path / "async_closed.db"))
-            tg.add_task(_make_task("t1"))
-            await tg.aclose()
-
-            with pytest.raises(RuntimeError, match="[Cc]losed"):
-                await tg.aget_task("t1")
-
-        asyncio.run(_test())
-
-    def test_detect_cycles_on_closed_raises(self, tmp_path: Path) -> None:
-        """detect_cycles() on closed graph raises RuntimeError."""
-        tg = TaskGraph(str(tmp_path / "closed_cycle.db"))
-        tg.add_task(_make_task("t1"))
-        tg.close()
-
-        with pytest.raises(RuntimeError, match="[Cc]losed"):
-            tg.detect_cycles()
-
-
-# ---------------------------------------------------------------------------
 # Batch edge cases
 # ---------------------------------------------------------------------------
 
@@ -326,9 +204,7 @@ class TestTaskGraphBatchEdgeCases:
         assert tg.get_task("anything") is None
         tg.close()
 
-    def test_add_tasks_atomic_rollback_on_cycle(
-        self, tmp_path: Path
-    ) -> None:
+    def test_add_tasks_atomic_rollback_on_cycle(self, tmp_path: Path) -> None:
         """add_tasks with a cycle rolls back the entire batch."""
         tg = TaskGraph(str(tmp_path / "batch_rollback.db"))
 

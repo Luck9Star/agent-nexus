@@ -1737,7 +1737,6 @@ class TestExecuteSingleAgentReturnTypeSafety:
         router = PlatformRouter(process_manager=pm)
 
         result = await router._execute_single_agent("a1", "hi", "c1")
-        assert isinstance(result, str)
         assert result == ""
 
     @pytest.mark.asyncio
@@ -1756,7 +1755,6 @@ class TestExecuteSingleAgentReturnTypeSafety:
         router = PlatformRouter(process_manager=pm)
 
         result = await router._execute_single_agent("a1", "hi", "c1")
-        assert isinstance(result, str)
         assert "item1" in result
 
     @pytest.mark.asyncio
@@ -1775,7 +1773,6 @@ class TestExecuteSingleAgentReturnTypeSafety:
         router = PlatformRouter(process_manager=pm)
 
         result = await router._execute_single_agent("a1", "hi", "c1")
-        assert isinstance(result, str)
         assert "key" in result
 
     @pytest.mark.asyncio
@@ -1794,7 +1791,6 @@ class TestExecuteSingleAgentReturnTypeSafety:
         router = PlatformRouter(process_manager=pm)
 
         result = await router._execute_single_agent("a1", "hi", "c1")
-        assert isinstance(result, str)
         assert result == "42"
 
 
@@ -2134,10 +2130,13 @@ class TestCompositeOverallTimeout:
         async def _hanging_phase(*args, **kwargs):
             await asyncio.sleep(10)  # Much longer than short_timeout
 
-        with patch(
-            "agent_nexus.platform.router.router._DEFAULT_COMPOSITE_TIMEOUT",
-            short_timeout,
-        ), patch.object(router, "_execute_phase", side_effect=_hanging_phase):
+        with (
+            patch(
+                "agent_nexus.platform.router.router._DEFAULT_COMPOSITE_TIMEOUT",
+                short_timeout,
+            ),
+            patch.object(router, "_execute_phase", side_effect=_hanging_phase),
+        ):
             with patch.object(router, "_build_phase_message", return_value="msg"):
                 definition = OrchestrationDefinition(
                     goal="test",

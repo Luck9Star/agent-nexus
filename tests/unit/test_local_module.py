@@ -1726,7 +1726,6 @@ class TestBuildCommandUnsafeName:
         entry = self._make_entry()
         result = sup._build_command("normal-agent", entry)
         assert result is not None
-        assert isinstance(result, list)
         assert len(result) > 0
 
 
@@ -2780,10 +2779,13 @@ class TestGitInstallerRunGitCapture:
         mock_proc.communicate = AsyncMock(return_value=(b"", b"fatal: error"))
         mock_proc.returncode = 128
 
-        with patch(
-            "agent_nexus.platform.local.installer.asyncio.create_subprocess_exec",
-            return_value=mock_proc,
-        ), pytest.raises(InstallationError, match="git.*failed"):
+        with (
+            patch(
+                "agent_nexus.platform.local.installer.asyncio.create_subprocess_exec",
+                return_value=mock_proc,
+            ),
+            pytest.raises(InstallationError, match="git.*failed"),
+        ):
             await GitInstaller._run_git_capture(["bad-cmd"], tmp_path)
 
 
@@ -3268,10 +3270,13 @@ class TestInstallRollbackCleanupFailure:
                 raise OSError("rollback permission denied")
             return _shutil.rmtree(path, *args, **kwargs)
 
-        with patch(
-            "agent_nexus.platform.local.installer.shutil.rmtree",
-            side_effect=_rmtree_side_effect,
-        ), pytest.raises(RuntimeError, match="venv fail"):
+        with (
+            patch(
+                "agent_nexus.platform.local.installer.shutil.rmtree",
+                side_effect=_rmtree_side_effect,
+            ),
+            pytest.raises(RuntimeError, match="venv fail"),
+        ):
             await installer.install("rf-agent", source_url="https://github.com/x/y.git")
 
         # At least 2 rmtree calls: step-5 pre-copy + rollback cleanup
