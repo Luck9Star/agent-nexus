@@ -60,3 +60,4 @@ graphify-out/
 # Claude harness state
 .claude/harness/
 .claude/harness-state.json
+.pi
