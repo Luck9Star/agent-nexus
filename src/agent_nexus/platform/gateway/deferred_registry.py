@@ -401,6 +401,18 @@ class DeferredAgentRegistry:
     # Query helpers
     # ------------------------------------------------------------------
 
+
+    @staticmethod
+    def _collect_unique_tools(
+        tools: list[dict], seen: set[str], schemas: list[dict]
+    ) -> None:
+        """Append unique tool schemas, skipping names already in *seen*."""
+        for schema in schemas:
+            name = schema.get("name", "")
+            if name not in seen:
+                tools.append(schema)
+                seen.add(name)
+
     def get_tools_for_llm(self) -> list[dict]:
         """Get all available tool schemas (core + activated deferred).
 
@@ -413,21 +425,11 @@ class DeferredAgentRegistry:
         tools: list[dict] = []
         seen: set[str] = set()
 
-        # Core agents: always included
         for info in self._core_agents.values():
             if info.tool_schemas:
-                for schema in info.tool_schemas:
-                    name = schema.get("name", "")
-                    if name not in seen:
-                        tools.append(schema)
-                        seen.add(name)
-            elif info.is_running:
-                # Core agent is running but tools not yet discovered
-                # (will be discovered on first gateway startup)
-                pass
+                self._collect_unique_tools(tools, seen, info.tool_schemas)
 
-        # Activated deferred agents (skip duplicates)
-        for _, adapters in self._tool_adapters.items():
+        for adapters in self._tool_adapters.values():
             for adapter in adapters:
                 if adapter.full_name not in seen:
                     tools.append(adapter.get_tool_definition())

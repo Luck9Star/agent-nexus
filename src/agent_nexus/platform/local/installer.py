@@ -568,6 +568,41 @@ class GitInstaller:
         except Exception:
             return False
 
+
+    def _validate_venv_path(self, venv_path: Path) -> bool:
+        """Check if venv path is safe (no symlink escape). Removes existing venv if safe."""
+        if not venv_path.exists():
+            return True
+        resolved = venv_path.resolve()
+        if not resolved.is_relative_to(self._venvs_dir.resolve()):
+            logger.warning(
+                "Skipping removal of venv_path outside allowed directory: %s",
+                resolved,
+            )
+            return False
+        shutil.rmtree(venv_path)
+        return True
+
+    @staticmethod
+    async def _run_uv(args: list[str], error_label: str) -> bytes | None:
+        """Run a uv subprocess with cleanup. Returns stderr on success, ``None`` on failure."""
+        proc = await asyncio.create_subprocess_exec(
+            "uv",
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            _, stderr = await proc.communicate()
+        except BaseException:
+            proc.kill()
+            await proc.wait()
+            raise
+        if proc.returncode != 0:
+            logger.warning("uv %s failed: %s", error_label, stderr.decode(errors="replace"))
+            return None
+        return stderr
+
     async def _create_venv(self, agent_name: str, agent_dir: Path) -> Path | None:
         """Create a per-agent venv if the agent has ``pyproject.toml``.
 
@@ -582,71 +617,26 @@ class GitInstaller:
         venv_path = self._venvs_dir / agent_name
         self._venvs_dir.mkdir(parents=True, exist_ok=True)
 
-        # Remove existing venv if present (guard against symlinks escaping venvs_dir)
-        if venv_path.exists():
-            resolved = venv_path.resolve()
-            if resolved.is_relative_to(self._venvs_dir.resolve()):
-                shutil.rmtree(venv_path)
-            else:
-                logger.warning(
-                    "Skipping removal of venv_path outside allowed directory: %s",
-                    resolved,
-                )
-                # Abort: do NOT create a venv at a symlink that points
-                # outside _venvs_dir — that would write to an arbitrary
-                # directory (directory escape via symlink).
-                return None
+        if not self._validate_venv_path(venv_path):
+            return None
 
         try:
-            # Create venv with uv
-            proc = await asyncio.create_subprocess_exec(
-                "uv",
-                "venv",
-                str(venv_path),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            try:
-                _, stderr = await proc.communicate()
-            except BaseException:
-                proc.kill()
-                await proc.wait()
-                raise
-
-            if proc.returncode != 0:
-                logger.warning(
-                    "uv venv failed for %s: %s", agent_name, stderr.decode(errors="replace")
-                )
+            stderr = await self._run_uv(["venv", str(venv_path)], f"venv for {agent_name}")
+            if stderr is None:
                 shutil.rmtree(venv_path, ignore_errors=True)
                 return None
 
-            # Install the agent package into the venv (non-editable to avoid
-            # relative-path dependency breakage and cache-cleanup fragility).
-            # Include [full] extras if defined (e.g. python-docx, fastmcp).
             install_target = (
                 f"{agent_dir}[full]" if self._has_extra(agent_dir, "full") else str(agent_dir)
             )
-            proc = await asyncio.create_subprocess_exec(
-                "uv",
-                "pip",
-                "install",
-                install_target,
-                "--python",
-                str(venv_path / "bin" / "python"),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            stderr = await self._run_uv(
+                [
+                    "pip", "install", install_target,
+                    "--python", str(venv_path / "bin" / "python"),
+                ],
+                f"pip install for {agent_name}",
             )
-            try:
-                _, stderr = await proc.communicate()
-            except BaseException:
-                proc.kill()
-                await proc.wait()
-                raise
-
-            if proc.returncode != 0:
-                logger.warning(
-                    "uv pip install failed for %s: %s", agent_name, stderr.decode(errors="replace")
-                )
+            if stderr is None:
                 shutil.rmtree(venv_path, ignore_errors=True)
                 return None
 

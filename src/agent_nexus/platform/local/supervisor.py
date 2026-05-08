@@ -270,33 +270,19 @@ class AgentSupervisor:
     # Auto-restart
     # ------------------------------------------------------------------
 
-    async def auto_restart_dead(self) -> list[str]:
-        """Check for dead agents and restart them.
 
-        Iterates over all agents known to the process manager.  Agents
-        whose process has died are restarted in parallel via
-        ``asyncio.gather``, subject to the per-agent ``max_restarts``
-        limit to prevent infinite restart loops.
-
-        Returns
-        -------
-        list[str]
-            Names of agents that were successfully restarted.
-        """
-        # Phase 1: identify dead agents that need restarting
+    def _find_dead_agents(self) -> list[str]:
+        """Identify dead agents eligible for restart (within budget)."""
         lockfile = self._lockfile.load()
         dead_agents: list[str] = []
         for agent_name in lockfile.agents:
-            # Skip agents that were never explicitly started this session
             if agent_name not in self._started_agents:
                 continue
 
             handle = self._pm.get_agent(agent_name)
-            is_alive = handle is not None and handle.is_alive
-            if is_alive:
+            if handle is not None and handle.is_alive:
                 continue
 
-            # Check restart budget
             tracker = self._restart_trackers.setdefault(
                 agent_name,
                 RestartTracker(max_restarts=self._max_restarts),
@@ -317,8 +303,22 @@ class AgentSupervisor:
                 tracker.max_restarts,
             )
             dead_agents.append(agent_name)
+        return dead_agents
 
-        # Phase 2: restart all dead agents in parallel
+    async def auto_restart_dead(self) -> list[str]:
+        """Check for dead agents and restart them.
+
+        Iterates over all agents known to the process manager.  Agents
+        whose process has died are restarted in parallel via
+        ``asyncio.gather``, subject to the per-agent ``max_restarts``
+        limit to prevent infinite restart loops.
+
+        Returns
+        -------
+        list[str]
+            Names of agents that were successfully restarted.
+        """
+        dead_agents = self._find_dead_agents()
         if not dead_agents:
             return []
 

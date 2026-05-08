@@ -45,6 +45,34 @@ class ModelConfigManager:
     # Public API
     # ------------------------------------------------------------------
 
+
+    def _resolve_tier_model(
+        self, agent_name: str, recommended_tier: str | ModelTier
+    ) -> str | None:
+        """Resolve a model string from a tier recommendation, or ``None``."""
+        try:
+            tier_key = (
+                ModelTier(recommended_tier)
+                if isinstance(recommended_tier, str)
+                else recommended_tier
+            )
+        except ValueError:
+            logger.warning(
+                "Unknown model tier '%s' for agent '%s', ignoring",
+                recommended_tier,
+                agent_name,
+            )
+            return None
+        tier_model = MODEL_TIER_MAP.get(tier_key)
+        if tier_model:
+            logger.debug(
+                "Model for '%s' resolved from tier %s: %s",
+                agent_name,
+                tier_key,
+                tier_model,
+            )
+        return tier_model
+
     def resolve_model(
         self,
         agent_name: str,
@@ -90,29 +118,9 @@ class ModelConfigManager:
 
         # 3. Tier mapping
         if recommended_tier:
-            try:
-                tier_key = (
-                    ModelTier(recommended_tier)
-                    if isinstance(recommended_tier, str)
-                    else recommended_tier
-                )
-            except ValueError:
-                logger.warning(
-                    "Unknown model tier '%s' for agent '%s', ignoring",
-                    recommended_tier,
-                    agent_name,
-                )
-                tier_key = None
-            if tier_key is not None:
-                tier_model = MODEL_TIER_MAP.get(tier_key)
-                if tier_model:
-                    logger.debug(
-                        "Model for '%s' resolved from tier %s: %s",
-                        agent_name,
-                        tier_key,
-                        tier_model,
-                    )
-                    return tier_model
+            tier_model = self._resolve_tier_model(agent_name, recommended_tier)
+            if tier_model:
+                return tier_model
 
         # 4. Config default
         default = self._config.models.default

@@ -15,7 +15,6 @@ Hooks are loaded from:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import fnmatch
 import ipaddress
 import json
@@ -360,6 +359,28 @@ class HookExecutor:
     # Type-specific executors
     # ------------------------------------------------------------------
 
+
+    async def _kill_and_build_error(
+        self,
+        hook: HookDefinition,
+        error_msg: str,
+        proc: asyncio.subprocess.Process | None,
+        start: float,
+        error_type: str | None = None,
+    ) -> HookExecution:
+        """Kill subprocess (if running) and build error HookExecution."""
+        duration_ms = (time.monotonic() - start) * 1000
+        if proc is not None:
+            await self._kill_subprocess(proc)
+        return HookExecution(
+            hook=hook,
+            passed=False,
+            blocked=hook.block_on_failure,
+            error=error_msg,
+            error_type=error_type,
+            duration_ms=round(duration_ms, 2),
+        )
+
     async def _execute_command(
         self,
         hook: HookDefinition,
@@ -406,15 +427,8 @@ class HookExecutor:
             )
 
         except TimeoutError:
-            duration_ms = (time.monotonic() - start) * 1000
-            if proc is not None:
-                await self._kill_subprocess(proc)
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error=f"Command timed out after {timeout}s",
-                duration_ms=round(duration_ms, 2),
+            return await self._kill_and_build_error(
+                hook, f"Command timed out after {timeout}s", proc, start,
             )
 
         except asyncio.CancelledError:
@@ -423,19 +437,8 @@ class HookExecutor:
             raise
 
         except Exception as exc:
-            duration_ms = (time.monotonic() - start) * 1000
-            if proc is not None:
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
-                with contextlib.suppress(ProcessLookupError):
-                    await proc.wait()
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error=str(exc),
-                error_type=type(exc).__name__,
-                duration_ms=round(duration_ms, 2),
+            return await self._kill_and_build_error(
+                hook, str(exc), proc, start, error_type=type(exc).__name__,
             )
 
     @staticmethod

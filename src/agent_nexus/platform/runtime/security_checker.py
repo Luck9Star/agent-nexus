@@ -12,7 +12,7 @@ import ast
 import hashlib
 import logging
 from collections.abc import Sequence
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from agent_nexus.models.runtime import SecurityViolation
 
@@ -215,6 +215,42 @@ class SecurityChecker:
 
         return list(self._check_cached(code, tree))
 
+
+    @staticmethod
+    def _apply_rule_batch(
+        rules: list[Any],
+        check_fn: Any,
+        subject: Any,
+        subject_label: str,
+    ) -> list[SecurityViolation]:
+        """Apply a batch of rules to a subject, collecting violations.
+
+        On rule failure, logs a warning and treats the failure as a violation.
+        """
+        violations: list[SecurityViolation] = []
+        for rule in rules:
+            try:
+                violations.extend(check_fn(rule, subject))
+            except Exception:
+                rule_name = type(rule).__name__
+                logger.warning(
+                    "Security rule %r failed on %s — treating as violation",
+                    rule_name,
+                    subject_label,
+                    exc_info=True,
+                )
+                violations.append(
+                    SecurityViolation(
+                        rule_type=rule_name,
+                        node_type=subject_label,
+                        message=(
+                            f"Security rule {rule_name!r} raised"
+                            " an exception — execution blocked for safety"
+                        ),
+                    )
+                )
+        return violations
+
     def _check_cached(
         self, code: str, tree: ast.Module | None = None
     ) -> tuple[SecurityViolation, ...]:
@@ -242,47 +278,27 @@ class SecurityChecker:
 
         violations: list[SecurityViolation] = []
 
-        # Structural rules: per-node
         for node in ast.walk(tree):
-            for rule in self._structural_rules:
-                try:
-                    violations.extend(rule.check(node))
-                except Exception:
-                    logger.warning(
-                        "Security rule %r failed on node %s — treating as violation",
-                        type(rule).__name__,
-                        type(node).__name__,
-                        exc_info=True,
-                    )
-                    violations.append(
-                        SecurityViolation(
-                            rule_type=type(rule).__name__,
-                            node_type=type(node).__name__,
-                            message=f"Security rule {type(rule).__name__!r} raised an exception — execution blocked for safety",  # noqa: E501
-                        )
-                    )
+            violations.extend(
+                self._apply_rule_batch(
+                    self._structural_rules,
+                    lambda rule, n: rule.check(n),
+                    node,
+                    type(node).__name__,
+                )
+            )
 
-        # Regex rules: once on full source
-        for rule in self._regex_rules:
-            try:
-                violations.extend(rule.check_source(code))
-            except Exception:
-                logger.warning(
-                    "Security rule %r failed on source — treating as violation",
-                    type(rule).__name__,
-                    exc_info=True,
-                )
-                violations.append(
-                    SecurityViolation(
-                        rule_type=type(rule).__name__,
-                        node_type="source",
-                        message=f"Security rule {type(rule).__name__!r} raised an exception — execution blocked for safety",  # noqa: E501
-                    )
-                )
+        violations.extend(
+            self._apply_rule_batch(
+                self._regex_rules,
+                lambda rule, src: rule.check_source(src),
+                code,
+                "source",
+            )
+        )
 
         result = tuple(violations)
 
-        # Evict oldest entry if cache is full (FIFO eviction).
         if len(self._cache) >= self._cache_max:
             self._cache.pop(next(iter(self._cache)))
         self._cache[cache_key] = result
