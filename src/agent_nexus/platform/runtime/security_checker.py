@@ -56,6 +56,8 @@ _DEFAULT_FORBIDDEN_IMPORTS = [
     "concurrent",  # ProcessPoolExecutor bypasses subprocess/multiprocessing blocks
     "linecache",  # linecache.getline() reads file contents without open()
     "fileinput",  # fileinput.input() reads files line-by-line without open()
+    "zipimport",  # zipimport.zipimporter() loads .pyc from zip, bypassing import checks
+    "webbrowser",  # webbrowser.open() opens URLs — data exfiltration vector
 ]
 
 _DEFAULT_FORBIDDEN_FUNCTIONS = [
@@ -82,6 +84,11 @@ _DEFAULT_FORBIDDEN_FUNCTIONS = [
 _DEFAULT_FORBIDDEN_QUALIFIED_CALLS: dict[str, set[str]] = {
     "os": {"system", "popen", "spawnl", "spawnv", "spawnle", "spawnve"},
     "subprocess": {"call", "run", "Popen", "check_output", "check_call"},
+    "asyncio": {
+        "create_subprocess_exec",
+        "create_subprocess_shell",
+        "create_subprocess",
+    },
 }
 
 _DEFAULT_FORBIDDEN_ATTRIBUTES = [

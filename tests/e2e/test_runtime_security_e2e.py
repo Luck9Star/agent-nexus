@@ -605,3 +605,86 @@ class TestAdvancedBypassVectors:
             assert result.error is not None and "security violation" in result.error.lower()
         finally:
             executor.close()
+
+
+class TestAsyncIOBypassVectors:
+    """Verify asyncio subprocess-creation methods are blocked at AST level.
+
+    asyncio.create_subprocess_exec/shell bypass the subprocess import block,
+    since asyncio itself is not in _DEFAULT_FORBIDDEN_IMPORTS (agents use it).
+    The qualified-call blocklist closes this gap.
+    """
+
+    def test_ast_blocks_create_subprocess_exec(self) -> None:
+        checker = SecurityChecker()
+        violations = checker.check_code(
+            "import asyncio\nasyncio.create_subprocess_exec('ls')"
+        )
+        assert len(violations) >= 1
+        msgs = " ".join(v.message for v in violations)
+        assert "create_subprocess_exec" in msgs
+
+    def test_ast_blocks_create_subprocess_shell(self) -> None:
+        checker = SecurityChecker()
+        violations = checker.check_code(
+            "import asyncio\nasyncio.create_subprocess_shell('ls')"
+        )
+        assert len(violations) >= 1
+        msgs = " ".join(v.message for v in violations)
+        assert "create_subprocess_shell" in msgs
+
+    def test_ast_allows_safe_asyncio_usage(self) -> None:
+        """Non-subprocess asyncio calls (async def, gather, etc.) are allowed."""
+        checker = SecurityChecker()
+        violations = checker.check_code(
+            "import asyncio\nasyncio.gather(asyncio.sleep(0.1))"
+        )
+        assert all("asyncio" not in v.message for v in violations)
+
+    @pytest.mark.asyncio
+    async def test_executor_rejects_asyncio_subprocess_exec(self) -> None:
+        executor = IPythonExecutor()
+        try:
+            result = await executor.execute(
+                "import asyncio\nasyncio.create_subprocess_exec('whoami')"
+            )
+            assert result.success is False
+            assert result.error is not None and "security violation" in result.error.lower()
+        finally:
+            executor.close()
+
+
+class TestNewImportBypassVectors:
+    """Verify zipimport and webbrowser are blocked at both AST and runtime level."""
+
+    def test_ast_blocks_zipimport(self) -> None:
+        checker = SecurityChecker()
+        violations = checker.check_code("import zipimport")
+        assert len(violations) >= 1
+        assert any("zipimport" in v.message for v in violations)
+
+    def test_ast_blocks_webbrowser(self) -> None:
+        checker = SecurityChecker()
+        violations = checker.check_code("import webbrowser")
+        assert len(violations) >= 1
+        assert any("webbrowser" in v.message for v in violations)
+
+    @pytest.mark.asyncio
+    async def test_executor_rejects_zipimport(self) -> None:
+        executor = IPythonExecutor()
+        try:
+            result = await executor.execute("import zipimport")
+            assert result.success is False
+            assert result.error is not None and "security violation" in result.error.lower()
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_executor_rejects_webbrowser(self) -> None:
+        executor = IPythonExecutor()
+        try:
+            result = await executor.execute("import webbrowser")
+            assert result.success is False
+            assert result.error is not None and "security violation" in result.error.lower()
+        finally:
+            executor.close()

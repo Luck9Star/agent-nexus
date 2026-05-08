@@ -282,12 +282,12 @@ class TestIPCStreamCloseSafety:
             await proto.send_chat("hello", conversation_id="c1")
 
             await stream.close()
-
-            proc.terminate()
-            await proc.wait()
-        except Exception:
-            proc.terminate()
-            await proc.wait()
+        finally:
+            try:
+                proc.terminate()
+                await proc.wait()
+            except ProcessLookupError:
+                pass
 
     @pytest.mark.asyncio
     async def test_close_sync_on_active_stream(self):
