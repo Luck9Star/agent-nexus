@@ -52,7 +52,6 @@ class ImportRule(SecurityRule):
         self.forbidden: set[str] = set(forbidden)
         self._forbidden_prefixes: tuple[str, ...] = tuple(f"{mod}." for mod in self.forbidden)
 
-
     def _check_import_node(self, node: ast.Import) -> list[SecurityViolation]:
         violations: list[SecurityViolation] = []
         for alias in node.names:

@@ -401,7 +401,9 @@ class LLMClient:
         return f"{litellm_provider}/{model}"
 
     def _apply_temperature(
-        self, kwargs: dict[str, Any], temperature: float | None,
+        self,
+        kwargs: dict[str, Any],
+        temperature: float | None,
     ) -> None:
         """Apply temperature to kwargs if supported by the model."""
         if temperature is None:

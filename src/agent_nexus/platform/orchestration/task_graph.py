@@ -510,10 +510,7 @@ class TaskGraph:
         with self._conn() as conn:
             return self._detect_cycles_conn(conn)
 
-
-    def _check_batch_duplicates(
-        self, conn: sqlite3.Connection, task_ids: list[str]
-    ) -> None:
+    def _check_batch_duplicates(self, conn: sqlite3.Connection, task_ids: list[str]) -> None:
         """Raise ValueError if task_ids contain duplicates or already exist in DB."""
         id_set = set(task_ids)
         if len(id_set) < len(task_ids):
@@ -551,9 +548,7 @@ class TaskGraph:
             found = self._query_ids_in_db(conn, list(external_deps))
             missing = external_deps - found
             if missing:
-                raise ValueError(
-                    f"blocked_by references non-existent tasks: {missing}"
-                )
+                raise ValueError(f"blocked_by references non-existent tasks: {missing}")
 
         return all_deps
 
@@ -589,9 +584,7 @@ class TaskGraph:
             )
 
     @staticmethod
-    def _query_ids_in_db(
-        conn: sqlite3.Connection, ids: list[str]
-    ) -> set[str]:
+    def _query_ids_in_db(conn: sqlite3.Connection, ids: list[str]) -> set[str]:
         """Chunked SELECT to find which of *ids* already exist in the tasks table."""
         found: set[str] = set()
         for i in range(0, len(ids), _SQL_CHUNK_SIZE):

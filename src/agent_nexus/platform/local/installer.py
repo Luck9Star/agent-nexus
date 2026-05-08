@@ -228,7 +228,10 @@ class GitInstaller:
         try:
             try:
                 agent_dir = await self._sparse_clone(
-                    source.url, agent_name, relative_path, ref,
+                    source.url,
+                    agent_name,
+                    relative_path,
+                    ref,
                 )
             except Exception as exc:
                 raise InstallationError(f"Failed to clone agent '{agent_name}': {exc}") from exc
@@ -261,8 +264,10 @@ class GitInstaller:
 
             logger.info(
                 "Agent installed: %s@%s (sha=%s, venv=%s)",
-                agent_name, entry.version,
-                commit_sha[:12], "yes" if venv_path else "no",
+                agent_name,
+                entry.version,
+                commit_sha[:12],
+                "yes" if venv_path else "no",
             )
             return entry
         except Exception:
@@ -380,7 +385,8 @@ class GitInstaller:
 
             logger.info(
                 "Local agent installed: %s@%s (source=local)",
-                agent_name, entry.version,
+                agent_name,
+                entry.version,
             )
             return entry
         except Exception:

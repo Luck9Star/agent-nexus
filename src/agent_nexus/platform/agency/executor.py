@@ -114,7 +114,10 @@ class ProfileBasedExecutor:
 
     @staticmethod
     def _resolve_section(
-        section: str, name: str, capabilities: list[str], task: str,
+        section: str,
+        name: str,
+        capabilities: list[str],
+        task: str,
     ) -> object:
         """Map a section name to its generated value."""
         generators: dict[str, Callable[[], object]] = {

@@ -105,9 +105,7 @@ def _max_edit_distance(raw_id: str, pfx: str, n_candidates: int) -> int:
     return 3
 
 
-def _find_best_candidate(
-    raw_id: str, candidates: list[str], max_dist: int
-) -> str | None:
+def _find_best_candidate(raw_id: str, candidates: list[str], max_dist: int) -> str | None:
     """Find the closest candidate within max_dist, returning None if ambiguous."""
     best: str | None = None
     best_dist = max_dist + 1

@@ -58,9 +58,7 @@ class Integrator:
     MAX_SECTION_VALUE_SIZE: int = 500_000
 
     @staticmethod
-    def _validate_section_value(
-        key: str, value: object, source_agent: str, max_size: int
-    ) -> None:
+    def _validate_section_value(key: str, value: object, source_agent: str, max_size: int) -> None:
         if isinstance(value, str) and len(value) > max_size:
             raise ValueError(
                 f"Section '{key}' in artifact from '{source_agent}' "
@@ -77,9 +75,7 @@ class Integrator:
                 )
 
     @staticmethod
-    def _merge_section_value(
-        merged_sections: dict[str, object], key: str, value: object
-    ) -> None:
+    def _merge_section_value(merged_sections: dict[str, object], key: str, value: object) -> None:
         if key not in merged_sections:
             merged_sections[key] = value
             return
@@ -90,15 +86,12 @@ class Integrator:
             merged_sections[key] = {**existing, **value}
         else:
             logger.warning(
-                "Type mismatch for section '%s': existing=%s, new=%s; "
-                "converting to list",
+                "Type mismatch for section '%s': existing=%s, new=%s; converting to list",
                 key,
                 type(existing).__name__,
                 type(value).__name__,
             )
-            converted: list[object] = (
-                existing if isinstance(existing, list) else [existing]
-            )
+            converted: list[object] = existing if isinstance(existing, list) else [existing]
             converted.append(value)
             merged_sections[key] = converted
 
@@ -365,9 +358,7 @@ def _detect_risk_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
         return []
 
     # No similar risks and all non-empty — check shared section overlap
-    _structural_sections = frozenset(
-        {"final_recommendation", "decision_summary", "recommendation"}
-    )
+    _structural_sections = frozenset({"final_recommendation", "decision_summary", "recommendation"})
     section_sets = [
         set(a.sections.keys()) - _structural_sections
         for a in artifacts
@@ -385,10 +376,7 @@ def _detect_risk_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
     return [
         ConflictItem(
             field="risks",
-            description=(
-                "Experts have completely disjoint risk "
-                "findings — potential blind spots"
-            ),
+            description=("Experts have completely disjoint risk findings — potential blind spots"),
             agents=list(risk_sets.keys()),
         )
     ]

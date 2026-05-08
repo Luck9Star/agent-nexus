@@ -314,13 +314,11 @@ class MCPGateway:
             suffix += 1
             if suffix > 100:
                 raise ValueError(
-                    f"Too many tool name collisions for '{full_name}' "
-                    f"(max 100 disambiguations)"
+                    f"Too many tool name collisions for '{full_name}' (max 100 disambiguations)"
                 )
         disambiguated = f"{full_name}_{suffix}"
         logger.warning(
-            "Tool name collision: '%s' from agent '%s' "
-            "already registered, renaming to '%s'",
+            "Tool name collision: '%s' from agent '%s' already registered, renaming to '%s'",
             full_name,
             agent_name,
             disambiguated,
@@ -353,7 +351,9 @@ class MCPGateway:
         remove_lock(agent_name)
 
     def _check_agent_health(
-        self, agent_name: str, adapter: McpToolAdapter,
+        self,
+        agent_name: str,
+        adapter: McpToolAdapter,
     ) -> tuple[Any | None, str | None]:
         """Check agent health. Returns (info, error_msg) — error_msg set means agent unavailable."""
         info = self._registry.get_agent_info(agent_name)
@@ -365,7 +365,9 @@ class MCPGateway:
         return info, None
 
     def _handle_ipc_result(
-        self, result: dict, agent_name: str,
+        self,
+        result: dict,
+        agent_name: str,
     ) -> str:
         """Process IPC call result and return string response."""
         if result["success"]:
@@ -377,7 +379,8 @@ class MCPGateway:
             except Exception:
                 logger.debug(
                     "Failed to clean up dead agent '%s' registration",
-                    agent_name, exc_info=True,
+                    agent_name,
+                    exc_info=True,
                 )
         return f"Error: {result.get('error', 'unknown failure')}"
 

@@ -141,10 +141,7 @@ def check_compliance(clauses: list[ClauseInfo], jurisdiction: str) -> Compliance
                 f"不支持的管辖区: {jurisdiction}。"
                 f"支持: {', '.join(sorted(SUPPORTED_JURISDICTIONS))}"
             ],
-            suggestions=[
-                f"请使用以下管辖区代码之一:"
-                f" {', '.join(sorted(SUPPORTED_JURISDICTIONS))}"
-            ],
+            suggestions=[f"请使用以下管辖区代码之一: {', '.join(sorted(SUPPORTED_JURISDICTIONS))}"],
         )
 
     if not clauses:

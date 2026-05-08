@@ -171,9 +171,7 @@ def _resolve_update_targets(
     raise typer.Exit(code=1)
 
 
-def _report_update_results(
-    agents_to_update: list[str], results: Sequence[object]
-) -> None:
+def _report_update_results(agents_to_update: list[str], results: Sequence[object]) -> None:
     """Print per-agent update results and raise on all-fail."""
     from agent_nexus.platform.local.installer import AgentNotFoundError
 

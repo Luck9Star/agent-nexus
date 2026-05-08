@@ -274,7 +274,6 @@ def env() -> None:
 # =====================================================================
 
 
-
 _PRESET_MODELS: dict[str, tuple[str | None, str, str | None, str]] = {
     "openai": ("OPENAI_API_KEY", "openai-compatible", None, "gpt-4o"),
     "anthropic": ("ANTHROPIC_API_KEY", "anthropic-messages", None, "claude-sonnet-4-20250514"),
@@ -305,9 +304,7 @@ def _write_provider_config(
     except Exception:
         raw = {}
     raw.setdefault("models", {})["default"] = f"{provider}:{model}"
-    prov_section = (
-        raw.setdefault("models", {}).setdefault("providers", {}).setdefault(provider, {})
-    )
+    prov_section = raw.setdefault("models", {}).setdefault("providers", {}).setdefault(provider, {})
     if base_url:
         prov_section["base_url"] = base_url
     if key_env:
@@ -347,15 +344,21 @@ def _run_custom_provider_wizard(questionary: Any, config_path: Path) -> None:
         return
 
     _write_provider_config(
-        config_path, provider, model,
-        base_url=base_url, key_env=key_env, api_type=api_type,
+        config_path,
+        provider,
+        model,
+        base_url=base_url,
+        key_env=key_env,
+        api_type=api_type,
     )
     if key_env:
         typer.echo(f"  Note: Add your API key to your shell profile: export {key_env}=...")
 
 
 def _run_builtin_provider_wizard(
-    questionary: Any, config_path: Path, provider: str,
+    questionary: Any,
+    config_path: Path,
+    provider: str,
 ) -> None:
     """Interactive wizard for a built-in (preset) provider."""
     key_env, api_type, base_url, default_model = _PRESET_MODELS[provider]
@@ -371,8 +374,12 @@ def _run_builtin_provider_wizard(
     ).ask()
 
     _write_provider_config(
-        config_path, provider, model,
-        base_url=base_url, key_env=key_env, api_type=api_type,
+        config_path,
+        provider,
+        model,
+        base_url=base_url,
+        key_env=key_env,
+        api_type=api_type,
     )
     if key_env:
         typer.echo(f"  Note: API key stored. Add to shell profile: export {key_env}=****")
@@ -380,6 +387,7 @@ def _run_builtin_provider_wizard(
     verify = questionary.confirm("Test API connectivity?").ask()
     if verify:
         typer.echo("Connectivity test not yet implemented (placeholder).")
+
 
 def _run_wizard(config_path: Path) -> None:
     """Interactive setup wizard using questionary."""

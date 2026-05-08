@@ -212,7 +212,11 @@ class SpecialistSelector:
                     continue
                 coverage = set(profile.get("capabilities", [])) & remaining
                 if self._is_better_candidate(
-                    profile, coverage, best_profile, best_coverage, best_score,
+                    profile,
+                    coverage,
+                    best_profile,
+                    best_coverage,
+                    best_score,
                 ):
                     best_profile = profile
                     best_coverage = coverage

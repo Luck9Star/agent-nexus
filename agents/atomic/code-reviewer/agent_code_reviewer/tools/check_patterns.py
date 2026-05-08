@@ -55,8 +55,7 @@ ANTI_PATTERNS: list[dict[str, str | re.Pattern[str]]] = [
         "pattern": re.compile(r"\[\s*\w+\s+for\s+\w+\s+in\s+.*\]\s*"),
         "severity": "info",
         "description": (
-            "List comprehension used without storing result;"
-            " consider generator expression"
+            "List comprehension used without storing result; consider generator expression"
         ),
     },
     {
@@ -64,8 +63,7 @@ ANTI_PATTERNS: list[dict[str, str | re.Pattern[str]]] = [
         "pattern": re.compile(r"(?:for|while)\s+.*:\s*\n(?:.*\n){0,3}.*\+="),
         "severity": "warning",
         "description": (
-            "String concatenation in loop;"
-            " use join() or StringIO for better performance"
+            "String concatenation in loop; use join() or StringIO for better performance"
         ),
     },
     # Maintainability patterns
@@ -80,8 +78,7 @@ ANTI_PATTERNS: list[dict[str, str | re.Pattern[str]]] = [
         "pattern": re.compile(r"(?:    |\t){4,}\S"),
         "severity": "warning",
         "description": (
-            "Deep nesting detected (4+ levels);"
-            " consider extracting to helper functions"
+            "Deep nesting detected (4+ levels); consider extracting to helper functions"
         ),
     },
     {
@@ -91,8 +88,7 @@ ANTI_PATTERNS: list[dict[str, str | re.Pattern[str]]] = [
         ),
         "severity": "warning",
         "description": (
-            "Function is very long (50+ lines);"
-            " consider breaking into smaller functions"
+            "Function is very long (50+ lines); consider breaking into smaller functions"
         ),
     },
     {

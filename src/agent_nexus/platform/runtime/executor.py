@@ -305,9 +305,7 @@ class IPythonExecutor:
 
         # Phase 3: build result from IPython cell output.
         vars_created = self._detect_new_variables(pre_keys)
-        return self._build_cell_result(
-            result, buf_out.getvalue(), buf_err.getvalue(), vars_created
-        )
+        return self._build_cell_result(result, buf_out.getvalue(), buf_err.getvalue(), vars_created)
 
     # ------------------------------------------------------------------
     # _execute_inner helpers
@@ -368,9 +366,7 @@ class IPythonExecutor:
 
         combined_output = stdout
         if stderr:
-            combined_output = (
-                f"{stdout}\n--- stderr ---\n{stderr}" if stdout else stderr
-            )
+            combined_output = f"{stdout}\n--- stderr ---\n{stderr}" if stdout else stderr
         return ExecutionResult(
             success=True,
             output=combined_output or "",

@@ -168,8 +168,7 @@ def _check_forms(html: str) -> list[AccessibilityIssue]:
                 element=input_tag[:50],
                 description=f"Form input (type={input_type}) missing associated label",
                 fix_suggestion=(
-                    "Add a <label> element with 'for' matching the input's"
-                    " 'id', or use aria-label"
+                    "Add a <label> element with 'for' matching the input's 'id', or use aria-label"
                 ),
             )
         )
@@ -301,8 +300,7 @@ def _check_tables(html: str) -> list[AccessibilityIssue]:
                     element="<table>",
                     description="Data table missing header cells (<th>)",
                     fix_suggestion=(
-                        "Use <th> elements for header cells"
-                        " with appropriate scope attributes"
+                        "Use <th> elements for header cells with appropriate scope attributes"
                     ),
                 )
             )

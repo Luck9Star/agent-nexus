@@ -124,9 +124,7 @@ def _build_line_map(
 ) -> dict[int, int]:
     """Build a mapping from normalized line numbers to original line numbers."""
     if len(norm_lines) == len(orig_lines):
-        return dict(
-            zip(range(1, len(norm_lines) + 1), range(1, len(orig_lines) + 1), strict=False)
-        )
+        return dict(zip(range(1, len(norm_lines) + 1), range(1, len(orig_lines) + 1), strict=False))
 
     # Build mapping by tracking cumulative char offsets.
     norm_offsets = [0]
@@ -158,9 +156,7 @@ def _match_patterns(
     line_num: int,
 ) -> list[dict[str, Any]]:
     """Match *text* against a list of (regex, description) tuples."""
-    return [
-        _make_risk(desc, severity, line_num) for pat, desc in patterns if pat.search(text)
-    ]
+    return [_make_risk(desc, severity, line_num) for pat, desc in patterns if pat.search(text)]
 
 
 def _match_cn_high(line: str, line_num: int) -> list[dict[str, Any]]:
@@ -168,9 +164,7 @@ def _match_cn_high(line: str, line_num: int) -> list[dict[str, Any]]:
     risks: list[dict[str, Any]] = []
     for pattern, description in _CN_HIGH_SEVERITY_PATTERNS:
         match = pattern.search(line)
-        if match and (
-            any(p in line for p in _CN_INSTRUCTION_PREFIXES) or match.start() < 3
-        ):
+        if match and (any(p in line for p in _CN_INSTRUCTION_PREFIXES) or match.start() < 3):
             risks.append(_make_risk(description, "high", line_num))
     return risks
 

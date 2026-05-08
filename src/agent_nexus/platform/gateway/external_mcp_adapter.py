@@ -201,9 +201,7 @@ class ExternalMcpAdapter:
     async def _open_stdio_transport(self) -> tuple[Any, Any]:
         """Open STDIO transport with shell character validation."""
         if not self._config.command:
-            raise ValueError(
-                f"STDIO transport requires 'command' for server '{self._config.name}'"
-            )
+            raise ValueError(f"STDIO transport requires 'command' for server '{self._config.name}'")
         _shell_chars = ("|", ">", "<", "&", ";", "`", "$")
         if any(c in self._config.command for c in _shell_chars):
             raise ValueError(
@@ -226,9 +224,7 @@ class ExternalMcpAdapter:
             command=self._config.command,
             args=self._config.args,
         )
-        return await self._exit_stack.enter_async_context(
-            stdio_client(server_params)
-        )
+        return await self._exit_stack.enter_async_context(stdio_client(server_params))
 
     async def _open_sse_transport(self) -> tuple[Any, Any]:
         """Open SSE transport."""

@@ -123,6 +123,7 @@ class HookExecutor:
             return {}
         try:
             import yaml
+
             return yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
         except Exception:
             logger.warning("Failed to load hooks from %s", yaml_path, exc_info=True)
@@ -173,7 +174,9 @@ class HookExecutor:
             if not isinstance(hook_list, list):
                 logger.warning(
                     "Expected list for event %r in %s, got %s",
-                    event_name, yaml_path, type(hook_list).__name__,
+                    event_name,
+                    yaml_path,
+                    type(hook_list).__name__,
                 )
                 continue
             hooks.extend(cls._parse_hooks_for_event(event, hook_list, yaml_path))
@@ -395,7 +398,11 @@ class HookExecutor:
             )
             duration_ms = (time.monotonic() - start) * 1000
             return self._build_command_result(
-                hook, proc.returncode, stdout_bytes, stderr_bytes, duration_ms,
+                hook,
+                proc.returncode,
+                stdout_bytes,
+                stderr_bytes,
+                duration_ms,
             )
 
         except TimeoutError:
@@ -436,29 +443,38 @@ class HookExecutor:
         """Validate HTTP hook URL. Returns error result on failure, None on success."""
         if not hook.url:
             return HookExecution(
-                hook=hook, passed=False, blocked=hook.block_on_failure,
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
                 error="HTTP hook missing 'url' field",
             )
         if not hook.url.startswith(("http://", "https://")):
             return HookExecution(
-                hook=hook, passed=False, blocked=hook.block_on_failure,
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
                 error=f"HTTP hook URL has unsupported scheme (only http/https): {hook.url}",
             )
         if _is_private_url(hook.url):
             return HookExecution(
-                hook=hook, passed=False, blocked=hook.block_on_failure,
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
                 error=f"HTTP hook URL targets private/internal address: {hook.url}",
             )
         return None
 
     @staticmethod
     def _build_http_result(
-        hook: HookDefinition, resp: Any, duration_ms: float,
+        hook: HookDefinition,
+        resp: Any,
+        duration_ms: float,
     ) -> HookExecution:
         """Build HookExecution from HTTP response."""
         passed = 200 <= resp.status_code < 300
         return HookExecution(
-            hook=hook, passed=passed,
+            hook=hook,
+            passed=passed,
             blocked=(not passed and hook.block_on_failure),
             output=resp.text[:256] or None,
             error=None if passed else f"HTTP {resp.status_code}: {resp.text[:512]}",
@@ -488,14 +504,19 @@ class HookExecutor:
         start = time.monotonic()
         try:
             resp = await self._http_client.post(
-                hook.url, json=payload, timeout=httpx.Timeout(hook.timeout_seconds),
+                hook.url,
+                json=payload,
+                timeout=httpx.Timeout(hook.timeout_seconds),
             )
             return self._build_http_result(hook, resp, (time.monotonic() - start) * 1000)
         except Exception as exc:
             duration_ms = (time.monotonic() - start) * 1000
             return HookExecution(
-                hook=hook, passed=False, blocked=hook.block_on_failure,
-                error=str(exc), error_type=type(exc).__name__,
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error=str(exc),
+                error_type=type(exc).__name__,
                 duration_ms=round(duration_ms, 2),
             )
 

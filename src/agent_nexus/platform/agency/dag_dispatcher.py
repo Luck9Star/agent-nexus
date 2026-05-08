@@ -305,7 +305,8 @@ class DAGDispatcher:
         """
         all_specialists = [self._graph.get_task(tid) for tid in specialist_ids]
         pending_or_running = [
-            t for t in all_specialists
+            t
+            for t in all_specialists
             if t is not None and t.state in (TaskState.PENDING, TaskState.IN_PROGRESS)
         ]
 
@@ -350,9 +351,7 @@ class DAGDispatcher:
             if self._check_deadline(deadline, result):
                 return False
 
-            ready_specialists = [
-                t for t in self._graph.get_ready_tasks() if t.id in specialist_ids
-            ]
+            ready_specialists = [t for t in self._graph.get_ready_tasks() if t.id in specialist_ids]
 
             if not ready_specialists:
                 if self._no_more_work(specialist_ids, result):
@@ -396,7 +395,11 @@ class DAGDispatcher:
         max_iterations = max(len(dag.tasks) * 3, 1)
 
         completed_normally = self._run_dispatch_loop(
-            specialist_ids, task_description, deadline, max_iterations, result,
+            specialist_ids,
+            task_description,
+            deadline,
+            max_iterations,
+            result,
         )
 
         has_no_errors = (
@@ -637,6 +640,5 @@ class DAGDispatcher:
             return True  # Independent task never started
         dep_tasks = [self._graph.get_task(d) for d in task.blocked_by]
         return all(
-            t is not None and t.state in (TaskState.COMPLETED, TaskState.FAILED)
-            for t in dep_tasks
+            t is not None and t.state in (TaskState.COMPLETED, TaskState.FAILED) for t in dep_tasks
         )

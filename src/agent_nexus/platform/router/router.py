@@ -136,7 +136,8 @@ class PlatformRouter:
 
     @staticmethod
     def _validate_chat_args(
-        agent_name: str, message: str,
+        agent_name: str,
+        message: str,
     ) -> dict | None:
         """Return error dict if args are invalid, else None."""
         if not agent_name or not agent_name.strip():
@@ -290,9 +291,13 @@ class PlatformRouter:
             except Exception:
                 logger.debug("Failed to close context after TaskGraph error", exc_info=True)
             return WorkflowResult(
-                success=False, final_output="",
-                phase_results={}, total_phases=total, completed_phases=0,
-                error=error_msg, error_type=error_type,
+                success=False,
+                final_output="",
+                phase_results={},
+                total_phases=total,
+                completed_phases=0,
+                error=error_msg,
+                error_type=error_type,
             )
 
         # Pre-compute role->agent mapping once
@@ -304,7 +309,11 @@ class PlatformRouter:
         phase_results: dict[WorkflowPhase, str] = {}
         try:
             completed, last_error, last_error_type = await self._execute_phases(
-                ctx, definition, message, role_agents, phase_results,
+                ctx,
+                definition,
+                message,
+                role_agents,
+                phase_results,
             )
         finally:
             try:
@@ -319,10 +328,13 @@ class PlatformRouter:
             final_output = phase_results.get(WorkflowPhase.synthesis, "")
 
         return WorkflowResult(
-            success=success, final_output=final_output,
-            phase_results=phase_results, total_phases=total,
+            success=success,
+            final_output=final_output,
+            phase_results=phase_results,
+            total_phases=total,
             completed_phases=completed,
-            error=last_error, error_type=last_error_type,
+            error=last_error,
+            error_type=last_error_type,
         )
 
     async def route_to_atomic(
@@ -587,11 +599,13 @@ class PlatformRouter:
         async with lock:
             await self._ipc_call_safe(
                 handle.ipc.send_chat(message, conversation_id=conversation_id),
-                agent_name, "send",
+                agent_name,
+                "send",
             )
             response = await self._ipc_call_safe(
                 handle.ipc.receive_until_result(timeout=timeout),
-                agent_name, "receive",
+                agent_name,
+                "receive",
             )
             self._check_ipc_response(response, agent_name)
             return str(response.content) if response.content is not None else ""
@@ -680,7 +694,8 @@ class PlatformRouter:
 
     @staticmethod
     def _classify_result(
-        result: Any, idx: int,
+        result: Any,
+        idx: int,
     ) -> tuple[str | None, str | None]:
         """Classify a single worker result into (output, error)."""
         if isinstance(result, dict) and not result.get("success", True):
@@ -731,7 +746,8 @@ def _parse_tool_response(content: str | None, agent_name: str) -> list[dict]:
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning(
             "Agent '%s' returned invalid JSON tool definitions: %s",
-            agent_name, exc,
+            agent_name,
+            exc,
         )
     return []
 
@@ -748,7 +764,8 @@ async def _fetch_single_agent_tools(pm: ProcessManager, name: str) -> list[dict]
         if response.type == AgentToPlatformType.ERROR:
             logger.warning(
                 "Agent '%s' returned error during tool discovery: %s",
-                name, response.error or "unknown error",
+                name,
+                response.error or "unknown error",
             )
             return []
         return _parse_tool_response(response.content, name)
