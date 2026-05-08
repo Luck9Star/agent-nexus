@@ -134,6 +134,17 @@ class PlatformRouter:
         """
         self._composite_defs[name] = definition
 
+    @staticmethod
+    def _validate_chat_args(
+        agent_name: str, message: str,
+    ) -> dict | None:
+        """Return error dict if args are invalid, else None."""
+        if not agent_name or not agent_name.strip():
+            return _make_error_result("agent_name is required", "ValueError")
+        if not message or not message.strip():
+            return _make_error_result("message is required", "ValueError")
+        return None
+
     async def route_chat(
         self,
         agent_name: str,
@@ -153,29 +164,37 @@ class PlatformRouter:
         Returns:
             Dict with ``output`` and ``success`` keys.
         """
-        conv_id = conversation_id or str(uuid.uuid4())
+        validation_err = self._validate_chat_args(agent_name, message)
+        if validation_err is not None:
+            return validation_err
 
-        if not agent_name or not agent_name.strip():
-            return _make_error_result("agent_name is required", "ValueError")
-        if not message or not message.strip():
-            return _make_error_result("message is required", "ValueError")
+        conv_id = conversation_id or str(uuid.uuid4())
 
         # Check if this is a composite agent with an orchestration definition
         definition = self._composite_defs.get(agent_name)
         if definition is not None:
-            result = await self.route_composite(definition, message, conv_id)
-            result_dict: dict[str, Any] = {
-                "output": result.final_output,
-                "success": result.success,
-            }
-            if not result.success:
-                if result.error:
-                    result_dict["error"] = result.error
-                if result.error_type:
-                    result_dict["error_type"] = result.error_type
-            return result_dict
+            return await self._route_composite_wrapped(definition, message, conv_id)
 
         return await self.route_to_atomic(agent_name, message, conv_id)
+
+    async def _route_composite_wrapped(
+        self,
+        definition: OrchestrationDefinition,
+        message: str,
+        conv_id: str,
+    ) -> dict[str, Any]:
+        """Execute composite routing and wrap result in a dict."""
+        result = await self.route_composite(definition, message, conv_id)
+        result_dict: dict[str, Any] = {
+            "output": result.final_output,
+            "success": result.success,
+        }
+        if not result.success:
+            if result.error:
+                result_dict["error"] = result.error
+            if result.error_type:
+                result_dict["error_type"] = result.error_type
+        return result_dict
 
     def _setup_task_graph(
         self,
@@ -660,6 +679,19 @@ class PlatformRouter:
         return sorted_tasks
 
     @staticmethod
+    def _classify_result(
+        result: Any, idx: int,
+    ) -> tuple[str | None, str | None]:
+        """Classify a single worker result into (output, error)."""
+        if isinstance(result, dict) and not result.get("success", True):
+            return None, f"Worker {idx + 1} failed: {result.get('error', 'unknown error')}"
+        if isinstance(result, Exception):
+            return None, f"Worker {idx + 1} failed: {result}"
+        if result is None or (isinstance(result, str) and not result):
+            return f"Worker {idx + 1}: (no output)", None
+        return str(result), None
+
+    @staticmethod
     def _aggregate_results(results: list[Any], phase: WorkflowPhase) -> str:
         """Aggregate parallel results into a single string.
 
@@ -670,15 +702,11 @@ class PlatformRouter:
         errors: list[str] = []
 
         for i, result in enumerate(results):
-            if isinstance(result, dict) and not result.get("success", True):
-                # Error dict returned by _execute_single_agent
-                errors.append(f"Worker {i + 1} failed: {result.get('error', 'unknown error')}")
-            elif isinstance(result, Exception):
-                errors.append(f"Worker {i + 1} failed: {result}")
-            elif result is None or (isinstance(result, str) and not result):
-                parts.append(f"Worker {i + 1}: (no output)")
-            else:
-                parts.append(str(result))
+            output, error = PlatformRouter._classify_result(result, i)
+            if output:
+                parts.append(output)
+            if error:
+                errors.append(error)
 
         output = "\n\n---\n\n".join(parts)
         if errors:
@@ -690,6 +718,22 @@ class PlatformRouter:
 # ---------------------------------------------------------------------------
 # Module-level helpers for legacy IPC tool discovery
 # ---------------------------------------------------------------------------
+
+
+def _parse_tool_response(content: str | None, agent_name: str) -> list[dict]:
+    """Parse JSON tool list from IPC response content."""
+    if not content or not isinstance(content, str):
+        return []
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, list):
+            return parsed
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.warning(
+            "Agent '%s' returned invalid JSON tool definitions: %s",
+            agent_name, exc,
+        )
+    return []
 
 
 async def _fetch_single_agent_tools(pm: ProcessManager, name: str) -> list[dict]:
@@ -704,22 +748,10 @@ async def _fetch_single_agent_tools(pm: ProcessManager, name: str) -> list[dict]
         if response.type == AgentToPlatformType.ERROR:
             logger.warning(
                 "Agent '%s' returned error during tool discovery: %s",
-                name,
-                response.error or "unknown error",
+                name, response.error or "unknown error",
             )
             return []
-        if response.content and isinstance(response.content, str):
-            try:
-                parsed = json.loads(response.content)
-                if isinstance(parsed, list):
-                    return parsed
-            except (json.JSONDecodeError, ValueError) as exc:
-                logger.warning(
-                    "Agent '%s' returned invalid JSON tool definitions: %s",
-                    name,
-                    exc,
-                )
-        return []
+        return _parse_tool_response(response.content, name)
     except (TimeoutError, IPCError, OSError, RuntimeError) as exc:
         logger.warning("Failed to get tools from agent '%s': %s", name, exc)
         return []

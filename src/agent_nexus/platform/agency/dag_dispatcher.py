@@ -326,6 +326,14 @@ class DAGDispatcher:
             result.failed.append(t.id)
         return True
 
+    def _check_deadline(self, deadline: float | None, result: DispatchResult) -> bool:
+        """Return True if deadline exceeded (sets result.timed_out)."""
+        if deadline is not None and time.monotonic() > deadline:
+            result.timed_out = True
+            logger.warning("DAGDispatch timed out after %ss", self._timeout_seconds)
+            return True
+        return False
+
     def _run_dispatch_loop(
         self,
         specialist_ids: set[str],
@@ -339,9 +347,7 @@ class DAGDispatcher:
         while iteration < max_iterations:
             iteration += 1
 
-            if deadline is not None and time.monotonic() > deadline:
-                result.timed_out = True
-                logger.warning("DAGDispatch timed out after %ss", self._timeout_seconds)
+            if self._check_deadline(deadline, result):
                 return False
 
             ready_specialists = [
@@ -486,6 +492,28 @@ class DAGDispatcher:
             for f in futures:
                 f.cancel()
 
+    def _drain_single_future(
+        self,
+        _f: concurrent.futures.Future[tuple[Artifact | None, str | None]],
+        ti: TaskItem,
+        result: DispatchResult,
+    ) -> bool:
+        """Process a single remaining future. Returns True if task completed."""
+        if _f.done() and not _f.cancelled():
+            try:
+                artifact, error = _f.result()
+            except Exception:
+                artifact, error = None, "executor error"
+            if error is None and artifact is not None:
+                self._graph.complete_task(ti.id)
+                result.artifacts[ti.id] = artifact
+                result.completed.append(ti.id)
+                return True
+        _safe_fail(self._graph, ti.id)
+        result.cancelled.append(ti.id)
+        result.errors[ti.id] = "cancelled (sibling task failed)"
+        return False
+
     def _drain_remaining(
         self,
         futures: dict[concurrent.futures.Future[tuple[Artifact | None, str | None]], TaskItem],
@@ -495,19 +523,7 @@ class DAGDispatcher:
         for _f, ti in futures.items():
             if ti.id in result.completed or ti.id in result.failed:
                 continue
-            if _f.done() and not _f.cancelled():
-                try:
-                    artifact, error = _f.result()
-                except Exception:
-                    artifact, error = None, "executor error"
-                if error is None and artifact is not None:
-                    self._graph.complete_task(ti.id)
-                    result.artifacts[ti.id] = artifact
-                    result.completed.append(ti.id)
-                    continue
-            _safe_fail(self._graph, ti.id)
-            result.cancelled.append(ti.id)
-            result.errors[ti.id] = "cancelled (sibling task failed)"
+            self._drain_single_future(_f, ti, result)
 
     def _dispatch_parallel(
         self,

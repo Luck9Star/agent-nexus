@@ -400,6 +400,23 @@ class LLMClient:
         litellm_provider = self._LITELLM_PROVIDER_MAP.get(provider, "openai")
         return f"{litellm_provider}/{model}"
 
+    def _apply_temperature(
+        self, kwargs: dict[str, Any], temperature: float | None,
+    ) -> None:
+        """Apply temperature to kwargs if supported by the model."""
+        if temperature is None:
+            return
+        if self._capability.supports_temperature:
+            kwargs["temperature"] = max(
+                self._capability.temperature_min,
+                min(self._capability.temperature_max, temperature),
+            )
+        else:
+            logger.warning(
+                "Model '%s' does not support temperature -- ignoring",
+                self._model_name,
+            )
+
     def _build_litellm_kwargs(
         self,
         ctx: CallContext,
@@ -424,25 +441,12 @@ class LLMClient:
         if effective_max_tokens:
             kwargs["max_tokens"] = effective_max_tokens
 
-        if ctx.temperature is not None:
-            if self._capability.supports_temperature:
-                kwargs["temperature"] = max(
-                    self._capability.temperature_min,
-                    min(self._capability.temperature_max, ctx.temperature),
-                )
-            else:
-                logger.warning(
-                    "Model '%s' does not support temperature -- ignoring",
-                    self._model_name,
-                )
+        self._apply_temperature(kwargs, ctx.temperature)
 
         if top_p is not None:
             kwargs["top_p"] = max(0.0, min(1.0, top_p))
-
         if ctx.timeout is not None:
             kwargs["timeout"] = ctx.timeout
-
-        # API key + base_url: LiteLLM accepts these as parameters
         if self._api_key:
             kwargs["api_key"] = self._api_key
         base_url = self._provider_config.base_url or None

@@ -92,8 +92,9 @@ class HookExecutor:
     # Construction helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
+    @classmethod
     def _parse_hooks_for_event(
+        cls,
         event: HookEvent,
         hook_list: list[Any],
         source_path: Path,
@@ -114,6 +115,27 @@ class HookExecutor:
                     exc_info=True,
                 )
         return hooks
+
+    @staticmethod
+    def _load_yaml_raw(yaml_path: Path) -> dict[str, Any]:
+        """Load raw YAML dict from file. Returns empty dict on any failure."""
+        if not yaml_path.exists():
+            return {}
+        try:
+            import yaml
+            return yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            logger.warning("Failed to load hooks from %s", yaml_path, exc_info=True)
+            return {}
+
+    @staticmethod
+    def _resolve_event(event_name: str, yaml_path: Path) -> HookEvent | None:
+        """Parse event name, return None and log on failure."""
+        try:
+            return HookEvent(event_name)
+        except ValueError:
+            logger.warning("Unknown hook event %r in %s, skipping", event_name, yaml_path)
+            return None
 
     @classmethod
     def from_yaml(
@@ -138,37 +160,25 @@ class HookExecutor:
         Returns an executor with an empty hook list if the file does not
         exist or cannot be parsed.
         """
-        if not yaml_path.exists():
-            return cls(hooks=[], allowed_commands=allowed_commands or [])
-
-        try:
-            import yaml
-
-            raw: dict[str, Any] = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
-        except Exception:
-            logger.warning("Failed to load hooks from %s", yaml_path, exc_info=True)
-            return cls(hooks=[], allowed_commands=allowed_commands or [])
+        cmds = allowed_commands or []
+        raw = cls._load_yaml_raw(yaml_path)
+        if not raw:
+            return cls(hooks=[], allowed_commands=cmds)
 
         hooks: list[HookDefinition] = []
         for event_name, hook_list in raw.items():
-            try:
-                event = HookEvent(event_name)
-            except ValueError:
-                logger.warning("Unknown hook event %r in %s, skipping", event_name, yaml_path)
+            event = cls._resolve_event(event_name, yaml_path)
+            if event is None:
                 continue
-
             if not isinstance(hook_list, list):
                 logger.warning(
                     "Expected list for event %r in %s, got %s",
-                    event_name,
-                    yaml_path,
-                    type(hook_list).__name__,
+                    event_name, yaml_path, type(hook_list).__name__,
                 )
                 continue
-
             hooks.extend(cls._parse_hooks_for_event(event, hook_list, yaml_path))
 
-        return cls(hooks=hooks, allowed_commands=allowed_commands or [])
+        return cls(hooks=hooks, allowed_commands=cmds)
 
     # ------------------------------------------------------------------
     # Query helpers
@@ -421,6 +431,40 @@ class HookExecutor:
                 duration_ms=round(duration_ms, 2),
             )
 
+    @staticmethod
+    def _validate_http_url(hook: HookDefinition) -> HookExecution | None:
+        """Validate HTTP hook URL. Returns error result on failure, None on success."""
+        if not hook.url:
+            return HookExecution(
+                hook=hook, passed=False, blocked=hook.block_on_failure,
+                error="HTTP hook missing 'url' field",
+            )
+        if not hook.url.startswith(("http://", "https://")):
+            return HookExecution(
+                hook=hook, passed=False, blocked=hook.block_on_failure,
+                error=f"HTTP hook URL has unsupported scheme (only http/https): {hook.url}",
+            )
+        if _is_private_url(hook.url):
+            return HookExecution(
+                hook=hook, passed=False, blocked=hook.block_on_failure,
+                error=f"HTTP hook URL targets private/internal address: {hook.url}",
+            )
+        return None
+
+    @staticmethod
+    def _build_http_result(
+        hook: HookDefinition, resp: Any, duration_ms: float,
+    ) -> HookExecution:
+        """Build HookExecution from HTTP response."""
+        passed = 200 <= resp.status_code < 300
+        return HookExecution(
+            hook=hook, passed=passed,
+            blocked=(not passed and hook.block_on_failure),
+            output=resp.text[:256] or None,
+            error=None if passed else f"HTTP {resp.status_code}: {resp.text[:512]}",
+            duration_ms=round(duration_ms, 2),
+        )
+
     async def _execute_http(
         self,
         hook: HookDefinition,
@@ -431,75 +475,27 @@ class HookExecutor:
         POSTs a JSON body ``{event, context, hook_type}`` to the hook
         URL.  Any 2xx response = pass, non-2xx or error = fail.
         """
-        if not hook.url:
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error="HTTP hook missing 'url' field",
-            )
+        url_err = self._validate_http_url(hook)
+        if url_err is not None:
+            return url_err
 
-        # SSRF guard: only http/https schemes allowed
-        if not hook.url.startswith(("http://", "https://")):
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error=f"HTTP hook URL has unsupported scheme (only http/https): {hook.url}",
-            )
-
-        # SSRF guard: block private/internal IP ranges
-        if _is_private_url(hook.url):
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error=f"HTTP hook URL targets private/internal address: {hook.url}",
-            )
-
-        payload = {
-            "event": hook.event,
-            "context": context,
-            "hook_type": hook.type,
-        }
+        payload = {"event": hook.event, "context": context, "hook_type": hook.type}
         import httpx
 
-        # Reuse a long-lived client for connection pooling across hooks.
-        # Use a generous default timeout on the client; per-request timeout
-        # is set on each POST call so hooks with different timeouts work correctly.
         if self._http_client is None or self._http_client.is_closed:
-            self._http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(30.0),
-            )
+            self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
 
         start = time.monotonic()
         try:
             resp = await self._http_client.post(
-                hook.url,
-                json=payload,
-                timeout=httpx.Timeout(hook.timeout_seconds),
+                hook.url, json=payload, timeout=httpx.Timeout(hook.timeout_seconds),
             )
-
-            duration_ms = (time.monotonic() - start) * 1000
-            passed = 200 <= resp.status_code < 300
-
-            return HookExecution(
-                hook=hook,
-                passed=passed,
-                blocked=(not passed and hook.block_on_failure),
-                output=resp.text[:256] or None,
-                error=None if passed else f"HTTP {resp.status_code}: {resp.text[:512]}",
-                duration_ms=round(duration_ms, 2),
-            )
-
+            return self._build_http_result(hook, resp, (time.monotonic() - start) * 1000)
         except Exception as exc:
             duration_ms = (time.monotonic() - start) * 1000
             return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error=str(exc),
-                error_type=type(exc).__name__,
+                hook=hook, passed=False, blocked=hook.block_on_failure,
+                error=str(exc), error_type=type(exc).__name__,
                 duration_ms=round(duration_ms, 2),
             )
 

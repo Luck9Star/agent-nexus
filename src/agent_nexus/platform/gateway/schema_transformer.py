@@ -145,6 +145,17 @@ class SchemaTransformer:
 
         return str
 
+    @staticmethod
+    def _navigate_ref(schema: Any, parts: list[str]) -> Any:
+        """Navigate schema along parts path, returning empty dict on failure."""
+        current = schema
+        for part in parts:
+            if isinstance(current, dict):
+                current = current.get(part, {})
+            else:
+                return {}
+        return current
+
     def _resolve_ref(self, ref: str, _name: str = "RefModel") -> type:
         """Resolve a ``$ref`` pointer (``#/$defs/X`` or ``#/definitions/X``)."""
         if not ref.startswith("#/"):
@@ -158,15 +169,7 @@ class SchemaTransformer:
         if ref_name in self._model_cache:
             return self._model_cache[ref_name]
 
-        # Navigate the full schema to the referenced definition
-        resolved_schema: Any = self._full_schema
-        for part in parts:
-            if isinstance(resolved_schema, dict):
-                resolved_schema = resolved_schema.get(part, {})
-            else:
-                resolved_schema = {}
-                break
-
+        resolved_schema = self._navigate_ref(self._full_schema, parts)
         if not isinstance(resolved_schema, dict) or not resolved_schema:
             return str
 

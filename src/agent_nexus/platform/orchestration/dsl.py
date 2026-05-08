@@ -368,35 +368,39 @@ class OrchestrationDSL:
         return tasks
 
     @staticmethod
+    def _require_str(
+        raw: dict[str, Any], key: str, ctx: str,
+    ) -> str:
+        """Return raw[key] if it's a non-empty string, else raise DSLSyntaxError."""
+        val = raw.get(key)
+        if val and isinstance(val, str):
+            return val
+        raise DSLSyntaxError(f"{ctx}.{key} must be a non-empty string")
+
+    @staticmethod
     def _parse_single_task(
         raw_task: dict[str, Any], idx: int, seen_ids: set[str],
     ) -> DSLTask:
-        task_id = raw_task.get("id")
-        if not task_id or not isinstance(task_id, str):
-            raise DSLSyntaxError(f"tasks[{idx}].id must be a non-empty string")
+        ctx = f"tasks[{idx}]"
+        task_id = OrchestrationDSL._require_str(raw_task, "id", ctx)
         if task_id in seen_ids:
             raise DSLSyntaxError(f"Duplicate task id: '{task_id}'")
 
-        description = raw_task.get("description", "")
-        if not description or not isinstance(description, str):
-            raise DSLSyntaxError(
-                f"tasks[{idx}] ({task_id}): .description must be a non-empty string"
-            )
-        agent = raw_task.get("agent")
-        if not agent or not isinstance(agent, str):
-            raise DSLSyntaxError(f"tasks[{idx}] ({task_id}): .agent must be a non-empty string")
+        description = OrchestrationDSL._require_str(
+            raw_task, "description", f"{ctx} ({task_id})",
+        )
+        agent = OrchestrationDSL._require_str(
+            raw_task, "agent", f"{ctx} ({task_id})",
+        )
         blocked_by = OrchestrationDSL._validate_blocked_by(
-            raw_task.get("blocked_by", []), f"tasks[{idx}] ({task_id})",
+            raw_task.get("blocked_by", []), f"{ctx} ({task_id})",
         )
         task_vars = raw_task.get("vars", {})
         if not isinstance(task_vars, dict):
-            raise DSLSyntaxError(f"tasks[{idx}] ({task_id}): .vars must be a table")
+            raise DSLSyntaxError(f"{ctx} ({task_id}): .vars must be a table")
         return DSLTask(
-            id=task_id,
-            description=description,
-            agent=agent,
-            blocked_by=blocked_by,
-            vars=dict(task_vars),
+            id=task_id, description=description, agent=agent,
+            blocked_by=blocked_by, vars=dict(task_vars),
         )
 
     def _parse_composition_format(self, raw: dict[str, Any]) -> OrchestrationDefinition:

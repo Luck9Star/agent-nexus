@@ -352,6 +352,35 @@ class MCPGateway:
                 )
         remove_lock(agent_name)
 
+    def _check_agent_health(
+        self, agent_name: str, adapter: McpToolAdapter,
+    ) -> tuple[Any | None, str | None]:
+        """Check agent health. Returns (info, error_msg) — error_msg set means agent unavailable."""
+        info = self._registry.get_agent_info(agent_name)
+        if info is None or info.handle is None:
+            return None, f"Error: agent '{agent_name}' not available"
+        if not info.handle.is_alive:
+            self._cleanup_agent_registration(agent_name)
+            return None, f"Error: agent '{agent_name}' process has died"
+        return info, None
+
+    def _handle_ipc_result(
+        self, result: dict, agent_name: str,
+    ) -> str:
+        """Process IPC call result and return string response."""
+        if result["success"]:
+            return result["output"]
+        error_type = result.get("error_type", "")
+        if error_type in IPC_FATAL_ERROR_TYPES:
+            try:
+                self._cleanup_agent_registration(agent_name)
+            except Exception:
+                logger.debug(
+                    "Failed to clean up dead agent '%s' registration",
+                    agent_name, exc_info=True,
+                )
+        return f"Error: {result.get('error', 'unknown failure')}"
+
     def _make_tool_func(
         self,
         adapter: McpToolAdapter,
@@ -372,47 +401,20 @@ class MCPGateway:
         display_name = registered_name or adapter.full_name
 
         async def _invoke(**kwargs: Any) -> str:
-            info = self._registry.get_agent_info(adapter.agent_name)
-            if info is None or info.handle is None:
-                return f"Error: agent '{adapter.agent_name}' not available"
-
-            # Health check: clean up stale registration if process died
-            if not info.handle.is_alive:
-                # No lock: set.discard is atomic under GIL, and
-                # reacquiring _reg_lock here would deadlock if
-                # _register_agent_tools still holds it (asyncio.Lock
-                # is non-reentrant).
-                self._cleanup_agent_registration(adapter.agent_name)
-                return f"Error: agent '{adapter.agent_name}' process has died"
+            info, health_err = self._check_agent_health(adapter.agent_name, adapter)
+            if health_err:
+                return health_err
 
             try:
                 result = await adapter.execute(info.handle, kwargs)
             except (TimeoutError, OSError, ConnectionError, IPCError) as exc:
-                # Transport-level failure: process died between is_alive
-                # check and IPC send.  adapter.execute() handles IPCError
-                # internally — reaching here means a low-level OS failure.
                 self._cleanup_agent_registration(adapter.agent_name)
                 return (
                     f"Error: IPC failed for agent "
                     f"'{adapter.agent_name}' [{type(exc).__name__}]: {exc}"
                 )
-            if result["success"]:
-                return result["output"]
-            # If the error indicates the agent process is dead
-            # (IPC/connection failure), clean up stale registration
-            # so get_tools() reflects reality immediately instead of
-            # waiting for the next _invoke call's is_alive check.
-            error_type = result.get("error_type", "")
-            if error_type in IPC_FATAL_ERROR_TYPES:
-                try:
-                    self._cleanup_agent_registration(adapter.agent_name)
-                except Exception:
-                    logger.debug(
-                        "Failed to clean up dead agent '%s' registration",
-                        adapter.agent_name,
-                        exc_info=True,
-                    )
-            return f"Error: {result.get('error', 'unknown failure')}"
+
+            return self._handle_ipc_result(result, adapter.agent_name)
 
         # Override __signature__ and __annotations__ so FastMCP's
         # ParsedFunction.from_function() sees explicit typed parameters
