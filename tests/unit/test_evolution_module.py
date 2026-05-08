@@ -2363,7 +2363,8 @@ class TestEvolutionEngineFacadeDelegation:
             problem_description="tool is slow",
         )
         assert isinstance(results, list)
-        assert len(results) >= 0
+        assert all(isinstance(r, EvolveResult) for r in results)
+        assert len(results) == 0  # empty store → no skills to evolve
 
     def test_evolve_metric_check_returns_list(self, engine: EvolutionEngine) -> None:
         """trigger=METRIC_CHECK returns list[EvolveResult]."""
@@ -2384,7 +2385,7 @@ class TestEvolutionEngineFacadeDelegation:
         """diagnose_all delegates to HealthChecker."""
         report = engine.diagnose_all()
         assert isinstance(report, dict)
-        assert len(report) >= 0  # empty store yields empty dict
+        assert len(report) == 0  # empty store yields empty dict
 
     def test_check_health_missing_skill_raises(self, engine: EvolutionEngine) -> None:
         """check_health raises ValueError for unknown skill_id."""

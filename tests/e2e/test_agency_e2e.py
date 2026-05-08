@@ -303,7 +303,8 @@ class TestTaskComposerPipeline:
         )
         result = composer.run(inp)  # Uses default stub executor
         assert isinstance(result, TaskComposerResult)
-        # Should not crash even with stubs
+        assert result.dag is not None
+        assert len(result.selected_agents) > 0
 
     def test_pipeline_completes_within_time(self, composer):
         """Pipeline completes within reasonable time (no infinite loops)."""

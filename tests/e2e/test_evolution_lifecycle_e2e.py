@@ -92,7 +92,9 @@ class TestSkillAnalysisIntegration:
 
         # Record analysis with judgments for both skills
         store.record_analysis(
-            "task-1", "agent-a", "text",
+            "task-1",
+            "agent-a",
+            "text",
             judgments=[
                 {"skill_id": "s1", "selected": True, "applied": True},
                 {"skill_id": "s2", "selected": True, "fell_back": True},
@@ -105,16 +107,16 @@ class TestSkillAnalysisIntegration:
         assert len(batch["s1"]) == 1
         assert len(batch["s2"]) == 1
 
-    def test_analysis_counter_invariant_violation_rollback(
-        self, store: EvolutionStore
-    ) -> None:
+    def test_analysis_counter_invariant_violation_rollback(self, store: EvolutionStore) -> None:
         """Counter invariant violation rolls back both analysis and judgments."""
         skill = _make_skill("s1")
         store.save_skill_record(skill)
 
         with pytest.raises(ValueError, match="applied requires selected"):
             store.record_analysis(
-                "task-bad", "agent-a", "bad analysis",
+                "task-bad",
+                "agent-a",
+                "bad analysis",
                 judgments=[
                     {
                         "skill_id": "s1",
@@ -219,7 +221,8 @@ class TestEvolutionLifecycle:
 
         # Gen 1
         g1 = SkillRecord(
-            id="gen-1", name="scan",
+            id="gen-1",
+            name="scan",
             lineage=SkillLineage(
                 origin=SkillOrigin.DERIVED,
                 generation=1,
@@ -232,7 +235,8 @@ class TestEvolutionLifecycle:
 
         # Gen 2
         g2 = SkillRecord(
-            id="gen-2", name="scan",
+            id="gen-2",
+            name="scan",
             lineage=SkillLineage(
                 origin=SkillOrigin.DERIVED,
                 generation=2,
@@ -315,7 +319,8 @@ class TestBatchOperations:
         store.save_skill_record(g0)
 
         g1 = SkillRecord(
-            id="a1", name="root",
+            id="a1",
+            name="root",
             lineage=SkillLineage(origin=SkillOrigin.DERIVED, generation=1, parent_skill_ids=["a0"]),
             directory="/skills/root-v1",
         )
@@ -365,9 +370,7 @@ class TestEvolutionEngineErrorPaths:
         yield engine, store
         store.close()
 
-    def test_evolve_post_analysis_without_ctx_raises(
-        self, engine_and_store
-    ) -> None:
+    def test_evolve_post_analysis_without_ctx_raises(self, engine_and_store) -> None:
         """POST_ANALYSIS trigger without ctx raises ValueError."""
         from agent_nexus.platform.evolution.evolver import EvolutionTrigger
 
@@ -375,9 +378,7 @@ class TestEvolutionEngineErrorPaths:
         with pytest.raises(ValueError, match="ctx.*required"):
             engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS)
 
-    def test_evolve_tool_degradation_without_tool_key_raises(
-        self, engine_and_store
-    ) -> None:
+    def test_evolve_tool_degradation_without_tool_key_raises(self, engine_and_store) -> None:
         """TOOL_DEGRADATION trigger without tool_key raises ValueError."""
         from agent_nexus.platform.evolution.evolver import EvolutionTrigger
 
@@ -391,25 +392,19 @@ class TestEvolutionEngineErrorPaths:
         with pytest.raises(ValueError, match="Unknown trigger"):
             engine.evolve(trigger="nonexistent_trigger")  # type: ignore[arg-type]
 
-    def test_check_health_nonexistent_skill_raises(
-        self, engine_and_store
-    ) -> None:
+    def test_check_health_nonexistent_skill_raises(self, engine_and_store) -> None:
         """check_health raises ValueError for a skill that doesn't exist."""
         engine, _ = engine_and_store
         with pytest.raises(ValueError, match="Skill not found"):
             engine.check_health("ghost-skill-999")
 
-    def test_diagnose_all_empty_returns_empty_dict(
-        self, engine_and_store
-    ) -> None:
+    def test_diagnose_all_empty_returns_empty_dict(self, engine_and_store) -> None:
         """diagnose_all on empty store returns empty dict (no crash)."""
         engine, _ = engine_and_store
         result = engine.diagnose_all()
         assert result == {}
 
-    def test_evolve_tool_degradation_returns_results(
-        self, engine_and_store
-    ) -> None:
+    def test_evolve_tool_degradation_returns_results(self, engine_and_store) -> None:
         """TOOL_DEGRADATION with tool_key returns a list of EvolveResults."""
         from agent_nexus.platform.evolution.evolver import EvolutionTrigger
 
@@ -423,11 +418,10 @@ class TestEvolutionEngineErrorPaths:
             problem_description="Tool returns 500 errors",
         )
         assert isinstance(results, list)
+        assert len(results) >= 1  # seeded skill should trigger at least one evolution
         assert all(hasattr(r, "success") for r in results)
 
-    def test_evolve_metric_check_returns_results(
-        self, engine_and_store
-    ) -> None:
+    def test_evolve_metric_check_returns_results(self, engine_and_store) -> None:
         """METRIC_CHECK trigger returns a list (possibly empty if no skills qualify)."""
         from agent_nexus.platform.evolution.evolver import EvolutionTrigger
 
@@ -435,3 +429,4 @@ class TestEvolutionEngineErrorPaths:
         results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
         assert isinstance(results, list)
         assert all(hasattr(r, "success") for r in results)
+        assert len(results) == 0  # no skills with sufficient metrics to trigger evolution

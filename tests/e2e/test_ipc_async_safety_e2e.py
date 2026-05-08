@@ -137,11 +137,7 @@ class TestIPCConcurrentOperations:
         silent_cmd = [
             "python3",
             "-c",
-            (
-                "import sys\n"
-                "for line in sys.stdin:\n"
-                "    pass\n"
-            ),
+            ("import sys\nfor line in sys.stdin:\n    pass\n"),
         ]
         proc, stream = await _start_subprocess(silent_cmd)
         try:
@@ -202,9 +198,7 @@ class TestIPCLargePayload:
         ]
         proc, stream = await _start_subprocess(huge_agent)
         try:
-            await stream.send(
-                PlatformToAgent(type=PlatformToAgentType.CHAT, content="trigger")
-            )
+            await stream.send(PlatformToAgent(type=PlatformToAgentType.CHAT, content="trigger"))
 
             # Should raise — either IPCError (our check) or ValueError (asyncio buffer)
             with pytest.raises((IPCError, ValueError)):
@@ -224,11 +218,7 @@ class TestIPCCancelledError:
         silent_cmd = [
             "python3",
             "-c",
-            (
-                "import sys\n"
-                "for line in sys.stdin:\n"
-                "    pass\n"
-            ),
+            ("import sys\nfor line in sys.stdin:\n    pass\n"),
         ]
         proc, stream = await _start_subprocess(silent_cmd)
         try:
@@ -255,6 +245,7 @@ class TestIPCCancelledError:
             assert await proto.send_heartbeat() is True
 
             import signal as sig
+
             proc.send_signal(sig.SIGKILL)
             await asyncio.sleep(0.3)
 
@@ -282,6 +273,8 @@ class TestIPCStreamCloseSafety:
             await proto.send_chat("hello", conversation_id="c1")
 
             await stream.close()
+            # Verify stream stdin is closed after drain
+            assert stream._stdin.is_closing()
         finally:
             try:
                 proc.terminate()
@@ -301,6 +294,8 @@ class TestIPCStreamCloseSafety:
             stream.close_sync()
 
             await asyncio.sleep(0.3)
+            # Verify process has exited after sync close — stdin is closed so echo agent should terminate
+            assert proc.returncode is not None, "Process should have exited after close_sync()"
         finally:
             try:
                 proc.terminate()
@@ -314,6 +309,7 @@ class TestIPCStreamCloseSafety:
         proc, stream = await _start_subprocess(_ECHO_AGENT)
         try:
             await stream.close()
+            # Second close must not raise — idempotent cleanup
             await stream.close()
         finally:
             proc.terminate()

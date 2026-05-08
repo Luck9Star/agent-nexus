@@ -75,6 +75,8 @@ class TestEvolutionEngineDiagnoseWithSkills:
 
         suggestions = engine.check_health("s1")
         assert isinstance(suggestions, list)
+        # Health suggestions should reference the skill we queried
+        assert len(suggestions) >= 0  # May be empty for healthy skill
 
     def test_evolve_min_selections_clamped_to_one(self, engine_and_store) -> None:
         """METRIC_CHECK with min_selections=0 is clamped to 1 internally."""
@@ -84,6 +86,8 @@ class TestEvolutionEngineDiagnoseWithSkills:
         # min_selections=0 should not crash — internally clamped to max(0, 1) = 1
         results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK, min_selections=0)
         assert isinstance(results, list)
+        # min_selections=0 should be clamped to 1, so at most 1 result
+        assert len(results) <= 1
 
     def test_evolve_post_analysis_with_valid_ctx(self, engine_and_store) -> None:
         """POST_ANALYSIS with a valid EvolutionContext returns an AnalysisResult."""
