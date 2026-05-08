@@ -443,13 +443,26 @@ class MCPGateway:
         schema = adapter._input_schema
         if not schema or "properties" not in schema:
             return [], {"return": str}
+        return MCPGateway._build_params_from_schema(schema)
 
-        properties = schema.get("properties", {})
-        required = set(schema.get("required", []))
+    @staticmethod
+    def _build_params_from_schema(
+        input_schema: dict,
+    ) -> tuple[list[inspect.Parameter], dict[str, Any]]:
+        """Build inspect.Parameter list from a JSON-schema dict.
+
+        Shared implementation used by both internal tool adapters and
+        external MCP server tools.
+        """
+        if not input_schema or "properties" not in input_schema:
+            return [], {"return": str}
+
+        properties = input_schema.get("properties", {})
+        required = set(input_schema.get("required", []))
         params: list[inspect.Parameter] = []
         annotations: dict[str, Any] = {}
 
-        transformer = SchemaTransformer(schema)
+        transformer = SchemaTransformer(input_schema)
         for prop_name, prop_def in properties.items():
             if not isinstance(prop_def, dict):
                 continue
@@ -603,57 +616,6 @@ class MCPGateway:
                 return f"Error: {type(exc).__name__}: {exc}"
 
         return _invoke
-
-    @staticmethod
-    def _build_params_from_schema(
-        input_schema: dict,
-    ) -> tuple[list[inspect.Parameter], dict[str, Any]]:
-        """Build inspect.Parameter list from a JSON-schema dict.
-
-        Similar to _build_params but works directly with a raw schema
-        dict instead of a McpToolAdapter.
-        """
-        if not input_schema or "properties" not in input_schema:
-            return [], {"return": str}
-
-        properties = input_schema.get("properties", {})
-        required = set(input_schema.get("required", []))
-        params: list[inspect.Parameter] = []
-        annotations: dict[str, Any] = {}
-
-        transformer = SchemaTransformer(input_schema)
-        for prop_name, prop_def in properties.items():
-            if not isinstance(prop_def, dict):
-                continue
-            py_type = transformer.resolve(prop_def, name=prop_name)
-            annotations[prop_name] = py_type
-
-            if prop_name in required:
-                params.append(
-                    inspect.Parameter(
-                        prop_name,
-                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        annotation=py_type,
-                    )
-                )
-            else:
-                has_default = "default" in prop_def
-                if has_default:
-                    default = prop_def["default"]
-                else:
-                    default = None
-                    py_type = py_type | None  # type: ignore[assignment]
-                annotations[prop_name] = py_type
-                params.append(
-                    inspect.Parameter(
-                        prop_name,
-                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        annotation=py_type,
-                        default=default,
-                    )
-                )
-
-        return params, annotations
 
     # ------------------------------------------------------------------
     # Runtime

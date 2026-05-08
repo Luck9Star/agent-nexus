@@ -66,9 +66,12 @@ def remove_all_locks() -> None:
     """Remove all IPC locks (called on gateway shutdown).
 
     Delegates to :func:`ipc.get_ipc_lock`'s internal registry.
+    Thread-safe: acquires the module-level threading lock before
+    mutating the registry.
     """
-    _ipc_mod._ipc_lock_registry.clear()
-    _ipc_mod._ipc_lock_loop_id = None
+    with _ipc_mod._ipc_lock_thread_guard:
+        _ipc_mod._ipc_lock_registry.clear()
+        _ipc_mod._ipc_lock_loop_id = None
 
 
 # ---------------------------------------------------------------------------

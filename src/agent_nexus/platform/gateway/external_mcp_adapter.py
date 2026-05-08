@@ -127,7 +127,8 @@ class ExternalMcpAdapter:
             Concatenated text content from the tool result.
 
         Raises:
-            RuntimeError: If the adapter is not connected.
+            RuntimeError: If the adapter is not connected or the tool
+                returns an error response.
         """
         if self._session is None or not self.is_alive:
             raise RuntimeError(f"External MCP server '{self._config.name}' is not connected")
@@ -148,6 +149,10 @@ class ExternalMcpAdapter:
                 self._config.name,
                 tool_name,
                 output,
+            )
+            raise RuntimeError(
+                f"External MCP server '{self._config.name}' "
+                f"tool '{tool_name}' returned error: {output}"
             )
 
         return output

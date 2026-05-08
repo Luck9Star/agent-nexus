@@ -1068,8 +1068,8 @@ class TestExternalMcpAdapterCallToolErrors:
     """Tests for call_tool error handling."""
 
     @pytest.mark.asyncio
-    async def test_call_tool_error_result_still_returns_text(self) -> None:
-        """Tool error result still returns text content."""
+    async def test_call_tool_error_result_raises_runtime_error(self) -> None:
+        """Tool error result raises RuntimeError with error details."""
         config = _make_sse_config()
         adapter = ExternalMcpAdapter(config)
 
@@ -1082,8 +1082,8 @@ class TestExternalMcpAdapterCallToolErrors:
         adapter._session = mock_session
         adapter._exit_stack = AsyncExitStack()
 
-        result = await adapter.call_tool("fail_tool", {})
-        assert result == "something went wrong"
+        with pytest.raises(RuntimeError, match="returned error: something went wrong"):
+            await adapter.call_tool("fail_tool", {})
 
     @pytest.mark.asyncio
     async def test_call_tool_empty_content_returns_empty_string(self) -> None:

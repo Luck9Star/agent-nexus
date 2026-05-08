@@ -193,7 +193,7 @@ class SecurityChecker:
             ]
 
         try:
-            ast.parse(code)
+            tree = ast.parse(code)
         except SyntaxError as e:
             return [
                 SecurityViolation(
@@ -213,14 +213,20 @@ class SecurityChecker:
                 )
             ]
 
-        return list(self._check_cached(code))
+        return list(self._check_cached(code, tree))
 
-    def _check_cached(self, code: str) -> tuple[SecurityViolation, ...]:
+    def _check_cached(
+        self, code: str, tree: ast.Module | None = None
+    ) -> tuple[SecurityViolation, ...]:
         """Cached AST walk + rule application.
 
         Per-instance cache avoids the memory leak and cross-instance
         contamination that @lru_cache on a method causes (the class-level
         descriptor retains strong references to ``self``).
+
+        Args:
+            code: Source code string (used as cache key).
+            tree: Pre-parsed AST tree. If *None*, parses *code* here.
 
         Returns:
             Tuple of SecurityViolation objects.
@@ -231,7 +237,8 @@ class SecurityChecker:
         if cached is not None:
             return cached
 
-        tree = ast.parse(code)
+        if tree is None:
+            tree = ast.parse(code)
 
         violations: list[SecurityViolation] = []
 
