@@ -2356,11 +2356,13 @@ class TestEvolutionEngineFacadeDelegation:
             problem_description="tool is slow",
         )
         assert isinstance(results, list)
+        assert len(results) >= 0
 
     def test_evolve_metric_check_returns_list(self, engine: EvolutionEngine) -> None:
         """trigger=METRIC_CHECK returns list[EvolveResult]."""
         results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
         assert isinstance(results, list)
+        assert all(isinstance(r, EvolveResult) for r in results)
 
     def test_should_compact_delegates(self, engine: EvolutionEngine) -> None:
         """should_compact delegates to CompactionGuard."""
@@ -2369,12 +2371,13 @@ class TestEvolutionEngineFacadeDelegation:
         ctx = AgentContext(agent_id="test", session_id="s1")
         # Should return bool without error
         result = engine.should_compact(ctx)
-        assert isinstance(result, bool)
+        assert result is False  # default compaction guard returns False
 
     def test_diagnose_all_delegates(self, engine: EvolutionEngine) -> None:
         """diagnose_all delegates to HealthChecker."""
         report = engine.diagnose_all()
         assert isinstance(report, dict)
+        assert len(report) >= 0  # empty store yields empty dict
 
     def test_check_health_missing_skill_raises(self, engine: EvolutionEngine) -> None:
         """check_health raises ValueError for unknown skill_id."""

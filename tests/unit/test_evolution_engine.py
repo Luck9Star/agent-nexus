@@ -87,7 +87,7 @@ class TestEvolvePostAnalysis:
         result = engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
         # Analyzer records analysis even if no suggestions produced
         store.record_analysis.assert_called_once()
-        assert isinstance(result, AnalysisResult)
+        assert result.task_id == "task-1"
 
     def test_post_analysis_requires_ctx(self):
         store = _make_store()
@@ -192,7 +192,8 @@ class TestPromoteCandidate:
             reason="high performance",
         )
         result = engine.promote_candidate(candidate)
-        assert isinstance(result, PromotionResult)
+        assert result.success is True
+        assert result.agent_name == "good-skill"
 
 
 class TestShouldCompact:

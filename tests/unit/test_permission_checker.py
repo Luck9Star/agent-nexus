@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from agent_nexus.models.permission import (
     PathAccess,
@@ -440,8 +441,8 @@ class TestEdgeCases:
     def test_config_is_frozen(self) -> None:
         """PermissionConfig is frozen (immutable Pydantic model)."""
         cfg = PermissionConfig()
-        with pytest.raises(Exception):
-            cfg.mode = PermissionMode.FLAN_AUTO  # type: ignore[misc]
+        with pytest.raises(ValidationError):
+            cfg.mode = PermissionMode.FULL_AUTO  # type: ignore[misc]
 
     def test_multiple_denied_tools(self) -> None:
         checker = _checker(denied_tools=["bash", "exec", "eval"])
@@ -610,14 +611,17 @@ class TestSegmentPositions:
 
     def test_empty_tail(self) -> None:
         from agent_nexus.platform.runtime.permission_checker import _segment_positions
+
         assert _segment_positions("") == [0]
 
     def test_single_segment(self) -> None:
         from agent_nexus.platform.runtime.permission_checker import _segment_positions
+
         assert _segment_positions("file.txt") == [0]
 
     def test_multi_segment(self) -> None:
         from agent_nexus.platform.runtime.permission_checker import _segment_positions
+
         # "/a/b/c.txt" -> [0, after /a -> index 2, after /b -> index 4]... wait
         # positions: [0, (i+1 where ch='/' and i+1 < len)] -> "/" at 0, "a" at 1; "/" at 2 -> pos 3; "/" at... no
         # "/" at index 0 -> i+1=1 < 5 -> add 1; "a" at 1; "/" at 2 -> i+1=3 < 5 -> add 3; "b" at 3; "/" at 4 -> i+1=5 == 5, NOT added
@@ -627,6 +631,7 @@ class TestSegmentPositions:
 
     def test_trailing_slash(self) -> None:
         from agent_nexus.platform.runtime.permission_checker import _segment_positions
+
         # "/a/b/" -> "/" at 0 -> add 1; "/" at 2 -> add 3; "/" at 4 -> 5 not < 5 -> NOT added
         assert _segment_positions("/a/b/") == [0, 1, 3]
 

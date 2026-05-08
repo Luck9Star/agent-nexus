@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import json
+
 import pytest
 
 from agent_nexus.models.task import TaskGraphSnapshot, TaskItem, TaskState
@@ -456,7 +458,7 @@ class TestTaskGraphCorruptRow:
         conn.commit()
         conn.close()
 
-        with pytest.raises(Exception):
+        with pytest.raises(json.JSONDecodeError):
             tg.get_task("T1")
 
     def test_valid_row_still_works(self, task_graph: TaskGraph) -> None:
@@ -919,7 +921,7 @@ class TestCorruptTaskRow:
         tg.add_task(_make_task("v1"))
         with tg._conn(immediate=True) as conn:
             conn.execute("UPDATE tasks SET vars = 'not-json{{{}}' WHERE id = 'v1'")
-        with pytest.raises(Exception):
+        with pytest.raises(json.JSONDecodeError):
             tg.get_task("v1")
 
     def test_corrupt_state_in_batch_raises(self, tmp_path: Path) -> None:

@@ -36,8 +36,6 @@ def _registry_with_experts():
     return registry
 
 
-
-
 @patch("agent_nexus.platform.agency.executor.LLMClient")
 def test_llm_pipeline_fallback_without_llm(mock_llm_client):
     """Without LLM components, pipeline uses rule-based fallback."""
@@ -58,4 +56,6 @@ def test_llm_pipeline_fallback_without_llm(mock_llm_client):
 
     # Pipeline should complete with rule-based components
     assert result.integrated is not None
+    assert isinstance(result.integrated.merged_sections, dict)
     assert result.qa_passed is not None
+    assert isinstance(result.qa_passed, bool)

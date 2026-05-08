@@ -365,7 +365,8 @@ class TestLLMAnalyze:
 
         result = planner.analyze_task("Review code")
         # from_json will return a default PlannerOutput for invalid text
-        assert isinstance(result, PlannerOutput)
+        assert result.capabilities is not None  # default empty list
+        assert result.decomposition_strategy == "parallel"  # default strategy
 
     def test_fallback_on_invalid_strategy(self):
         """Invalid decomposition_strategy triggers Pydantic fallback path."""
@@ -381,7 +382,7 @@ class TestLLMAnalyze:
 
         result = planner.analyze_task("Review code")
         # Should still extract capabilities via fallback
-        assert isinstance(result, PlannerOutput)
+        assert "code_review" in result.capabilities
 
     def test_unknown_expert_id_accepted_by_pydantic(self):
         """Pydantic model does not enforce expert_id membership (it's a string).
