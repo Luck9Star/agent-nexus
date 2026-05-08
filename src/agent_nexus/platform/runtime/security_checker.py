@@ -54,6 +54,8 @@ _DEFAULT_FORBIDDEN_IMPORTS = [
     "pty",  # pty.spawn() executes arbitrary commands via pseudo-terminal
     "mmap",  # mmap.mmap() reads/writes files without using open()
     "concurrent",  # ProcessPoolExecutor bypasses subprocess/multiprocessing blocks
+    "linecache",  # linecache.getline() reads file contents without open()
+    "fileinput",  # fileinput.input() reads files line-by-line without open()
 ]
 
 _DEFAULT_FORBIDDEN_FUNCTIONS = [

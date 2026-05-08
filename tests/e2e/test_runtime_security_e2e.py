@@ -442,3 +442,68 @@ class TestAdditionalBypassVectors:
             assert result.error is not None and "security violation" in result.error.lower()
         finally:
             executor.close()
+
+
+class TestFileReadBypassVectors:
+    """Verify linecache and fileinput cannot bypass the file read blocks.
+
+    These bypass vectors were identified in iteration 13:
+    - linecache.getline() reads file contents without calling open()
+    - fileinput.input() reads files line-by-line without calling open()
+    """
+
+    def test_linecache_import_blocked(self) -> None:
+        """Importing 'linecache' module is blocked (file read without open)."""
+        checker = SecurityChecker()
+        violations = checker.check_code("import linecache")
+        assert len(violations) >= 1
+        assert any(v.rule_type == "import" for v in violations)
+
+    def test_linecache_getline_bypass_blocked(self) -> None:
+        """linecache.getline('/etc/passwd', 1) bypass is blocked."""
+        checker = SecurityChecker()
+        violations = checker.check_code(
+            "import linecache\nline = linecache.getline('/etc/passwd', 1)"
+        )
+        assert len(violations) >= 1
+        types = {v.rule_type for v in violations}
+        assert "import" in types
+
+    def test_fileinput_import_blocked(self) -> None:
+        """Importing 'fileinput' module is blocked (file read without open)."""
+        checker = SecurityChecker()
+        violations = checker.check_code("import fileinput")
+        assert len(violations) >= 1
+        assert any(v.rule_type == "import" for v in violations)
+
+    def test_fileinput_input_bypass_blocked(self) -> None:
+        """fileinput.input('/etc/passwd') bypass is blocked."""
+        checker = SecurityChecker()
+        violations = checker.check_code(
+            "import fileinput\nfor line in fileinput.input('/etc/passwd'):\n    pass"
+        )
+        assert len(violations) >= 1
+        types = {v.rule_type for v in violations}
+        assert "import" in types
+
+    @pytest.mark.asyncio
+    async def test_linecache_bypass_rejected_by_executor(self) -> None:
+        """IPythonExecutor rejects linecache import at execution time."""
+        executor = IPythonExecutor()
+        try:
+            result = await executor.execute("import linecache")
+            assert result.success is False
+            assert result.error is not None and "security violation" in result.error.lower()
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_fileinput_bypass_rejected_by_executor(self) -> None:
+        """IPythonExecutor rejects fileinput import at execution time."""
+        executor = IPythonExecutor()
+        try:
+            result = await executor.execute("import fileinput")
+            assert result.success is False
+            assert result.error is not None and "security violation" in result.error.lower()
+        finally:
+            executor.close()
