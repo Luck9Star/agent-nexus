@@ -191,18 +191,8 @@ class ModelDBClient:
             models = provider.get("models", {})
             if not isinstance(models, dict):
                 continue
-            for model_id, model_data in models.items():
-                if not isinstance(model_data, dict):
-                    continue
-                transformed = _transform_model(model_data, provider_id)
-                # Index by normalized id (lowercase)
-                key = model_id.strip().lower()
-                index[key] = transformed
-                # Also index short name if model_id has a prefix
-                if "/" in key:
-                    short = key.rsplit("/", 1)[-1]
-                    if short not in index:
-                        index[short] = transformed
+            self._index_provider_models(index, provider_id, models)
+
         self._model_index = index
         self._index_fetched_at = time.time()
         self._build_search_index()
@@ -211,6 +201,21 @@ class ModelDBClient:
             len(index),
             len(data),
         )
+
+    def _index_provider_models(
+        self, index: dict[str, dict], provider_id: str, models: dict[str, Any]
+    ) -> None:
+        """Index all models for a single provider, including short-name aliases."""
+        for model_id, model_data in models.items():
+            if not isinstance(model_data, dict):
+                continue
+            transformed = _transform_model(model_data, provider_id)
+            key = model_id.strip().lower()
+            index[key] = transformed
+            if "/" in key:
+                short = key.rsplit("/", 1)[-1]
+                if short not in index:
+                    index[short] = transformed
 
     def _build_search_index(self) -> None:
         """Build trigram index for fast substring matching."""

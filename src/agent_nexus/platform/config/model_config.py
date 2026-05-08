@@ -190,18 +190,7 @@ class ModelConfigManager:
         str
             The API key string, or empty string if not set.
         """
-        if isinstance(provider, str):
-            # Look up by name so we can also do fallback lookups
-            provider_cfg = self.get_provider_config(provider)
-            provider_name = provider
-        else:
-            provider_cfg = provider
-            # Find the provider name by identity in the registry
-            provider_name = ""
-            for pname, pcfg in self._config.models.providers.items():
-                if pcfg is provider_cfg:
-                    provider_name = pname
-                    break
+        provider_cfg, provider_name = self._resolve_provider_identity(provider)
 
         # Primary: read from the configured env var
         if provider_cfg.api_key_env:
@@ -210,7 +199,6 @@ class ModelConfigManager:
                 return key
 
         # Secondary: try well-known fallback env vars for the provider
-        # Normalize to lowercase so callers can pass "OpenAI" / "OPENAI" etc.
         provider_name = provider_name.lower()
         for env_var in _PROVIDER_ENV_FALLBACKS.get(provider_name, []):
             key = os.environ.get(env_var, "")
@@ -223,6 +211,20 @@ class ModelConfigManager:
             [provider_cfg.api_key_env] + _PROVIDER_ENV_FALLBACKS.get(provider_name.lower(), []),
         )
         return ""
+
+    def _resolve_provider_identity(
+        self, provider: ProviderConfig | str
+    ) -> tuple[ProviderConfig, str]:
+        """Resolve a provider argument to (config, name) pair."""
+        if isinstance(provider, str):
+            return self.get_provider_config(provider), provider
+        # Find the provider name by identity in the registry
+        provider_name = ""
+        for pname, pcfg in self._config.models.providers.items():
+            if pcfg is provider:
+                provider_name = pname
+                break
+        return provider, provider_name
 
     def resolve_stage_model(self, stage: str) -> str | None:
         """Resolve the model string for a specific pipeline stage.

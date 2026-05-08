@@ -420,15 +420,18 @@ class SourceManager:
             logger.warning("index.yaml 'agents' key is not a list")
             return None
 
+        return self._parse_agent_entries(raw["agents"])
+
+    def _parse_agent_entries(self, raw_agents: list) -> list[IndexEntry]:
+        """Parse and validate index entry dicts from raw YAML data."""
         entries: list[IndexEntry] = []
-        for item in raw["agents"]:
+        for item in raw_agents:
             if not isinstance(item, dict):
                 logger.warning("Skipping non-mapping index entry: %r", item)
                 continue
             entry = _parse_index_entry(item)
             if entry is not None:
                 entries.append(entry)
-
         return entries
 
     @staticmethod

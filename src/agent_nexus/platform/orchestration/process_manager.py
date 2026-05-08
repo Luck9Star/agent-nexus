@@ -319,31 +319,35 @@ class ProcessManager:
                 logger.info("Agent '%s' exited cleanly after IPC close", name)
                 return
 
-            # Stage 2: SIGTERM.
-            logger.warning("Agent '%s' did not exit, sending SIGTERM", name)
-            try:
-                process.send_signal(signal.SIGTERM)
-            except ProcessLookupError:
-                await self._remove_agent(name, handle)
-                return
-
-            if await self._wait_exit(name, handle, timeout):
-                logger.info("Agent '%s' terminated after SIGTERM", name)
-                return
-
-            # Stage 3: SIGKILL.
-            logger.error("Agent '%s' did not exit after SIGTERM, sending SIGKILL", name)
-            with contextlib.suppress(ProcessLookupError):
-                process.kill()
-            try:
-                await process.wait()
-            except Exception:
-                logger.warning("Error waiting for agent '%s' after SIGKILL", name, exc_info=True)
-
+            # Stage 2+3: SIGTERM → SIGKILL escalation.
+            await self._terminate_process(name, handle, process, timeout)
             await self._remove_agent(name, handle)
-            logger.info("Agent '%s' killed", name)
         finally:
             self._stopping.discard(name)
+
+    async def _terminate_process(
+        self, name: str, handle: AgentHandle, process: asyncio.subprocess.Process, timeout: float
+    ) -> None:
+        """Escalate from SIGTERM to SIGKILL to stop a stubborn process."""
+        logger.warning("Agent '%s' did not exit, sending SIGTERM", name)
+        try:
+            process.send_signal(signal.SIGTERM)
+        except ProcessLookupError:
+            await self._remove_agent(name, handle)
+            return
+
+        if await self._wait_exit(name, handle, timeout):
+            logger.info("Agent '%s' terminated after SIGTERM", name)
+            return
+
+        logger.error("Agent '%s' did not exit after SIGTERM, sending SIGKILL", name)
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
+        try:
+            await process.wait()
+        except Exception:
+            logger.warning("Error waiting for agent '%s' after SIGKILL", name, exc_info=True)
+        logger.info("Agent '%s' killed", name)
 
     async def _remove_agent(self, name: str, handle: AgentHandle) -> None:
         """Remove agent from registry if handle still matches."""

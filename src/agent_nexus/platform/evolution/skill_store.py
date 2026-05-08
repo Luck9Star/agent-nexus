@@ -548,22 +548,7 @@ class SkillStore:
     def get_ancestry(self, skill_id: str, max_depth: int = 10) -> list[SkillRecord]:
         """Walk up the lineage tree, returns ancestors oldest-first."""
         with self._conn() as conn:
-            visited: set[str] = set()
-            frontier = [skill_id]
-
-            for _ in range(max_depth):
-                if not frontier:
-                    break
-                round_parents = self._batch_load_parents(conn, set(frontier))
-                next_frontier: list[str] = []
-                for sid in frontier:
-                    for pid in round_parents.get(sid, []):
-                        if pid in visited:
-                            continue
-                        visited.add(pid)
-                        next_frontier.append(pid)
-                frontier = next_frontier
-
+            visited = self._walk_lineage_bfs(conn, skill_id, max_depth)
             if not visited:
                 return []
 
@@ -581,6 +566,26 @@ class SkillStore:
 
             ancestors.sort(key=lambda r: r.lineage.generation)
             return ancestors
+
+    def _walk_lineage_bfs(self, conn: Any, skill_id: str, max_depth: int) -> set[str]:
+        """BFS traversal of lineage tree, returning visited ancestor IDs."""
+        visited: set[str] = set()
+        frontier = [skill_id]
+
+        for _ in range(max_depth):
+            if not frontier:
+                break
+            round_parents = self._batch_load_parents(conn, set(frontier))
+            next_frontier: list[str] = []
+            for sid in frontier:
+                for pid in round_parents.get(sid, []):
+                    if pid in visited:
+                        continue
+                    visited.add(pid)
+                    next_frontier.append(pid)
+            frontier = next_frontier
+
+        return visited
 
     def get_children(self, parent_id: str) -> list[str]:
         """Find skill IDs derived from the given parent."""

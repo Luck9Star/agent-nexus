@@ -120,25 +120,12 @@ class SpecialistSelector:
         """
         required_set = set(request.required_capabilities)
         optional_set = set(request.optional_capabilities)
-        request_perm_level = _permission_level(request.permissions)
 
-        # 1. Get all experts and filter by permission
-        all_ids = self.registry.list_all()
-        eligible: list[dict[str, Any]] = []
-        for pid in all_ids:
-            profile = self.registry.get(pid)
-            if profile is None:
-                continue
-            profile.setdefault("id", pid)
-            agent_perm = profile.get("permissions", {}).get("mode", "plan")
-            if _permission_level(agent_perm) > request_perm_level:
-                continue
-            eligible.append(profile)
-
+        eligible = self._filter_by_permission(request)
         if not eligible:
             return []
 
-        # 2. Fast path: find agents that individually cover ALL required caps
+        # Fast path: find agents that individually cover ALL required caps
         full_match = [
             p
             for p in eligible
@@ -148,8 +135,7 @@ class SpecialistSelector:
         if full_match:
             return self._score_and_rank(full_match, required_set, optional_set, request)
 
-        # 3. Slow path: no single agent covers all required caps.
-        #    Use greedy set-cover to find a multi-agent team.
+        # Slow path: no single agent covers all required caps.
         if not required_set:
             return self._score_and_rank(eligible, required_set, optional_set, request)
 
@@ -164,6 +150,22 @@ class SpecialistSelector:
         return self._score_and_rank(
             team, required_set, optional_set, request, protect_coverage=True
         )
+
+    def _filter_by_permission(self, request: SelectionRequest) -> list[dict[str, Any]]:
+        """Filter registry experts by permission level."""
+        request_perm_level = _permission_level(request.permissions)
+        all_ids = self.registry.list_all()
+        eligible: list[dict[str, Any]] = []
+        for pid in all_ids:
+            profile = self.registry.get(pid)
+            if profile is None:
+                continue
+            profile.setdefault("id", pid)
+            agent_perm = profile.get("permissions", {}).get("mode", "plan")
+            if _permission_level(agent_perm) > request_perm_level:
+                continue
+            eligible.append(profile)
+        return eligible
 
     @staticmethod
     def _is_better_candidate(

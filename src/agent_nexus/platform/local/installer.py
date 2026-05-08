@@ -514,30 +514,43 @@ class GitInstaller:
         3. Basic manifest structure has required fields
         """
         issues: list[str] = []
-        manifest_data: dict = {}
 
         # 1. agent-manifest.yaml
-        manifest_path = agent_dir / "agent-manifest.yaml"
-        if not manifest_path.exists():
-            issues.append("Missing agent-manifest.yaml")
-        else:
-            try:
-                manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-                if not isinstance(manifest, dict):
-                    issues.append("agent-manifest.yaml is not a valid mapping")
-                else:
-                    manifest_data = manifest
-                    for field in ("name", "version", "type"):
-                        if field not in manifest:
-                            issues.append(f"agent-manifest.yaml missing required field: {field}")
-                    if "type" in manifest and manifest["type"] not in {t.value for t in AgentType}:
-                        issues.append(f"Invalid agent type: {manifest['type']}")
-            except yaml.YAMLError as exc:
-                issues.append(f"agent-manifest.yaml parse error: {exc}")
+        manifest_issues, manifest_data = self._validate_manifest_yaml(agent_dir)
+        issues.extend(manifest_issues)
 
         # 2. SKILL.md
         if not (agent_dir / "SKILL.md").exists():
             issues.append("Missing SKILL.md")
+
+        return issues, manifest_data
+
+    def _validate_manifest_yaml(self, agent_dir: Path) -> tuple[list[str], dict]:
+        """Validate and parse agent-manifest.yaml.
+
+        Returns (issues, manifest_data).  manifest_data is empty dict
+        if the file is missing or unparseable.
+        """
+        issues: list[str] = []
+        manifest_data: dict = {}
+
+        manifest_path = agent_dir / "agent-manifest.yaml"
+        if not manifest_path.exists():
+            return (["Missing agent-manifest.yaml"], {})
+
+        try:
+            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+            if not isinstance(manifest, dict):
+                return (["agent-manifest.yaml is not a valid mapping"], {})
+
+            manifest_data = manifest
+            for field in ("name", "version", "type"):
+                if field not in manifest:
+                    issues.append(f"agent-manifest.yaml missing required field: {field}")
+            if "type" in manifest and manifest["type"] not in {t.value for t in AgentType}:
+                issues.append(f"Invalid agent type: {manifest['type']}")
+        except yaml.YAMLError as exc:
+            issues.append(f"agent-manifest.yaml parse error: {exc}")
 
         return issues, manifest_data
 

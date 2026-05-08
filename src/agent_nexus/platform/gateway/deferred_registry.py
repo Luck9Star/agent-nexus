@@ -21,6 +21,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from agent_nexus.models.agent import AgentManifest
 from agent_nexus.models.ipc import AgentToPlatformType
@@ -286,30 +287,7 @@ class DeferredAgentRegistry:
                 await handle.ipc.send_chat(_LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID)
                 response = await handle.ipc.receive_until_result(timeout=10.0)
 
-            if response.type == AgentToPlatformType.ERROR:
-                logger.warning(
-                    "Agent '%s' returned ERROR response during tool "
-                    "discovery: %s. Using generic chat tool as fallback.",
-                    info.name,
-                    response.error or "unknown error",
-                )
-                return [self._fallback_chat_tool(info)]
-
-            if isinstance(response.output, list):
-                return self._validate_tool_schemas(response.output)
-
-            # Fallback: parse content as JSON list
-            if response.content:
-                try:
-                    parsed = json.loads(response.content)
-                    if isinstance(parsed, list):
-                        return self._validate_tool_schemas(parsed)
-                except json.JSONDecodeError:
-                    logger.debug(
-                        "Agent '%s' tool response not valid JSON: %.200s",
-                        info.name,
-                        response.content[:200],
-                    )
+            return self._parse_tool_response(info, response)
 
         except Exception as exc:
             logger.warning(
@@ -321,7 +299,33 @@ class DeferredAgentRegistry:
             )
             return [self._fallback_chat_tool(info)]
 
-        # No tool schemas found in response
+    def _parse_tool_response(self, info: AgentInfo, response: Any) -> list[dict]:
+        """Parse IPC response into validated tool schemas."""
+        if response.type == AgentToPlatformType.ERROR:
+            logger.warning(
+                "Agent '%s' returned ERROR response during tool "
+                "discovery: %s. Using generic chat tool as fallback.",
+                info.name,
+                response.error or "unknown error",
+            )
+            return [self._fallback_chat_tool(info)]
+
+        if isinstance(response.output, list):
+            return self._validate_tool_schemas(response.output)
+
+        # Fallback: parse content as JSON list
+        if response.content:
+            try:
+                parsed = json.loads(response.content)
+                if isinstance(parsed, list):
+                    return self._validate_tool_schemas(parsed)
+            except json.JSONDecodeError:
+                logger.debug(
+                    "Agent '%s' tool response not valid JSON: %.200s",
+                    info.name,
+                    response.content[:200],
+                )
+
         logger.warning(
             "Agent '%s' returned no tool schemas. Using generic chat tool as fallback.",
             info.name,

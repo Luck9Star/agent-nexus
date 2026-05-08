@@ -435,46 +435,45 @@ class PlatformRouter:
         if tg is None:
             raise RuntimeError("TaskGraph not initialized in context")
 
-        role = self._phase_to_role(phase)
-        if role_agents is not None:
-            phase_agents = list(role_agents.get(role, []))
-        else:
-            phase_agents = [
-                name for name, agent_def in definition.agents.items() if agent_def.role == role
-            ]
-
-        if not phase_agents:
-            # Fallback: if no agents have the matching role, use root tasks
-            # for research and first available agent for other phases
-            logger.warning(
-                "No agents with role '%s' found for %s phase, "
-                "falling back to default agent selection",
-                role,
-                phase.value,
-            )
-            if phase == WorkflowPhase.research:
-                root_tasks = definition.get_root_tasks()
-                phase_agents = list({t.agent for t in root_tasks})
-            elif definition.agents:
-                phase_agents = [next(iter(definition.agents.keys()))]
-
+        phase_agents = self._resolve_phase_agents(phase, definition, role_agents)
         if not phase_agents:
             raise RuntimeError(f"No agents available for {phase.value} phase")
 
-        # Build message for this phase
-        phase_message = message
-
         if phase in (WorkflowPhase.research, WorkflowPhase.implementation):
-            # Parallel execution
             results = await self._execute_parallel_agents(
-                phase_agents, phase_message, ctx.conversation_id
+                phase_agents, message, ctx.conversation_id
             )
             return self._aggregate_results(results, phase)
 
+        return await self._execute_single_agent(phase_agents[0], message, ctx.conversation_id)
+
+    def _resolve_phase_agents(
+        self,
+        phase: WorkflowPhase,
+        definition: OrchestrationDefinition,
+        role_agents: dict[str, list[str]] | None,
+    ) -> list[str]:
+        """Resolve agents for a given phase with fallback logic."""
+        role = self._phase_to_role(phase)
+        if role_agents is not None:
+            agents = list(role_agents.get(role, []))
         else:
-            # Single agent execution (synthesis, verification)
-            agent_name = phase_agents[0]
-            return await self._execute_single_agent(agent_name, phase_message, ctx.conversation_id)
+            agents = [name for name, ad in definition.agents.items() if ad.role == role]
+
+        if agents:
+            return agents
+
+        # Fallback: no agents have the matching role
+        logger.warning(
+            "No agents with role '%s' found for %s phase, falling back to default agent selection",
+            role,
+            phase.value,
+        )
+        if phase == WorkflowPhase.research:
+            return list({t.agent for t in definition.get_root_tasks()})
+        if definition.agents:
+            return [next(iter(definition.agents.keys()))]
+        return []
 
     async def _execute_parallel_agents(
         self,
