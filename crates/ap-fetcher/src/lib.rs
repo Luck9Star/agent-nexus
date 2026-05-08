@@ -3,6 +3,9 @@
 pub mod advisory_lock;
 pub mod installer;
 pub mod lockfile;
+pub mod manifest_checker;
+pub mod security_audit;
+pub mod skill_checker;
 pub mod sources;
 pub mod traits;
 pub mod uv_bridge;

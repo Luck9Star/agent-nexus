@@ -1,4 +1,5 @@
 pub mod check;
+pub mod completion;
 pub mod config;
 pub mod create;
 pub mod env;

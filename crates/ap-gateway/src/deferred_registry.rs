@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ap_core::models::agent::AgentManifest;
+use ap_core::models::agent::{AgentManifest, IsolationLevel};
 use ap_runtime::mcp_client::{McpClient, ToolInfo};
 use thiserror::Error;
 use tokio::sync::{Mutex, OnceCell, RwLock};
@@ -416,7 +416,7 @@ impl Default for DeferredAgentRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ap_core::models::agent::{AgentType, AgentManifest};
+    use ap_core::models::agent::{AgentType, AgentManifest, IsolationLevel};
     use ap_runtime::mcp_client::ToolInfo;
     use std::future::Future;
     use std::pin::Pin;
@@ -486,7 +486,7 @@ mod tests {
             effort: None,
             max_turns: None,
             memory_scope: None,
-            isolation: None,
+            isolation: IsolationLevel::None,
             color: None,
             background: false,
             initial_prompt: None,

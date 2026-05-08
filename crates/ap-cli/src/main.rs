@@ -5,6 +5,7 @@ pub mod error;
 mod output;
 
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 use output::OutputFormatter;
 
 #[derive(Parser)]
@@ -166,6 +167,12 @@ enum Commands {
 
     /// Print the agent-nexus version
     Version,
+
+    /// Generate shell completion scripts
+    Completion {
+        /// Shell type: bash, zsh, fish
+        shell: Shell,
+    },
 }
 
 #[derive(Subcommand)]
@@ -489,6 +496,10 @@ fn run(cli: Cli, output: &OutputFormatter) -> anyhow::Result<()> {
 
             Commands::Version => {
                 println!("agent-nexus {}", env!("CARGO_PKG_VERSION"));
+            }
+
+            Commands::Completion { shell } => {
+                commands::completion::run(shell)?;
             }
         }
     Ok(())
