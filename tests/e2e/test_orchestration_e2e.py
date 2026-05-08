@@ -1,7 +1,7 @@
 """E2E tests for orchestration layer: TaskGraph + ProcessManager + IPC + DSL.
 
 Covers the full orchestration pipeline from DSL parsing through task execution
-to result collection.
+to result collection, including TOML DAG cycle detection at parse time.
 """
 
 from pathlib import Path
@@ -268,4 +268,120 @@ blocked_by = []
 """
         dsl = OrchestrationDSL()
         with pytest.raises(DSLValidationError, match="unknown agent"):
+            dsl.parse_string(toml_content)
+
+    def test_toml_circular_dependency_rejected_at_parse(self) -> None:
+        """TOML with circular blocked_by is rejected by DSLValidationError at parse time."""
+        from agent_nexus.platform.orchestration.dsl import DSLValidationError, OrchestrationDSL
+
+        toml_content = """
+[goal]
+description = "Cycle test"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = "Agent A"
+
+[[tasks]]
+id = "t1"
+description = "Task 1"
+agent = "a"
+blocked_by = ["t2"]
+
+[[tasks]]
+id = "t2"
+description = "Task 2"
+agent = "a"
+blocked_by = ["t1"]
+"""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLValidationError, match="[Cc]ycle|cycle"):
+            dsl.parse_string(toml_content)
+
+    def test_toml_self_blocking_rejected(self) -> None:
+        """TOML where a task blocks itself is rejected."""
+        from agent_nexus.platform.orchestration.dsl import DSLValidationError, OrchestrationDSL
+
+        toml_content = """
+[goal]
+description = "Self-block"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = "Agent A"
+
+[[tasks]]
+id = "t1"
+description = "Self-blocker"
+agent = "a"
+blocked_by = ["t1"]
+"""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLValidationError, match="cannot block itself"):
+            dsl.parse_string(toml_content)
+
+    def test_toml_three_node_cycle_rejected(self) -> None:
+        """TOML with A→B→C→A cycle is rejected."""
+        from agent_nexus.platform.orchestration.dsl import DSLValidationError, OrchestrationDSL
+
+        toml_content = """
+[goal]
+description = "3-node cycle"
+
+[agent_name]
+value = "test"
+
+[[agents]]
+name = "a"
+description = "Agent"
+
+[[tasks]]
+id = "t1"
+description = "T1"
+agent = "a"
+blocked_by = ["t3"]
+
+[[tasks]]
+id = "t2"
+description = "T2"
+agent = "a"
+blocked_by = ["t1"]
+
+[[tasks]]
+id = "t3"
+description = "T3"
+agent = "a"
+blocked_by = ["t2"]
+"""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLValidationError, match="[Cc]ycle|cycle"):
+            dsl.parse_string(toml_content)
+
+    def test_composition_format_cycle_rejected(self) -> None:
+        """Composition TOML format with circular deps is rejected."""
+        from agent_nexus.platform.orchestration.dsl import DSLValidationError, OrchestrationDSL
+
+        toml_content = """
+[composition]
+name = "cyclic-pipeline"
+description = "Has a cycle"
+
+[tasks.step1]
+name = "Step 1"
+agent = "agent-a"
+blocked_by = ["step2"]
+
+[tasks.step2]
+name = "Step 2"
+agent = "agent-a"
+blocked_by = ["step1"]
+"""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLValidationError, match="[Cc]ycle|cycle"):
             dsl.parse_string(toml_content)

@@ -1,4 +1,4 @@
-"""E2E tests for ProcessManager cancellation scenarios.
+"""E2E tests for ProcessManager cancellation and health-check scenarios.
 
 Covers:
 - CancelledError propagation during stop_agent
@@ -6,6 +6,9 @@ Covers:
 - stop_all cancellation via asyncio.CancelledError
 - Drain task cancellation and subprocess cleanup
 - Cancellation interaction with timeouts
+- Health check failure on dead/unresponsive processes
+- Auto-restart cycle after process death
+- list_running cleanup of dead handles
 """
 
 import asyncio
@@ -228,6 +231,109 @@ class TestProcessManagerCancelE2E:
             # After stop, health_check should raise KeyError (agent removed)
             with pytest.raises(KeyError):
                 await pm.health_check("echo-hc")
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+
+@pytest.mark.timeout(30)
+class TestProcessManagerHealthFailureE2E:
+    """E2E tests for health check failure and dead-process lifecycle."""
+
+    def test_health_check_returns_false_for_dead_process(self):
+        """Health check on a dead process either returns False or raises KeyError
+        (defense-in-depth: _cleanup_dead prunes it before health_check runs)."""
+        pm = ProcessManager()
+
+        # Use a process that handles heartbeats but will be killed externally
+        async def _test():
+            handle = await pm.start_agent("echo-hc-dead", _ECHO_CMD)
+            assert await pm.health_check("echo-hc-dead") is True
+
+            # Kill externally
+            import signal
+            handle.process.send_signal(signal.SIGKILL)
+            import asyncio
+            await asyncio.sleep(0.3)
+
+            assert not handle.is_alive
+
+            # health_check cleans up dead handle → either False or KeyError
+            try:
+                result = await pm.health_check("echo-hc-dead")
+                assert result is False
+            except KeyError:
+                pass  # Acceptable: _cleanup_dead already removed it
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_list_running_cleans_up_dead_handles(self):
+        """list_running removes handles for processes that have exited."""
+        pm = ProcessManager()
+
+        async def _test():
+            handle = await pm.start_agent("echo-lr", _ECHO_CMD)
+            assert "echo-lr" in pm.list_running()
+
+            # Kill externally
+            import signal
+            handle.process.send_signal(signal.SIGKILL)
+            import asyncio
+            await asyncio.sleep(0.3)
+
+            # list_running prunes dead handles
+            running = pm.list_running()
+            assert "echo-lr" not in running
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_restart_after_external_kill(self):
+        """Restarting an agent whose process was externally killed succeeds with new PID."""
+        pm = ProcessManager()
+
+        async def _test():
+            handle = await pm.start_agent("echo-rk", _ECHO_CMD)
+            pid_v1 = handle.pid
+
+            # Kill the process externally (simulating OOM or signal)
+            import signal
+            import asyncio
+            handle.process.send_signal(signal.SIGKILL)
+            await asyncio.sleep(0.3)
+
+            # Process is dead but handle still registered
+            assert not handle.is_alive
+
+            # Restart should succeed — new subprocess with new PID
+            new_handle = await pm.restart_agent("echo-rk")
+            assert new_handle.is_alive
+            assert new_handle.pid != pid_v1
+
+            # Health check on new process should pass
+            assert await pm.health_check("echo-rk") is True
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_start_agent_rejects_duplicate_name(self):
+        """Starting an agent with a name already in use raises ValueError."""
+        pm = ProcessManager()
+
+        async def _test():
+            await pm.start_agent("dup-name", _ECHO_CMD)
+
+            with pytest.raises(ValueError, match="already running"):
+                await pm.start_agent("dup-name", _ECHO_CMD)
 
         try:
             _run(_test())

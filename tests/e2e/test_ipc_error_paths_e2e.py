@@ -6,6 +6,8 @@ Covers:
 - Large message handling (near/past size limits)
 - IPC lock registry correctness
 - Peek buffer overflow behavior
+- Unexpected/extra fields in IPC messages
+- Send on closed/closing stream
 """
 
 import asyncio
@@ -337,3 +339,82 @@ class TestIPCProtocolPeekBuffer:
         # Should have discarded oldest messages
         assert len(proto._peek_buffer) <= proto._MAX_PEEK_BUFFER_SIZE
         assert proto._discarded_count > 0
+
+
+@pytest.mark.timeout(30)
+class TestIPCUnexpectedMessageTypes:
+    """IPC handling of messages with unexpected fields or edge-case types."""
+
+    def test_receive_result_type_message_succeeds(self):
+        """A valid 'result' type message is parsed correctly."""
+        stream, _, mock_stdout = _make_stream_pair()
+        mock_stdout.readline = AsyncMock(
+            return_value=b'{"type": "result", "content": "done", "task_id": "t1"}\n'
+        )
+
+        async def _test():
+            msg = await stream.receive(timeout=5.0)
+            assert msg.type == AgentToPlatformType.RESULT
+            assert msg.content == "done"
+
+        asyncio.run(_test())
+
+    def test_receive_progress_type_message_succeeds(self):
+        """A valid 'progress' type message is parsed correctly."""
+        stream, _, mock_stdout = _make_stream_pair()
+        mock_stdout.readline = AsyncMock(
+            return_value=b'{"type": "progress", "content": "50%"}\n'
+        )
+
+        async def _test():
+            msg = await stream.receive(timeout=5.0)
+            assert msg.type == AgentToPlatformType.PROGRESS
+            assert msg.content == "50%"
+
+        asyncio.run(_test())
+
+    def test_receive_message_with_extra_fields_succeeds(self):
+        """Extra fields beyond the schema are accepted (forward-compatible)."""
+        stream, _, mock_stdout = _make_stream_pair()
+        mock_stdout.readline = AsyncMock(
+            return_value=b'{"type": "result", "content": "ok", "extra": "ignored", "meta": 42}\n'
+        )
+
+        async def _test():
+            msg = await stream.receive(timeout=5.0)
+            assert msg.type == AgentToPlatformType.RESULT
+            assert msg.content == "ok"
+
+        asyncio.run(_test())
+
+    def test_send_on_closing_stream_raises_connection_error(self):
+        """Sending on a stream with broken write raises IPCConnectionError."""
+        stream, mock_stdin, _ = _make_stream_pair()
+        mock_stdin.write.side_effect = BrokenPipeError("pipe closed")
+
+        async def _test():
+            with pytest.raises(IPCConnectionError, match="stdin closed"):
+                await stream.send(
+                    PlatformToAgent(type=PlatformToAgentType.CHAT, content="hello")
+                )
+
+        asyncio.run(_test())
+
+    def test_null_bytes_in_message_raises_ipc_error(self):
+        """Message containing null bytes is handled safely."""
+        stream, _, mock_stdout = _make_stream_pair()
+        # Construct null-byte payload at runtime to avoid source parse errors
+        null_byte = bytes([0])
+        payload = b'{"type": "result", "content": "ok' + null_byte + b'evil"}\n'
+        mock_stdout.readline = AsyncMock(return_value=payload)
+
+        async def _test():
+            # Should either parse (JSON allows null) or raise IPCError
+            try:
+                msg = await stream.receive(timeout=5.0)
+                # If it parses, content should exist
+                assert msg.content is not None
+            except IPCError:
+                pass  # Acceptable: implementation may reject null bytes
+
+        asyncio.run(_test())

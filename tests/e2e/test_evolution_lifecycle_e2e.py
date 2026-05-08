@@ -3,6 +3,9 @@
 Tests cross-store transactions where SkillStore, AnalysisStore, and BudgetStore
 must work together through the EvolutionStore facade. These paths cannot be
 covered by unit tests of individual stores.
+
+Also covers EvolutionEngine error injection paths: invalid triggers, missing
+required arguments, and health check on nonexistent skills.
 """
 
 from collections.abc import Generator
@@ -336,3 +339,97 @@ class TestBatchOperations:
         ids1 = {s.id for s in page1}
         ids2 = {s.id for s in page2}
         assert ids1.isdisjoint(ids2)
+
+
+# ---------------------------------------------------------------------------
+# EvolutionEngine error injection
+# ---------------------------------------------------------------------------
+
+
+class TestEvolutionEngineErrorPaths:
+    """EvolutionEngine facade correctly routes and validates triggers.
+
+    Uses real EvolutionStore (SQLite) to exercise the full engine → sub-component
+    delegation chain. Only error/edge-case paths — happy paths are covered in
+    test_evolution_e2e.py.
+    """
+
+    @pytest.fixture()
+    def engine_and_store(self, tmp_path: Path):
+        from agent_nexus.platform.evolution.engine import EvolutionEngine
+        from agent_nexus.platform.evolution.store import EvolutionStore
+
+        db_path = tmp_path / "engine_e2e.db"
+        store = EvolutionStore(db_path)
+        engine = EvolutionEngine(store)
+        yield engine, store
+        store.close()
+
+    def test_evolve_post_analysis_without_ctx_raises(
+        self, engine_and_store
+    ) -> None:
+        """POST_ANALYSIS trigger without ctx raises ValueError."""
+        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
+
+        engine, _ = engine_and_store
+        with pytest.raises(ValueError, match="ctx.*required"):
+            engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS)
+
+    def test_evolve_tool_degradation_without_tool_key_raises(
+        self, engine_and_store
+    ) -> None:
+        """TOOL_DEGRADATION trigger without tool_key raises ValueError."""
+        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
+
+        engine, _ = engine_and_store
+        with pytest.raises(ValueError, match="tool_key.*required"):
+            engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION)
+
+    def test_evolve_unknown_trigger_raises(self, engine_and_store) -> None:
+        """Passing an unknown/invalid trigger string raises ValueError."""
+        engine, _ = engine_and_store
+        with pytest.raises(ValueError, match="Unknown trigger"):
+            engine.evolve(trigger="nonexistent_trigger")  # type: ignore[arg-type]
+
+    def test_check_health_nonexistent_skill_raises(
+        self, engine_and_store
+    ) -> None:
+        """check_health raises ValueError for a skill that doesn't exist."""
+        engine, _ = engine_and_store
+        with pytest.raises(ValueError, match="Skill not found"):
+            engine.check_health("ghost-skill-999")
+
+    def test_diagnose_all_empty_returns_empty_dict(
+        self, engine_and_store
+    ) -> None:
+        """diagnose_all on empty store returns empty dict (no crash)."""
+        engine, _ = engine_and_store
+        result = engine.diagnose_all()
+        assert result == {}
+
+    def test_evolve_tool_degradation_returns_results(
+        self, engine_and_store
+    ) -> None:
+        """TOOL_DEGRADATION with tool_key returns a list of EvolveResults."""
+        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
+
+        engine, store = engine_and_store
+        # Seed a skill so the evolver has something to work with
+        store.save_skill_record(_make_skill("td-skill", name="td-skill"))
+
+        results = engine.evolve(
+            trigger=EvolutionTrigger.TOOL_DEGRADATION,
+            tool_key="failing-tool",
+            problem_description="Tool returns 500 errors",
+        )
+        assert isinstance(results, list)
+
+    def test_evolve_metric_check_returns_results(
+        self, engine_and_store
+    ) -> None:
+        """METRIC_CHECK trigger returns a list (possibly empty if no skills qualify)."""
+        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
+
+        engine, _ = engine_and_store
+        results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
+        assert isinstance(results, list)

@@ -1,4 +1,5 @@
-"""E2E tests for MCP Gateway: tool registration, name collision, cleanup.
+"""E2E tests for MCP Gateway: tool registration, name collision, cleanup,
+and deferred loading edge cases.
 
 Tests gateway-level logic without requiring live MCP connections.
 """
@@ -153,3 +154,73 @@ class TestDeferredRegistryE2E:
             )
         manifest = registry.build_manifest()
         assert len(manifest) >= 3
+
+
+class TestDeferredRegistryToolLifecycle:
+    """E2E tests for deferred agent tool visibility and tier transitions.
+
+    Verifies that deferred agents don't expose tools until activated,
+    and that deregistration properly cleans up state.
+    """
+
+    @pytest.fixture()
+    def registry(self):
+        """Create a DeferredAgentRegistry with a mock ProcessManager."""
+        from agent_nexus.platform.gateway.deferred_registry import DeferredAgentRegistry
+
+        pm = MagicMock()
+        pm.start_agent = AsyncMock(return_value=None)
+        pm.stop_agent = AsyncMock(return_value=None)
+        reg = DeferredAgentRegistry(process_manager=pm)
+        yield reg
+
+    def test_deferred_agent_tools_not_in_get_tools_for_llm(self, registry) -> None:
+        """Deferred agents are excluded from get_tools_for_llm until activated."""
+        registry.register_agent(
+            _make_manifest(name="lazy-agent"), deferred=True,
+        )
+        registry.register_agent(
+            _make_manifest(name="eager-agent"), deferred=False,
+        )
+
+        # Only core agent tools should be available
+        tools = registry.get_tools_for_llm()
+        # Deferred agent should not contribute tools
+        tool_names = [t.name for t in tools] if tools else []
+        assert "lazy-agent" not in str(tool_names)
+
+    def test_remove_agent_tools_cleans_up(self, registry) -> None:
+        """remove_agent_tools clears tool registrations for an agent."""
+        manifest = _make_manifest(name="temp-agent")
+        registry.register_agent(manifest, deferred=False)
+
+        assert registry.get_agent_info("temp-agent") is not None
+
+        registry.remove_agent_tools("temp-agent")
+        # Tool adapters should be gone, but agent info may persist
+        assert len(registry._tool_adapters) == 0
+
+    def test_register_many_agents_stability(self, registry) -> None:
+        """Registering many agents doesn't corrupt internal state."""
+        for i in range(20):
+            tier = i % 2 == 0
+            registry.register_agent(
+                _make_manifest(name=f"batch-{i}"), deferred=not tier,
+            )
+
+        all_agents = registry.list_all_agents()
+        assert len(all_agents) == 20
+
+        core = registry.list_core_agents()
+        deferred = registry.list_deferred_agents()
+        assert len(core) + len(deferred) == 20
+
+    def test_search_agents_returns_empty_for_no_match(self, registry) -> None:
+        """search_agents returns empty list when no keywords match."""
+        registry.register_agent(
+            _make_manifest(name="code-reviewer", description="Reviews code"),
+            deferred=False,
+        )
+
+        results = registry.search_agents("completely unrelated quantum physics")
+        assert results == []

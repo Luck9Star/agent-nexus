@@ -4,6 +4,7 @@ Tests the full defense-in-depth chain that protects code execution:
   1. SecurityChecker performs AST-level analysis using Import/Function/Attribute/Regex rules
   2. PermissionChecker evaluates tool access using mode + blacklist/whitelist + path_rules
   3. IPythonExecutor enforces security check before execution
+  4. Bypass vectors (io.open, types.FunctionType) are blocked
 """
 
 import pytest
@@ -272,5 +273,74 @@ class TestExecutorSecurityPipeline:
             result = await executor.execute("a = 10\nb = 20\nc = a + b")
             assert result.success is True
             assert executor.get("c") == 30
+        finally:
+            executor.close()
+
+
+# ---------------------------------------------------------------------------
+# Bypass attempt tests — io and types modules added in iter 6
+# ---------------------------------------------------------------------------
+
+
+class TestSecurityBypassAttempts:
+    """Verify newly-added forbidden modules (io, types) block sandbox escape vectors.
+
+    These bypass vectors were identified in iteration 6:
+    - io.open() bypasses the forbidden open() function
+    - types.FunctionType(code, globals) bypasses FunctionRule AST checks
+    """
+
+    def test_io_import_blocked(self) -> None:
+        """Importing 'io' module is blocked (io.open bypasses open() restriction)."""
+        checker = SecurityChecker()
+        violations = checker.check_code("import io")
+        assert len(violations) >= 1
+        assert any(v.rule_type == "import" for v in violations)
+
+    def test_io_open_bypass_blocked(self) -> None:
+        """io.open() file read/write bypass attempt is blocked."""
+        checker = SecurityChecker()
+        violations = checker.check_code("import io\nf = io.open('/etc/passwd')")
+        assert len(violations) >= 1
+        types = {v.rule_type for v in violations}
+        assert "import" in types
+
+    def test_types_import_blocked(self) -> None:
+        """Importing 'types' module is blocked (types.FunctionType code injection)."""
+        checker = SecurityChecker()
+        violations = checker.check_code("import types")
+        assert len(violations) >= 1
+        assert any(v.rule_type == "import" for v in violations)
+
+    def test_types_function_type_bypass_blocked(self) -> None:
+        """types.FunctionType(code, globals) sandbox escape is blocked."""
+        checker = SecurityChecker()
+        violations = checker.check_code(
+            "import types\ncode = compile('import os', '', 'exec')\n"
+            "fn = types.FunctionType(code, {})"
+        )
+        assert len(violations) >= 1
+        types = {v.rule_type for v in violations}
+        assert "import" in types
+
+    @pytest.mark.asyncio
+    async def test_io_bypass_rejected_by_executor(self) -> None:
+        """IPythonExecutor rejects io.open() bypass at execution time."""
+        executor = IPythonExecutor()
+        try:
+            result = await executor.execute("import io\nf = io.open('/tmp/test', 'w')")
+            assert result.success is False
+            assert result.error is not None and "security violation" in result.error.lower()
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_types_bypass_rejected_by_executor(self) -> None:
+        """IPythonExecutor rejects types.FunctionType bypass at execution time."""
+        executor = IPythonExecutor()
+        try:
+            result = await executor.execute("import types\nfn = types.FunctionType")
+            assert result.success is False
+            assert result.error is not None and "security violation" in result.error.lower()
         finally:
             executor.close()
