@@ -263,9 +263,7 @@ class QualityGateCoordinator:
                 converter = _AGENT_CONVERTERS.get(task.agent, _convert_default)
                 checks.append(converter(result))
 
-    def _build_gate_result(
-        self, checks: list[GateCheck], config: dict[str, Any]
-    ) -> GateResult:
+    def _build_gate_result(self, checks: list[GateCheck], config: dict[str, Any]) -> GateResult:
         """Build the final GateResult from accumulated checks."""
         overall_passed, gate_score, blockers, warnings = _make_gate_decision(checks, config)
         return GateResult(

@@ -441,8 +441,7 @@ class LLMClient:
         }
 
         effective_max_tokens = (
-            max_tokens if max_tokens is not None
-            else self._capability.max_output_tokens
+            max_tokens if max_tokens is not None else self._capability.max_output_tokens
         )
         if effective_max_tokens:
             kwargs["max_tokens"] = effective_max_tokens

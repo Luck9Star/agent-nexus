@@ -131,9 +131,7 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
-def _validate_task_fields(
-    tasks: dict, task_ids: set[str], errors: list[str]
-) -> None:
+def _validate_task_fields(tasks: dict, task_ids: set[str], errors: list[str]) -> None:
     """Validate each task has required fields and valid dependencies."""
     for task_id, task_def in tasks.items():
         if "name" not in task_def:

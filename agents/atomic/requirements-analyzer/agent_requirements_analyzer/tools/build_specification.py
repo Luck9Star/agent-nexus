@@ -25,7 +25,16 @@ def _build_glossary(
 
 
 _FUNCTIONAL_KEYWORDS = [
-    "功能", "角色", "认证", "数据", "流程", "feature", "role", "auth", "data", "process",
+    "功能",
+    "角色",
+    "认证",
+    "数据",
+    "流程",
+    "feature",
+    "role",
+    "auth",
+    "data",
+    "process",
 ]
 _NON_FUNCTIONAL_KEYWORDS = ["性能", "安全", "可用", "perf", "security", "avail"]
 

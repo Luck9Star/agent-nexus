@@ -107,9 +107,7 @@ async def _simulate_localization_async(text: str, target_lang: str) -> dict:
     return _simulate_localization(text, target_lang)
 
 
-def _validate_task_fields(
-    tasks: dict, task_ids: set[str], errors: list[str]
-) -> None:
+def _validate_task_fields(tasks: dict, task_ids: set[str], errors: list[str]) -> None:
     """Validate each task has required fields and valid dependencies."""
     for task_id, task_def in tasks.items():
         if "name" not in task_def:
