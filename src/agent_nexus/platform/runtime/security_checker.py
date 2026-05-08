@@ -49,6 +49,8 @@ _DEFAULT_FORBIDDEN_IMPORTS = [
     "tempfile",  # temp file creation bypasses path_rules
     "builtins",  # access to eval/exec/compile via builtins module
     "pdb",  # interactive debugger can escape sandbox
+    "io",  # io.open() bypasses the forbidden open() function
+    "types",  # types.FunctionType(code, globals) bypasses FunctionRule
 ]
 
 _DEFAULT_FORBIDDEN_FUNCTIONS = [
