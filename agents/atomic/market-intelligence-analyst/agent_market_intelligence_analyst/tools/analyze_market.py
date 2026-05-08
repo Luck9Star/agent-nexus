@@ -293,41 +293,59 @@ def _compute_score(keyword_hits: int, total_keywords: int) -> int:
     return 1
 
 
+def _insights_porter(scores: dict[str, int]) -> list[str]:
+    """Generate Porter's Five Forces insights."""
+    insights: list[str] = []
+    if scores.get("rivalry", 0) >= 4:
+        insights.append("行业竞争激烈，需要差异化战略")
+    if scores.get("new_entrants", 0) >= 4:
+        insights.append("新进入者威胁较大，需加强护城河")
+    if scores.get("buyer_power", 0) >= 4:
+        insights.append("买方议价能力强，需提升客户粘性")
+    if not insights:
+        insights.append("市场环境相对稳定，适合稳健发展")
+    return insights
+
+
+def _insights_swot(scores: dict[str, int]) -> list[str]:
+    """Generate SWOT analysis insights."""
+    insights: list[str] = []
+    if scores.get("strengths", 0) >= 4:
+        insights.append("具备显著竞争优势，应积极扩展")
+    if scores.get("threats", 0) >= 4:
+        insights.append("外部威胁显著，需制定风险缓解策略")
+    if scores.get("opportunities", 0) >= 4:
+        insights.append("市场机会丰富，建议加大投入")
+    if not insights:
+        insights.append("优劣势均衡，需找准差异化定位")
+    return insights
+
+
+def _insights_pestel(scores: dict[str, int]) -> list[str]:
+    """Generate PESTEL analysis insights."""
+    insights: list[str] = []
+    if scores.get("technological", 0) >= 4:
+        insights.append("技术创新是核心驱动力，应持续投入研发")
+    if scores.get("political", 0) >= 4:
+        insights.append("政策环境活跃，需密切关注监管变化")
+    if scores.get("economic", 0) >= 4:
+        insights.append("经济因素影响显著，需建立抗周期机制")
+    if not insights:
+        insights.append("宏观环境平稳，适合长期战略规划")
+    return insights
+
+
+_FRAMEWORK_INSIGHT_GENERATORS = {
+    "porter": _insights_porter,
+    "swot": _insights_swot,
+    "pestel": _insights_pestel,
+}
+
+
 def _generate_insights(framework: str, scores: dict[str, int]) -> list[str]:
     """Generate insights based on factor scores."""
-    insights: list[str] = []
-
-    if framework == "porter":
-        if scores.get("rivalry", 0) >= 4:
-            insights.append("行业竞争激烈，需要差异化战略")
-        if scores.get("new_entrants", 0) >= 4:
-            insights.append("新进入者威胁较大，需加强护城河")
-        if scores.get("buyer_power", 0) >= 4:
-            insights.append("买方议价能力强，需提升客户粘性")
-        if not insights:
-            insights.append("市场环境相对稳定，适合稳健发展")
-
-    elif framework == "swot":
-        if scores.get("strengths", 0) >= 4:
-            insights.append("具备显著竞争优势，应积极扩展")
-        if scores.get("threats", 0) >= 4:
-            insights.append("外部威胁显著，需制定风险缓解策略")
-        if scores.get("opportunities", 0) >= 4:
-            insights.append("市场机会丰富，建议加大投入")
-        if not insights:
-            insights.append("优劣势均衡，需找准差异化定位")
-
-    elif framework == "pestel":
-        if scores.get("technological", 0) >= 4:
-            insights.append("技术创新是核心驱动力，应持续投入研发")
-        if scores.get("political", 0) >= 4:
-            insights.append("政策环境活跃，需密切关注监管变化")
-        if scores.get("economic", 0) >= 4:
-            insights.append("经济因素影响显著，需建立抗周期机制")
-        if not insights:
-            insights.append("宏观环境平稳，适合长期战略规划")
-
-    return insights
+    generator = _FRAMEWORK_INSIGHT_GENERATORS.get(framework)
+    return generator(scores) if generator else []
 
 
 def _assess_factor(hits: int, label: str) -> str:

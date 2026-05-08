@@ -228,42 +228,45 @@ class QualityGateCoordinator:
                     non_merge_tasks.append(task)
 
             if non_merge_tasks:
-                coros = []
-                for task in non_merge_tasks:
-                    context = dict(context_base)
-                    for dep_id in task.blocked_by:
-                        if dep_id in completed_results:
-                            context[dep_id] = completed_results[dep_id]
-                    coros.append((task, _simulate_agent_check_async(task.agent, context)))
-                results = await asyncio.gather(
-                    *[c for _, c in coros],
-                    return_exceptions=True,
+                await self._execute_gate_group(
+                    non_merge_tasks, context_base, completed_results, checks
                 )
-                for (task, _), result in zip(coros, results, strict=True):
-                    if isinstance(result, Exception):
-                        checks.append(
-                            GateCheck(
-                                agent=task.agent,
-                                passed=False,
-                                findings=[str(result)],
-                                score=0.0,
-                            )
-                        )
-                    else:
-                        completed_results[task.id] = result  # type: ignore[assignment]
-                        converter = _AGENT_CONVERTERS.get(task.agent, _convert_default)
-                        checks.append(converter(result))
 
             if merge_task is not None:
-                overall_passed, gate_score, blockers, warnings = _make_gate_decision(checks, config)
-                return GateResult(
-                    checks=checks,
-                    overall_passed=overall_passed,
-                    gate_score=gate_score,
-                    blockers=blockers,
-                    warnings=warnings,
-                )
+                return self._build_gate_result(checks, config)
 
+        return self._build_gate_result(checks, config)
+
+    async def _execute_gate_group(
+        self,
+        tasks: list,
+        context_base: dict[str, Any],
+        completed_results: dict[str, dict[str, Any]],
+        checks: list[GateCheck],
+    ) -> None:
+        """Execute a group of gate check tasks concurrently."""
+        coros = []
+        for task in tasks:
+            context = dict(context_base)
+            for dep_id in task.blocked_by:
+                if dep_id in completed_results:
+                    context[dep_id] = completed_results[dep_id]
+            coros.append((task, _simulate_agent_check_async(task.agent, context)))
+        results = await asyncio.gather(*[c for _, c in coros], return_exceptions=True)
+        for (task, _), result in zip(coros, results, strict=True):
+            if isinstance(result, Exception):
+                checks.append(
+                    GateCheck(agent=task.agent, passed=False, findings=[str(result)], score=0.0)
+                )
+            else:
+                completed_results[task.id] = result  # type: ignore[assignment]
+                converter = _AGENT_CONVERTERS.get(task.agent, _convert_default)
+                checks.append(converter(result))
+
+    def _build_gate_result(
+        self, checks: list[GateCheck], config: dict[str, Any]
+    ) -> GateResult:
+        """Build the final GateResult from accumulated checks."""
         overall_passed, gate_score, blockers, warnings = _make_gate_decision(checks, config)
         return GateResult(
             checks=checks,

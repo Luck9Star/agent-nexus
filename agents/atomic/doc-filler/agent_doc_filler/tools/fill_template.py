@@ -23,68 +23,68 @@ def _default_output_path(template_path: str) -> str:
     return str(path.with_stem(path.stem + "_filled"))
 
 
-def _fill_with_docx(
-    template_path: str,
+class _ReplaceState:
+    """Mutable state holder for placeholder replacement tracking."""
+
+    __slots__ = ("filled_count", "seen_placeholders")
+
+    def __init__(self) -> None:
+        self.filled_count = 0
+        self.seen_placeholders: set[str] = set()
+
+
+def _replace_in_paragraph(paragraph: object, values: dict[str, str], state: _ReplaceState) -> None:
+    """Replace placeholders in a single paragraph, preserving run formatting."""
+    for run in paragraph.runs:
+        text = run.text
+        if not PLACEHOLDER_RE.search(text):
+            continue
+
+        def _replacer(match: re.Match) -> str:
+            name = match.group(1)
+            state.seen_placeholders.add(name)
+            if name in values:
+                state.filled_count += 1
+                return values[name]
+            return match.group(0)
+
+        run.text = PLACEHOLDER_RE.sub(_replacer, text)
+
+
+def _replace_in_paragraphs(paragraphs, values: dict[str, str], state: _ReplaceState) -> None:
+    """Apply placeholder replacement to an iterable of paragraphs."""
+    for para in paragraphs:
+        _replace_in_paragraph(para, values, state)
+
+
+def _replace_placeholders_in_doc(
+    doc,
     values: dict[str, str],
-    output_path: str,
-) -> FillResult:
-    """Fill template using python-docx with full style preservation."""
-    from docx import Document
+) -> tuple[int, set[str]]:
+    """Replace all placeholders in document regions. Returns (filled_count, seen_names)."""
+    state = _ReplaceState()
 
-    doc = Document(template_path)
-    filled_count = 0
-    unfilled: list[str] = []
-    warnings: list[str] = []
-    seen_placeholders: set[str] = set()
-
-    def _replace_in_paragraph(paragraph: object) -> None:
-        """Replace placeholders in a single paragraph, preserving run formatting."""
-        nonlocal filled_count
-        for run in paragraph.runs:
-            text = run.text
-            if not PLACEHOLDER_RE.search(text):
-                continue
-
-            def _replacer(match: re.Match) -> str:
-                nonlocal filled_count
-                name = match.group(1)
-                seen_placeholders.add(name)
-                if name in values:
-                    filled_count += 1
-                    return values[name]
-                return match.group(0)  # Keep original placeholder
-
-            new_text = PLACEHOLDER_RE.sub(_replacer, text)
-            run.text = new_text
-
-    # Process paragraphs
-    for para in doc.paragraphs:
-        _replace_in_paragraph(para)
-
-    # Process tables
+    _replace_in_paragraphs(doc.paragraphs, values, state)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
-                for para in cell.paragraphs:
-                    _replace_in_paragraph(para)
-
-    # Process headers and footers
+                _replace_in_paragraphs(cell.paragraphs, values, state)
     for section in doc.sections:
-        for para in section.header.paragraphs:
-            _replace_in_paragraph(para)
-        for para in section.footer.paragraphs:
-            _replace_in_paragraph(para)
+        _replace_in_paragraphs(section.header.paragraphs, values, state)
+        _replace_in_paragraphs(section.footer.paragraphs, values, state)
 
-    # Determine unfilled placeholders
-    for name in seen_placeholders:
-        if name not in values:
-            unfilled.append(name)
+    return state.filled_count, state.seen_placeholders
 
-    # Check for placeholders that exist in template but weren't seen via runs
-    all_text_parts: list[str] = []
-    for para in doc.paragraphs:
-        all_text_parts.append(para.text)
-    remaining = PLACEHOLDER_RE.search(" ".join(all_text_parts))
+
+def _collect_unfilled(
+    doc, seen_placeholders: set[str], values: dict[str, str]
+) -> tuple[list[str], list[str]]:
+    """Determine unfilled placeholders and detect multi-run placeholders."""
+    unfilled: list[str] = [name for name in seen_placeholders if name not in values]
+    warnings: list[str] = []
+
+    all_text = " ".join(para.text for para in doc.paragraphs)
+    remaining = PLACEHOLDER_RE.search(all_text)
     if remaining:
         name = remaining.group(1)
         if name not in seen_placeholders and name not in values:
@@ -97,6 +97,20 @@ def _fill_with_docx(
     if unfilled:
         warnings.append(f"Unfilled placeholders: {', '.join(unfilled)}")
 
+    return unfilled, warnings
+
+
+def _fill_with_docx(
+    template_path: str,
+    values: dict[str, str],
+    output_path: str,
+) -> FillResult:
+    """Fill template using python-docx with full style preservation."""
+    from docx import Document
+
+    doc = Document(template_path)
+    filled_count, seen_placeholders = _replace_placeholders_in_doc(doc, values)
+    unfilled, warnings = _collect_unfilled(doc, seen_placeholders, values)
     doc.save(output_path)
 
     return FillResult(

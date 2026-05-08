@@ -132,39 +132,40 @@ def _count_words(text: str) -> int:
     return chinese_chars + english_words
 
 
-def _analyze_with_docx(template_path: str) -> TemplateAnalysis:
-    """Full analysis using python-docx library."""
-    from docx import Document
+def _scan_text_for_placeholders(
+    text: str,
+    seen_names: set[str],
+    placeholders: list[PlaceholderInfo],
+    formatting: dict | None = None,
+) -> None:
+    """Scan a text string for placeholders and add new ones."""
+    for match in PLACEHOLDER_RE.finditer(text):
+        name = match.group(1)
+        if name in seen_names:
+            continue
+        seen_names.add(name)
+        placeholders.append(
+            PlaceholderInfo(
+                name=name,
+                field_type=_guess_field_type(name),
+                description="",
+                required=True,
+                default=None,
+                formatting=formatting,
+            )
+        )
 
-    doc = Document(template_path)
-    placeholders: list[PlaceholderInfo] = []
-    seen_names: set[str] = set()
+
+def _build_paragraph_sections(
+    doc,
+    seen_names: set[str],
+    placeholders: list[PlaceholderInfo],
+) -> tuple[list[HeadingInfo], list[SectionContent], int, int]:
+    """Iterate paragraphs: detect headings, build sections, scan placeholders."""
     headings: list[HeadingInfo] = []
     sections: list[SectionContent] = []
-    tables: list[TableInfo] = []
     total_chars = 0
     total_words = 0
-    image_count = _count_images(doc)
-
-    def _scan_text(text: str, formatting: dict | None = None) -> None:
-        """Scan a text string for placeholders and add them."""
-        for match in PLACEHOLDER_RE.finditer(text):
-            name = match.group(1)
-            if name in seen_names:
-                continue
-            seen_names.add(name)
-            placeholders.append(
-                PlaceholderInfo(
-                    name=name,
-                    field_type=_guess_field_type(name),
-                    description="",
-                    required=True,
-                    default=None,
-                    formatting=formatting,
-                )
-            )
-
-    # --- Build headings and sections ---
     current_section_text: list[str] = []
     current_heading = ""
     current_level = 0
@@ -175,15 +176,14 @@ def _analyze_with_docx(template_path: str) -> TemplateAnalysis:
         total_chars += len(text)
         total_words += _count_words(text)
 
-        # Scan for placeholders
         for run in para.runs:
             if PLACEHOLDER_RE.search(run.text):
-                _scan_text(run.text, _extract_formatting_from_run(run))
+                _scan_text_for_placeholders(
+                    run.text, seen_names, placeholders, _extract_formatting_from_run(run)
+                )
 
-        # Detect heading
         level = _get_heading_level(para)
         if level is not None and text:
-            # Flush previous section
             if current_heading or current_para_count > 0:
                 preview = "\n".join(current_section_text)[:MAX_PREVIEW_LENGTH]
                 sections.append(
@@ -194,7 +194,6 @@ def _analyze_with_docx(template_path: str) -> TemplateAnalysis:
                         preview=preview,
                     )
                 )
-            # Start new section
             headings.append(HeadingInfo(level=level, text=text))
             current_heading = text
             current_level = level
@@ -205,7 +204,6 @@ def _analyze_with_docx(template_path: str) -> TemplateAnalysis:
             if len(current_section_text) < 5:
                 current_section_text.append(text)
 
-    # Flush last section
     if current_heading or current_para_count > 0:
         preview = "\n".join(current_section_text)[:MAX_PREVIEW_LENGTH]
         sections.append(
@@ -217,23 +215,34 @@ def _analyze_with_docx(template_path: str) -> TemplateAnalysis:
             )
         )
 
-    # --- Scan tables ---
+    return headings, sections, total_chars, total_words
+
+
+def _scan_tables(
+    doc,
+    seen_names: set[str],
+    placeholders: list[PlaceholderInfo],
+) -> list[TableInfo]:
+    """Scan document tables for placeholders and collect table metadata."""
+    tables: list[TableInfo] = []
     for idx, table in enumerate(doc.tables):
-        rows_data = []
+        rows_data: list[list[str]] = []
         for row in table.rows:
             row_texts = [cell.text.strip() for cell in row.cells]
             rows_data.append(row_texts)
-            # Scan cells for placeholders
             for cell in row.cells:
                 for para in cell.paragraphs:
                     for run in para.runs:
                         if PLACEHOLDER_RE.search(run.text):
-                            _scan_text(run.text, _extract_formatting_from_run(run))
-
+                            _scan_text_for_placeholders(
+                                run.text,
+                                seen_names,
+                                placeholders,
+                                _extract_formatting_from_run(run),
+                            )
         header_row = rows_data[0] if rows_data else []
         num_cols = max((len(r) for r in rows_data), default=0)
-        preview = rows_data[: MAX_TABLE_PREVIEW_ROWS + 1]  # header + preview rows
-
+        preview = rows_data[: MAX_TABLE_PREVIEW_ROWS + 1]
         tables.append(
             TableInfo(
                 index=idx,
@@ -243,15 +252,11 @@ def _analyze_with_docx(template_path: str) -> TemplateAnalysis:
                 preview=preview,
             )
         )
+    return tables
 
-    # Scan headers and footers for placeholders
-    for section in doc.sections:
-        for para in section.header.paragraphs:
-            _scan_text(para.text)
-        for para in section.footer.paragraphs:
-            _scan_text(para.text)
 
-    # --- Document-level style info ---
+def _extract_style_info(doc) -> dict:
+    """Extract default style information from the document."""
     style_info: dict = {}
     if doc.styles:
         try:
@@ -262,21 +267,43 @@ def _analyze_with_docx(template_path: str) -> TemplateAnalysis:
                 style_info["default_size"] = normal.font.size.pt
         except (KeyError, AttributeError):
             pass
+    return style_info
 
-    # Core properties
-    metadata: dict = {}
-    metadata["section_count"] = len(doc.sections)
+
+def _extract_metadata(doc) -> dict:
+    """Extract core properties metadata from the document."""
+    metadata: dict = {"section_count": len(doc.sections)}
     core_props = doc.core_properties
-    if core_props.title:
-        metadata["title"] = core_props.title
-    if core_props.author:
-        metadata["author"] = core_props.author
-    if core_props.created:
-        metadata["created"] = str(core_props.created)
-    if core_props.modified:
-        metadata["modified"] = str(core_props.modified)
-    if core_props.subject:
-        metadata["subject"] = core_props.subject
+    for attr in ("title", "author", "subject"):
+        val = getattr(core_props, attr, None)
+        if val:
+            metadata[attr] = val
+    for attr in ("created", "modified"):
+        val = getattr(core_props, attr, None)
+        if val:
+            metadata[attr] = str(val)
+    return metadata
+
+
+def _analyze_with_docx(template_path: str) -> TemplateAnalysis:
+    """Full analysis using python-docx library."""
+    from docx import Document
+
+    doc = Document(template_path)
+    placeholders: list[PlaceholderInfo] = []
+    seen_names: set[str] = set()
+    image_count = _count_images(doc)
+
+    headings, sections, total_chars, total_words = _build_paragraph_sections(
+        doc, seen_names, placeholders
+    )
+    tables = _scan_tables(doc, seen_names, placeholders)
+
+    for sec in doc.sections:
+        for para in sec.header.paragraphs:
+            _scan_text_for_placeholders(para.text, seen_names, placeholders)
+        for para in sec.footer.paragraphs:
+            _scan_text_for_placeholders(para.text, seen_names, placeholders)
 
     stats = DocumentStats(
         total_paragraphs=len(doc.paragraphs),
@@ -294,8 +321,8 @@ def _analyze_with_docx(template_path: str) -> TemplateAnalysis:
         sections=sections,
         tables=tables,
         stats=stats,
-        style_info=style_info,
-        metadata=metadata,
+        style_info=_extract_style_info(doc),
+        metadata=_extract_metadata(doc),
     )
 
 

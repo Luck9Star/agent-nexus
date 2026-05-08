@@ -107,6 +107,29 @@ async def _simulate_localization_async(text: str, target_lang: str) -> dict:
     return _simulate_localization(text, target_lang)
 
 
+def _validate_task_fields(
+    tasks: dict, task_ids: set[str], errors: list[str]
+) -> None:
+    """Validate each task has required fields and valid dependencies."""
+    for task_id, task_def in tasks.items():
+        if "name" not in task_def:
+            errors.append(f"Task '{task_id}' missing 'name'")
+        if "agent" not in task_def:
+            errors.append(f"Task '{task_id}' missing 'agent'")
+
+        blocked_by = task_def.get("blocked_by", [])
+        if not isinstance(blocked_by, list):
+            errors.append(f"Task '{task_id}' blocked_by must be a list")
+            continue
+
+        for dep in blocked_by:
+            if dep not in task_ids:
+                errors.append(f"Task '{task_id}' references unknown dependency '{dep}'")
+
+        if task_id in blocked_by:
+            errors.append(f"Task '{task_id}' cannot depend on itself")
+
+
 # ---------------------------------------------------------------------------
 # Coordinator
 # ---------------------------------------------------------------------------
@@ -357,26 +380,8 @@ class CompetitiveIntelCoordinator:
             return errors
 
         task_ids = set(tasks.keys())
+        _validate_task_fields(tasks, task_ids, errors)
 
-        for task_id, task_def in tasks.items():
-            if "name" not in task_def:
-                errors.append(f"Task '{task_id}' missing 'name'")
-            if "agent" not in task_def:
-                errors.append(f"Task '{task_id}' missing 'agent'")
-
-            blocked_by = task_def.get("blocked_by", [])
-            if not isinstance(blocked_by, list):
-                errors.append(f"Task '{task_id}' blocked_by must be a list")
-                continue
-
-            for dep in blocked_by:
-                if dep not in task_ids:
-                    errors.append(f"Task '{task_id}' references unknown dependency '{dep}'")
-
-            if task_id in blocked_by:
-                errors.append(f"Task '{task_id}' cannot depend on itself")
-
-        # Shared cycle detection from platform utils
         cycles = detect_cycles_dfs(
             task_ids,
             lambda tid: [d for d in tasks[tid].get("blocked_by", []) if d in task_ids],

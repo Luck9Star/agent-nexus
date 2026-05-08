@@ -24,83 +24,54 @@ def _build_glossary(
     return glossary
 
 
+_FUNCTIONAL_KEYWORDS = [
+    "功能", "角色", "认证", "数据", "流程", "feature", "role", "auth", "data", "process",
+]
+_NON_FUNCTIONAL_KEYWORDS = ["性能", "安全", "可用", "perf", "security", "avail"]
+
+
+def _build_functional_section(
+    analysis: RequirementAnalysis, answers: dict[str, str]
+) -> RequirementSection | None:
+    """Build the functional requirements section."""
+    items = list(analysis.priorities.get("high", []) + analysis.priorities.get("medium", []))
+    for key, value in answers.items():
+        if any(kw in key for kw in _FUNCTIONAL_KEYWORDS):
+            items.append(f"{key}: {value}")
+    return RequirementSection(title="功能需求", items=items, priority="high") if items else None
+
+
+def _build_non_functional_section(
+    analysis: RequirementAnalysis, answers: dict[str, str]
+) -> RequirementSection | None:
+    """Build the non-functional requirements section."""
+    items = list(analysis.priorities.get("low", []))
+    for key, value in answers.items():
+        if any(kw in key for kw in _NON_FUNCTIONAL_KEYWORDS):
+            items.append(f"{key}: {value}")
+    return RequirementSection(title="非功能需求", items=items, priority="medium") if items else None
+
+
+def _build_constraint_section(
+    analysis: RequirementAnalysis, answers: dict[str, str]
+) -> RequirementSection | None:
+    """Build the constraints section from contradictions and gap answers."""
+    items: list[str] = []
+    for contradiction in analysis.contradictions:
+        if contradiction in answers:
+            items.append(f"矛盾解决: {answers[contradiction]}")
+        else:
+            items.append(contradiction)
+    return RequirementSection(title="约束条件", items=items, priority="high") if items else None
+
+
 def _build_sections(
     analysis: RequirementAnalysis,
     answers: dict[str, str],
 ) -> list[RequirementSection]:
-    """Build requirement sections from analysis and answers.
-
-    Groups requirements into logical sections based on content.
-    """
-    sections: list[RequirementSection] = []
-
-    # Functional requirements section
-    functional_items: list[str] = []
-    for item in analysis.priorities.get("high", []) + analysis.priorities.get("medium", []):
-        functional_items.append(item)
-    # Incorporate answers that relate to functionality
-    for key, value in answers.items():
-        if any(
-            kw in key
-            for kw in [
-                "功能",
-                "角色",
-                "认证",
-                "数据",
-                "流程",
-                "feature",
-                "role",
-                "auth",
-                "data",
-                "process",
-            ]
-        ):
-            functional_items.append(f"{key}: {value}")
-
-    if functional_items:
-        sections.append(
-            RequirementSection(
-                title="功能需求",
-                items=functional_items,
-                priority="high",
-            )
-        )
-
-    # Non-functional requirements section
-    non_functional_items: list[str] = []
-    for item in analysis.priorities.get("low", []):
-        non_functional_items.append(item)
-    for key, value in answers.items():
-        if any(kw in key for kw in ["性能", "安全", "可用", "性能", "perf", "security", "avail"]):
-            non_functional_items.append(f"{key}: {value}")
-
-    if non_functional_items:
-        sections.append(
-            RequirementSection(
-                title="非功能需求",
-                items=non_functional_items,
-                priority="medium",
-            )
-        )
-
-    # Constraints section (from contradictions and gap answers)
-    constraint_items: list[str] = []
-    for contradiction in analysis.contradictions:
-        if contradiction in answers:
-            constraint_items.append(f"矛盾解决: {answers[contradiction]}")
-        else:
-            constraint_items.append(contradiction)
-
-    if constraint_items:
-        sections.append(
-            RequirementSection(
-                title="约束条件",
-                items=constraint_items,
-                priority="high",
-            )
-        )
-
-    return sections
+    """Build requirement sections from analysis and answers."""
+    builders = [_build_functional_section, _build_non_functional_section, _build_constraint_section]
+    return [s for builder in builders if (s := builder(analysis, answers)) is not None]
 
 
 def _build_priorities(
