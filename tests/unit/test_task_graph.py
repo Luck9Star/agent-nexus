@@ -849,7 +849,9 @@ class TestTaskGraphClose:
     def test_close_idempotent(self) -> None:
         tg = TaskGraph(Path(":memory:"))
         tg.close()
-        tg.close()  # second call is a no-op, should not raise
+        assert tg._mem_conn is None
+        tg.close()  # second call is a no-op
+        assert tg._mem_conn is None
 
     def test_close_file_db_is_noop(self, tmp_path: Path) -> None:
         tg = TaskGraph(tmp_path / "test.db")

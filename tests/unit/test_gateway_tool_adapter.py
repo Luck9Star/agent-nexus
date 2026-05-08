@@ -184,7 +184,8 @@ class TestMcpToolAdapterLocks:
         assert "test-agent" in _ipc_lock_registry
 
     def test_remove_lock_missing_is_noop(self) -> None:
-        remove_lock("nonexistent")  # should not raise
+        remove_lock("nonexistent")
+        assert "nonexistent" not in _ipc_lock_registry
 
     def test_remove_all_locks(self) -> None:
         _ipc_lock_registry["a"] = asyncio.Lock()

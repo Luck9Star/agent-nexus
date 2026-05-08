@@ -92,6 +92,8 @@ quality:
 """
     )
     _validate(EXPERT_PROFILE_SCHEMA_PATH, instance)
+    # jsonschema.validate raises on failure; explicit check for clarity
+    assert instance["id"] == "agency.software-architect"
 
 
 # ===================================================================
@@ -169,6 +171,8 @@ constraints:
 """
     )
     _validate(OUTPUT_CONTRACT_SCHEMA_PATH, instance)
+    # jsonschema.validate raises on failure; explicit check for clarity
+    assert instance["artifact_type"] == "risk_report"
 
 
 # ===================================================================

@@ -462,7 +462,8 @@ class TestStopAll:
 
     async def test_stop_all_empty(self, pm: ProcessManager) -> None:
         """stop_all on empty manager is a no-op."""
-        await pm.stop_all()  # Should not raise
+        await pm.stop_all()
+        assert len(pm._agents) == 0
 
 
 # ============================================================================
@@ -602,6 +603,7 @@ class TestProcessManagerDelRobustness:
         pm = ProcessManager()
         del pm._agents  # simulate interpreter GC having collected the dict
         pm.__del__()  # must not raise
+        assert not hasattr(pm, "_agents")
 
     def test_del_handle_attr_error(self) -> None:
         """__del__ skips handles whose .process raises RuntimeError."""
@@ -622,6 +624,7 @@ class TestProcessManagerDelRobustness:
         )
         pm._agents["broken"] = handle
         pm.__del__()  # must not raise — OSError caught by broad except
+        mock_proc.kill.assert_called_once()
 
 
 _SUBPROCESS_PATCH = (

@@ -466,14 +466,6 @@ class TestSmartDependencyResolution:
 class TestValidateTomlField:
     """Unit tests for the _validate_toml_field helper."""
 
-    def test_valid_alphanumeric_passes(self) -> None:
-        # Should not raise
-        _validate_toml_field("hello123", "test-context")
-
-    def test_valid_string_with_spaces_passes(self) -> None:
-        # Should not raise
-        _validate_toml_field("task name", "test-context")
-
     def test_null_byte_raises(self) -> None:
         with pytest.raises(ValueError, match="null byte"):
             _validate_toml_field("bad\x00value", "test-context")

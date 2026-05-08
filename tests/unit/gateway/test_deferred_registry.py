@@ -286,7 +286,9 @@ class TestRemoveAgentTools:
 
     def test_noop_for_unknown(self) -> None:
         reg = DeferredAgentRegistry(_make_mock_pm())
-        reg.remove_agent_tools("ghost")  # should not raise
+        reg.remove_agent_tools("ghost")
+        assert len(reg._tool_adapters) == 0
+        assert len(reg._tool_by_name) == 0
 
 
 # ---------------------------------------------------------------------------

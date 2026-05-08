@@ -1020,7 +1020,9 @@ class TestDAGDispatcherCleanup:
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         dispatcher.close()
+        assert dispatcher._pool is None
         dispatcher.close()  # second close is a no-op
+        assert dispatcher._pool is None
         graph.close()
 
 

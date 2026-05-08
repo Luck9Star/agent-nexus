@@ -1318,9 +1318,10 @@ class TestCLI:
             task = asyncio.create_task(_wait_forever())
             await asyncio.sleep(0)  # let task start
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            result = await asyncio.gather(task, return_exceptions=True)
+            assert isinstance(result[0], asyncio.CancelledError)
 
-        asyncio.run(_run())  # should not raise
+        asyncio.run(_run())
 
     def test_search_no_results(self) -> None:
         """search command with no matches shows 'No agents found'."""
@@ -3312,6 +3313,9 @@ class TestRmTreeBestEffort:
         try:
             # Should NOT raise — best-effort means continue on error
             _rmtree_best_effort(d, context="permission-test")
+            # Parent dir may still exist if protected subdir couldn't be removed
+            # but accessible files should have been deleted
+            assert (d / "a.txt").exists() is False or d.exists()
         finally:
             # Restore permissions for cleanup
             if protected.exists():

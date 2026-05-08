@@ -534,3 +534,4 @@ class TestLoadCliRouting:
         loader = _make_loader(tmp_path)
         result = loader.load_cli_routing()
         assert result is not None
+        assert result.default == "anthropic"

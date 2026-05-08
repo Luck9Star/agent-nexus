@@ -2442,3 +2442,4 @@ class TestCompositeCloseSafety:
 
         # The result should still be returned (not lost to the close() exception)
         assert result is not None
+        assert hasattr(result, "success")

@@ -94,7 +94,8 @@ class TestProviderRegistry:
 
     def test_unregister_unknown_is_noop(self) -> None:
         registry = ProviderRegistry()
-        registry.unregister("nonexistent")  # should not raise
+        registry.unregister("nonexistent")
+        assert registry.get("nonexistent") is None
 
     def test_default_priority_is_7(self) -> None:
         registry = ProviderRegistry()

@@ -1195,7 +1195,8 @@ class TestEvolutionStoreClose:
 
     def test_close_is_noop_for_file_db(self, tmp_path: Path) -> None:
         store = EvolutionStore(tmp_path / "evo.db")
-        store.close()  # should not raise
+        store.close()
+        assert store._memory_conn is None
 
     def test_close_idempotent(self, tmp_path: Path) -> None:
         store = EvolutionStore(tmp_path / "evo.db")
@@ -1891,12 +1892,12 @@ class TestStoreSchemaInitTransaction:
 class TestIncrementCountersRowcount:
     """Verify increment_counters warns on missing skill_id."""
 
-    def test_missing_skill_no_crash(self, tmp_path: Path) -> None:
-        """increment_counters on non-existent skill should not raise."""
+    def test_missing_skill_no_crash(self, tmp_path: Path, caplog) -> None:
+        """increment_counters on non-existent skill should not raise and logs warning."""
         store = _make_store(tmp_path)
-        # Use a skill_id that doesn't exist — should not raise
-        store.increment_counters("nonexistent-skill-id", selected=True)
-        # No assertion needed — just verifying no crash
+        with caplog.at_level("WARNING"):
+            store.increment_counters("nonexistent-skill-id", selected=True)
+        assert any("nonexistent-skill-id" in r.message for r in caplog.records)
 
 
 class TestSaveSkillRecordPreservesActive:

@@ -307,9 +307,10 @@ class TestIncrementCounters:
         with pytest.raises(ValueError, match="fell_back requires selected"):
             store.increment_counters("s1", fell_back=True)
 
-    def test_increment_nonexistent_logs_warning(self, store: SkillStore) -> None:
-        # Should not raise — just logs a warning
-        store.increment_counters("ghost", selected=True)
+    def test_increment_nonexistent_logs_warning(self, store: SkillStore, caplog) -> None:
+        with caplog.at_level("WARNING"):
+            store.increment_counters("ghost", selected=True)
+        assert any("ghost" in r.message for r in caplog.records)
 
 
 # ============================================================================

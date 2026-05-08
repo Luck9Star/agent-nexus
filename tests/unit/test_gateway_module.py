@@ -646,6 +646,7 @@ class TestMCPGatewayRegisterAgentTools:
     async def test_register_tools_unknown_agent(self, gateway: MCPGateway) -> None:
         """Registering tools for nonexistent agent does nothing."""
         await gateway._register_agent_tools("nonexistent")
+        assert "nonexistent" not in gateway.registry._tool_adapters
 
     @pytest.mark.asyncio
     async def test_register_tools_not_activated(self, gateway: MCPGateway) -> None:
@@ -653,6 +654,7 @@ class TestMCPGatewayRegisterAgentTools:
         manifest = _make_manifest("dormant")
         await gateway.register_agent(manifest, deferred=True)
         await gateway._register_agent_tools("dormant")
+        assert "dormant" not in gateway.registry._tool_adapters
 
     @pytest.mark.asyncio
     async def test_register_tools_skips_when_already_registered_and_alive(
