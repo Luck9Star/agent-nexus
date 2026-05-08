@@ -1,4 +1,6 @@
-# Python
+# Nextflow
+*.nf
+.nextflow/
 __pycache__/
 *.py[oc]
 build/
