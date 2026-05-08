@@ -93,6 +93,11 @@ class ExternalMcpAdapter:
             )
             # Clean up partial state
             await self._safe_disconnect()
+        except BaseException:
+            # CancelledError (or other BaseException) — clean up to prevent
+            # AsyncExitStack / stream resource leak, then re-raise.
+            await self._safe_disconnect()
+            raise
 
     async def disconnect(self) -> None:
         """Disconnect from the external MCP Server."""

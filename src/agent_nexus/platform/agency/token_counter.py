@@ -64,7 +64,7 @@ class TokenCounter:
                     text=text,
                 )
             except Exception:
-                pass  # Fall through to tiktoken
+                logger.debug("LiteLLM token count failed, falling back", exc_info=True)
 
         # Tier 2: tiktoken exact counting
         if self._tiktoken_available:

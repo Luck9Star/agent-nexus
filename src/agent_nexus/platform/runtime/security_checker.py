@@ -51,6 +51,9 @@ _DEFAULT_FORBIDDEN_IMPORTS = [
     "pdb",  # interactive debugger can escape sandbox
     "io",  # io.open() bypasses the forbidden open() function
     "types",  # types.FunctionType(code, globals) bypasses FunctionRule
+    "pty",  # pty.spawn() executes arbitrary commands via pseudo-terminal
+    "mmap",  # mmap.mmap() reads/writes files without using open()
+    "concurrent",  # ProcessPoolExecutor bypasses subprocess/multiprocessing blocks
 ]
 
 _DEFAULT_FORBIDDEN_FUNCTIONS = [

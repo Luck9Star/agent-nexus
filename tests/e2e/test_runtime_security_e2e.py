@@ -344,3 +344,101 @@ class TestSecurityBypassAttempts:
             assert result.error is not None and "security violation" in result.error.lower()
         finally:
             executor.close()
+
+
+# Additional bypass vectors — pty, mmap, concurrent (added in iter 11)
+
+
+class TestAdditionalBypassVectors:
+    """Verify newly-added forbidden modules (pty, mmap, concurrent) block escape vectors.
+
+    These bypass vectors were identified in iteration 11:
+    - pty.spawn() executes arbitrary commands via pseudo-terminal
+    - mmap.mmap() reads/writes files without using open()
+    - concurrent.futures.ProcessPoolExecutor bypasses subprocess/multiprocessing blocks
+    """
+
+    def test_pty_import_blocked(self) -> None:
+        """Importing 'pty' module is blocked (pty.spawn command execution)."""
+        checker = SecurityChecker()
+        violations = checker.check_code("import pty")
+        assert len(violations) >= 1
+        assert any(v.rule_type == "import" for v in violations)
+
+    def test_pty_spawn_bypass_blocked(self) -> None:
+        """pty.spawn() bypass attempt is blocked."""
+        checker = SecurityChecker()
+        violations = checker.check_code("import pty\npty.spawn('/bin/sh')")
+        assert len(violations) >= 1
+        types = {v.rule_type for v in violations}
+        assert "import" in types
+
+    def test_mmap_import_blocked(self) -> None:
+        """Importing 'mmap' module is blocked (mmap file read/write without open)."""
+        checker = SecurityChecker()
+        violations = checker.check_code("import mmap")
+        assert len(violations) >= 1
+        assert any(v.rule_type == "import" for v in violations)
+
+    def test_mmap_file_access_bypass_blocked(self) -> None:
+        """mmap.mmap() file access bypass is blocked."""
+        checker = SecurityChecker()
+        violations = checker.check_code(
+            "import mmap\nm = mmap.mmap(0, 1024, '/etc/passwd', mmap.ACCESS_READ)"
+        )
+        assert len(violations) >= 1
+        types = {v.rule_type for v in violations}
+        assert "import" in types
+
+    def test_concurrent_import_blocked(self) -> None:
+        """Importing 'concurrent.futures' module is blocked (ProcessPoolExecutor)."""
+        checker = SecurityChecker()
+        violations = checker.check_code("from concurrent.futures import ProcessPoolExecutor")
+        assert len(violations) >= 1
+        assert any(v.rule_type == "import" for v in violations)
+
+    def test_concurrent_process_pool_bypass_blocked(self) -> None:
+        """concurrent.futures.ProcessPoolExecutor bypass is blocked."""
+        checker = SecurityChecker()
+        violations = checker.check_code(
+            "from concurrent.futures import ProcessPoolExecutor\n"
+            "pool = ProcessPoolExecutor()"
+        )
+        assert len(violations) >= 1
+        types = {v.rule_type for v in violations}
+        assert "import" in types
+
+    @pytest.mark.asyncio
+    async def test_pty_bypass_rejected_by_executor(self) -> None:
+        """IPythonExecutor rejects pty.spawn() bypass at execution time."""
+        executor = IPythonExecutor()
+        try:
+            result = await executor.execute("import pty\npty.spawn('/bin/echo')")
+            assert result.success is False
+            assert result.error is not None and "security violation" in result.error.lower()
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_mmap_bypass_rejected_by_executor(self) -> None:
+        """IPythonExecutor rejects mmap.mmap() bypass at execution time."""
+        executor = IPythonExecutor()
+        try:
+            result = await executor.execute("import mmap\nm = mmap.mmap(-1, 1024)")
+            assert result.success is False
+            assert result.error is not None and "security violation" in result.error.lower()
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_bypass_rejected_by_executor(self) -> None:
+        """IPythonExecutor rejects concurrent.futures import at execution time."""
+        executor = IPythonExecutor()
+        try:
+            result = await executor.execute(
+                "from concurrent.futures import ProcessPoolExecutor"
+            )
+            assert result.success is False
+            assert result.error is not None and "security violation" in result.error.lower()
+        finally:
+            executor.close()
