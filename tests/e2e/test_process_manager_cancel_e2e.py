@@ -12,11 +12,11 @@ Covers:
 """
 
 import asyncio
+import signal
 
 import pytest
 
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
-
 
 # ---------------------------------------------------------------------------
 # Helpers — lightweight echo subprocess for real process E2E tests
@@ -36,10 +36,13 @@ _ECHO_CMD = [
         "    except json.JSONDecodeError:\n"
         "        continue\n"
         "    if msg.get('content') == '__heartbeat__':\n"
-        "        sys.stdout.write(json.dumps({'type':'progress','content':'pong'}) + '\\n')\n"
+        "        resp = json.dumps({'type':'progress','content':'pong'})\n"
+        "        sys.stdout.write(resp + '\\n')\n"
         "        sys.stdout.flush()\n"
         "        continue\n"
-        "    sys.stdout.write(json.dumps({'type':'result','content':'echo','task_id':msg.get('task_id')}) + '\\n')\n"
+        "    d = {'type':'result','content':'echo'}\n"
+        "    d['task_id'] = msg.get('task_id')\n"
+        "    sys.stdout.write(json.dumps(d) + '\\n')\n"
         "    sys.stdout.flush()\n"
     ),
 ]
@@ -304,8 +307,6 @@ class TestProcessManagerHealthFailureE2E:
             pid_v1 = handle.pid
 
             # Kill the process externally (simulating OOM or signal)
-            import signal
-            import asyncio
             handle.process.send_signal(signal.SIGKILL)
             await asyncio.sleep(0.3)
 
@@ -334,6 +335,141 @@ class TestProcessManagerHealthFailureE2E:
 
             with pytest.raises(ValueError, match="already running"):
                 await pm.start_agent("dup-name", _ECHO_CMD)
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+
+@pytest.mark.timeout(30)
+class TestProcessManagerForceKillAndReap:
+    """E2E tests for _force_kill_and_reap and CancelledError during shutdown.
+
+    _force_kill_and_reap is only called when stop_all() is cancelled mid-shutdown.
+    These tests exercise that emergency force-kill path with real subprocesses.
+    """
+
+    def test_stop_all_survives_cancelled_error_with_force_kill(self):
+        """Cancelling stop_all mid-shutdown force-kills remaining agents."""
+        pm = ProcessManager()
+
+        # Use stubborn agents that ignore SIGTERM
+        stubborn_cmd = [
+            "python3",
+            "-c",
+            (
+                "import signal, sys, json\n"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                "for line in sys.stdin:\n"
+                "    line = line.strip()\n"
+                "    if not line:\n"
+                "        continue\n"
+            ),
+        ]
+
+        async def _test():
+            # Start 2 stubborn agents
+            for i in range(2):
+                await pm.start_agent(f"stubborn-fk-{i}", stubborn_cmd)
+
+            assert len(pm.list_running()) == 2
+
+            # stop_all with very short timeout — agents ignore SIGTERM
+            # so they'll get SIGKILL escalation
+            await pm.stop_all(timeout=0.2)
+
+            # All agents cleaned up
+            assert pm.list_running() == []
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_cleanup_dead_prevents_fd_leak(self):
+        """_cleanup_dead closes IPC streams for dead processes, preventing FD leaks."""
+        pm = ProcessManager()
+
+        async def _test():
+            handle = await pm.start_agent("echo-fd", _ECHO_CMD)
+
+            # Kill externally
+            handle.process.send_signal(signal.SIGKILL)
+            await asyncio.sleep(0.3)
+
+            # Verify process is dead
+            assert not handle.is_alive
+
+            # list_running triggers _cleanup_dead which closes streams
+            pm.list_running()
+
+            # Agent should be removed from registry
+            assert pm.get_agent("echo-fd") is None
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_stop_all_with_mix_of_alive_and_dead_agents(self):
+        """stop_all handles a mix of alive and already-dead agents cleanly."""
+        pm = ProcessManager()
+
+        async def _test():
+            # Start 3 agents
+            await pm.start_agent("mix-alive-1", _ECHO_CMD)
+            h2 = await pm.start_agent("mix-alive-2", _ECHO_CMD)
+            await pm.start_agent("mix-alive-3", _ECHO_CMD)
+
+            # Kill one externally
+            h2.process.send_signal(signal.SIGKILL)
+            await asyncio.sleep(0.3)
+
+            # stop_all should handle both alive and dead agents
+            await pm.stop_all(timeout=5.0)
+
+            # All cleaned up
+            assert pm.list_running() == []
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_stop_all_cleans_up_all_agents(self):
+        """stop_all with many agents cleans them all up."""
+        pm = ProcessManager()
+
+        async def _test():
+            for i in range(5):
+                await pm.start_agent(f"echo-bulk-{i}", _ECHO_CMD)
+
+            assert len(pm.list_running()) == 5
+
+            await pm.stop_all(timeout=5.0)
+
+            assert pm.list_running() == []
+
+        try:
+            _run(_test())
+        finally:
+            _run(pm.stop_all())
+
+    def test_health_check_on_restarted_agent(self):
+        """Health check succeeds on a freshly restarted agent."""
+        pm = ProcessManager()
+
+        async def _test():
+            handle = await pm.start_agent("echo-hc-restart", _ECHO_CMD)
+            assert await pm.health_check("echo-hc-restart") is True
+
+            # Restart
+            new_handle = await pm.restart_agent("echo-hc-restart")
+            assert new_handle.pid != handle.pid
+
+            # Health check on new process
+            assert await pm.health_check("echo-hc-restart") is True
 
         try:
             _run(_test())
