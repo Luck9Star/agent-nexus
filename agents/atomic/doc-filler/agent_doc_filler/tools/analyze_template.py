@@ -156,6 +156,27 @@ def _scan_text_for_placeholders(
         )
 
 
+def _finalize_current_section(
+    sections: list[SectionContent],
+    heading: str,
+    level: int,
+    para_count: int,
+    section_text: list[str],
+) -> None:
+    """Append the current section to the sections list if it has content."""
+    if not heading and para_count == 0:
+        return
+    preview = "\n".join(section_text)[:MAX_PREVIEW_LENGTH]
+    sections.append(
+        SectionContent(
+            heading=heading,
+            level=level,
+            paragraph_count=para_count,
+            preview=preview,
+        )
+    )
+
+
 def _build_paragraph_sections(
     doc,
     seen_names: set[str],
@@ -184,16 +205,9 @@ def _build_paragraph_sections(
 
         level = _get_heading_level(para)
         if level is not None and text:
-            if current_heading or current_para_count > 0:
-                preview = "\n".join(current_section_text)[:MAX_PREVIEW_LENGTH]
-                sections.append(
-                    SectionContent(
-                        heading=current_heading,
-                        level=current_level,
-                        paragraph_count=current_para_count,
-                        preview=preview,
-                    )
-                )
+            _finalize_current_section(
+                sections, current_heading, current_level, current_para_count, current_section_text
+            )
             headings.append(HeadingInfo(level=level, text=text))
             current_heading = text
             current_level = level
@@ -204,16 +218,9 @@ def _build_paragraph_sections(
             if len(current_section_text) < 5:
                 current_section_text.append(text)
 
-    if current_heading or current_para_count > 0:
-        preview = "\n".join(current_section_text)[:MAX_PREVIEW_LENGTH]
-        sections.append(
-            SectionContent(
-                heading=current_heading,
-                level=current_level,
-                paragraph_count=current_para_count,
-                preview=preview,
-            )
-        )
+    _finalize_current_section(
+        sections, current_heading, current_level, current_para_count, current_section_text
+    )
 
     return headings, sections, total_chars, total_words
 

@@ -241,31 +241,32 @@ def _extract_key_terms(text: str, words: set[str], domain: str) -> list[str]:
     return sorted(terms)
 
 
-def _assess_complexity(text: str, key_terms: list[str], formality: str) -> str:
-    """Assess translation complexity."""
+def _compute_complexity_score(text: str, key_terms: list[str], formality: str) -> int:
+    """Compute a numeric complexity score from text properties."""
     score = 0
-
-    # Longer texts are more complex
     word_count = len(text.split())
     if word_count > 100:
         score += 2
     elif word_count > 30:
         score += 1
 
-    # More key terms = more complex
     if len(key_terms) > 10:
         score += 2
     elif len(key_terms) > 5:
         score += 1
 
-    # Formal formality adds complexity
     if formality == "formal":
         score += 1
 
-    # Mixed punctuation or complex sentence structure
     if text.count(";") + text.count(":") > 3:
         score += 1
 
+    return score
+
+
+def _assess_complexity(text: str, key_terms: list[str], formality: str) -> str:
+    """Assess translation complexity."""
+    score = _compute_complexity_score(text, key_terms, formality)
     if score >= 4:
         return "high"
     if score >= 2:

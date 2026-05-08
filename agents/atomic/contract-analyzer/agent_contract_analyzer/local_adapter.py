@@ -20,9 +20,49 @@ from __future__ import annotations
 import json
 import sys
 import traceback
+from collections.abc import Callable
 
 from agent_contract_analyzer.agent import ContractAnalyzerAgent
 from agent_contract_analyzer.models import ClauseInfo
+
+
+def _handle_extract_clauses(agent: ContractAnalyzerAgent, params: dict) -> dict:
+    """Handle the 'extract_clauses' method."""
+    text = params.get("text", "")
+    if not text:
+        return {"status": "error", "error": "Missing 'text' parameter"}
+    result = agent.extract_clauses(text)
+    return {"status": "ok", "result": {"clauses": [c.model_dump() for c in result]}}
+
+
+def _handle_analyze_risks(agent: ContractAnalyzerAgent, params: dict) -> dict:
+    """Handle the 'analyze_risks' method."""
+    raw_clauses = params.get("clauses", [])
+    if not raw_clauses:
+        return {"status": "error", "error": "Missing 'clauses' parameter"}
+    clauses = [ClauseInfo.model_validate(c) for c in raw_clauses]
+    result = agent.analyze_risks(clauses)
+    return {"status": "ok", "result": result.model_dump()}
+
+
+def _handle_check_compliance(agent: ContractAnalyzerAgent, params: dict) -> dict:
+    """Handle the 'check_compliance' method."""
+    raw_clauses = params.get("clauses", [])
+    jurisdiction = params.get("jurisdiction", "")
+    if not raw_clauses:
+        return {"status": "error", "error": "Missing 'clauses' parameter"}
+    if not jurisdiction:
+        return {"status": "error", "error": "Missing 'jurisdiction' parameter"}
+    clauses = [ClauseInfo.model_validate(c) for c in raw_clauses]
+    result = agent.check_compliance(clauses, jurisdiction)
+    return {"status": "ok", "result": result.model_dump()}
+
+
+_METHOD_HANDLERS: dict[str, Callable] = {
+    "extract_clauses": _handle_extract_clauses,
+    "analyze_risks": _handle_analyze_risks,
+    "check_compliance": _handle_check_compliance,
+}
 
 
 def handle_message(agent: ContractAnalyzerAgent, message: dict) -> dict:
@@ -38,35 +78,11 @@ def handle_message(agent: ContractAnalyzerAgent, message: dict) -> dict:
     method = message.get("method", "")
     params = message.get("params", {})
 
+    handler = _METHOD_HANDLERS.get(method)
+    if not handler:
+        return {"status": "error", "error": f"Unknown method: {method}"}
     try:
-        if method == "extract_clauses":
-            text = params.get("text", "")
-            if not text:
-                return {"status": "error", "error": "Missing 'text' parameter"}
-            result = agent.extract_clauses(text)
-            return {"status": "ok", "result": {"clauses": [c.model_dump() for c in result]}}
-
-        elif method == "analyze_risks":
-            raw_clauses = params.get("clauses", [])
-            if not raw_clauses:
-                return {"status": "error", "error": "Missing 'clauses' parameter"}
-            clauses = [ClauseInfo.model_validate(c) for c in raw_clauses]
-            result = agent.analyze_risks(clauses)
-            return {"status": "ok", "result": result.model_dump()}
-
-        elif method == "check_compliance":
-            raw_clauses = params.get("clauses", [])
-            jurisdiction = params.get("jurisdiction", "")
-            if not raw_clauses:
-                return {"status": "error", "error": "Missing 'clauses' parameter"}
-            if not jurisdiction:
-                return {"status": "error", "error": "Missing 'jurisdiction' parameter"}
-            clauses = [ClauseInfo.model_validate(c) for c in raw_clauses]
-            result = agent.check_compliance(clauses, jurisdiction)
-            return {"status": "ok", "result": result.model_dump()}
-
-        else:
-            return {"status": "error", "error": f"Unknown method: {method}"}
+        return handler(agent, params)
     except Exception as exc:
         return {
             "status": "error",

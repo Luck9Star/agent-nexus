@@ -83,6 +83,29 @@ def _build_sections(
     return [s for builder in builders if (s := builder(analysis, answers)) is not None]
 
 
+_LEVEL_TO_MOSCOW: dict[str, str] = {
+    "high": "must",
+    "medium": "should",
+    "low": "could",
+}
+
+_OVERRIDE_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
+    (("不需要", "不做", "wont"), "wont"),
+    (("必须", "must"), "must"),
+    (("应该", "should"), "should"),
+    (("可以", "could"), "could"),
+]
+
+
+def _classify_override(value: str) -> str:
+    """Classify an answer value into a MoSCoW priority category."""
+    lower = value.lower()
+    for keywords, moscow in _OVERRIDE_KEYWORDS:
+        if any(kw in lower for kw in keywords):
+            return moscow
+    return "could"
+
+
 def _build_priorities(
     analysis: RequirementAnalysis,
     answers: dict[str, str],
@@ -95,29 +118,12 @@ def _build_priorities(
         "wont": [],
     }
 
-    # High priority items become "must"
-    for item in analysis.priorities.get("high", []):
-        priorities["must"].append(item)
+    for level, moscow in _LEVEL_TO_MOSCOW.items():
+        priorities[moscow].extend(analysis.priorities.get(level, []))
 
-    # Medium priority items become "should"
-    for item in analysis.priorities.get("medium", []):
-        priorities["should"].append(item)
-
-    # Low priority items become "could"
-    for item in analysis.priorities.get("low", []):
-        priorities["could"].append(item)
-
-    # Check answers for explicit priority overrides
     for key, value in answers.items():
-        lower_value = value.lower()
-        if "不需要" in value or "不做" in value or "wont" in lower_value:
-            priorities["wont"].append(f"{key}: {value}")
-        elif "必须" in value or "must" in lower_value:
-            priorities["must"].append(f"{key}: {value}")
-        elif "应该" in value or "should" in lower_value:
-            priorities["should"].append(f"{key}: {value}")
-        elif "可以" in value or "could" in lower_value:
-            priorities["could"].append(f"{key}: {value}")
+        moscow = _classify_override(value)
+        priorities[moscow].append(f"{key}: {value}")
 
     return priorities
 

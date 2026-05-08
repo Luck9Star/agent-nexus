@@ -121,39 +121,29 @@ def _detect_ambiguities(text: str) -> list[str]:
     return ambiguities
 
 
+# Gap definitions: (indicator regex, detail regex, gap message)
+_INDICATOR_GAPS: list[tuple[object, object, str]] = [
+    (GAP_INDICATORS["missing_user_role"], _ROLE_DETAIL_RE, "缺少用户角色定义"),
+    (GAP_INDICATORS["missing_error_handling"], _ERROR_DETAIL_RE, "缺少错误处理说明"),
+    (GAP_INDICATORS["missing_performance"], _PERF_DETAIL_RE, "缺少性能指标定义"),
+]
+_PRESENCE_GAPS: list[tuple[object, object, str]] = [
+    (_AUTH_RE, _AUTH_DETAIL_RE, "缺少认证方式详细说明"),
+    (_DATA_RE, _DATA_DETAIL_RE, "缺少数据模型定义"),
+]
+
+
 def _detect_gaps(text: str) -> list[str]:
     """Identify missing information based on requirement content."""
     gaps: list[str] = []
 
-    # Check for missing role/actor definition
-    if GAP_INDICATORS["missing_user_role"].search(text):
-        has_role = bool(_ROLE_DETAIL_RE.search(text))
-        if not has_role:
-            gaps.append("缺少用户角色定义")
+    for indicator_re, detail_re, message in _INDICATOR_GAPS:
+        if indicator_re.search(text) and not detail_re.search(text):
+            gaps.append(message)
 
-    # Check for missing error handling mention
-    if GAP_INDICATORS["missing_error_handling"].search(text):
-        has_error = bool(_ERROR_DETAIL_RE.search(text))
-        if not has_error:
-            gaps.append("缺少错误处理说明")
-
-    # Check for missing performance requirements
-    if GAP_INDICATORS["missing_performance"].search(text):
-        has_perf = bool(_PERF_DETAIL_RE.search(text))
-        if not has_perf:
-            gaps.append("缺少性能指标定义")
-
-    # Check for missing authentication/authorization
-    has_auth = bool(_AUTH_RE.search(text))
-    has_auth_detail = bool(_AUTH_DETAIL_RE.search(text))
-    if has_auth and not has_auth_detail:
-        gaps.append("缺少认证方式详细说明")
-
-    # Check for missing data model
-    has_data = bool(_DATA_RE.search(text))
-    has_data_detail = bool(_DATA_DETAIL_RE.search(text))
-    if has_data and not has_data_detail:
-        gaps.append("缺少数据模型定义")
+    for presence_re, detail_re, message in _PRESENCE_GAPS:
+        if presence_re.search(text) and not detail_re.search(text):
+            gaps.append(message)
 
     return gaps
 
