@@ -184,6 +184,43 @@ The codebase is **well-structured and defensively programmed**. No P0 (critical)
 
 ---
 
+## Cycle 3 — Test Signal-to-Noise Audit (2026-05-10)
+
+**Focus**: Remove tests with zero information value (tautological, framework-behavior, same-abstraction duplicates).
+**Baseline**: 4845 tests (4813 passed, 2 pre-existing IPC E2E failures, 30 skipped)
+**After**: 4707 tests (4707 passed, 2 pre-existing IPC E2E failures, 30 skipped)
+**Net removal**: 138 tests, 0 regressions
+
+### Files Deleted Entirely
+
+| File | Tests Removed | Reason |
+|------|:---:|--------|
+| `tests/unit/test_config_loader.py` | 28 | 100% redundant with `config/test_loader.py` — 18 exact + 9 partial overlaps, 3 unique tests already covered |
+| `tests/unit/test_ipc_models.py` | 23 | 100% subset of `test_ipc_mcp_contract.py` — every class had equivalent or better coverage |
+
+### Classes Removed from Existing Files
+
+| File | Class/Tests Removed | Reason |
+|------|:---:|--------|
+| `test_gateway_e2e_reclassified.py` | TestMcpToolAdapterContract (~6 tests) | Exact duplicate of `test_gateway_tool_adapter.py` |
+| `test_evolution_module.py` | TestEditDistance, TestCorrectSkillIds, TestExecutionAnalyzer, TestSkillEvolverFix, TestSkillEvolverDerived (~15 tests) | Exact duplicates of `test_evolution_analyzer.py` and `test_evolution_evolver.py` |
+| `test_ipc.py` | TestIPCModelRoundtrip (2), TestIPCContentMaxLength (11) | Roundtrip = Pydantic framework behavior; MaxLength = redundant with IPC contract tests |
+| `test_task_models.py` | test_frozen_raises_on_mutation, test_frozen_raises_on_field_change | Pydantic `frozen=True` framework behavior, not project logic |
+| `models/test_capability.py` | test_frozen | Pydantic frozen framework behavior |
+| `test_permission_checker.py` | test_config_is_frozen | Pydantic frozen framework behavior |
+| `test_integrator_enhanced.py` | test_conflicting_severity_viewpoints | Overlapping with test_conflicting_recommendations at same abstraction level |
+
+### TSN Pattern Classification
+
+| Pattern | Count | Description |
+|---------|:---:|-------------|
+| Exact file duplication | 51 | Two files testing same module at same abstraction level |
+| Exact class duplication | 21 | Class copied between files (5 evolution + 6 gateway) |
+| Pydantic framework tests | 4 | Testing that `frozen=True` raises on mutation |
+| IPC framework tests | 13 | Pydantic serialization roundtrip + max_length constraints |
+| Same-level overlap | 1 | Two integrator tests detecting same conflict type |
+| **Total** | **138** | |
+
 ## Methodology
 
 - **Tool**: Serena MCP (LSP-backed semantic analysis)

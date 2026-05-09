@@ -78,16 +78,6 @@ class TestTaskItem:
         )
         assert t.vars["input_file"] == "/tmp/data.csv"
 
-    def test_frozen_raises_on_mutation(self):
-        t = TaskItem(id="t1", description="Do work", agent="worker-1")
-        with pytest.raises(ValidationError):
-            t.state = TaskState.COMPLETED
-
-    def test_frozen_raises_on_field_change(self):
-        t = TaskItem(id="t1", description="Do work", agent="worker-1")
-        with pytest.raises(ValidationError):
-            t.id = "t2"
-
     def test_serialization_round_trip(self):
         t = TaskItem(
             id="t1",

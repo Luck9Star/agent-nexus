@@ -438,12 +438,6 @@ class TestEdgeCases:
         d = checker.check_tool("file_write")
         assert d.allowed and d.requires_confirmation
 
-    def test_config_is_frozen(self) -> None:
-        """PermissionConfig is frozen (immutable Pydantic model)."""
-        cfg = PermissionConfig()
-        with pytest.raises(ValidationError):
-            cfg.mode = PermissionMode.FULL_AUTO  # type: ignore[misc]
-
     def test_multiple_denied_tools(self) -> None:
         checker = _checker(denied_tools=["bash", "exec", "eval"])
         assert not checker.check_tool("bash").allowed

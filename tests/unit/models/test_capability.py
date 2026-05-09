@@ -14,23 +14,6 @@ from agent_nexus.models.capability import (
 
 
 class TestModelCapability:
-    def test_frozen(self):
-        """ModelCapability instances should be immutable."""
-        cap = ModelCapability(
-            model_id="test",
-            provider="test",
-            max_output_tokens=100,
-            context_window=1000,
-            supports_vision=False,
-            supports_tool_use=True,
-            supports_temperature=True,
-            temperature_min=0.0,
-            temperature_max=1.0,
-            knowledge_cutoff="2025-01",
-        )
-        with pytest.raises(AttributeError):
-            cap.max_output_tokens = 200  # type: ignore[misc]
-
     def test_fields_present(self):
         """All fields should be present and typed."""
         cap = ModelCapability(

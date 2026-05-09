@@ -45,29 +45,6 @@ class TestFinalRecommendation:
 class TestViewpointConflict:
     """Integrator detects viewpoint conflicts beyond severity."""
 
-    def test_conflicting_severity_viewpoints(self) -> None:
-        a1 = Artifact(
-            source_agent="agency.security-engineer",
-            artifact_type="risk_report",
-            sections={
-                "findings": [{"severity": "high", "description": "Auth bypass"}],
-                "severity": "high",
-                "mitigation": ["Patch now"],
-            },
-        )
-        a2 = Artifact(
-            source_agent="agency.sre",
-            artifact_type="risk_report",
-            sections={
-                "findings": [{"severity": "low", "description": "Minor issue"}],
-                "severity": "low",
-                "mitigation": ["Monitor"],
-            },
-        )
-        result = Integrator.merge([a1, a2])
-        conflict_fields = [c.field for c in result.conflicts]
-        assert any("severity" in f for f in conflict_fields)
-
     def test_conflicting_recommendations(self) -> None:
         """Directly conflicting recommendations should be detected."""
         a1 = Artifact(
