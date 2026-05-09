@@ -110,7 +110,6 @@ fn validate_init_dir(dir: &str) -> Result<PathBuf, InitError> {
         "/Library/System",
         "/private/etc",
         "/private/var/db",
-        "/tmp",
         "/opt",
         "/srv",
         "/boot",
