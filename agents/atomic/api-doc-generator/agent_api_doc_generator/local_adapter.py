@@ -20,9 +20,50 @@ from __future__ import annotations
 import json
 import sys
 import traceback
+from collections.abc import Callable
 
 from agent_api_doc_generator.agent import APIDocGeneratorAgent
 from agent_api_doc_generator.models import EndpointInfo, SchemaInfo
+
+
+def _handle_extract(agent: APIDocGeneratorAgent, params: dict) -> dict:
+    """Handle the 'extract' method."""
+    file_path = params.get("file_path", "")
+    if not file_path:
+        return {"status": "error", "error": "Missing 'file_path' parameter"}
+    endpoints = agent.extract(file_path)
+    return {"status": "ok", "result": {"endpoints": [e.model_dump() for e in endpoints]}}
+
+
+def _handle_infer(agent: APIDocGeneratorAgent, params: dict) -> dict:
+    """Handle the 'infer' method."""
+    type_info = params.get("type_info", "")
+    if not type_info:
+        return {"status": "error", "error": "Missing 'type_info' parameter"}
+    schema = agent.infer(type_info)
+    return {"status": "ok", "result": schema.model_dump()}
+
+
+def _handle_generate(agent: APIDocGeneratorAgent, params: dict) -> dict:
+    """Handle the 'generate' method."""
+    endpoints_data = params.get("endpoints", [])
+    if not endpoints_data:
+        return {"status": "error", "error": "Missing 'endpoints' parameter"}
+    endpoints = [EndpointInfo.model_validate(e) for e in endpoints_data]
+    info = params.get("info")
+    schemas_data = params.get("schemas")
+    schemas = None
+    if schemas_data:
+        schemas = [SchemaInfo.model_validate(s) for s in schemas_data]
+    result = agent.generate(endpoints, info, schemas)
+    return {"status": "ok", "result": result.model_dump()}
+
+
+_METHOD_HANDLERS: dict[str, Callable] = {
+    "extract": _handle_extract,
+    "infer": _handle_infer,
+    "generate": _handle_generate,
+}
 
 
 def handle_message(agent: APIDocGeneratorAgent, message: dict) -> dict:
@@ -38,39 +79,11 @@ def handle_message(agent: APIDocGeneratorAgent, message: dict) -> dict:
     method = message.get("method", "")
     params = message.get("params", {})
 
+    handler = _METHOD_HANDLERS.get(method)
+    if not handler:
+        return {"status": "error", "error": f"Unknown method: {method}"}
     try:
-        if method == "extract":
-            file_path = params.get("file_path", "")
-            if not file_path:
-                return {"status": "error", "error": "Missing 'file_path' parameter"}
-            endpoints = agent.extract(file_path)
-            return {
-                "status": "ok",
-                "result": {"endpoints": [e.model_dump() for e in endpoints]},
-            }
-
-        elif method == "infer":
-            type_info = params.get("type_info", "")
-            if not type_info:
-                return {"status": "error", "error": "Missing 'type_info' parameter"}
-            schema = agent.infer(type_info)
-            return {"status": "ok", "result": schema.model_dump()}
-
-        elif method == "generate":
-            endpoints_data = params.get("endpoints", [])
-            if not endpoints_data:
-                return {"status": "error", "error": "Missing 'endpoints' parameter"}
-            endpoints = [EndpointInfo.model_validate(e) for e in endpoints_data]
-            info = params.get("info")
-            schemas_data = params.get("schemas")
-            schemas = None
-            if schemas_data:
-                schemas = [SchemaInfo.model_validate(s) for s in schemas_data]
-            result = agent.generate(endpoints, info, schemas)
-            return {"status": "ok", "result": result.model_dump()}
-
-        else:
-            return {"status": "error", "error": f"Unknown method: {method}"}
+        return handler(agent, params)
     except Exception as exc:
         return {
             "status": "error",

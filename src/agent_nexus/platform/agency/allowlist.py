@@ -1,5 +1,6 @@
 """Allowlist loader and validator for agency-agents imports."""
 
+import re
 from pathlib import Path
 
 import yaml
@@ -19,15 +20,25 @@ def load_allowlist(path: str) -> dict:
     if not isinstance(data, dict):
         raise ValueError("Allowlist file must contain a YAML mapping")
 
-    # Validate top-level structure
+    _validate_top_level(data)
+    _validate_entries(data["agents"])
+    _validate_source(data["source"])
+
+    return data
+
+
+def _validate_top_level(data: dict) -> None:
+    """Validate top-level structure has 'source' and 'agents' keys."""
     if "source" not in data:
         raise ValueError("Allowlist must have a 'source' key")
     if "agents" not in data or not isinstance(data["agents"], list):
         raise ValueError("Allowlist must have an 'agents' list")
 
-    # Validate each agent entry
+
+def _validate_entries(agents: list[dict]) -> None:
+    """Validate each agent entry and check for duplicate IDs."""
     seen_ids: set[str] = set()
-    for i, entry in enumerate(data["agents"]):
+    for i, entry in enumerate(agents):
         if not isinstance(entry, dict):
             raise ValueError(f"Agent entry #{i} must be a mapping, got {type(entry).__name__}")
         entry_errors = validate_allowlist_entry(entry)
@@ -39,13 +50,13 @@ def load_allowlist(path: str) -> dict:
             raise ValueError(f"Duplicate agent id '{entry_id}' in allowlist")
         seen_ids.add(entry_id)
 
-    source = data["source"]
+
+def _validate_source(source: dict) -> None:
+    """Validate source section has 'repo' and 'ref' keys."""
     if not isinstance(source, dict):
         raise ValueError("'source' must be a mapping")
     if "repo" not in source or "ref" not in source:
         raise ValueError("'source' must contain 'repo' and 'ref' keys")
-
-    return data
 
 
 def validate_allowlist_entry(entry: dict) -> list[str]:
@@ -55,59 +66,86 @@ def validate_allowlist_entry(entry: dict) -> list[str]:
     """
     errors: list[str] = []
 
-    required_fields = ["source_path", "id", "capabilities", "output_contract"]
-    for field in required_fields:
+    for field in ["source_path", "id", "capabilities", "output_contract"]:
         if field not in entry:
             errors.append(f"missing required field '{field}'")
 
-    if "capabilities" in entry:
-        caps = entry["capabilities"]
-        if not isinstance(caps, list):
-            errors.append("'capabilities' must be a list")
-        elif len(caps) == 0:
-            errors.append("'capabilities' must be a non-empty list")
-        elif not all(isinstance(c, str) for c in caps):
-            errors.append("'capabilities' entries must all be strings")
-
-    if "id" in entry:
-        id_val = entry["id"]
-        if not isinstance(id_val, str) or not id_val.startswith("agency."):
-            errors.append("'id' must be a string starting with 'agency.'")
-
-    if "output_contract" in entry:
-        oc = entry["output_contract"]
-        if not isinstance(oc, str) or not oc.strip():
-            errors.append("'output_contract' must be a non-empty string")
-
-    if "source_path" in entry:
-        sp = entry["source_path"]
-        if not isinstance(sp, str) or not sp.endswith(".md"):
-            errors.append("'source_path' must be a string ending with '.md'")
-        elif sp.startswith("/") or sp.startswith("~"):
-            errors.append("'source_path' must not be an absolute path or start with '~'")
-        elif ".." in Path(sp).parts:
-            errors.append("'source_path' must not contain '..' path components")
-
-    if "tools" in entry:
-        tools = entry["tools"]
-        if not isinstance(tools, dict):
-            errors.append("'tools' must be a mapping")
-        else:
-            allowed = tools.get("allowed")
-            denied = tools.get("denied")
-            if allowed is not None:
-                if not isinstance(allowed, list):
-                    errors.append("'tools.allowed' must be a list")
-                elif not all(isinstance(t, str) for t in allowed):
-                    errors.append("'tools.allowed' must be a list of strings")
-            if denied is not None:
-                if not isinstance(denied, list):
-                    errors.append("'tools.denied' must be a list")
-                elif not all(isinstance(t, str) for t in denied):
-                    errors.append("'tools.denied' must be a list of strings")
-            if isinstance(allowed, list) and isinstance(denied, list):
-                overlap = set(allowed) & set(denied)
-                if overlap:
-                    errors.append(f"tools cannot be in both allowed and denied: {sorted(overlap)}")
+    _validate_capabilities(entry, errors)
+    _validate_id(entry, errors)
+    _validate_output_contract(entry, errors)
+    _validate_source_path(entry, errors)
+    _validate_tools(entry, errors)
 
     return errors
+
+
+def _validate_capabilities(entry: dict, errors: list[str]) -> None:
+    if "capabilities" not in entry:
+        return
+    caps = entry["capabilities"]
+    if not isinstance(caps, list):
+        errors.append("'capabilities' must be a list")
+    elif len(caps) == 0:
+        errors.append("'capabilities' must be a non-empty list")
+    elif not all(isinstance(c, str) for c in caps):
+        errors.append("'capabilities' entries must all be strings")
+
+
+def _validate_id(entry: dict, errors: list[str]) -> None:
+    if "id" not in entry:
+        return
+    id_val = entry["id"]
+    if not isinstance(id_val, str) or not id_val.startswith("agency."):
+        errors.append("'id' must be a string starting with 'agency.'")
+
+
+def _validate_output_contract(entry: dict, errors: list[str]) -> None:
+    if "output_contract" not in entry:
+        return
+    oc = entry["output_contract"]
+    if not isinstance(oc, str) or not oc.strip():
+        errors.append("'output_contract' must be a non-empty string")
+
+
+_SAFE_SOURCE_PATH = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_/-]*\.md$")
+
+
+def _validate_source_path(entry: dict, errors: list[str]) -> None:
+    if "source_path" not in entry:
+        return
+    sp = entry["source_path"]
+    if not isinstance(sp, str) or not sp.endswith(".md"):
+        errors.append("'source_path' must be a string ending with '.md'")
+    elif not _SAFE_SOURCE_PATH.match(sp):
+        errors.append(
+            "'source_path' must contain only alphanumeric, underscore, "
+            "hyphen, forward-slash characters (no '..', '~', '\\', or absolute paths)"
+        )
+
+
+def _validate_string_list(value: object, field_name: str, errors: list[str]) -> None:
+    if not isinstance(value, list):
+        errors.append(f"'{field_name}' must be a list")
+    elif not all(isinstance(t, str) for t in value):
+        errors.append(f"'{field_name}' must be a list of strings")
+
+
+def _validate_tools(entry: dict, errors: list[str]) -> None:
+    if "tools" not in entry:
+        return
+    tools = entry["tools"]
+    if not isinstance(tools, dict):
+        errors.append("'tools' must be a mapping")
+        return
+
+    allowed = tools.get("allowed")
+    denied = tools.get("denied")
+
+    if allowed is not None:
+        _validate_string_list(allowed, "tools.allowed", errors)
+    if denied is not None:
+        _validate_string_list(denied, "tools.denied", errors)
+    if isinstance(allowed, list) and isinstance(denied, list):
+        overlap = set(allowed) & set(denied)
+        if overlap:
+            errors.append(f"tools cannot be in both allowed and denied: {sorted(overlap)}")

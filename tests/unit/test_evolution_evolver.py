@@ -3,18 +3,32 @@
 from unittest.mock import MagicMock
 
 from agent_nexus.models.evolution import (
-    EvolutionType, SkillLineage, SkillOrigin, SkillRecord,
+    EvolutionType,
+    SkillLineage,
+    SkillOrigin,
+    SkillRecord,
 )
 from agent_nexus.platform.evolution.analyzer import AnalysisResult, EvolutionSuggestion
 from agent_nexus.platform.evolution.evolver import EvolveResult, SkillEvolver
 
 
-def _skill(id="sk-1", name="test-skill", selections=0, applied=0,
-           completions=0, fallbacks=0, gen=1, directory="skills/test") -> SkillRecord:
+def _skill(
+    id="sk-1",
+    name="test-skill",
+    selections=0,
+    applied=0,
+    completions=0,
+    fallbacks=0,
+    gen=1,
+    directory="skills/test",
+) -> SkillRecord:
     return SkillRecord(
-        id=id, name=name,
-        total_selections=selections, total_applied=applied,
-        total_completions=completions, total_fallbacks=fallbacks,
+        id=id,
+        name=name,
+        total_selections=selections,
+        total_applied=applied,
+        total_completions=completions,
+        total_fallbacks=fallbacks,
         lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=gen),
         directory=directory,
     )
@@ -33,33 +47,48 @@ class TestEvolveFix:
         parent = _skill()
         store = _make_store()
         store.get_skill_record.return_value = parent
-        result = SkillEvolver(store).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.FIX, target_skill_ids=["sk-1"], direction="broken",
-        ))
+        result = SkillEvolver(store).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.FIX,
+                target_skill_ids=["sk-1"],
+                direction="broken",
+            )
+        )
         assert result.success is True
         assert result.new_record is not None
         assert result.new_record.lineage.origin == SkillOrigin.FIXED
 
     def test_fix_requires_exactly_one_parent(self):
         store = _make_store()
-        result = SkillEvolver(store).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.FIX, target_skill_ids=["a", "b"], direction="x",
-        ))
+        result = SkillEvolver(store).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.FIX,
+                target_skill_ids=["a", "b"],
+                direction="x",
+            )
+        )
         assert result.success is False
         assert "exactly 1 parent" in result.error
 
     def test_fix_fails_if_parent_missing(self):
         store = _make_store()
         store.get_skill_record.return_value = None
-        result = SkillEvolver(store).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.FIX, target_skill_ids=["missing"], direction="x",
-        ))
+        result = SkillEvolver(store).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.FIX,
+                target_skill_ids=["missing"],
+                direction="x",
+            )
+        )
         assert result.success is False
 
     def test_fix_with_empty_target_ids(self):
-        result = SkillEvolver(_make_store()).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.FIX, target_skill_ids=[],
-        ))
+        result = SkillEvolver(_make_store()).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.FIX,
+                target_skill_ids=[],
+            )
+        )
         assert result.success is False
 
     def test_fix_store_write_failure(self):
@@ -68,9 +97,13 @@ class TestEvolveFix:
         store = _make_store()
         store.get_skill_record.return_value = parent
         store.evolve_skill.return_value = EvolveResult(success=False, error="DB write failed")
-        result = SkillEvolver(store).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.FIX, target_skill_ids=["sk-1"], direction="broken",
-        ))
+        result = SkillEvolver(store).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.FIX,
+                target_skill_ids=["sk-1"],
+                direction="broken",
+            )
+        )
         assert result.success is False
         assert result.new_record is None
 
@@ -80,9 +113,13 @@ class TestEvolveDerived:
         parent = _skill()
         store = _make_store()
         store.get_skill_records_batch.return_value = {"sk-1": parent}
-        result = SkillEvolver(store).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.DERIVED, target_skill_ids=["sk-1"], direction="enhance",
-        ))
+        result = SkillEvolver(store).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.DERIVED,
+                target_skill_ids=["sk-1"],
+                direction="enhance",
+            )
+        )
         assert result.success is True
         assert result.new_record is not None
         assert "enhanced" in result.new_record.name
@@ -92,26 +129,36 @@ class TestEvolveDerived:
         p1, p2 = _skill(id="a", name="alpha"), _skill(id="b", name="beta", gen=2)
         store = _make_store()
         store.get_skill_records_batch.return_value = {"a": p1, "b": p2}
-        result = SkillEvolver(store).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.DERIVED, target_skill_ids=["a", "b"], direction="merge",
-        ))
+        result = SkillEvolver(store).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.DERIVED,
+                target_skill_ids=["a", "b"],
+                direction="merge",
+            )
+        )
         assert result.success is True
         assert result.new_record is not None
         assert "merged" in result.new_record.name
 
     def test_derived_with_empty_targets_fails(self):
-        result = SkillEvolver(_make_store()).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.DERIVED, target_skill_ids=[],
-        ))
+        result = SkillEvolver(_make_store()).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.DERIVED,
+                target_skill_ids=[],
+            )
+        )
         assert result.success is False
         assert "at least 1 parent" in result.error
 
     def test_derived_parent_not_found_fails(self):
         store = _make_store()
         store.get_skill_records_batch.return_value = {}  # no parents found
-        result = SkillEvolver(store).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.DERIVED, target_skill_ids=["missing"],
-        ))
+        result = SkillEvolver(store).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.DERIVED,
+                target_skill_ids=["missing"],
+            )
+        )
         assert result.success is False
         assert "Parent skill not found" in result.error
 
@@ -119,27 +166,37 @@ class TestEvolveDerived:
 class TestEvolveCaptured:
     def test_captured_creates_new_skill(self):
         store = _make_store()
-        result = SkillEvolver(store).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.CAPTURED, target_skill_ids=[],
-            direction="A useful pattern. First sentence.",
-        ))
+        result = SkillEvolver(store).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.CAPTURED,
+                target_skill_ids=[],
+                direction="A useful pattern. First sentence.",
+            )
+        )
         assert result.success is True
         assert result.new_record is not None
         assert result.new_record.lineage.origin == SkillOrigin.CAPTURED
 
     def test_captured_requires_direction(self):
-        result = SkillEvolver(_make_store()).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.CAPTURED, target_skill_ids=[], direction="",
-        ))
+        result = SkillEvolver(_make_store()).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.CAPTURED,
+                target_skill_ids=[],
+                direction="",
+            )
+        )
         assert result.success is False
         assert "direction" in result.error
 
     def test_captured_sanitizes_special_chars_in_name(self):
         store = _make_store()
-        result = SkillEvolver(store).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.CAPTURED, target_skill_ids=[],
-            direction="Pattern with @#$% special chars! here",
-        ))
+        result = SkillEvolver(store).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.CAPTURED,
+                target_skill_ids=[],
+                direction="Pattern with @#$% special chars! here",
+            )
+        )
         assert result.success is True
         assert result.new_record is not None
         # Name should only contain a-z, 0-9, hyphens
@@ -150,7 +207,8 @@ class TestEvolveCaptured:
         store = _make_store()
         result = SkillEvolver(store).evolve(
             EvolutionSuggestion(
-                evolution_type=EvolutionType.CAPTURED, target_skill_ids=[],
+                evolution_type=EvolutionType.CAPTURED,
+                target_skill_ids=[],
                 direction="Custom pattern.",
             ),
             capture_directory="custom/dir",
@@ -162,10 +220,13 @@ class TestEvolveCaptured:
     def test_captured_long_direction_truncated_name(self):
         store = _make_store()
         long_direction = "A" * 200 + ". rest of it"
-        result = SkillEvolver(store).evolve(EvolutionSuggestion(
-            evolution_type=EvolutionType.CAPTURED, target_skill_ids=[],
-            direction=long_direction,
-        ))
+        result = SkillEvolver(store).evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.CAPTURED,
+                target_skill_ids=[],
+                direction=long_direction,
+            )
+        )
         assert result.success is True
         assert result.new_record is not None
         # Name base comes from first 50 chars of direction
@@ -175,7 +236,8 @@ class TestEvolveCaptured:
         store = _make_store()
         result = SkillEvolver(store).evolve(
             EvolutionSuggestion(
-                evolution_type=EvolutionType.CAPTURED, target_skill_ids=[],
+                evolution_type=EvolutionType.CAPTURED,
+                target_skill_ids=[],
                 direction="Pattern found.",
             ),
             task_id="task-42",
@@ -192,10 +254,16 @@ class TestProcessAnalysis:
         store = _make_store()
         store.get_skill_record.return_value = parent
         analysis = AnalysisResult(
-            task_id="t1", agent_name="a1", analysis_text="",
-            suggestions=[EvolutionSuggestion(
-                evolution_type=EvolutionType.FIX, target_skill_ids=["sk-1"], direction="fix it",
-            )],
+            task_id="t1",
+            agent_name="a1",
+            analysis_text="",
+            suggestions=[
+                EvolutionSuggestion(
+                    evolution_type=EvolutionType.FIX,
+                    target_skill_ids=["sk-1"],
+                    direction="fix it",
+                )
+            ],
         )
         results = SkillEvolver(store).process_analysis(analysis)
         assert len(results) == 1
@@ -204,7 +272,9 @@ class TestProcessAnalysis:
     def test_empty_suggestions_returns_empty(self):
         store = _make_store()
         analysis = AnalysisResult(
-            task_id="t1", agent_name="a1", analysis_text="",
+            task_id="t1",
+            agent_name="a1",
+            analysis_text="",
             suggestions=[],
         )
         results = SkillEvolver(store).process_analysis(analysis)
@@ -215,14 +285,18 @@ class TestProcessAnalysis:
         store = _make_store()
         store.get_skill_record.return_value = parent
         analysis = AnalysisResult(
-            task_id="t1", agent_name="a1", analysis_text="",
+            task_id="t1",
+            agent_name="a1",
+            analysis_text="",
             suggestions=[
                 EvolutionSuggestion(
-                    evolution_type=EvolutionType.FIX, target_skill_ids=["sk-1"],
+                    evolution_type=EvolutionType.FIX,
+                    target_skill_ids=["sk-1"],
                     direction="fix",
                 ),
                 EvolutionSuggestion(
-                    evolution_type=EvolutionType.DERIVED, target_skill_ids=["sk-1"],
+                    evolution_type=EvolutionType.DERIVED,
+                    target_skill_ids=["sk-1"],
                     direction="enhance",
                 ),
             ],

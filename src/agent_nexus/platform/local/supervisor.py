@@ -270,33 +270,18 @@ class AgentSupervisor:
     # Auto-restart
     # ------------------------------------------------------------------
 
-    async def auto_restart_dead(self) -> list[str]:
-        """Check for dead agents and restart them.
-
-        Iterates over all agents known to the process manager.  Agents
-        whose process has died are restarted in parallel via
-        ``asyncio.gather``, subject to the per-agent ``max_restarts``
-        limit to prevent infinite restart loops.
-
-        Returns
-        -------
-        list[str]
-            Names of agents that were successfully restarted.
-        """
-        # Phase 1: identify dead agents that need restarting
+    def _find_dead_agents(self) -> list[str]:
+        """Identify dead agents eligible for restart (within budget)."""
         lockfile = self._lockfile.load()
         dead_agents: list[str] = []
         for agent_name in lockfile.agents:
-            # Skip agents that were never explicitly started this session
             if agent_name not in self._started_agents:
                 continue
 
             handle = self._pm.get_agent(agent_name)
-            is_alive = handle is not None and handle.is_alive
-            if is_alive:
+            if handle is not None and handle.is_alive:
                 continue
 
-            # Check restart budget
             tracker = self._restart_trackers.setdefault(
                 agent_name,
                 RestartTracker(max_restarts=self._max_restarts),
@@ -317,8 +302,22 @@ class AgentSupervisor:
                 tracker.max_restarts,
             )
             dead_agents.append(agent_name)
+        return dead_agents
 
-        # Phase 2: restart all dead agents in parallel
+    async def auto_restart_dead(self) -> list[str]:
+        """Check for dead agents and restart them.
+
+        Iterates over all agents known to the process manager.  Agents
+        whose process has died are restarted in parallel via
+        ``asyncio.gather``, subject to the per-agent ``max_restarts``
+        limit to prevent infinite restart loops.
+
+        Returns
+        -------
+        list[str]
+            Names of agents that were successfully restarted.
+        """
+        dead_agents = self._find_dead_agents()
         if not dead_agents:
             return []
 
@@ -376,61 +375,79 @@ class AgentSupervisor:
         agent_dir = self._resolve_agent_dir(agent_name)
         pkg_name = self._resolve_package_name(agent_name, agent_dir)
 
-        # Compute candidate paths once — reused across all strategies
         agent_main = agent_dir / "main.py"
         pkg_main = (agent_dir / pkg_name / "main.py") if pkg_name else None
 
-        # Strategy 1: venv python
         if entry.venv_path:
+            cmd = self._try_venv_command(agent_name, entry, agent_main, pkg_main)
+            if cmd is not None:
+                return cmd
+            # venv tried but failed — if venv_python exists, it's a
+            # security block or missing main files → stop (don't fall through)
             venv_python = Path(entry.venv_path).resolve() / "bin" / "python"
-            if not venv_python.exists():
-                logger.warning(
-                    "Configured venv for '%s' not found at %s, falling back to system python/uvx",
-                    agent_name,
-                    venv_python,
-                )
-            else:
-                allowed = self._config_dir.resolve()
-                if not venv_python.is_relative_to(allowed):
-                    logger.warning(
-                        "venv_path outside config_dir, skipping: %s",
-                        venv_python,
-                    )
-                    return None
-                if agent_main.exists():
-                    return [str(venv_python), str(agent_main)]
-                if pkg_main and pkg_main.exists():
-                    return [str(venv_python), str(pkg_main)]
+            if venv_python.exists():
                 return None
+            # venv_python not found → fall through to system commands
 
-        # No venv — warn if the agent declares dependencies via pyproject.toml,
-        # as the agent will likely fail at runtime with missing imports.
-        if not entry.venv_path and (agent_dir / "pyproject.toml").exists():
+        if (agent_dir / "pyproject.toml").exists():
             logger.warning(
                 "Agent '%s' has pyproject.toml but no venv — dependencies "
                 "may not be installed. Re-install the agent to create a venv.",
                 agent_name,
             )
 
-        # Strategy 2: system python3 <agent_dir>/<pkg>/main.py
+        return self._try_system_command(agent_name, agent_main, pkg_main)
+
+    def _try_venv_command(
+        self,
+        agent_name: str,
+        entry: LockfileEntry,
+        agent_main: Path,
+        pkg_main: Path | None,
+    ) -> list[str] | None:
+        """Try building command using venv python (Strategy 1)."""
+        if not entry.venv_path:
+            return None
+        venv_python = Path(entry.venv_path).resolve() / "bin" / "python"
+        if not venv_python.exists():
+            logger.warning(
+                "Configured venv for '%s' not found at %s, falling back to system python/uvx",
+                agent_name,
+                venv_python,
+            )
+            return None
+        allowed = self._config_dir.resolve()
+        if not venv_python.is_relative_to(allowed):
+            logger.warning(
+                "venv_path outside config_dir, skipping: %s",
+                venv_python,
+            )
+            return None  # treated as "not found" for the caller
+        if agent_main.exists():
+            return [str(venv_python), str(agent_main)]
+        if pkg_main and pkg_main.exists():
+            return [str(venv_python), str(pkg_main)]
+        return None
+
+    @staticmethod
+    def _try_system_command(
+        agent_name: str,
+        agent_main: Path,
+        pkg_main: Path | None,
+    ) -> list[str]:
+        """Try system python or fall back to uvx (Strategy 2+3)."""
         if pkg_main and pkg_main.exists():
             return ["python3", str(pkg_main)]
-
-        # Strategy 3: system python3 <agent_dir>/main.py (skip symlinks)
         if agent_main.exists() and not agent_main.is_symlink():
             return ["python3", str(agent_main)]
-
         return ["uvx", agent_name]
 
     def _resolve_package_name(self, agent_name: str, agent_dir: Path) -> str | None:
         """Discover the Python package name inside an installed agent directory.
 
-        Looks for a subdirectory with ``__init__.py`` (the Python package) and
-        prefers the one that also contains ``main.py``.  Falls back to reading
-        ``pyproject.toml`` [tool.hatch.build.targets.wheel] packages.
-
-        Results are cached per ``agent_name`` since the mapping is
-        deterministic for a given agent directory.
+        Tries three heuristics in order: subdir with ``__init__.py`` + ``main.py``,
+        any subdir with ``__init__.py``, then ``pyproject.toml`` hatch config.
+        Results are cached per ``agent_name``.
         """
         cached = self._resolved_packages.get(agent_name)
         if cached is not None:
@@ -439,9 +456,19 @@ class AgentSupervisor:
         if not agent_dir.is_dir():
             return None
 
-        result: str | None = None
+        result = (
+            self._find_package_with_main(agent_dir)
+            or self._find_package_with_init(agent_dir)
+            or self._read_hatch_packages(agent_dir)
+        )
 
-        # Heuristic 1: find subdir with __init__.py + main.py
+        if result is not None:
+            self._resolved_packages[agent_name] = result
+
+        return result
+
+    @staticmethod
+    def _find_package_with_main(agent_dir: Path) -> str | None:
         for child in sorted(agent_dir.iterdir()):
             if (
                 child.is_dir()
@@ -449,44 +476,39 @@ class AgentSupervisor:
                 and (child / "__init__.py").exists()
                 and (child / "main.py").exists()
             ):
-                result = child.name
-                break
+                return child.name
+        return None
 
-        # Heuristic 2: find any subdir with __init__.py
-        if result is None:
-            for child in sorted(agent_dir.iterdir()):
-                if (
-                    child.is_dir()
-                    and not child.name.startswith((".", "_"))
-                    and (child / "__init__.py").exists()
-                ):
-                    result = child.name
-                    break
+    @staticmethod
+    def _find_package_with_init(agent_dir: Path) -> str | None:
+        for child in sorted(agent_dir.iterdir()):
+            if (
+                child.is_dir()
+                and not child.name.startswith((".", "_"))
+                and (child / "__init__.py").exists()
+            ):
+                return child.name
+        return None
 
-        # Heuristic 3: read pyproject.toml
-        if result is None:
-            pyproject = agent_dir / "pyproject.toml"
-            if pyproject.exists():
-                try:
-                    raw = toml.loads(pyproject.read_text(encoding="utf-8"))
-                    packages = (
-                        raw.get("tool", {})
-                        .get("hatch", {})
-                        .get("build", {})
-                        .get("targets", {})
-                        .get("wheel", {})
-                        .get("packages", [])
-                    )
-                    if packages:
-                        result = packages[0]
-                except Exception:
-                    logger.debug("Failed to read pyproject.toml for package name", exc_info=True)
-
-        # Cache any non-None result so we skip directory scans on subsequent calls.
-        if result is not None:
-            self._resolved_packages[agent_name] = result
-
-        return result
+    @staticmethod
+    def _read_hatch_packages(agent_dir: Path) -> str | None:
+        pyproject = agent_dir / "pyproject.toml"
+        if not pyproject.exists():
+            return None
+        try:
+            raw = toml.loads(pyproject.read_text(encoding="utf-8"))
+            packages = (
+                raw.get("tool", {})
+                .get("hatch", {})
+                .get("build", {})
+                .get("targets", {})
+                .get("wheel", {})
+                .get("packages", [])
+            )
+            return packages[0] if packages else None
+        except Exception:
+            logger.debug("Failed to read pyproject.toml for package name", exc_info=True)
+            return None
 
     def _resolve_agent_dir(self, agent_name: str) -> Path:
         """Resolve the installed agent directory.

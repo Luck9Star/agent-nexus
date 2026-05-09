@@ -27,7 +27,9 @@ def _generate_executive_summary(analysis: MarketAnalysis) -> str:
     if not analysis.insights:
         return "No significant findings from the analysis."
 
-    parts = [f"基于{FRAMEWORK_NAMES.get(analysis.framework, analysis.framework)}框架的市场分析结果："]
+    parts = [
+        f"基于{FRAMEWORK_NAMES.get(analysis.framework, analysis.framework)}框架的市场分析结果："
+    ]
     for insight in analysis.insights:
         parts.append(f"- {insight}")
 
@@ -55,46 +57,61 @@ def _generate_sections(analysis: MarketAnalysis) -> dict[str, str]:
     return sections
 
 
+def _recommend_porter(scores: dict[str, int]) -> list[str]:
+    """Generate Porter's Five Forces recommendations."""
+    recs: list[str] = []
+    if scores.get("rivalry", 0) >= 4:
+        recs.append("建议通过差异化产品或服务降低直接竞争")
+    if scores.get("buyer_power", 0) >= 4:
+        recs.append("建议提升客户忠诚度和转换成本")
+    if scores.get("new_entrants", 0) >= 3:
+        recs.append("建议加强品牌建设和专利保护")
+    if scores.get("supplier_power", 0) >= 4:
+        recs.append("建议多元化供应商，降低依赖")
+    return recs
+
+
+def _recommend_swot(scores: dict[str, int]) -> list[str]:
+    """Generate SWOT analysis recommendations."""
+    recs: list[str] = []
+    if scores.get("strengths", 0) >= 4:
+        recs.append("利用核心优势进行市场扩张")
+    if scores.get("weaknesses", 0) >= 3:
+        recs.append("制定改进计划弥补关键劣势")
+    if scores.get("opportunities", 0) >= 4:
+        recs.append("积极抓住市场机会，加大资源投入")
+    if scores.get("threats", 0) >= 4:
+        recs.append("建立风险缓解机制，应对外部威胁")
+    return recs
+
+
+def _recommend_pestel(scores: dict[str, int]) -> list[str]:
+    """Generate PESTEL analysis recommendations."""
+    recs: list[str] = []
+    if scores.get("political", 0) >= 4:
+        recs.append("密切关注政策变化，建立政府关系")
+    if scores.get("technological", 0) >= 4:
+        recs.append("加大技术投入，保持创新领先")
+    if scores.get("environmental", 0) >= 3:
+        recs.append("制定ESG战略，提前布局可持续发展")
+    if scores.get("legal", 0) >= 3:
+        recs.append("确保合规运营，降低法律风险")
+    return recs
+
+
+_RECOMMENDATION_GENERATORS = {
+    "porter": _recommend_porter,
+    "swot": _recommend_swot,
+    "pestel": _recommend_pestel,
+}
+
+
 def _generate_recommendations(analysis: MarketAnalysis) -> list[str]:
     """Generate strategic recommendations based on analysis."""
-    recs: list[str] = []
-
-    if analysis.framework == "porter":
-        scores = analysis.scores
-        if scores.get("rivalry", 0) >= 4:
-            recs.append("建议通过差异化产品或服务降低直接竞争")
-        if scores.get("buyer_power", 0) >= 4:
-            recs.append("建议提升客户忠诚度和转换成本")
-        if scores.get("new_entrants", 0) >= 3:
-            recs.append("建议加强品牌建设和专利保护")
-        if scores.get("supplier_power", 0) >= 4:
-            recs.append("建议多元化供应商，降低依赖")
-
-    elif analysis.framework == "swot":
-        scores = analysis.scores
-        if scores.get("strengths", 0) >= 4:
-            recs.append("利用核心优势进行市场扩张")
-        if scores.get("weaknesses", 0) >= 3:
-            recs.append("制定改进计划弥补关键劣势")
-        if scores.get("opportunities", 0) >= 4:
-            recs.append("积极抓住市场机会，加大资源投入")
-        if scores.get("threats", 0) >= 4:
-            recs.append("建立风险缓解机制，应对外部威胁")
-
-    elif analysis.framework == "pestel":
-        scores = analysis.scores
-        if scores.get("political", 0) >= 4:
-            recs.append("密切关注政策变化，建立政府关系")
-        if scores.get("technological", 0) >= 4:
-            recs.append("加大技术投入，保持创新领先")
-        if scores.get("environmental", 0) >= 3:
-            recs.append("制定ESG战略，提前布局可持续发展")
-        if scores.get("legal", 0) >= 3:
-            recs.append("确保合规运营，降低法律风险")
-
+    generator = _RECOMMENDATION_GENERATORS.get(analysis.framework)
+    recs = generator(analysis.scores) if generator else []
     if not recs:
         recs.append("继续监测市场动态，保持战略灵活性")
-
     return recs
 
 

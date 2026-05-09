@@ -10,14 +10,14 @@ from agent_nexus.models.runtime import (
     RuntimeType,
     Variable,
 )
-from agent_nexus.platform.runtime.runtime import PythonRuntime
-from agent_nexus.platform.runtime.executor import _IPYTHON_INTERNALS, IPythonExecutor
 from agent_nexus.platform.runtime.describer import TieredRuntimeDescriber
-
+from agent_nexus.platform.runtime.executor import _IPYTHON_INTERNALS, IPythonExecutor
+from agent_nexus.platform.runtime.runtime import PythonRuntime
 
 # ---------------------------------------------------------------------------
 # inject_variable
 # ---------------------------------------------------------------------------
+
 
 class TestInjectVariable:
     """Tests for PythonRuntime.inject_variable()."""
@@ -45,6 +45,7 @@ class TestInjectVariable:
 # inject_function
 # ---------------------------------------------------------------------------
 
+
 class TestInjectFunction:
     """Tests for PythonRuntime.inject_function()."""
 
@@ -63,6 +64,7 @@ class TestInjectFunction:
 # ---------------------------------------------------------------------------
 # inject_callable
 # ---------------------------------------------------------------------------
+
 
 class TestInjectCallable:
     """Tests for PythonRuntime.inject_callable()."""
@@ -93,13 +95,14 @@ class TestInjectCallable:
         assert "my_sync_func" in desc
         # The line for my_sync_func should not have (async)
         lines = desc.strip().split("\n")
-        sync_line = [l for l in lines if "my_sync_func" in l][0]
+        sync_line = [line for line in lines if "my_sync_func" in line][0]
         assert "(async)" not in sync_line
 
 
 # ---------------------------------------------------------------------------
 # inject_type
 # ---------------------------------------------------------------------------
+
 
 class TestInjectType:
     """Tests for PythonRuntime.inject_type()."""
@@ -124,6 +127,7 @@ class TestInjectType:
 # ---------------------------------------------------------------------------
 # execute
 # ---------------------------------------------------------------------------
+
 
 class TestExecute:
     """Tests for PythonRuntime.execute()."""
@@ -151,11 +155,14 @@ class TestExecute:
 # describe_variables
 # ---------------------------------------------------------------------------
 
+
 class TestDescribeVariables:
     """Tests for PythonRuntime.describe_variables()."""
 
     def test_with_variables(self, shared_runtime) -> None:
-        shared_runtime.inject_variable(Variable(name="count", description="Counter", type_name="int"))
+        shared_runtime.inject_variable(
+            Variable(name="count", description="Counter", type_name="int")
+        )
         desc = shared_runtime.describe_variables()
         assert "count" in desc
         assert "Counter" in desc
@@ -167,6 +174,7 @@ class TestDescribeVariables:
 # ---------------------------------------------------------------------------
 # describe_functions
 # ---------------------------------------------------------------------------
+
 
 class TestDescribeFunctions:
     """Tests for PythonRuntime.describe_functions()."""
@@ -195,6 +203,7 @@ class TestDescribeFunctions:
 # ---------------------------------------------------------------------------
 # describe_types
 # ---------------------------------------------------------------------------
+
 
 class TestDescribeTypes:
     """Tests for PythonRuntime.describe_types() at various detail levels."""
@@ -255,6 +264,7 @@ class TestDescribeTypes:
 # _format_signature
 # ---------------------------------------------------------------------------
 
+
 class TestFormatSignature:
     """Tests for PythonRuntime._format_signature()."""
 
@@ -290,9 +300,21 @@ class TestIPythonInternalsNoDuplicates:
 
     def test_contains_expected_keys(self) -> None:
         """All expected IPython internal keys are present."""
-        expected = {"In", "Out", "exit", "quit", "get_ipython",
-                    "_", "__", "___", "_ih", "_oh", "_sh", "_dh"}
-        assert _IPYTHON_INTERNALS == expected
+        expected = {
+            "In",
+            "Out",
+            "exit",
+            "quit",
+            "get_ipython",
+            "_",
+            "__",
+            "___",
+            "_ih",
+            "_oh",
+            "_sh",
+            "_dh",
+        }
+        assert expected == _IPYTHON_INTERNALS
 
 
 # ============================================================================
@@ -612,9 +634,7 @@ class TestSecurityCheckerAdditionalBlocks:
         """__bases__ allows MRO chain traversal → sandbox escape."""
         runtime = PythonRuntime()
         try:
-            result = await runtime.execute(
-                "x = ().__class__.__bases__"
-            )
+            result = await runtime.execute("x = ().__class__.__bases__")
             assert result.success is False
             assert result.error is not None
             assert "security violation" in result.error.lower()
@@ -627,9 +647,7 @@ class TestSecurityCheckerAdditionalBlocks:
         """__mro__ exposes class hierarchy → sandbox escape."""
         runtime = PythonRuntime()
         try:
-            result = await runtime.execute(
-                "x = str.__mro__"
-            )
+            result = await runtime.execute("x = str.__mro__")
             assert result.success is False
             assert result.error is not None
             assert "security violation" in result.error.lower()
@@ -649,6 +667,7 @@ class TestSecurityCheckerExceptionBranches:
     def test_non_syntax_error_returns_parse_error(self) -> None:
         """A non-SyntaxError exception from ast.parse returns parse error."""
         from unittest.mock import patch
+
         from agent_nexus.platform.runtime.security_checker import SecurityChecker
 
         checker = SecurityChecker()
@@ -662,8 +681,9 @@ class TestSecurityCheckerExceptionBranches:
 
     def test_regex_rule_exception_handled(self) -> None:
         """A failing regex rule logs warning but does not raise."""
-        from unittest.mock import patch, MagicMock
-        from agent_nexus.platform.runtime.security_checker import SecurityChecker, RegexRule
+        from unittest.mock import MagicMock
+
+        from agent_nexus.platform.runtime.security_checker import RegexRule, SecurityChecker
 
         bad_rule = MagicMock(spec=RegexRule)
         bad_rule.check_source.side_effect = RuntimeError("regex engine exploded")
@@ -671,7 +691,7 @@ class TestSecurityCheckerExceptionBranches:
         checker = SecurityChecker(rules=[bad_rule])
         # Should NOT raise -- exception is caught and logged
         violations = checker.check_code("x = 1 + 2")
-        assert isinstance(violations, list)
+        assert len(violations) == 1
 
 
 # ============================================================================
@@ -752,7 +772,7 @@ class TestFunctionRuleNestedCall:
         # To get a nested Call whose innermost name IS forbidden, use:
         # (eval)('x') — nope, func is Name.
         # We need the .func of a Call to be a Call whose .func is Name('eval'):
-        # eval()('x') -> func=Call(func=Name('eval'))
+        # Indirect call pattern: eval()('x') -> func=Call(func=Name('eval'))
         tree = _ast.parse("eval()('x')")
         call_node = tree.body[0].value  # outer Call
 
@@ -760,10 +780,8 @@ class TestFunctionRuleNestedCall:
         name = rule._get_function_name(call_node.func)
         assert name == "eval"
 
-        # The outer call's func is a Call (not ast.Name), so the Name check at line 113
-        # won't fire. But the recursive resolution still exercises line 175.
+        # The outer call's func is a Call (not ast.Name, not ast.Attribute).
+        # The catch-all guard now catches indirect calls to prevent sandbox bypass.
         violations = rule.check(call_node)
-        # No violation because the outer func is ast.Call, not ast.Name or ast.Attribute.
-        # Line 113 requires isinstance(node.func, ast.Name) and func_name in forbidden.
-        # Here node.func is ast.Call, so no match at line 113 or 126.
-        assert violations == []
+        assert len(violations) == 1
+        assert "indirect" in violations[0].message

@@ -29,9 +29,7 @@ _COMPOSITE_ROOT = Path(__file__).parent.parent.parent / "agents" / "composite"
 
 _FEATURE_PIPELINE = _COMPOSITE_ROOT / "feature-delivery-pipeline" / "composition.toml"
 _CICD_GATE = _COMPOSITE_ROOT / "cicd-quality-gate" / "composition.toml"
-_COMPETITIVE = (
-    _COMPOSITE_ROOT / "competitive-intelligence-briefing" / "composition.toml"
-)
+_COMPETITIVE = _COMPOSITE_ROOT / "competitive-intelligence-briefing" / "composition.toml"
 _PRODUCT_DOCS = _COMPOSITE_ROOT / "product-documentation-suite" / "composition.toml"
 _COMPLIANCE = _COMPOSITE_ROOT / "document-compliance-gateway" / "composition.toml"
 
@@ -248,7 +246,10 @@ class TestCycleDetectionReal:
         for path in [_FEATURE_PIPELINE, _CICD_GATE, _COMPETITIVE, _PRODUCT_DOCS, _COMPLIANCE]:
             dsl = OrchestrationDSL()
             definition = dsl.parse_file(path)
-            assert definition.get_task_depth(next(t for t in definition.tasks if not t.blocked_by).id) == 0
+            assert (
+                definition.get_task_depth(next(t for t in definition.tasks if not t.blocked_by).id)
+                == 0
+            )
 
     def test_cycle_toml_rejected(self) -> None:
         """Composition with cycle is rejected at parse time."""

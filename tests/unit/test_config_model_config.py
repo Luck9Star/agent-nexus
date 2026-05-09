@@ -245,16 +245,12 @@ class TestResolveApiKeyLogging:
         config = _make_config()
         mgr = ModelConfigManager(config)
 
-        with patch.dict("os.environ", {}, clear=True):
-            with patch.object(
-                logging.getLogger("agent_nexus.platform.config.model_config"),
-                "warning",
-            ) as mock_warn:
-                result = mgr.resolve_api_key("openai")
+        with patch.dict("os.environ", {}, clear=True), patch.object(
+            logging.getLogger("agent_nexus.platform.config.model_config"),
+            "warning",
+        ) as mock_warn:
+            result = mgr.resolve_api_key("openai")
 
         assert result == ""
         # Check that our new "No API key found" warning was logged
-        assert any(
-            "No API key found" in str(call)
-            for call in mock_warn.call_args_list
-        )
+        assert any("No API key found" in str(call) for call in mock_warn.call_args_list)

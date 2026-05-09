@@ -16,9 +16,9 @@ import os
 import tempfile
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from agent_doc_filler.agent import DocFillerAgent
 from agent_doc_filler.local_adapter import handle_message
@@ -34,10 +34,9 @@ from agent_doc_filler.tools.analyze_template import (
     analyze_template,
 )
 from agent_doc_filler.tools.fill_template import (
-    fill_template,
     _default_output_path,
+    fill_template,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -138,7 +137,7 @@ class TestPlaceholderInfo:
 
     def test_frozen(self) -> None:
         p = PlaceholderInfo(name="title")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             p.name = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -179,7 +178,7 @@ class TestTemplateAnalysis:
 
     def test_frozen(self) -> None:
         a = TemplateAnalysis(template_path="t.docx")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             a.template_path = "other.docx"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -213,7 +212,7 @@ class TestFillRequest:
 
     def test_frozen(self) -> None:
         r = FillRequest(template_path="t.docx", values={})
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.template_path = "other.docx"  # type: ignore[misc]
 
     def test_empty_values(self) -> None:
@@ -252,7 +251,7 @@ class TestFillResult:
 
     def test_frozen(self) -> None:
         r = FillResult(success=True, output_path="out.docx")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.success = False  # type: ignore[misc]
 
 
@@ -590,9 +589,7 @@ class TestLocalAdapter:
         assert "Unknown method" in response["error"]
 
     def test_handle_missing_template_path(self, agent: DocFillerAgent) -> None:
-        response = handle_message(
-            agent, {"method": "analyze", "params": {}}
-        )
+        response = handle_message(agent, {"method": "analyze", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
@@ -605,7 +602,5 @@ class TestLocalAdapter:
         assert "FileNotFoundError" in response.get("error_type", "")
 
     def test_handle_fill_missing_template_path(self, agent: DocFillerAgent) -> None:
-        response = handle_message(
-            agent, {"method": "fill", "params": {"values": {"a": "1"}}}
-        )
+        response = handle_message(agent, {"method": "fill", "params": {"values": {"a": "1"}}})
         assert response["status"] == "error"

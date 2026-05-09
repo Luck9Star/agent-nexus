@@ -66,31 +66,43 @@ def _load_dot_env(config_dir: Path) -> None:
         return
     try:
         for line in env_file.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
+            key, value = _parse_env_line(line)
+            if key is None:
                 continue
-            # Support both "KEY=VALUE" and "export KEY=VALUE"
-            if stripped.startswith("export "):
-                stripped = stripped[7:].strip()
-            if "=" not in stripped:
-                continue
-            key, _, value = stripped.partition("=")
-            key = key.strip()
-            value = value.strip()
-            # Strip balanced outer quotes: "foo" -> foo, 'bar' -> bar
-            # but "foo'bar" stays as-is (unbalanced).
-            if len(value) >= 2 and (
-                (value.startswith('"') and value.endswith('"'))
-                or (value.startswith("'") and value.endswith("'"))
-            ):
-                value = value[1:-1]
             if key in _BLOCKED_ENV_VARS:
                 logger.warning("Ignoring blocked env var from .env: %s", key)
                 continue
-            if key and key not in os.environ:
+            if key not in os.environ:
                 os.environ[key] = value
     except Exception:
         logger.debug("Failed to load .env file", exc_info=True)
+
+
+def _parse_env_line(line: str) -> tuple[str | None, str]:
+    """Parse a single .env line into (key, value). Returns (None, '') for non-entry lines."""
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None, ""
+    if stripped.startswith("export "):
+        stripped = stripped[7:].strip()
+    if "=" not in stripped:
+        return None, ""
+    key, _, value = stripped.partition("=")
+    key = key.strip()
+    value = _strip_quotes(value.strip())
+    if not key:
+        return None, ""
+    return key, value
+
+
+def _strip_quotes(value: str) -> str:
+    """Strip balanced outer quotes: "foo" -> foo, 'bar' -> bar."""
+    if len(value) >= 2 and (
+        (value.startswith('"') and value.endswith('"'))
+        or (value.startswith("'") and value.endswith("'"))
+    ):
+        return value[1:-1]
+    return value
 
 
 def _init_managers(

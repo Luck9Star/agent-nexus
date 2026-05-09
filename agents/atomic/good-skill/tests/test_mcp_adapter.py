@@ -23,9 +23,11 @@ class TestMCPAdapter:
         """When fastmcp is not installed, create_mcp_server raises ImportError."""
         from agent_good_skill.mcp_adapter import create_mcp_server
 
-        with patch("agent_good_skill.mcp_adapter.FastMCP", None):
-            with pytest.raises(ImportError, match="fastmcp is required"):
-                create_mcp_server()
+        with (
+            patch("agent_good_skill.mcp_adapter.FastMCP", None),
+            pytest.raises(ImportError, match="fastmcp is required"),
+        ):
+            create_mcp_server()
 
     def test_create_mcp_server_success(self) -> None:
         """When fastmcp is installed, the server is created successfully."""

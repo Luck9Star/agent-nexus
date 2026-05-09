@@ -61,6 +61,12 @@ class WorkflowContext:
             self.task_graph.close()
         self.task_graph = None
 
+    async def aclose(self) -> None:
+        """Async close — waits for in-flight async TaskGraph operations."""
+        if self.task_graph is not None:
+            await self.task_graph.aclose()
+        self.task_graph = None
+
 
 @dataclass
 class WorkflowResult:

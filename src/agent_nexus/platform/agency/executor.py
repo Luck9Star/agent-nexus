@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +17,35 @@ if TYPE_CHECKING:
     from .registry import ExpertRegistry
 
 logger = logging.getLogger(__name__)
+
+
+_REASONING_RE = re.compile(r"<thinking>(.*?)</thinking>", re.DOTALL)
+_SUMMARY_RE = re.compile(r"<summary>(.*?)</summary>", re.DOTALL)
+
+
+def _extract_reasoning_tags(text: str) -> tuple[str | None, str | None]:
+    """Extract <thinking> and <summary> content from LLM response.
+
+    Extracts the first occurrence of each tag (by design for v1).
+    Strips ``<thinking>`` first so that ``<summary>`` mentions inside
+    the thinking block are not falsely captured.
+    """
+    t_match = _REASONING_RE.search(text)
+    thinking = t_match.group(1).strip() if t_match else None
+    # Search for <summary> in text *after* removing thinking blocks
+    # to avoid false matches when the LLM mentions the tag name inside
+    # its own thinking process.
+    text_without_thinking = _REASONING_RE.sub("", text)
+    s_match = _SUMMARY_RE.search(text_without_thinking)
+    summary = s_match.group(1).strip() if s_match else None
+    return thinking, summary
+
+
+def _strip_reasoning_tags(text: str) -> str:
+    """Remove <thinking> and <summary> blocks from text before section parsing."""
+    text = _REASONING_RE.sub("", text)
+    text = _SUMMARY_RE.sub("", text)
+    return text.strip()
 
 
 class ProfileBasedExecutor:
@@ -68,6 +98,9 @@ class ProfileBasedExecutor:
             metadata={"synthetic": True},
         )
 
+    def close(self) -> None:
+        """No-op close for duck-type compatibility with LLMExecutor."""
+
     def _generate_sections(
         self,
         name: str,
@@ -79,46 +112,41 @@ class ProfileBasedExecutor:
         """Generate artifact sections. Override in subclass for LLM integration."""
         sections: dict[str, object] = {}
         for section in required_sections:
-            if section == "context":
-                sections["context"] = task
-            elif section == "summary":
-                sections["summary"] = f"[{name}] Analysis of: {task}"
-            elif section == "recommendations":
-                sections["recommendations"] = [f"Apply {name} expertise to: {task}"]
-            elif section == "findings":
-                sections["findings"] = [f"{cap} perspective on: {task}" for cap in capabilities[:3]]
-            elif section == "proposed_design":
-                sections["proposed_design"] = f"[{name}] Design for: {task}"
-            elif section == "tradeoffs":
-                sections["tradeoffs"] = [
-                    f"Trade-off from {cap} perspective" for cap in capabilities[:2]
-                ]
-            elif section == "risks":
-                sections["risks"] = [f"Risk identified via {cap}" for cap in capabilities[:2]]
-            elif section == "next_steps":
-                sections["next_steps"] = [
-                    f"Follow up with {cap} analysis" for cap in capabilities[:2]
-                ]
-            elif section == "assumptions":
-                sections["assumptions"] = [
-                    f"Assumed: {task} relates to {cap}" for cap in capabilities[:2]
-                ]
-            elif section == "objective":
-                sections["objective"] = f"[{name}] Orchestration plan for: {task}"
-            elif section == "task_decomposition":
-                sections["task_decomposition"] = [f"Subtask: apply {cap}" for cap in capabilities]
-            elif section == "agent_assignments":
-                sections["agent_assignments"] = {
-                    cap: f"Assigned to {name}" for cap in capabilities[:2]
-                }
-            elif section == "execution_order":
-                sections["execution_order"] = [
-                    f"Step {i + 1}: {cap}" for i, cap in enumerate(capabilities)
-                ]
-            else:
-                logger.warning("Unmapped section '%s' in output contract for '%s'", section, name)
-                sections[section] = f"[{name}] {section} for: {task}"
+            sections[section] = self._resolve_section(section, name, capabilities, task)
         return sections
+
+    @staticmethod
+    def _resolve_section(
+        section: str,
+        name: str,
+        capabilities: list[str],
+        task: str,
+    ) -> object:
+        """Map a section name to its generated value."""
+        generators: dict[str, Callable[[], object]] = {
+            "context": lambda: task,
+            "summary": lambda: f"[{name}] Analysis of: {task}",
+            "recommendations": lambda: [f"Apply {name} expertise to: {task}"],
+            "findings": lambda: [f"{cap} perspective on: {task}" for cap in capabilities[:3]],
+            "proposed_design": lambda: f"[{name}] Design for: {task}",
+            "tradeoffs": lambda: [f"Trade-off from {cap} perspective" for cap in capabilities[:2]],
+            "risks": lambda: [f"Risk identified via {cap}" for cap in capabilities[:2]],
+            "next_steps": lambda: [f"Follow up with {cap} analysis" for cap in capabilities[:2]],
+            "assumptions": lambda: [
+                f"Assumed: {task} relates to {cap}" for cap in capabilities[:2]
+            ],
+            "objective": lambda: f"[{name}] Orchestration plan for: {task}",
+            "task_decomposition": lambda: [f"Subtask: apply {cap}" for cap in capabilities],
+            "agent_assignments": lambda: {cap: f"Assigned to {name}" for cap in capabilities[:2]},
+            "execution_order": lambda: [
+                f"Step {i + 1}: {cap}" for i, cap in enumerate(capabilities)
+            ],
+        }
+        gen = generators.get(section)
+        if gen is not None:
+            return gen()
+        logger.warning("Unmapped section '%s' in output contract for '%s'", section, name)
+        return f"[{name}] {section} for: {task}"
 
 
 class LLMExecutor:
@@ -137,6 +165,7 @@ class LLMExecutor:
         capability_registry: ModelCapabilityRegistry | None = None,
         timeout: float | None = None,
         client: LLMClient | None = None,
+        reasoning_protocol: bool = False,
     ) -> None:
         self._registry = registry
         self._config_dir = config_dir
@@ -144,6 +173,7 @@ class LLMExecutor:
         self._default_temperature = default_temperature
         self._timeout = timeout
         self._capability_registry = capability_registry
+        self._reasoning_protocol = reasoning_protocol
 
         if client is not None:
             self._default_client = client
@@ -218,6 +248,7 @@ class LLMExecutor:
             body=body,
             capabilities=capabilities,
             required_sections=required_sections,
+            reasoning_protocol=self._reasoning_protocol,
         )
 
         # Inject upstream artifact context into user message
@@ -233,7 +264,15 @@ class LLMExecutor:
             temperature=expert_temperature,
             timeout=self._timeout,
         )
-        sections = self._parse_sections(response.text, required_sections)
+
+        if self._reasoning_protocol:
+            thinking, summary = _extract_reasoning_tags(response.text)
+            clean_text = _strip_reasoning_tags(response.text)
+        else:
+            thinking, summary = None, None
+            clean_text = response.text
+
+        sections = self._parse_sections(clean_text, required_sections)
 
         logger.info(
             "LLMExecutor: expert '%s' completed (model=%s, provider=%s)",
@@ -242,11 +281,21 @@ class LLMExecutor:
             response.provider,
         )
 
+        metadata: dict[str, object] = {
+            "llm": True,
+            "model": response.model,
+            "provider": response.provider,
+        }
+        if thinking is not None:
+            metadata["reasoning"] = thinking
+        if summary is not None:
+            metadata["expert_summary"] = summary
+
         return Artifact(
             source_agent=profile_id,
             artifact_type=artifact_type,
             sections=sections,
-            metadata={"llm": True, "model": response.model, "provider": response.provider},
+            metadata=metadata,
         )
 
     # ------------------------------------------------------------------
@@ -259,6 +308,8 @@ class LLMExecutor:
         body: str,
         capabilities: list[str],
         required_sections: list[str],
+        *,
+        reasoning_protocol: bool = False,
     ) -> str:
         """Build the full system prompt with section output instructions."""
         parts: list[str] = []
@@ -272,15 +323,26 @@ class LLMExecutor:
             parts.append("Your areas of expertise: " + ", ".join(capabilities) + ".")
 
         section_list = ", ".join(required_sections)
-        parts.append(
-            "Your response must include these sections as ## markdown headings: "
-            + section_list
-            + "."
-        )
-        parts.append(
-            "Use exactly these heading names so they can be parsed. "
-            "Provide substantive content under each heading."
-        )
+        if reasoning_protocol:
+            parts.append(
+                "Follow this response protocol strictly:\n"
+                "1. **Think**: Analyze the task inside <thinking> tags. Consider multiple\n"
+                "   perspectives, identify edge cases, and evaluate trade-offs.\n"
+                "2. **Summarize**: Output a one-line (<30 words) physical snapshot in <summary>\n"
+                "   tags capturing your key finding and confidence level.\n"
+                "3. **Structure**: Output your analysis as ## markdown headings using exactly\n"
+                f"   these section names: {section_list}. Provide substantive content under each."
+            )
+        else:
+            parts.append(
+                "Your response must include these sections as ## markdown headings: "
+                + section_list
+                + "."
+            )
+            parts.append(
+                "Use exactly these heading names so they can be parsed. "
+                "Provide substantive content under each heading."
+            )
 
         return "\n\n".join(parts)
 
@@ -348,13 +410,13 @@ def _normalize_heading(heading: str) -> str:
 def _fenced_code_line_indices(text: str) -> set[int]:
     """Return the set of 1-based line numbers that fall inside fenced code blocks."""
     code_lines: set[int] = set()
-    inside = False
+    depth = 0
     for lineno, line in enumerate(text.split("\n"), start=1):
         if line.strip().startswith("```"):
-            inside = not inside
+            depth += 1
             code_lines.add(lineno)  # the fence line itself
             continue
-        if inside:
+        if depth % 2 == 1:
             code_lines.add(lineno)
     return code_lines
 

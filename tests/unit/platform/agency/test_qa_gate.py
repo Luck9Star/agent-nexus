@@ -4,16 +4,15 @@ import pytest
 
 from agent_nexus.platform.agency.qa_gate import (
     ContractValidationResult,
-    GitNexusCheckResult,
     QAGate,
     QAGateInput,
     QAGateResult,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def complete_output() -> dict:
@@ -49,6 +48,7 @@ def incomplete_output() -> dict:
 # Contract validation
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.timeout(30)
 class TestContractValidation:
     """QA Gate validates output contracts — missing sections should fail."""
@@ -56,7 +56,14 @@ class TestContractValidation:
     def test_complete_output_passes(self, complete_output: dict) -> None:
         result = QAGate.validate_contract(
             complete_output,
-            required_sections=["context", "assumptions", "proposed_design", "tradeoffs", "risks", "next_steps"],
+            required_sections=[
+                "context",
+                "assumptions",
+                "proposed_design",
+                "tradeoffs",
+                "risks",
+                "next_steps",
+            ],
         )
 
         assert isinstance(result, ContractValidationResult)
@@ -66,7 +73,14 @@ class TestContractValidation:
     def test_incomplete_output_fails(self, incomplete_output: dict) -> None:
         result = QAGate.validate_contract(
             incomplete_output,
-            required_sections=["context", "assumptions", "proposed_design", "tradeoffs", "risks", "next_steps"],
+            required_sections=[
+                "context",
+                "assumptions",
+                "proposed_design",
+                "tradeoffs",
+                "risks",
+                "next_steps",
+            ],
         )
 
         assert result.passed is False
@@ -94,6 +108,7 @@ class TestContractValidation:
 # ---------------------------------------------------------------------------
 # GitNexus gate
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.timeout(30)
 class TestGitNexusGate:
@@ -162,6 +177,7 @@ class TestGitNexusGate:
 # Full QA gate (contract + gitnexus)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.timeout(30)
 class TestFullQAGate:
     """Full QA gate runs both contract and GitNexus checks."""
@@ -169,7 +185,14 @@ class TestFullQAGate:
     def test_full_pass_plan_task(self, complete_output: dict) -> None:
         gate_input = QAGateInput(
             output=complete_output,
-            required_sections=["context", "assumptions", "proposed_design", "tradeoffs", "risks", "next_steps"],
+            required_sections=[
+                "context",
+                "assumptions",
+                "proposed_design",
+                "tradeoffs",
+                "risks",
+                "next_steps",
+            ],
             task_type="architecture_review",
         )
         result = QAGate.run(gate_input)
@@ -179,9 +202,7 @@ class TestFullQAGate:
         assert result.contract_result.passed is True
         assert result.gitnexus_result.skipped is True
 
-    def test_full_fail_missing_section_and_gitnexus(
-        self, incomplete_output: dict
-    ) -> None:
+    def test_full_fail_missing_section_and_gitnexus(self, incomplete_output: dict) -> None:
         gate_input = QAGateInput(
             output=incomplete_output,
             required_sections=["context", "risks", "next_steps"],

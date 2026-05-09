@@ -15,7 +15,6 @@ Hooks are loaded from:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import fnmatch
 import ipaddress
 import json
@@ -93,6 +92,52 @@ class HookExecutor:
     # ------------------------------------------------------------------
 
     @classmethod
+    def _parse_hooks_for_event(
+        cls,
+        event: HookEvent,
+        hook_list: list[Any],
+        source_path: Path,
+    ) -> list[HookDefinition]:
+        hooks: list[HookDefinition] = []
+        for hook_dict in hook_list:
+            if not isinstance(hook_dict, dict):
+                continue
+            hook_dict_with_event = {**hook_dict, "event": event}
+            try:
+                hooks.append(HookDefinition.model_validate(hook_dict_with_event))
+            except Exception:
+                logger.warning(
+                    "Invalid hook definition in %s under event %r: %s",
+                    source_path,
+                    event.value,
+                    hook_dict,
+                    exc_info=True,
+                )
+        return hooks
+
+    @staticmethod
+    def _load_yaml_raw(yaml_path: Path) -> dict[str, Any]:
+        """Load raw YAML dict from file. Returns empty dict on any failure."""
+        if not yaml_path.exists():
+            return {}
+        try:
+            import yaml
+
+            return yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            logger.warning("Failed to load hooks from %s", yaml_path, exc_info=True)
+            return {}
+
+    @staticmethod
+    def _resolve_event(event_name: str, yaml_path: Path) -> HookEvent | None:
+        """Parse event name, return None and log on failure."""
+        try:
+            return HookEvent(event_name)
+        except ValueError:
+            logger.warning("Unknown hook event %r in %s, skipping", event_name, yaml_path)
+            return None
+
+    @classmethod
     def from_yaml(
         cls,
         yaml_path: Path,
@@ -115,25 +160,16 @@ class HookExecutor:
         Returns an executor with an empty hook list if the file does not
         exist or cannot be parsed.
         """
-        if not yaml_path.exists():
-            return cls(hooks=[], allowed_commands=allowed_commands or [])
-
-        try:
-            import yaml
-
-            raw: dict[str, Any] = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
-        except Exception:
-            logger.warning("Failed to load hooks from %s", yaml_path, exc_info=True)
-            return cls(hooks=[])
+        cmds = allowed_commands or []
+        raw = cls._load_yaml_raw(yaml_path)
+        if not raw:
+            return cls(hooks=[], allowed_commands=cmds)
 
         hooks: list[HookDefinition] = []
         for event_name, hook_list in raw.items():
-            try:
-                event = HookEvent(event_name)
-            except ValueError:
-                logger.warning("Unknown hook event %r in %s, skipping", event_name, yaml_path)
+            event = cls._resolve_event(event_name, yaml_path)
+            if event is None:
                 continue
-
             if not isinstance(hook_list, list):
                 logger.warning(
                     "Expected list for event %r in %s, got %s",
@@ -142,23 +178,9 @@ class HookExecutor:
                     type(hook_list).__name__,
                 )
                 continue
+            hooks.extend(cls._parse_hooks_for_event(event, hook_list, yaml_path))
 
-            for hook_dict in hook_list:
-                if not isinstance(hook_dict, dict):
-                    continue
-                hook_dict_with_event = {**hook_dict, "event": event}
-                try:
-                    hooks.append(HookDefinition.model_validate(hook_dict_with_event))
-                except Exception:
-                    logger.warning(
-                        "Invalid hook definition in %s under event %r: %s",
-                        yaml_path,
-                        event_name,
-                        hook_dict,
-                        exc_info=True,
-                    )
-
-        return cls(hooks=hooks, allowed_commands=allowed_commands or [])
+        return cls(hooks=hooks, allowed_commands=cmds)
 
     # ------------------------------------------------------------------
     # Query helpers
@@ -251,9 +273,112 @@ class HookExecutor:
             )
         return await handler(hook, ctx)
 
+    @staticmethod
+    def _validate_command_args(
+        hook: HookDefinition,
+    ) -> tuple[list[str] | None, HookExecution | None]:
+        """Validate and parse COMMAND hook arguments.
+
+        Returns (args, error_result).  If *error_result* is set the
+        caller should return it immediately.
+        """
+        if not hook.command:
+            return None, HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error="COMMAND hook missing 'command' field",
+            )
+        try:
+            args = shlex.split(hook.command)
+        except ValueError as exc:
+            return None, HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error=f"Malformed command string: {exc}",
+                duration_ms=0.0,
+            )
+        if not args:
+            return None, HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error="COMMAND hook has empty command after parsing",
+            )
+        return args, None
+
+    def _check_command_allowlist(
+        self,
+        hook: HookDefinition,
+        base_command: str,
+    ) -> HookExecution | None:
+        """Return an error result if *base_command* is not allowed, else None."""
+        if self._allowed_commands and base_command in self._allowed_commands:
+            return None
+        return HookExecution(
+            hook=hook,
+            passed=False,
+            blocked=hook.block_on_failure,
+            error=f"COMMAND hook base command '{base_command}' not in allowlist",
+        )
+
+    @staticmethod
+    def _build_command_result(
+        hook: HookDefinition,
+        returncode: int,
+        stdout_bytes: bytes,
+        stderr_bytes: bytes,
+        duration_ms: float,
+    ) -> HookExecution:
+        """Build a HookExecution from subprocess exit status."""
+        passed = returncode == 0
+        output = stdout_bytes.decode("utf-8", errors="replace").strip() or None
+        error_text = stderr_bytes.decode("utf-8", errors="replace").strip() or None
+        if not passed and error_text is None:
+            error_text = f"Command exited with code {returncode}"
+        return HookExecution(
+            hook=hook,
+            passed=passed,
+            blocked=(not passed and hook.block_on_failure),
+            output=output,
+            error=error_text if not passed else None,
+            duration_ms=round(duration_ms, 2),
+        )
+
+    @staticmethod
+    async def _kill_subprocess(proc: asyncio.subprocess.Process) -> None:
+        """Best-effort kill + wait for a subprocess."""
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            logger.debug("Failed to kill subprocess", exc_info=True)
+
     # ------------------------------------------------------------------
     # Type-specific executors
     # ------------------------------------------------------------------
+
+    async def _kill_and_build_error(
+        self,
+        hook: HookDefinition,
+        error_msg: str,
+        proc: asyncio.subprocess.Process | None,
+        start: float,
+        error_type: str | None = None,
+    ) -> HookExecution:
+        """Kill subprocess (if running) and build error HookExecution."""
+        duration_ms = (time.monotonic() - start) * 1000
+        if proc is not None:
+            await self._kill_subprocess(proc)
+        return HookExecution(
+            hook=hook,
+            passed=False,
+            blocked=hook.block_on_failure,
+            error=error_msg,
+            error_type=error_type,
+            duration_ms=round(duration_ms, 2),
+        )
 
     async def _execute_command(
         self,
@@ -266,46 +391,19 @@ class HookExecutor:
         safety.  The *context* dict is serialized to JSON and passed via
         stdin pipe.  Exit code 0 = pass, non-zero = fail.
         """
-        if not hook.command:
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error="COMMAND hook missing 'command' field",
-            )
+        # --- input validation ---
+        args, validation_err = self._validate_command_args(hook)
+        if validation_err is not None:
+            return validation_err
+        assert args is not None  # guaranteed when validation_err is None
 
-        # Security: validate the base command against the allowlist.
-        # The allowlist is empty by default, which means COMMAND hooks
-        # are rejected unless the platform operator explicitly allows
-        # specific commands.
-        try:
-            args = shlex.split(hook.command)
-        except ValueError as exc:
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error=f"Malformed command string: {exc}",
-                duration_ms=0.0,
-            )
-        if not args:
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error="COMMAND hook has empty command after parsing",
-            )
-        if not self._allowed_commands or args[0] not in self._allowed_commands:
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error=f"COMMAND hook base command '{args[0]}' not in allowlist",
-            )
+        allowlist_err = self._check_command_allowlist(hook, args[0])
+        if allowlist_err is not None:
+            return allowlist_err
 
+        # --- run subprocess ---
         stdin_data = json.dumps(context).encode("utf-8")
         timeout = hook.timeout_seconds
-
         start = time.monotonic()
         proc: asyncio.subprocess.Process | None = None
         try:
@@ -320,65 +418,78 @@ class HookExecutor:
                 timeout=timeout,
             )
             duration_ms = (time.monotonic() - start) * 1000
-
-            passed = proc.returncode == 0
-            output = stdout_bytes.decode("utf-8", errors="replace").strip() or None
-            error_text = stderr_bytes.decode("utf-8", errors="replace").strip() or None
-
-            if not passed and error_text is None:
-                error_text = f"Command exited with code {proc.returncode}"
-
-            return HookExecution(
-                hook=hook,
-                passed=passed,
-                blocked=(not passed and hook.block_on_failure),
-                output=output,
-                error=error_text if not passed else None,
-                duration_ms=round(duration_ms, 2),
+            return self._build_command_result(
+                hook,
+                proc.returncode if proc.returncode is not None else -1,
+                stdout_bytes,
+                stderr_bytes,
+                duration_ms,
             )
 
         except TimeoutError:
-            duration_ms = (time.monotonic() - start) * 1000
-            try:
-                if proc is not None:
-                    proc.kill()
-                    await proc.wait()
-            except Exception:
-                logger.debug("Failed to kill timed-out hook subprocess", exc_info=True)
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error=f"Command timed out after {timeout}s",
-                duration_ms=round(duration_ms, 2),
+            return await self._kill_and_build_error(
+                hook,
+                f"Command timed out after {timeout}s",
+                proc,
+                start,
             )
 
         except asyncio.CancelledError:
-            # CancelledError is BaseException, NOT caught by "except Exception".
-            # Must kill the subprocess to prevent orphans on task cancellation/shutdown.
             if proc is not None:
-                try:
-                    proc.kill()
-                    await proc.wait()
-                except Exception:
-                    logger.debug("Failed to kill cancelled hook subprocess", exc_info=True)
+                await self._kill_subprocess(proc)
             raise
 
         except Exception as exc:
-            duration_ms = (time.monotonic() - start) * 1000
-            if proc is not None:
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
-                with contextlib.suppress(ProcessLookupError):
-                    await proc.wait()
+            return await self._kill_and_build_error(
+                hook,
+                str(exc),
+                proc,
+                start,
+                error_type=type(exc).__name__,
+            )
+
+    @staticmethod
+    def _validate_http_url(hook: HookDefinition) -> HookExecution | None:
+        """Validate HTTP hook URL. Returns error result on failure, None on success."""
+        if not hook.url:
             return HookExecution(
                 hook=hook,
                 passed=False,
                 blocked=hook.block_on_failure,
-                error=str(exc),
-                error_type=type(exc).__name__,
-                duration_ms=round(duration_ms, 2),
+                error="HTTP hook missing 'url' field",
             )
+        if not hook.url.startswith(("http://", "https://")):
+            return HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error=f"HTTP hook URL has unsupported scheme (only http/https): {hook.url}",
+            )
+        if _is_private_url(hook.url):
+            return HookExecution(
+                hook=hook,
+                passed=False,
+                blocked=hook.block_on_failure,
+                error=f"HTTP hook URL targets private/internal address: {hook.url}",
+            )
+        return None
+
+    @staticmethod
+    def _build_http_result(
+        hook: HookDefinition,
+        resp: Any,
+        duration_ms: float,
+    ) -> HookExecution:
+        """Build HookExecution from HTTP response."""
+        passed = 200 <= resp.status_code < 300
+        return HookExecution(
+            hook=hook,
+            passed=passed,
+            blocked=(not passed and hook.block_on_failure),
+            output=resp.text[:256] or None,
+            error=None if passed else f"HTTP {resp.status_code}: {resp.text[:512]}",
+            duration_ms=round(duration_ms, 2),
+        )
 
     async def _execute_http(
         self,
@@ -390,46 +501,16 @@ class HookExecutor:
         POSTs a JSON body ``{event, context, hook_type}`` to the hook
         URL.  Any 2xx response = pass, non-2xx or error = fail.
         """
-        if not hook.url:
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error="HTTP hook missing 'url' field",
-            )
+        url_err = self._validate_http_url(hook)
+        if url_err is not None:
+            return url_err
+        assert hook.url is not None  # guaranteed when _validate_http_url returns None
 
-        # SSRF guard: only http/https schemes allowed
-        if not hook.url.startswith(("http://", "https://")):
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error=f"HTTP hook URL has unsupported scheme (only http/https): {hook.url}",
-            )
-
-        # SSRF guard: block private/internal IP ranges
-        if _is_private_url(hook.url):
-            return HookExecution(
-                hook=hook,
-                passed=False,
-                blocked=hook.block_on_failure,
-                error=f"HTTP hook URL targets private/internal address: {hook.url}",
-            )
-
-        payload = {
-            "event": hook.event,
-            "context": context,
-            "hook_type": hook.type,
-        }
+        payload = {"event": hook.event, "context": context, "hook_type": hook.type}
         import httpx
 
-        # Reuse a long-lived client for connection pooling across hooks.
-        # Use a generous default timeout on the client; per-request timeout
-        # is set on each POST call so hooks with different timeouts work correctly.
         if self._http_client is None or self._http_client.is_closed:
-            self._http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(30.0),
-            )
+            self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
 
         start = time.monotonic()
         try:
@@ -438,19 +519,7 @@ class HookExecutor:
                 json=payload,
                 timeout=httpx.Timeout(hook.timeout_seconds),
             )
-
-            duration_ms = (time.monotonic() - start) * 1000
-            passed = 200 <= resp.status_code < 300
-
-            return HookExecution(
-                hook=hook,
-                passed=passed,
-                blocked=(not passed and hook.block_on_failure),
-                output=resp.text[:256] or None,
-                error=None if passed else f"HTTP {resp.status_code}: {resp.text[:512]}",
-                duration_ms=round(duration_ms, 2),
-            )
-
+            return self._build_http_result(hook, resp, (time.monotonic() - start) * 1000)
         except Exception as exc:
             duration_ms = (time.monotonic() - start) * 1000
             return HookExecution(

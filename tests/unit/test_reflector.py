@@ -1,9 +1,7 @@
 """Tests for Reflector — hybrid rule-based + LLM evaluation system."""
 
 import json
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from agent_nexus.platform.agency.reflector import (
     EmptyResultRule,
@@ -12,7 +10,6 @@ from agent_nexus.platform.agency.reflector import (
     Reflection,
     Reflector,
 )
-
 
 # ---------------------------------------------------------------------------
 # Reflection dataclass
@@ -118,12 +115,14 @@ class TestLLMReflector:
         client = MagicMock()
         reflector = LLMReflector(client)
 
-        json_text = json.dumps({
-            "sufficient": True,
-            "reason": "looks good",
-            "feedback": "",
-            "next_queries": ["q1"],
-        })
+        json_text = json.dumps(
+            {
+                "sufficient": True,
+                "reason": "looks good",
+                "feedback": "",
+                "next_queries": ["q1"],
+            }
+        )
         result = reflector._parse_reflection(json_text)
         assert result.sufficient is True
         assert result.reason == "looks good"

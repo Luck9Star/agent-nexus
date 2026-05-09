@@ -93,11 +93,16 @@ class TaskGraph:
         For ``:memory:`` databases, a persistent connection is kept alive
         so that all operations share the same in-memory store.  File-based
         databases open a new connection per operation (original behaviour).
+
+        An ``asyncio.Lock`` serialises all async access to prevent TOCTOU
+        races on the shared in-memory connection.
         """
         self._db_path = db_path
         self._mem_conn: sqlite3.Connection | None = None
+        self._closed = False
+        self._async_lock = asyncio.Lock()
         if str(self._db_path) == ":memory:":
-            self._mem_conn = sqlite3.connect(":memory:")
+            self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
         self._init_db()
 
     def _init_db(self) -> None:
@@ -116,7 +121,11 @@ class TaskGraph:
         Closes the in-memory SQLite connection (if any).  File-based
         databases are already closed per-operation by ``_conn()`` so
         this is a no-op for them.
+
+        Sets a ``_closed`` flag to prevent use-after-close errors from
+        in-flight async operations.
         """
+        self._closed = True
         if self._mem_conn is not None:
             self._mem_conn.close()
             self._mem_conn = None
@@ -140,7 +149,11 @@ class TaskGraph:
 
         Delegates to :func:`sqlite_connection` for standardised setup,
         teardown, and transaction handling.
+
+        Raises ``RuntimeError`` if the graph has been closed.
         """
+        if self._closed:
+            raise RuntimeError("TaskGraph is closed")
         with sqlite_connection(
             self._db_path,
             immediate=immediate,
@@ -230,85 +243,13 @@ class TaskGraph:
         if not tasks:
             return
 
+        task_ids = [t.id for t in tasks]
+
         with self._conn(immediate=True) as conn:
-            # 1. Batch duplicate check
-            task_ids = [t.id for t in tasks]
-            id_set = set(task_ids)
-            if len(id_set) < len(task_ids):
-                seen: set[str] = set()
-                dupes: list[str] = []
-                for tid in task_ids:
-                    if tid in seen and tid not in dupes:
-                        dupes.append(tid)
-                    seen.add(tid)
-                raise ValueError(f"Duplicate task IDs in batch: {dupes}")
+            self._check_batch_duplicates(conn, task_ids)
+            all_deps = self._validate_external_deps(conn, tasks, set(task_ids))
+            self._insert_tasks_and_deps(conn, tasks, all_deps)
 
-            existing_ids: set[str] = set()
-            for i in range(0, len(task_ids), _SQL_CHUNK_SIZE):
-                chunk = task_ids[i : i + _SQL_CHUNK_SIZE]
-                placeholders = ",".join("?" * len(chunk))
-                rows = conn.execute(
-                    f"SELECT id FROM tasks WHERE id IN ({placeholders})",
-                    tuple(chunk),
-                ).fetchall()
-                existing_ids.update(r[0] for r in rows)
-            if existing_ids:
-                raise ValueError(f"Tasks already exist: {existing_ids}")
-
-            # 2. Validate all blocked_by references (must exist in DB or in this batch)
-            #    Collect external deps, then validate in a single query.
-            all_deps: list[tuple[str, str]] = []
-            external_deps: set[str] = set()
-            for task in tasks:
-                for dep_id in dict.fromkeys(task.blocked_by):
-                    # Self-dependency will be caught by cycle detection
-                    if dep_id not in id_set and dep_id != task.id:
-                        external_deps.add(dep_id)
-                    all_deps.append((task.id, dep_id))
-            if external_deps:
-                ext_list = list(external_deps)
-                found: set[str] = set()
-                for i in range(0, len(ext_list), _SQL_CHUNK_SIZE):
-                    chunk = ext_list[i : i + _SQL_CHUNK_SIZE]
-                    ph = ",".join("?" * len(chunk))
-                    found.update(
-                        r[0]
-                        for r in conn.execute(
-                            f"SELECT id FROM tasks WHERE id IN ({ph})",
-                            tuple(chunk),
-                        ).fetchall()
-                    )
-                missing = external_deps - found
-                if missing:
-                    raise ValueError(f"blocked_by references non-existent tasks: {missing}")
-
-            # 3. Batch insert all tasks
-            task_rows = [
-                (
-                    t.id,
-                    t.description,
-                    t.agent,
-                    t.state.value,
-                    json.dumps(t.vars, default=str),
-                    t.created_at.isoformat(),
-                    t.updated_at.isoformat(),
-                )
-                for t in tasks
-            ]
-            conn.executemany(
-                "INSERT INTO tasks (id, description, agent, state, vars, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                task_rows,
-            )
-
-            # 4. Batch insert dependencies
-            if all_deps:
-                conn.executemany(
-                    "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES (?, ?)",
-                    all_deps,
-                )
-
-            # 5. Single cycle-detection pass
             cycles = self._detect_cycles_conn(conn)
             if cycles:
                 raise ValueError(f"Adding batch tasks would create cycles: {cycles}")
@@ -457,24 +398,15 @@ class TaskGraph:
         with self._conn() as c:
             return self._get_parallel_groups_conn(c)
 
-    def _get_parallel_groups_conn(
-        self,
+    @staticmethod
+    def _build_dep_map(
         conn: Any,
-    ) -> list[list[TaskItem]]:
-        """Internal: compute parallel groups using an existing connection."""
-        # Build adjacency: task -> set of tasks it depends on
-        all_rows = conn.execute("SELECT id FROM tasks ORDER BY created_at").fetchall()
-        task_ids = [r[0] for r in all_rows]
-
-        if not task_ids:
-            return []
-
-        task_id_set = set(task_ids)
-        dep_map: dict[str, set[str]] = {tid: set() for tid in task_ids}
+        task_id_set: set[str],
+    ) -> dict[str, set[str]]:
+        """Build adjacency map: task -> set of existing tasks it depends on."""
+        dep_map: dict[str, set[str]] = {tid: set() for tid in task_id_set}
         dep_rows = conn.execute("SELECT task_id, blocked_by_id FROM task_dependencies").fetchall()
         for task_id, blocked_by_id in dep_rows:
-            # Only track dependencies to tasks that exist in the graph.
-            # Unknown deps are logged but don't block grouping.
             if blocked_by_id in task_id_set:
                 dep_map[task_id].add(blocked_by_id)
             else:
@@ -483,47 +415,79 @@ class TaskGraph:
                     task_id,
                     blocked_by_id,
                 )
+        return dep_map
 
-        # In-degree based topological grouping (Kahn's algorithm) — O(V+E)
+    @staticmethod
+    def _build_reverse_map(
+        dep_map: dict[str, set[str]],
+        task_ids: list[str],
+    ) -> tuple[dict[str, int], dict[str, set[str]]]:
+        """Compute in-degree counts and reverse adjacency from dep_map."""
         in_degree: dict[str, int] = {tid: len(deps) for tid, deps in dep_map.items()}
         reverse_map: dict[str, set[str]] = {tid: set() for tid in task_ids}
         for tid, deps in dep_map.items():
             for dep in deps:
                 reverse_map[dep].add(tid)
+        return in_degree, reverse_map
+
+    def _fetch_group_rows(
+        self,
+        conn: Any,
+        group_ids: list[str],
+    ) -> list[tuple[Any, ...]]:
+        """Batch-load task rows for a group of IDs (chunked SQL)."""
+        group_rows: list[tuple[Any, ...]] = []
+        for gi in range(0, len(group_ids), _SQL_CHUNK_SIZE):
+            g_chunk = group_ids[gi : gi + _SQL_CHUNK_SIZE]
+            placeholders = ",".join("?" for _ in g_chunk)
+            group_rows.extend(
+                conn.execute(
+                    f"SELECT {_TASK_COLUMNS} FROM tasks WHERE id IN ({placeholders})",
+                    g_chunk,
+                ).fetchall()
+            )
+        return group_rows
+
+    @staticmethod
+    def _advance_group(
+        group_ids: list[str],
+        reverse_map: dict[str, set[str]],
+        in_degree: dict[str, int],
+    ) -> set[str]:
+        """Decrement in-degrees for dependents and return newly available IDs."""
+        next_available: set[str] = set()
+        for tid in group_ids:
+            for dependent in reverse_map[tid]:
+                in_degree[dependent] -= 1
+                if in_degree[dependent] == 0:
+                    next_available.add(dependent)
+        return next_available
+
+    def _get_parallel_groups_conn(
+        self,
+        conn: Any,
+    ) -> list[list[TaskItem]]:
+        """Internal: compute parallel groups using an existing connection."""
+        all_rows = conn.execute("SELECT id FROM tasks ORDER BY created_at").fetchall()
+        task_ids = [r[0] for r in all_rows]
+        if not task_ids:
+            return []
+
+        task_id_set = set(task_ids)
+        dep_map = self._build_dep_map(conn, task_id_set)
+        in_degree, reverse_map = self._build_reverse_map(dep_map, task_ids)
 
         available: set[str] = {tid for tid, deg in in_degree.items() if deg == 0}
         assigned: set[str] = set()
-
-        # Pre-build position map for O(1) lookup instead of list.index O(n)
         position = {tid: idx for idx, tid in enumerate(task_ids)}
 
         groups: list[list[TaskItem]] = []
         while available:
-            # Preserve creation order within each group
             group_ids = sorted(available, key=lambda t: position[t])
-            # Batch-load group tasks in one pass instead of per-task queries
-            # (chunked to stay under SQLITE_MAX_VARIABLE_NUMBER)
-            group_rows: list[tuple[Any, ...]] = []
-            for gi in range(0, len(group_ids), _SQL_CHUNK_SIZE):
-                g_chunk = group_ids[gi : gi + _SQL_CHUNK_SIZE]
-                placeholders = ",".join("?" for _ in g_chunk)
-                group_rows.extend(
-                    conn.execute(
-                        f"SELECT {_TASK_COLUMNS} FROM tasks WHERE id IN ({placeholders})",
-                        g_chunk,
-                    ).fetchall()
-                )
-            group_tasks = self._rows_to_tasks(conn, group_rows)
-            groups.append(group_tasks)
+            group_rows = self._fetch_group_rows(conn, group_ids)
+            groups.append(self._rows_to_tasks(conn, group_rows))
             assigned.update(group_ids)
-
-            next_available: set[str] = set()
-            for tid in group_ids:
-                for dependent in reverse_map[tid]:
-                    in_degree[dependent] -= 1
-                    if in_degree[dependent] == 0:
-                        next_available.add(dependent)
-            available = next_available
+            available = self._advance_group(group_ids, reverse_map, in_degree)
 
         if len(assigned) < len(task_ids):
             unassigned = task_id_set - assigned
@@ -545,6 +509,93 @@ class TaskGraph:
         """
         with self._conn() as conn:
             return self._detect_cycles_conn(conn)
+
+    def _check_batch_duplicates(self, conn: sqlite3.Connection, task_ids: list[str]) -> None:
+        """Raise ValueError if task_ids contain duplicates or already exist in DB."""
+        id_set = set(task_ids)
+        if len(id_set) < len(task_ids):
+            seen: set[str] = set()
+            dupes: list[str] = []
+            for tid in task_ids:
+                if tid in seen and tid not in dupes:
+                    dupes.append(tid)
+                seen.add(tid)
+            raise ValueError(f"Duplicate task IDs in batch: {dupes}")
+
+        existing_ids = self._query_ids_in_db(conn, task_ids)
+        if existing_ids:
+            raise ValueError(f"Tasks already exist: {existing_ids}")
+
+    def _validate_external_deps(
+        self,
+        conn: sqlite3.Connection,
+        tasks: list[TaskItem],
+        id_set: set[str],
+    ) -> list[tuple[str, str]]:
+        """Collect all deps and validate that external blocked_by refs exist.
+
+        Returns list of (task_id, dep_id) tuples for all dependencies.
+        """
+        all_deps: list[tuple[str, str]] = []
+        external_deps: set[str] = set()
+        for task in tasks:
+            for dep_id in dict.fromkeys(task.blocked_by):
+                if dep_id not in id_set and dep_id != task.id:
+                    external_deps.add(dep_id)
+                all_deps.append((task.id, dep_id))
+
+        if external_deps:
+            found = self._query_ids_in_db(conn, list(external_deps))
+            missing = external_deps - found
+            if missing:
+                raise ValueError(f"blocked_by references non-existent tasks: {missing}")
+
+        return all_deps
+
+    def _insert_tasks_and_deps(
+        self,
+        conn: sqlite3.Connection,
+        tasks: list[TaskItem],
+        all_deps: list[tuple[str, str]],
+    ) -> None:
+        """Batch insert task rows and dependency rows."""
+        task_rows = [
+            (
+                t.id,
+                t.description,
+                t.agent,
+                t.state.value,
+                json.dumps(t.vars, default=str),
+                t.created_at.isoformat(),
+                t.updated_at.isoformat(),
+            )
+            for t in tasks
+        ]
+        conn.executemany(
+            "INSERT INTO tasks (id, description, agent, state, vars, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            task_rows,
+        )
+
+        if all_deps:
+            conn.executemany(
+                "INSERT INTO task_dependencies (task_id, blocked_by_id) VALUES (?, ?)",
+                all_deps,
+            )
+
+    @staticmethod
+    def _query_ids_in_db(conn: sqlite3.Connection, ids: list[str]) -> set[str]:
+        """Chunked SELECT to find which of *ids* already exist in the tasks table."""
+        found: set[str] = set()
+        for i in range(0, len(ids), _SQL_CHUNK_SIZE):
+            chunk = ids[i : i + _SQL_CHUNK_SIZE]
+            placeholders = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT id FROM tasks WHERE id IN ({placeholders})",
+                tuple(chunk),
+            ).fetchall()
+            found.update(r[0] for r in rows)
+        return found
 
     def _detect_cycles_conn(
         self,
@@ -573,28 +624,39 @@ class TaskGraph:
             return TaskGraphSnapshot(tasks=tasks, parallel_groups=group_ids)
 
     # ------------------------------------------------------------------
-    # Async wrappers — offload sync SQLite calls to a worker thread
+    # Async wrappers — serialised via _async_lock to prevent TOCTOU races
+    # on the shared in-memory connection.
     # ------------------------------------------------------------------
 
+    async def aclose(self) -> None:
+        """Async close — waits for any in-flight async ops to complete."""
+        async with self._async_lock:
+            self.close()
+
     async def aget_task(self, task_id: str) -> TaskItem | None:
-        """Async wrapper — avoids blocking the event loop."""
-        return await asyncio.to_thread(self.get_task, task_id)
+        """Async wrapper — serialised to prevent TOCTOU on in-memory DB."""
+        async with self._async_lock:
+            return await asyncio.to_thread(self.get_task, task_id)
 
     async def aget_ready_tasks(self) -> list[TaskItem]:
-        """Async wrapper — avoids blocking the event loop."""
-        return await asyncio.to_thread(self.get_ready_tasks)
+        """Async wrapper — serialised to prevent TOCTOU on in-memory DB."""
+        async with self._async_lock:
+            return await asyncio.to_thread(self.get_ready_tasks)
 
     async def aget_blocked_tasks(self) -> list[TaskItem]:
-        """Async wrapper — avoids blocking the event loop."""
-        return await asyncio.to_thread(self.get_blocked_tasks)
+        """Async wrapper — serialised to prevent TOCTOU on in-memory DB."""
+        async with self._async_lock:
+            return await asyncio.to_thread(self.get_blocked_tasks)
 
     async def aget_parallel_groups(self) -> list[list[TaskItem]]:
-        """Async wrapper — avoids blocking the event loop."""
-        return await asyncio.to_thread(self.get_parallel_groups)
+        """Async wrapper — serialised to prevent TOCTOU on in-memory DB."""
+        async with self._async_lock:
+            return await asyncio.to_thread(self.get_parallel_groups)
 
     async def aget_snapshot(self) -> TaskGraphSnapshot:
-        """Async wrapper — avoids blocking the event loop."""
-        return await asyncio.to_thread(self.get_snapshot)
+        """Async wrapper — serialised to prevent TOCTOU on in-memory DB."""
+        async with self._async_lock:
+            return await asyncio.to_thread(self.get_snapshot)
 
     def clear(self) -> None:
         """Clear all tasks (for testing).

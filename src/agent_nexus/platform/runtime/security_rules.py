@@ -52,59 +52,89 @@ class ImportRule(SecurityRule):
         self.forbidden: set[str] = set(forbidden)
         self._forbidden_prefixes: tuple[str, ...] = tuple(f"{mod}." for mod in self.forbidden)
 
-    def check(self, node: ast.AST) -> list[SecurityViolation]:
+    def _check_import_node(self, node: ast.Import) -> list[SecurityViolation]:
         violations: list[SecurityViolation] = []
-
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if self._is_forbidden(alias.name):
-                    violations.append(
-                        SecurityViolation(
-                            rule_type="import",
-                            node_type="Import",
-                            code_snippet=f"import {alias.name}",
-                            message=f"Forbidden import: '{alias.name}' at line {node.lineno}",
-                        )
+        for alias in node.names:
+            if self._is_forbidden(alias.name):
+                violations.append(
+                    SecurityViolation(
+                        rule_type="import",
+                        node_type="Import",
+                        code_snippet=f"import {alias.name}",
+                        message=f"Forbidden import: '{alias.name}' at line {node.lineno}",
                     )
+                )
+        return violations
 
-        elif isinstance(node, ast.ImportFrom):
-            # Resolve the absolute module name: strip leading dots from
-            # relative imports so that "from .os import *" is checked
-            # against "os", not ".os" (which would bypass the forbidden
-            # list due to startswith(".os") != startswith("os")).
-            module_name = node.module
-            if module_name and node.level > 0:
-                # Strip relative-import prefix dots (e.g. "..os" -> "os")
-                module_name = module_name.lstrip(".")
+    def _resolve_module_name(self, node: ast.ImportFrom) -> str | None:
+        """Strip leading dots from relative import module names."""
+        module_name = node.module
+        if module_name and node.level > 0:
+            module_name = module_name.lstrip(".")
+        return module_name
 
-            # Check module path (e.g. "from os import path")
-            if module_name and self._is_forbidden(module_name):
+    def _check_wildcard_relative(self, node: ast.ImportFrom) -> list[SecurityViolation]:
+        """Detect `from . import *` wildcard relative imports."""
+        if (
+            node.level > 0
+            and node.module is None
+            and any(alias.name == "*" for alias in node.names)
+        ):
+            return [
+                SecurityViolation(
+                    rule_type="import",
+                    node_type="ImportFrom",
+                    code_snippet="from . import *",
+                    message=f"Wildcard relative import at line {node.lineno}",
+                )
+            ]
+        return []
+
+    def _check_imported_names(self, node: ast.ImportFrom) -> list[SecurityViolation]:
+        """Check individual imported names for forbidden symbols."""
+        violations: list[SecurityViolation] = []
+        for alias in node.names:
+            if alias.name and alias.name != "*" and self._is_forbidden(alias.name):
                 violations.append(
                     SecurityViolation(
                         rule_type="import",
                         node_type="ImportFrom",
-                        code_snippet=f"from {node.module} import ...",
-                        message=f"Forbidden import: 'from {node.module}' at line {node.lineno}",
+                        code_snippet=f"from . import {alias.name}",
+                        message=f"Forbidden import: '{alias.name}' at line {node.lineno}",
                     )
                 )
+        return violations
 
-            # Relative imports like "from . import os" have node.module=None
-            # but forbidden names in node.names.  Only check names when
-            # the module-level check didn't already catch the violation,
-            # to avoid duplicate reports for "from os import os".
-            if not violations:
-                for alias in node.names:
-                    if alias.name and self._is_forbidden(alias.name):
-                        violations.append(
-                            SecurityViolation(
-                                rule_type="import",
-                                node_type="ImportFrom",
-                                code_snippet=f"from . import {alias.name}",
-                                message=(f"Forbidden import: '{alias.name}' at line {node.lineno}"),
-                            )
-                        )
+    def _check_import_from_node(self, node: ast.ImportFrom) -> list[SecurityViolation]:
+        violations: list[SecurityViolation] = []
+
+        module_name = self._resolve_module_name(node)
+
+        # Check module path (e.g. "from os import path")
+        if module_name and self._is_forbidden(module_name):
+            violations.append(
+                SecurityViolation(
+                    rule_type="import",
+                    node_type="ImportFrom",
+                    code_snippet=f"from {node.module} import ...",
+                    message=f"Forbidden import: 'from {node.module}' at line {node.lineno}",
+                )
+            )
+
+        violations.extend(self._check_wildcard_relative(node))
+
+        # Only check names when module-level check didn't already catch it.
+        if not violations:
+            violations.extend(self._check_imported_names(node))
 
         return violations
+
+    def check(self, node: ast.AST) -> list[SecurityViolation]:
+        if isinstance(node, ast.Import):
+            return self._check_import_node(node)
+        elif isinstance(node, ast.ImportFrom):
+            return self._check_import_from_node(node)
+        return []
 
     def _is_forbidden(self, module_name: str) -> bool:
         """Check if module_name is forbidden (exact match or parent module)."""
@@ -144,65 +174,76 @@ class FunctionRule(SecurityRule):
         "f",
     }
 
+    @staticmethod
+    def _make_violation(node: ast.Call, node_type: str, message: str) -> SecurityViolation:
+        return SecurityViolation(
+            rule_type="function",
+            node_type=node_type,
+            code_snippet=ast.unparse(node),
+            message=message,
+        )
+
+    def _check_bare_call(
+        self, node: ast.Call, func_name: str, violations: list[SecurityViolation]
+    ) -> None:
+        if func_name in self.forbidden and isinstance(node.func, ast.Name):
+            violations.append(
+                self._make_violation(
+                    node,
+                    "Call",
+                    f"Forbidden function call: '{func_name}' at line {node.lineno}",
+                )
+            )
+
+    def _check_attribute_call(
+        self, node: ast.Call, func_name: str, violations: list[SecurityViolation]
+    ) -> None:
+        if func_name in self.forbidden and isinstance(node.func, ast.Attribute):
+            violations.append(
+                self._make_violation(
+                    node,
+                    "AttributeCall",
+                    f"Forbidden function call via attribute: '{func_name}' at line {node.lineno}",
+                )
+            )
+
+    def _check_indirect_call(
+        self, node: ast.Call, func_name: str, violations: list[SecurityViolation]
+    ) -> None:
+        if func_name in self.forbidden and not violations:
+            violations.append(
+                self._make_violation(
+                    node,
+                    "Call",
+                    f"Forbidden function call (indirect): '{func_name}' at line {node.lineno}",
+                )
+            )
+
+    def _check_qualified_call(self, node: ast.Call, violations: list[SecurityViolation]) -> None:
+        if (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in self.qualified_calls
+            and node.func.attr in self.qualified_calls[node.func.value.id]
+        ):
+            qualified = f"{node.func.value.id}.{node.func.attr}"
+            violations.append(
+                self._make_violation(
+                    node,
+                    "QualifiedCall",
+                    f"Forbidden qualified call: '{qualified}' at line {node.lineno}",
+                )
+            )
+
     def check(self, node: ast.AST) -> list[SecurityViolation]:
         violations: list[SecurityViolation] = []
 
         if isinstance(node, ast.Call):
             func_name = self._get_function_name(node.func)
-            # Only check bare function calls (ast.Name) against the
-            # forbidden list.  Method calls (ast.Attribute) like
-            # ``re.compile()`` should NOT be flagged here -- the
-            # AttributeRule already covers dangerous attribute access
-            # such as ``__builtins__``.
-            if func_name in self.forbidden and isinstance(node.func, ast.Name):
-                violations.append(
-                    SecurityViolation(
-                        rule_type="function",
-                        node_type="Call",
-                        code_snippet=ast.unparse(node),
-                        message=f"Forbidden function call: '{func_name}' at line {node.lineno}",
-                    )
-                )
-
-            # Also catch attribute-based calls: builtins.eval(...),
-            # __builtins__.exec(...), etc.
-            if func_name in self.forbidden and isinstance(node.func, ast.Attribute):
-                violations.append(
-                    SecurityViolation(
-                        rule_type="function",
-                        node_type="AttributeCall",
-                        code_snippet=ast.unparse(node),
-                        message=(
-                            f"Forbidden function call via attribute: "
-                            f"'{func_name}' at line {node.lineno}"
-                        ),
-                    )
-                )
-
-            # Qualified-call check: block os.system(), subprocess.run(), etc.
-            # without false-positive on generic names like pipeline.run().
-            if (
-                isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id in self.qualified_calls
-                and node.func.attr in self.qualified_calls[node.func.value.id]
-            ):
-                qualified = f"{node.func.value.id}.{node.func.attr}"
-                violations.append(
-                    SecurityViolation(
-                        rule_type="function",
-                        node_type="QualifiedCall",
-                        code_snippet=ast.unparse(node),
-                        message=f"Forbidden qualified call: '{qualified}' at line {node.lineno}",
-                    )
-                )
-
-            # --- Bypass-vector protection ---
-            # Detect forbidden function names passed as *arguments* to other
-            # calls.  This catches patterns like:
-            #   map(__import__, ["os"])
-            #   sorted(data, key=exec)
-            #   filter(compile, items)
+            self._check_bare_call(node, func_name, violations)
+            self._check_attribute_call(node, func_name, violations)
+            self._check_indirect_call(node, func_name, violations)
+            self._check_qualified_call(node, violations)
             violations.extend(self._check_callback_args(node))
 
         return violations

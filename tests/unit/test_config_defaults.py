@@ -21,7 +21,6 @@ from agent_nexus.platform.config import (
     SOURCES_FILE,
 )
 
-
 # ============================================================================
 # Path constants
 # ============================================================================
@@ -161,4 +160,4 @@ class TestDefaultModelString:
 
     def test_default_matches_standard_tier(self) -> None:
         """The default model string matches the standard tier mapping."""
-        assert DEFAULT_MODEL_STRING == MODEL_TIER_MAP[ModelTier.STANDARD]
+        assert MODEL_TIER_MAP[ModelTier.STANDARD] == DEFAULT_MODEL_STRING

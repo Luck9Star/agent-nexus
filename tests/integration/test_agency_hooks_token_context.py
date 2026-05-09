@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from agent_nexus.platform.agency.context_provider import (
-    ContextProvider,
     ExpertListProvider,
     ProviderRegistry,
     ReflectionFeedbackProvider,
@@ -22,11 +21,9 @@ from agent_nexus.platform.agency.hooks import (
     HookManager,
 )
 from agent_nexus.platform.agency.token_counter import (
-    PromptSection,
     StructuredPrompt,
     TokenCounter,
 )
-
 
 # ---------------------------------------------------------------------------
 # 1. Hook BEFORE_CALL modifies prompt
@@ -150,9 +147,11 @@ class TestStructuredPromptWithProviders:
         task_prov.update(["Task A", "Task B"])
         registry.register("tasks", task_prov, priority=5)
 
-        expert_prov = ExpertListProvider([
-            {"name": "reviewer", "capabilities": ["code-review", "security"]},
-        ])
+        expert_prov = ExpertListProvider(
+            [
+                {"name": "reviewer", "capabilities": ["code-review", "security"]},
+            ]
+        )
         registry.register("experts", expert_prov, priority=3)
 
         feedback_prov = ReflectionFeedbackProvider()

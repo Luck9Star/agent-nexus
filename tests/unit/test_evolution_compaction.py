@@ -9,17 +9,19 @@ from agent_nexus.platform.evolution.compaction import (
     CompactionGuard,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_store() -> MagicMock:
     store = MagicMock()
     store.log_budget_event.return_value = "log-1"
     store.get_metrics.return_value = EvolutionMetrics(
-        total_selections=100, total_applied=80,
-        total_completions=60, total_fallbacks=20,
+        total_selections=100,
+        total_applied=80,
+        total_completions=60,
+        total_fallbacks=20,
     )
     return store
 
@@ -38,7 +40,8 @@ def _make_ctx(
         session_id="sess-1",
         turn_number=turn,
         token_usage=TokenUsage(
-            prompt_tokens=prompt, completion_tokens=completion,
+            prompt_tokens=prompt,
+            completion_tokens=completion,
         ),
         context_window=window,
         budget=ContextBudget(),
@@ -51,6 +54,7 @@ def _make_ctx(
 # ---------------------------------------------------------------------------
 # should_compact
 # ---------------------------------------------------------------------------
+
 
 class TestShouldCompact:
     def test_returns_true_when_over_trigger_and_enough_turns(self):
@@ -79,6 +83,7 @@ class TestShouldCompact:
 # needs_truncation
 # ---------------------------------------------------------------------------
 
+
 class TestNeedsTruncation:
     def test_returns_true_above_90_percent(self):
         guard = CompactionGuard(store=_make_store(), agent_id="a1")
@@ -100,6 +105,7 @@ class TestNeedsTruncation:
 # needs_hard_ceiling
 # ---------------------------------------------------------------------------
 
+
 class TestNeedsHardCeiling:
     def test_returns_true_above_95_percent(self):
         guard = CompactionGuard(store=_make_store(), agent_id="a1")
@@ -115,6 +121,7 @@ class TestNeedsHardCeiling:
 # ---------------------------------------------------------------------------
 # reinject_after_compaction
 # ---------------------------------------------------------------------------
+
 
 class TestReinjectAfterCompaction:
     def test_returns_l0_plus_l1_content(self):
@@ -175,6 +182,7 @@ class TestReinjectAfterCompaction:
 # check_and_log
 # ---------------------------------------------------------------------------
 
+
 class TestCheckAndLog:
     def test_returns_none_when_within_budget(self):
         guard = CompactionGuard(store=_make_store(), agent_id="a1")
@@ -205,6 +213,7 @@ class TestCheckAndLog:
 # should_alert + reset
 # ---------------------------------------------------------------------------
 
+
 class TestAlertAndReset:
     def test_should_alert_after_consecutive_compactions(self):
         store = _make_store()
@@ -230,6 +239,7 @@ class TestAlertAndReset:
 # ---------------------------------------------------------------------------
 # _truncate_to_budget
 # ---------------------------------------------------------------------------
+
 
 class TestTruncateToBudget:
     def test_no_truncation_when_short(self):

@@ -6,14 +6,14 @@ from agent_nexus.platform.evolution.thresholds import (
     _FALLBACK_THRESHOLD,
     _HIGH_APPLIED_FOR_FIX,
     _LOW_COMPLETION_THRESHOLD,
-    _MODERATE_EFFECTIVE_THRESHOLD,
     _MIN_APPLIED_FOR_DERIVED,
+    _MODERATE_EFFECTIVE_THRESHOLD,
 )
-
 
 # ---------------------------------------------------------------------------
 # Threshold constant values (docs/04 Section 6)
 # ---------------------------------------------------------------------------
+
 
 class TestThresholdConstants:
     """Verify the single source of truth matches docs/04 spec."""
@@ -52,19 +52,6 @@ class TestThresholdTypes:
             ("_MIN_APPLIED_FOR_DERIVED", _MIN_APPLIED_FOR_DERIVED),
         ],
     )
-    def test_is_float(self, name, value):
-        assert isinstance(value, float), f"{name} should be float"
-
-    @pytest.mark.parametrize(
-        "name, value",
-        [
-            ("_FALLBACK_THRESHOLD", _FALLBACK_THRESHOLD),
-            ("_HIGH_APPLIED_FOR_FIX", _HIGH_APPLIED_FOR_FIX),
-            ("_LOW_COMPLETION_THRESHOLD", _LOW_COMPLETION_THRESHOLD),
-            ("_MODERATE_EFFECTIVE_THRESHOLD", _MODERATE_EFFECTIVE_THRESHOLD),
-            ("_MIN_APPLIED_FOR_DERIVED", _MIN_APPLIED_FOR_DERIVED),
-        ],
-    )
     def test_in_valid_range(self, name, value):
         assert 0.0 < value < 1.0, f"{name}={value} out of (0, 1) range"
 
@@ -92,8 +79,10 @@ class TestThresholdInvariants:
     def test_all_thresholds_summarizable(self):
         """Sanity: exactly 5 thresholds exported."""
         from agent_nexus.platform.evolution import thresholds as mod
+
         exported = [
-            v for k, v in vars(mod).items()
+            v
+            for k, v in vars(mod).items()
             if k.startswith("_") and not k.startswith("__") and isinstance(v, float)
         ]
         assert len(exported) == 5

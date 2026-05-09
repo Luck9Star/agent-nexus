@@ -106,9 +106,11 @@ class ReviewReport(BaseModel):
     summary: str = ""
     findings: list[CodeIssue | PatternMatch] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
-    severity_counts: dict[str, int] = Field(default_factory=lambda: {
-        "critical": 0,
-        "warning": 0,
-        "info": 0,
-    })
+    severity_counts: dict[str, int] = Field(
+        default_factory=lambda: {
+            "critical": 0,
+            "warning": 0,
+            "info": 0,
+        }
+    )
     overall_score: int = 100

@@ -7,7 +7,6 @@ Provides two MCP tools:
 
 from __future__ import annotations
 
-from agent_doc_filler.models import FillRequest, FillResult, TemplateAnalysis
 from agent_doc_filler.tools.analyze_template import analyze_template as _analyze
 from agent_doc_filler.tools.fill_template import fill_template as _fill
 
@@ -28,9 +27,8 @@ def create_mcp_server() -> object:
         from fastmcp import FastMCP
     except ImportError:
         raise ImportError(
-            "FastMCP is required for MCP mode. "
-            "Install with: pip install agent-doc-filler[full]"
-        )
+            "FastMCP is required for MCP mode. Install with: pip install agent-doc-filler[full]"
+        ) from None
 
     mcp = FastMCP("doc-filler")
 

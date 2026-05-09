@@ -72,13 +72,9 @@ class McpServerConfig(FrozenModel):
         - sse transport requires url to be set
         """
         if self.transport == "stdio" and not self.command:
-            raise ValueError(
-                "McpServerConfig with transport='stdio' requires 'command' to be set"
-            )
+            raise ValueError("McpServerConfig with transport='stdio' requires 'command' to be set")
         if self.transport == "sse" and not self.url:
-            raise ValueError(
-                "McpServerConfig with transport='sse' requires 'url' to be set"
-            )
+            raise ValueError("McpServerConfig with transport='sse' requires 'url' to be set")
         return self
 
 

@@ -28,3 +28,47 @@ impl HealthCheck {
         Ok(version)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn echo_config() -> BackendConfig {
+        BackendConfig {
+            command: "echo".into(),
+            ..Default::default()
+        }
+    }
+
+    fn nonexistent_config() -> BackendConfig {
+        BackendConfig {
+            command: "definitely_not_installed_abcxyz".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn check_installed_echo() {
+        assert!(HealthCheck::check_installed(&echo_config()));
+    }
+
+    #[test]
+    fn check_not_installed() {
+        assert!(!HealthCheck::check_installed(&nonexistent_config()));
+    }
+
+    #[test]
+    fn check_version_echo() {
+        let result = HealthCheck::check_version(&echo_config());
+        // `echo --version` may succeed or fail depending on platform
+        // On macOS, echo is a builtin but also /bin/echo exists
+        // Just verify it doesn't panic
+        let _ = result;
+    }
+
+    #[test]
+    fn check_version_nonexistent() {
+        let result = HealthCheck::check_version(&nonexistent_config());
+        assert!(result.is_err());
+    }
+}

@@ -1,4 +1,6 @@
-# Python
+# Nextflow
+*.nf
+.nextflow/
 __pycache__/
 *.py[oc]
 build/
@@ -60,3 +62,4 @@ graphify-out/
 # Claude harness state
 .claude/harness/
 .claude/harness-state.json
+.pi

@@ -5,6 +5,19 @@ use serde::{Deserialize, Serialize};
 use super::hooks::HookDefinition;
 use super::permission::{PermissionConfig, PermissionMode};
 
+/// Isolation level for agent execution environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IsolationLevel {
+    /// No isolation — shared process space
+    #[default]
+    None,
+    /// Process-level isolation — independent subprocess
+    Process,
+    /// Container-level isolation — future extension
+    Container,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentType {
@@ -128,8 +141,8 @@ pub struct AgentManifest {
     pub max_turns: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_scope: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub isolation: Option<String>,
+    #[serde(default)]
+    pub isolation: IsolationLevel,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     #[serde(default)]
@@ -256,6 +269,33 @@ pub struct AgentPackage {
 mod tests {
     use super::*;
 
+
+    #[test]
+    fn isolation_level_default_is_none() {
+        assert_eq!(IsolationLevel::default(), IsolationLevel::None);
+    }
+
+    #[test]
+    fn isolation_level_serialize_deserialize() {
+        let yaml = r#"
+name: test-agent
+type: atomic
+version: "0.1.0"
+description: test
+isolation: process
+"#;
+        let manifest: AgentManifest = serde_yml::from_str(yaml).unwrap();
+        assert_eq!(manifest.isolation, IsolationLevel::Process);
+    }
+
+    #[test]
+    fn isolation_level_container_roundtrip() {
+        let level = IsolationLevel::Container;
+        let yaml = serde_yml::to_string(&level).unwrap();
+        let parsed: IsolationLevel = serde_yml::from_str(&yaml).unwrap();
+        assert_eq!(parsed, IsolationLevel::Container);
+    }
+
     #[test]
     fn parse_minimal_manifest() {
         let yaml = r#"
@@ -364,7 +404,7 @@ model_config:
             effort: None,
             max_turns: None,
             memory_scope: None,
-            isolation: None,
+            isolation: IsolationLevel::None,
             color: None,
             background: false,
             initial_prompt: None,
@@ -397,7 +437,7 @@ model_config:
             effort: None,
             max_turns: None,
             memory_scope: None,
-            isolation: None,
+            isolation: IsolationLevel::None,
             color: None,
             background: false,
             initial_prompt: None,

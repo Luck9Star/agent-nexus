@@ -7,13 +7,14 @@ from agent_nexus.platform.agency.planner import (
     DynamicCompositePlanner,
     PlannerInput,
     SubtaskDef,
+    _validate_toml_field,
     generate_toml,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def sample_subtasks() -> list[SubtaskDef]:
@@ -46,6 +47,7 @@ def sample_subtasks() -> list[SubtaskDef]:
 # ---------------------------------------------------------------------------
 # 1. DAG generation with blocked_by
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.timeout(30)
 class TestDAGGeneration:
@@ -118,6 +120,7 @@ class TestDAGGeneration:
 # 2. max_parallel enforcement
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.timeout(30)
 class TestMaxParallel:
     """Verify max_parallel is respected in the generated DAG."""
@@ -164,6 +167,7 @@ class TestMaxParallel:
 # 3. TOML generation
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.timeout(30)
 class TestTOMLGeneration:
     """Verify generate_toml produces valid TOML from a DAG."""
@@ -173,7 +177,7 @@ class TestTOMLGeneration:
         dag = planner.plan(sample_subtasks, composition_name="my-composition")
         toml_str = generate_toml(dag)
 
-        assert '[composition]' in toml_str
+        assert "[composition]" in toml_str
         assert 'name = "my-composition"' in toml_str
 
     def test_toml_has_all_tasks(self, sample_subtasks: list[SubtaskDef]) -> None:
@@ -213,6 +217,7 @@ class TestTOMLGeneration:
 # ---------------------------------------------------------------------------
 # 4. Edge cases
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.timeout(30)
 class TestEdgeCases:
@@ -295,6 +300,7 @@ class TestEdgeCases:
 # ---------------------------------------------------------------------------
 # 5. PlannerInput dataclass
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.timeout(30)
 class TestPlannerInput:
@@ -450,3 +456,24 @@ class TestSmartDependencyResolution:
         assert broad.blocked_by == []
         # unrelated has no overlap at all → not blocked
         assert unrelated.blocked_by == []
+
+
+# ---------------------------------------------------------------------------
+# _validate_toml_field
+# ---------------------------------------------------------------------------
+
+
+class TestValidateTomlField:
+    """Unit tests for the _validate_toml_field helper."""
+
+    def test_null_byte_raises(self) -> None:
+        with pytest.raises(ValueError, match="null byte"):
+            _validate_toml_field("bad\x00value", "test-context")
+
+    def test_empty_string_raises(self) -> None:
+        with pytest.raises(ValueError, match="must not be empty"):
+            _validate_toml_field("", "test-context")
+
+    def test_special_chars_only_raises(self) -> None:
+        with pytest.raises(ValueError, match="invalid characters"):
+            _validate_toml_field("!@#$", "test-context")

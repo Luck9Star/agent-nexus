@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 
 import pytest
+from pydantic import ValidationError
 
 from agent_competitive_intelligence_briefing.coordinator import (
     CompetitiveIntelCoordinator,
@@ -81,7 +81,7 @@ class TestPipelineStep:
 
     def test_frozen(self) -> None:
         step = PipelineStep(name="Step", agent="agent")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             step.name = "Changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -131,7 +131,7 @@ class TestBriefingResult:
 
     def test_frozen(self) -> None:
         result = BriefingResult(query="q")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             result.query = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -207,7 +207,10 @@ class TestCompositionValidation:
         assert any("composition" in e for e in errors)
 
     def test_missing_name(self) -> None:
-        data = {"composition": {"description": "test"}, "tasks": {"t1": {"name": "n", "agent": "a", "blocked_by": []}}}
+        data = {
+            "composition": {"description": "test"},
+            "tasks": {"t1": {"name": "n", "agent": "a", "blocked_by": []}},
+        }
         errors = CompetitiveIntelCoordinator.validate_composition(data)
         assert any("name" in e for e in errors)
 
@@ -291,9 +294,7 @@ class TestSimulatedDocFiller:
         assert result["filled_count"] > 0
 
     def test_custom_template_path(self) -> None:
-        result = _simulate_doc_filler(
-            {"title": "T"}, template_path="/custom/path.docx"
-        )
+        result = _simulate_doc_filler({"title": "T"}, template_path="/custom/path.docx")
         assert result["output_path"] == "/custom/path.docx"
 
 
@@ -330,9 +331,7 @@ class TestCompetitiveIntelCoordinator:
     def test_generate_briefing_with_localization(
         self, coordinator: CompetitiveIntelCoordinator
     ) -> None:
-        result = coordinator.generate_briefing(
-            "AI trends", target_langs=["zh", "en", "ja"]
-        )
+        result = coordinator.generate_briefing("AI trends", target_langs=["zh", "en", "ja"])
         assert result.success is True
         assert "zh" in result.localizations
         assert "en" in result.localizations
@@ -343,7 +342,9 @@ class TestCompetitiveIntelCoordinator:
         assert result.report_path != ""
         assert result.report_path.endswith(".docx")
 
-    def test_generate_briefing_default_langs(self, coordinator: CompetitiveIntelCoordinator) -> None:
+    def test_generate_briefing_default_langs(
+        self, coordinator: CompetitiveIntelCoordinator
+    ) -> None:
         result = coordinator.generate_briefing("test")
         assert "en" in result.localizations
 
@@ -412,9 +413,7 @@ class TestLocalAdapter:
         assert response["status"] == "ok"
         assert response["result"]["success"] is True
 
-    def test_handle_with_target_langs(
-        self, coordinator: CompetitiveIntelCoordinator
-    ) -> None:
+    def test_handle_with_target_langs(self, coordinator: CompetitiveIntelCoordinator) -> None:
         from agent_competitive_intelligence_briefing.main import _handle_message
 
         response = _handle_message(
@@ -430,17 +429,13 @@ class TestLocalAdapter:
     def test_handle_unknown_method(self, coordinator: CompetitiveIntelCoordinator) -> None:
         from agent_competitive_intelligence_briefing.main import _handle_message
 
-        response = _handle_message(
-            coordinator, {"method": "unknown", "params": {}}
-        )
+        response = _handle_message(coordinator, {"method": "unknown", "params": {}})
         assert response["status"] == "error"
         assert "Unknown method" in response["error"]
 
     def test_handle_missing_query(self, coordinator: CompetitiveIntelCoordinator) -> None:
         from agent_competitive_intelligence_briefing.main import _handle_message
 
-        response = _handle_message(
-            coordinator, {"method": "generate_briefing", "params": {}}
-        )
+        response = _handle_message(coordinator, {"method": "generate_briefing", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]

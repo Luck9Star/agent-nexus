@@ -33,12 +33,12 @@ impl CLISetup {
     /// and router.
     pub fn from_file(path: &Path) -> Result<Self, CLIBackendError> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| CLIBackendError::Io(e))?;
-        Self::from_str(&content)
+            .map_err(CLIBackendError::Io)?;
+        Self::parse_toml(&content)
     }
 
     /// Load CLI backend configuration from a TOML string.
-    pub fn from_str(content: &str) -> Result<Self, CLIBackendError> {
+    pub fn parse_toml(content: &str) -> Result<Self, CLIBackendError> {
         let config: CLIConfigFile = toml::from_str(content)
             .map_err(|e| CLIBackendError::JsonParse(format!("Config parse error: {e}")))?;
 
@@ -83,7 +83,7 @@ impl CLISetup {
                 return Self::empty();
             }
         };
-        match Self::from_str(&content) {
+        match Self::parse_toml(&content) {
             Ok(setup) => setup,
             Err(e) => {
                 tracing::warn!(
@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn from_str_parses_backends() {
+    fn parse_toml_parses_backends() {
         let toml = r#"
 [cli_backends.claude-code]
 command = "claude"
@@ -157,7 +157,7 @@ output_format = "text"
 default = "claude-code"
 fallback_chain = ["gemini-cli"]
 "#;
-        let setup = CLISetup::from_str(toml).unwrap();
+        let setup = CLISetup::parse_toml(toml).unwrap();
         assert_eq!(setup.registry.len(), 2);
 
         let claude = setup.registry.get("claude-code").unwrap();
@@ -166,20 +166,20 @@ fallback_chain = ["gemini-cli"]
     }
 
     #[test]
-    fn from_str_without_routing_uses_first_available() {
+    fn parse_toml_without_routing_uses_first_available() {
         let toml = r#"
 [cli_backends.echo-test]
 command = "echo"
 args = []
 output_format = "text"
 "#;
-        let setup = CLISetup::from_str(toml).unwrap();
+        let setup = CLISetup::parse_toml(toml).unwrap();
         assert_eq!(setup.registry.len(), 1);
     }
 
     #[test]
-    fn from_str_empty_is_valid() {
-        let setup = CLISetup::from_str("").unwrap();
+    fn parse_toml_empty_is_valid() {
+        let setup = CLISetup::parse_toml("").unwrap();
         assert_eq!(setup.registry.len(), 0);
     }
 }

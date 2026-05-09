@@ -13,9 +13,9 @@ Covers:
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from agent_requirements_analyzer.agent import RequirementsAnalyzerAgent
 from agent_requirements_analyzer.local_adapter import handle_message
@@ -38,7 +38,6 @@ from agent_requirements_analyzer.tools.build_specification import (
 from agent_requirements_analyzer.tools.generate_questions import (
     generate_questions,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -90,7 +89,7 @@ class TestRequirementAnalysis:
 
     def test_frozen(self) -> None:
         a = RequirementAnalysis(text="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             a.text = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -133,7 +132,7 @@ class TestQuestion:
 
     def test_frozen(self) -> None:
         q = Question(text="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             q.text = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -163,7 +162,7 @@ class TestRequirementSection:
 
     def test_frozen(self) -> None:
         s = RequirementSection(title="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             s.title = "changed"  # type: ignore[misc]
 
 
@@ -193,7 +192,7 @@ class TestRequirementSpec:
 
     def test_frozen(self) -> None:
         spec = RequirementSpec(title="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             spec.title = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -544,12 +543,8 @@ class TestLocalAdapter:
         assert "result" in response
         assert response["result"]["text"] == SAMPLE_TEXT
 
-    def test_handle_analyze_missing_text(
-        self, agent: RequirementsAnalyzerAgent
-    ) -> None:
-        response = handle_message(
-            agent, {"method": "analyze", "params": {}}
-        )
+    def test_handle_analyze_missing_text(self, agent: RequirementsAnalyzerAgent) -> None:
+        response = handle_message(agent, {"method": "analyze", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
@@ -565,12 +560,8 @@ class TestLocalAdapter:
         assert response["status"] == "ok"
         assert "questions" in response["result"]
 
-    def test_handle_questions_missing_analysis(
-        self, agent: RequirementsAnalyzerAgent
-    ) -> None:
-        response = handle_message(
-            agent, {"method": "questions", "params": {}}
-        )
+    def test_handle_questions_missing_analysis(self, agent: RequirementsAnalyzerAgent) -> None:
+        response = handle_message(agent, {"method": "questions", "params": {}})
         assert response["status"] == "error"
 
     def test_handle_build(self, agent: RequirementsAnalyzerAgent) -> None:
@@ -584,27 +575,17 @@ class TestLocalAdapter:
         assert response["status"] == "ok"
         assert response["result"]["title"] == "Test"
 
-    def test_handle_build_missing_answers(
-        self, agent: RequirementsAnalyzerAgent
-    ) -> None:
-        response = handle_message(
-            agent, {"method": "build", "params": {}}
-        )
+    def test_handle_build_missing_answers(self, agent: RequirementsAnalyzerAgent) -> None:
+        response = handle_message(agent, {"method": "build", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
-    def test_handle_unknown_method(
-        self, agent: RequirementsAnalyzerAgent
-    ) -> None:
+    def test_handle_unknown_method(self, agent: RequirementsAnalyzerAgent) -> None:
         response = handle_message(agent, {"method": "unknown", "params": {}})
         assert response["status"] == "error"
         assert "Unknown method" in response["error"]
 
-    def test_handle_analyze_empty_text(
-        self, agent: RequirementsAnalyzerAgent
-    ) -> None:
-        response = handle_message(
-            agent, {"method": "analyze", "params": {"text": ""}}
-        )
+    def test_handle_analyze_empty_text(self, agent: RequirementsAnalyzerAgent) -> None:
+        response = handle_message(agent, {"method": "analyze", "params": {"text": ""}})
         assert response["status"] == "ok"
         assert "No input text provided" in response["result"]["gaps"]

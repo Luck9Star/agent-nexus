@@ -9,7 +9,6 @@ import yaml
 from agent_nexus.platform.agency.allowlist import validate_allowlist_entry
 from agent_nexus.platform.agency.importer import AgencyImporter
 
-
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -21,6 +20,7 @@ _ALLOWLIST_PATH = _PROJECT_ROOT / "config" / "agency-agents.allowlist.yaml"
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def allowlist_data():
@@ -42,6 +42,7 @@ def importer_profiles():
 # ===================================================================
 # 1. Allowlist with tools field parses correctly
 # ===================================================================
+
 
 @pytest.mark.timeout(30)
 class TestAllowlistToolsField:
@@ -77,6 +78,7 @@ class TestAllowlistToolsField:
 # ===================================================================
 # 2. Importer respects per-agent tools config
 # ===================================================================
+
 
 @pytest.mark.timeout(30)
 class TestImporterPerAgentTools:
@@ -132,6 +134,7 @@ class TestImporterPerAgentTools:
 # 3. Agents needing file_read get it
 # ===================================================================
 
+
 @pytest.mark.timeout(30)
 class TestFileReadAgents:
     """All agents that need file_read have it in allowed_tools."""
@@ -163,6 +166,7 @@ class TestFileReadAgents:
 # ===================================================================
 # 4. Validator rejects invalid tools configs
 # ===================================================================
+
 
 @pytest.mark.timeout(30)
 class TestToolsValidation:
@@ -206,7 +210,9 @@ class TestToolsValidation:
         assert any("'tools.allowed' must be a list of strings" in e for e in errors)
 
     def test_overlap_fails(self):
-        entry = self._make_entry(tools={"allowed": ["file_read", "bash"], "denied": ["bash", "network"]})
+        entry = self._make_entry(
+            tools={"allowed": ["file_read", "bash"], "denied": ["bash", "network"]}
+        )
         errors = validate_allowlist_entry(entry)
         assert any("both allowed and denied" in e for e in errors)
 
@@ -214,6 +220,7 @@ class TestToolsValidation:
 # ===================================================================
 # 5. Backward compatibility: no tools field → defaults
 # ===================================================================
+
 
 @pytest.mark.timeout(30)
 class TestBackwardCompat:
@@ -223,20 +230,22 @@ class TestBackwardCompat:
         """Importer falls back to empty allowed and full denied when no tools field."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create a minimal allowlist without tools field
-            allowlist_content = yaml.dump({
-                "source": {
-                    "repo": "https://github.com/example/test",
-                    "ref": "abc123",
-                },
-                "agents": [
-                    {
-                        "source_path": "engineering/engineering-software-architect.md",
-                        "id": "agency.test-default",
-                        "capabilities": ["system_design"],
-                        "output_contract": "architecture_plan",
+            allowlist_content = yaml.dump(
+                {
+                    "source": {
+                        "repo": "https://github.com/example/test",
+                        "ref": "abc123",
                     },
-                ],
-            })
+                    "agents": [
+                        {
+                            "source_path": "engineering/engineering-software-architect.md",
+                            "id": "agency.test-default",
+                            "capabilities": ["system_design"],
+                            "output_contract": "architecture_plan",
+                        },
+                    ],
+                }
+            )
             allowlist_file = Path(tmpdir) / "test-allowlist.yaml"
             allowlist_file.write_text(allowlist_content)
 

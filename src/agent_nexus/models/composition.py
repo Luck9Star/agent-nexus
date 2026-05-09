@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import Any
 
 import toml
 
@@ -63,6 +64,29 @@ class Composition:
 
         return groups
 
+    @staticmethod
+    def _parse_tasks(tasks_raw: dict[str, Any]) -> dict[str, CompositionTask]:
+        """Parse the [tasks] section of a composition TOML."""
+        tasks: dict[str, CompositionTask] = {}
+        for task_id, task_def in tasks_raw.items():
+            if not isinstance(task_def, dict):
+                raise CompositionError(f"tasks.{task_id} must be a table")
+            tasks[task_id] = CompositionTask(
+                task_id=task_id,
+                name=task_def.get("name", task_id),
+                agent=task_def.get("agent", ""),
+                blocked_by=list(task_def.get("blocked_by", [])),
+            )
+        return tasks
+
+    @staticmethod
+    def _validate_deps(tasks: dict[str, CompositionTask]) -> None:
+        """Validate that all blocked_by references point to existing tasks."""
+        for tid, task in tasks.items():
+            for dep in task.blocked_by:
+                if dep not in tasks:
+                    raise CompositionError(f"Task '{tid}' blocked_by unknown task '{dep}'")
+
     @classmethod
     def from_toml(cls, path: Path | str) -> Composition:
         """Parse composition.toml file."""
@@ -84,24 +108,8 @@ class Composition:
         if not isinstance(tasks_raw, dict):
             raise CompositionError("[tasks] must be a table of task definitions")
 
-        tasks: dict[str, CompositionTask] = {}
-        for task_id, task_def in tasks_raw.items():
-            if not isinstance(task_def, dict):
-                raise CompositionError(f"tasks.{task_id} must be a table")
-            tasks[task_id] = CompositionTask(
-                task_id=task_id,
-                name=task_def.get("name", task_id),
-                agent=task_def.get("agent", ""),
-                blocked_by=list(task_def.get("blocked_by", [])),
-            )
-
-        # Validate references
-        for tid, task in tasks.items():
-            for dep in task.blocked_by:
-                if dep not in tasks:
-                    raise CompositionError(f"Task '{tid}' blocked_by unknown task '{dep}'")
-
-        # Validate no cycles
+        tasks = cls._parse_tasks(tasks_raw)
+        cls._validate_deps(tasks)
         _detect_cycles(tasks)
 
         return cls(name=name, description=description, tasks=tasks)

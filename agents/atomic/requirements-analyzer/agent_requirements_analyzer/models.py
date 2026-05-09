@@ -26,11 +26,13 @@ class RequirementAnalysis(BaseModel):
     text: str
     gaps: list[str] = Field(default_factory=list)
     ambiguities: list[str] = Field(default_factory=list)
-    priorities: dict[str, list[str]] = Field(default_factory=lambda: {
-        "high": [],
-        "medium": [],
-        "low": [],
-    })
+    priorities: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "high": [],
+            "medium": [],
+            "low": [],
+        }
+    )
     key_terms: list[str] = Field(default_factory=list)
     contradictions: list[str] = Field(default_factory=list)
 
@@ -86,12 +88,14 @@ class RequirementSpec(BaseModel):
 
     title: str
     sections: list[RequirementSection] = Field(default_factory=list)
-    priorities: dict[str, list[str]] = Field(default_factory=lambda: {
-        "must": [],
-        "should": [],
-        "could": [],
-        "wont": [],
-    })
+    priorities: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "must": [],
+            "should": [],
+            "could": [],
+            "wont": [],
+        }
+    )
     constraints: list[str] = Field(default_factory=list)
     acceptance_criteria: list[str] = Field(default_factory=list)
     glossary: dict[str, str] = Field(default_factory=dict)

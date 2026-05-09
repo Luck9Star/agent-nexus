@@ -11,10 +11,9 @@ Can be used directly or via adapters (MCP, local, CLI).
 from __future__ import annotations
 
 from agent_test_suite_generator.models import (
-    TestCase,
     TestAnalysis,
+    TestCase,
     TestSuite,
-    TestUnit,
 )
 from agent_test_suite_generator.tools.analyze_code import analyze_code_for_tests
 from agent_test_suite_generator.tools.build_suite import build_test_suite
@@ -36,9 +35,7 @@ class TestSuiteGeneratorAgent:
         suite = agent.build_test_suite(cases, "pytest")
     """
 
-    def analyze_code_for_tests(
-        self, file_path: str, language: str = "python"
-    ) -> TestAnalysis:
+    def analyze_code_for_tests(self, file_path: str, language: str = "python") -> TestAnalysis:
         """Phase 1: Analyze source code for testable units.
 
         Parses the source file and identifies functions, methods, and classes
@@ -68,9 +65,7 @@ class TestSuiteGeneratorAgent:
         """
         return generate_test_cases(analysis)
 
-    def build_test_suite(
-        self, cases: list[TestCase], framework: str = "pytest"
-    ) -> TestSuite:
+    def build_test_suite(self, cases: list[TestCase], framework: str = "pytest") -> TestSuite:
         """Phase 3: Assemble test cases into a complete suite.
 
         Organizes test cases into a test suite with proper imports,

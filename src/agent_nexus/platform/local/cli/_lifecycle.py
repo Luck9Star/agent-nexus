@@ -10,13 +10,19 @@ import asyncio
 import logging
 import os
 import signal
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 
 from agent_nexus.models.distribution import LockfileEntry
 from agent_nexus.platform.local.cli._shared import _get_config_dir, _init_managers
 from agent_nexus.platform.utils import AGENT_NAME_RE
+
+if TYPE_CHECKING:
+    from agent_nexus.platform.config.loader import ConfigLoader
+    from agent_nexus.platform.local.lockfile import LockfileManager
 
 logger = logging.getLogger(__name__)
 
@@ -148,41 +154,26 @@ async def _uninstall(name: str) -> None:
         raise typer.Exit(code=1) from None
 
 
-async def _update(name: str | None, all_agents: bool) -> None:
-    """Async update implementation."""
-    from agent_nexus.platform.local.installer import (
-        AgentNotFoundError,
-        GitInstaller,
-    )
-
-    _loader, lockfile, sources, config_dir = _init_managers()
-    installer = GitInstaller(sources, lockfile, config_dir)
-
+def _resolve_update_targets(
+    name: str | None, all_agents: bool, lockfile: LockfileManager
+) -> list[str] | None:
+    """Return list of agent names to update, or None if no agents."""
     if all_agents:
         lockfile_data = lockfile.load()
-        agents_to_update = list(lockfile_data.agents.keys())
-        if not agents_to_update:
+        agents = list(lockfile_data.agents.keys())
+        if not agents:
             typer.echo("No installed agents to update.")
-            return
-    elif name:
-        agents_to_update = [name]
-    else:
-        typer.echo("Specify an agent name or use --all.")
-        raise typer.Exit(code=1)
+            return None
+        return agents
+    if name:
+        return [name]
+    typer.echo("Specify an agent name or use --all.")
+    raise typer.Exit(code=1)
 
-    async def _update_one(a_name: str):
-        return await installer.update(a_name)
 
-    semaphore = asyncio.Semaphore(4)  # limit concurrent git operations
-
-    async def _bounded_update(a_name: str):
-        async with semaphore:
-            return await _update_one(a_name)
-
-    results = await asyncio.gather(
-        *[_bounded_update(n) for n in agents_to_update],
-        return_exceptions=True,
-    )
+def _report_update_results(agents_to_update: list[str], results: Sequence[object]) -> None:
+    """Print per-agent update results and raise on all-fail."""
+    from agent_nexus.platform.local.installer import AgentNotFoundError
 
     updated_count = 0
     for agent_name, result in zip(agents_to_update, results, strict=False):
@@ -201,6 +192,31 @@ async def _update(name: str | None, all_agents: bool) -> None:
     typer.echo(f"Updated {updated_count}/{len(agents_to_update)} agent(s).")
     if updated_count == 0 and any(isinstance(r, BaseException) for r in results):
         raise typer.Exit(code=1)
+
+
+async def _update(name: str | None, all_agents: bool) -> None:
+    """Async update implementation."""
+    from agent_nexus.platform.local.installer import GitInstaller
+
+    _loader, lockfile, sources, config_dir = _init_managers()
+    installer = GitInstaller(sources, lockfile, config_dir)
+
+    agents_to_update = _resolve_update_targets(name, all_agents, lockfile)
+    if agents_to_update is None:
+        return
+
+    semaphore = asyncio.Semaphore(4)
+
+    async def _bounded_update(a_name: str):
+        async with semaphore:
+            return await installer.update(a_name)
+
+    results = await asyncio.gather(
+        *[_bounded_update(n) for n in agents_to_update],
+        return_exceptions=True,
+    )
+
+    _report_update_results(agents_to_update, results)
 
 
 async def _list_agents(json_output: bool = False) -> None:
@@ -280,7 +296,6 @@ async def _info(name: str) -> None:
     if not AGENT_NAME_RE.match(name):
         typer.echo(f"Invalid agent name: {name!r}", err=True)
         raise typer.Exit(code=1)
-    import yaml
 
     _loader, lockfile, _sources, config_dir = _init_managers()
     entry = lockfile.get_entry(name)
@@ -301,41 +316,55 @@ async def _info(name: str) -> None:
         typer.echo(f"  Dependencies: {', '.join(entry.dependencies)}")
 
     agent_dir = config_dir / "agents" / name
-    manifest_path = agent_dir / "agent-manifest.yaml"
-    if manifest_path.exists():
-        try:
-            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-            if isinstance(manifest, dict):
-                typer.echo()
-                desc = manifest.get("description", "")
-                if desc:
-                    typer.echo(f"  Description:  {desc}")
-                run_modes = manifest.get("run_modes", [])
-                if run_modes:
-                    typer.echo(f"  Run modes:    {', '.join(run_modes)}")
-                model_tier = manifest.get("model_tier", "")
-                if model_tier:
-                    typer.echo(f"  Model tier:   {model_tier}")
-        except Exception:
-            logger.debug("Failed to read manifest for info display", exc_info=True)
+    _display_manifest_info(agent_dir)
+    _display_skill_preview(agent_dir)
 
+
+def _display_manifest_info(agent_dir: Path) -> None:
+    """Read and display agent-manifest.yaml metadata."""
+    import yaml
+
+    manifest_path = agent_dir / "agent-manifest.yaml"
+    if not manifest_path.exists():
+        return
+    try:
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.debug("Failed to read manifest for info display", exc_info=True)
+        return
+    if not isinstance(manifest, dict):
+        return
+    typer.echo()
+    display_fields = [
+        ("description", "Description"),
+        ("run_modes", "Run modes"),
+        ("model_tier", "Model tier"),
+    ]
+    for key, label in display_fields:
+        val = manifest.get(key)
+        if val:
+            formatted = ", ".join(val) if isinstance(val, list) else str(val)
+            typer.echo(f"  {label}:  {formatted}")
+
+
+def _display_skill_preview(agent_dir: Path) -> None:
+    """Show first 5 lines of SKILL.md as a preview."""
     skill_path = agent_dir / "SKILL.md"
-    if skill_path.exists():
-        try:
-            first_lines = skill_path.read_text(encoding="utf-8").split("\n")[:5]
-            typer.echo()
-            typer.echo("  SKILL.md preview:")
-            for line in first_lines:
-                typer.echo(f"    {line}")
-        except Exception:
-            logger.debug("Failed to read SKILL.md preview", exc_info=True)
+    if not skill_path.exists():
+        return
+    try:
+        first_lines = skill_path.read_text(encoding="utf-8").split("\n")[:5]
+    except Exception:
+        logger.debug("Failed to read SKILL.md preview", exc_info=True)
+        return
+    typer.echo()
+    typer.echo("  SKILL.md preview:")
+    for line in first_lines:
+        typer.echo(f"    {line}")
 
 
 async def _run(name: str, mode: str, transport: str, extra_args: list[str] | None = None) -> None:
     """Async run implementation."""
-    from agent_nexus.platform.local.supervisor import AgentSupervisor
-    from agent_nexus.platform.orchestration.process_manager import ProcessManager
-
     _loader, lockfile, _sources, config_dir = _init_managers()
 
     entry = lockfile.get_entry(name)
@@ -346,123 +375,105 @@ async def _run(name: str, mode: str, transport: str, extra_args: list[str] | Non
         )
         raise typer.Exit(code=1)
 
-    if mode == "mcp":
-        # MCP stdio standalone: exec directly into the agent process so
-        # the FastMCP server owns stdin/stdout for JSON-RPC framing.
-        # Using ProcessManager with piped I/O would prevent the MCP
-        # client from communicating with the agent.
-        supervisor = AgentSupervisor(
-            process_manager=ProcessManager(),
-            lockfile_manager=lockfile,
-            config_loader=_loader,
-            config_dir=config_dir,
-        )
-
-        command = supervisor._build_command(name, entry)
-        if not command:
-            typer.echo(
-                f"Could not resolve command for agent '{name}'.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
-
-        env = supervisor._build_env(name, entry)
-        env["AGENT_MODE"] = "mcp"
-
-        spawn_env = os.environ.copy()
-        spawn_env.update(env)
-
-        try:
-            os.execvpe(command[0], command, spawn_env)
-        except FileNotFoundError:
-            typer.echo(f"Command not found: {command[0]}", err=True)
-            raise typer.Exit(code=1) from None
-        except OSError as exc:
-            typer.echo(f"Failed to exec agent: {exc}", err=True)
-            raise typer.Exit(code=1) from None
-
+    if mode in ("mcp", "cli"):
+        _exec_agent_direct(name, entry, mode, extra_args, lockfile, _loader, config_dir)
     elif mode == "router":
         try:
-            from agent_nexus.platform.gateway.gateway import MCPGateway
-            from agent_nexus.platform.router.router import PlatformRouter
+            await _run_router_mode(name, transport, lockfile, _loader, config_dir)
         except ImportError as exc:
-            typer.echo(
-                f"Router mode requires additional modules: {exc}",
-                err=True,
-            )
+            typer.echo(f"Router mode requires additional modules: {exc}", err=True)
             raise typer.Exit(code=1) from None
-
-        pm = ProcessManager()
-        supervisor = AgentSupervisor(
-            process_manager=pm,
-            lockfile_manager=lockfile,
-            config_loader=_loader,
-            config_dir=config_dir,
-        )
-
-        ok = await supervisor.start_agent(name)
-        if not ok:
-            typer.echo(f"Failed to start agent '{name}'", err=True)
-            raise typer.Exit(code=1)
-
-        router = PlatformRouter(pm)
-        gateway = MCPGateway(pm, router)
-
-        typer.echo(
-            f"Starting agent '{name}' in router mode ({transport})...",
-            err=True,
-        )
-
-        try:
-            if transport == "sse":
-                await gateway.run_sse()
-            else:
-                await gateway.run_stdio()
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            typer.echo("\nShutting down...", err=True)
-        finally:
-            await gateway.stop()
-
-    elif mode == "cli":
-        # CLI mode: exec directly into the agent process for interactive use.
-        # os.execvpe replaces the current process, giving the agent direct
-        # terminal I/O without a pipe intermediary.  This avoids the deadlock
-        # where piped stdin/stdout are never read/written by either side.
-        supervisor = AgentSupervisor(
-            process_manager=ProcessManager(),
-            lockfile_manager=lockfile,
-            config_loader=_loader,
-            config_dir=config_dir,
-        )
-
-        command = supervisor._build_command(name, entry)
-        if not command:
-            typer.echo(
-                f"Could not resolve command for agent '{name}'.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
-
-        env = supervisor._build_env(name, entry)
-        env["AGENT_MODE"] = "cli"
-
-        # Merge with OS environment for interactive CLI mode
-        spawn_env = os.environ.copy()
-        spawn_env.update(env)
-
-        try:
-            exec_argv = command + (extra_args or [])
-            os.execvpe(exec_argv[0], exec_argv, spawn_env)
-        except FileNotFoundError:
-            typer.echo(f"Command not found: {command[0]}", err=True)
-            raise typer.Exit(code=1) from None
-        except OSError as exc:
-            typer.echo(f"Failed to exec agent: {exc}", err=True)
-            raise typer.Exit(code=1) from None
-
     else:
         typer.echo(f"Unknown mode '{mode}'. Use: mcp, router, cli.", err=True)
         raise typer.Exit(code=1)
+
+
+def _exec_agent_direct(
+    name: str,
+    entry: LockfileEntry,
+    mode: str,
+    extra_args: list[str] | None,
+    lockfile: LockfileManager,
+    config_loader: ConfigLoader,
+    config_dir: Path,
+) -> None:
+    """Exec directly into the agent process (MCP or CLI mode).
+
+    Uses ``os.execvpe`` to replace the current process so the agent owns
+    stdin/stdout directly — avoids pipe deadlocks with ProcessManager.
+    """
+    from agent_nexus.platform.local.supervisor import AgentSupervisor
+    from agent_nexus.platform.orchestration.process_manager import ProcessManager
+
+    supervisor = AgentSupervisor(
+        process_manager=ProcessManager(),
+        lockfile_manager=lockfile,
+        config_loader=config_loader,
+        config_dir=config_dir,
+    )
+
+    command = supervisor._build_command(name, entry)
+    if not command:
+        typer.echo(f"Could not resolve command for agent '{name}'.", err=True)
+        raise typer.Exit(code=1)
+
+    env = supervisor._build_env(name, entry)
+    env["AGENT_MODE"] = mode
+
+    spawn_env = os.environ.copy()
+    spawn_env.update(env)
+
+    exec_argv = command + (extra_args or []) if mode == "cli" else command
+    try:
+        os.execvpe(exec_argv[0], exec_argv, spawn_env)
+    except FileNotFoundError:
+        typer.echo(f"Command not found: {command[0]}", err=True)
+        raise typer.Exit(code=1) from None
+    except OSError as exc:
+        typer.echo(f"Failed to exec agent: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+
+
+async def _run_router_mode(
+    name: str,
+    transport: str,
+    lockfile: LockfileManager,
+    config_loader: ConfigLoader,
+    config_dir: Path,
+) -> None:
+    """Run agent through the platform router with MCP gateway."""
+    from agent_nexus.platform.gateway.gateway import MCPGateway
+    from agent_nexus.platform.local.supervisor import AgentSupervisor
+    from agent_nexus.platform.orchestration.process_manager import ProcessManager
+    from agent_nexus.platform.router.router import PlatformRouter
+
+    pm = ProcessManager()
+    supervisor = AgentSupervisor(
+        process_manager=pm,
+        lockfile_manager=lockfile,
+        config_loader=config_loader,
+        config_dir=config_dir,
+    )
+
+    ok = await supervisor.start_agent(name)
+    if not ok:
+        typer.echo(f"Failed to start agent '{name}'", err=True)
+        raise typer.Exit(code=1)
+
+    router = PlatformRouter(pm)
+    gateway = MCPGateway(pm, router)
+
+    typer.echo(f"Starting agent '{name}' in router mode ({transport})...", err=True)
+
+    try:
+        if transport == "sse":
+            await gateway.run_sse()
+        else:
+            await gateway.run_stdio()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        typer.echo("\nShutting down...", err=True)
+    finally:
+        await gateway.stop()
 
 
 async def _wait_forever() -> None:

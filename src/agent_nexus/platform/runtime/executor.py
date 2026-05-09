@@ -263,121 +263,98 @@ class IPythonExecutor:
 
     async def _execute_inner(self, code: str, timeout: float) -> ExecutionResult:
         """Inner execution logic, called under _exec_lock."""
-        # Acquire thread lock for the synchronous preamble to prevent race
-        # with reset() clearing self._shell while we read it.
+        # Phase 1: prepare shell + wait for prior thread (under thread lock).
         with self._thread_lock:
             try:
                 shell = await self._require_shell()
-
-                # Safety gate: if a previous timed-out thread is still running,
-                # wait for it to finish before starting a new execution.
-                if not self._exec_done.is_set():
-                    try:
-                        thread_done = await asyncio.wait_for(
-                            asyncio.to_thread(self._exec_done.wait, 5.0),
-                            timeout=6.0,
-                        )
-                    except TimeoutError:
-                        thread_done = False
-                    if not thread_done:
-                        return ExecutionResult(
-                            success=False,
-                            error="Previous timed-out execution thread is still running; "
-                            "call reset() or close() and wait for it to finish",
-                        )
-
-                # Snapshot namespace before execution to detect new variables
+                if not await self._await_prior_thread():
+                    return ExecutionResult(
+                        success=False,
+                        error="Previous timed-out execution thread is still running; "
+                        "call reset() or close() and wait for it to finish",
+                    )
                 pre_keys = self._namespace_key_set()
                 transformed = shell.transform_cell(code)
-                self._exec_done.clear()  # Thread is about to start
+                self._exec_done.clear()
             except Exception as e:
-                self._exec_done.set()  # Thread never started — clear the gate
+                self._exec_done.set()
                 logger.error("Unexpected execution error: %s", e, exc_info=True)
+                return ExecutionResult(success=False, error=f"Execution error: {e}")
+
+        # Phase 2: execute in worker thread with output capture.
+        # Thread lock released — shell reference captured locally above.
+        with self._output_redirect() as (buf_out, buf_err):
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(self._run_cell_sync, transformed),
+                    timeout=timeout,
+                )
+            except TimeoutError:
+                self._timed_out = True
                 return ExecutionResult(
                     success=False,
-                    error=f"Execution error: {e}",
+                    error=f"Execution timed out after {timeout}s",
                 )
+            except asyncio.CancelledError:
+                self._timed_out = True
+                raise
+            except Exception as e:
+                self._exec_done.set()
+                logger.error("Unexpected execution error: %s", e, exc_info=True)
+                return ExecutionResult(success=False, error=f"Execution error: {e}")
 
-        # --- thread lock released; execution proceeds without it ---
-        # The thread lock cannot be held across await calls (it would block
-        # the event loop).  The shell reference is captured locally above,
-        # and _run_cell_sync captures it again as a local variable, so
-        # reset() setting self._shell = None does not crash the running
-        # thread.
+        # Phase 3: build result from IPython cell output.
+        vars_created = self._detect_new_variables(pre_keys)
+        return self._build_cell_result(result, buf_out.getvalue(), buf_err.getvalue(), vars_created)
 
-        # Redirect stdout/stderr in the EVENT LOOP THREAD (not inside
-        # the worker thread) so that asyncio.wait_for can correctly
-        # cancel the coroutine on timeout.  Redirecting inside
-        # asyncio.to_thread deadlocks the cancellation path because
-        # the asyncio internals interact with sys.stdout during cancel.
+    # ------------------------------------------------------------------
+    # _execute_inner helpers
+    # ------------------------------------------------------------------
+
+    async def _await_prior_thread(self) -> bool:
+        """Wait for a previous timed-out thread to finish.
+
+        Returns True if no prior thread was running or it completed;
+        False if it is still running after the wait deadline.
+        """
+        if self._exec_done.is_set():
+            return True
+        try:
+            done = await asyncio.wait_for(
+                asyncio.to_thread(self._exec_done.wait, 5.0),
+                timeout=6.0,
+            )
+            return bool(done)
+        except TimeoutError:
+            return False
+
+    @contextlib.contextmanager
+    def _output_redirect(self):
+        """Context manager that redirects sys.stdout/stderr to StringIO buffers.
+
+        Must run in the event loop thread (not the worker thread) so that
+        asyncio.wait_for can correctly cancel on timeout.
+        """
         buf_out = io.StringIO()
         buf_err = io.StringIO()
-        old_out = sys.stdout
-        old_err = sys.stderr
-        sys.stdout = buf_out
-        sys.stderr = buf_err
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = buf_out, buf_err
         try:
-            result = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self._run_cell_sync,
-                    transformed,
-                ),
-                timeout=timeout,
-            )
-        except TimeoutError:
-            sys.stdout = old_out
-            sys.stderr = old_err
-            # NOTE: The underlying thread (from asyncio.to_thread) continues
-            # running after this timeout — Python cannot forcibly kill threads.
-            # Only the _timed_out flag prevents new executions on this shell,
-            # but the still-running thread may mutate kernel state (variables,
-            # imports, etc).  Callers should treat the shell as contaminated and
-            # call reset() or close() before reuse.
-            self._timed_out = True
-            return ExecutionResult(
-                success=False,
-                error=f"Execution timed out after {timeout}s",
-            )
-        except asyncio.CancelledError:
-            sys.stdout = old_out
-            sys.stderr = old_err
-            # Task cancelled while the to_thread is running.  The thread
-            # keeps going (same contamination risk as timeout), so mark
-            # the shell as timed-out to prevent reuse without reset().
-            self._timed_out = True
-            raise
-        except Exception as e:
-            sys.stdout = old_out
-            sys.stderr = old_err
-            self._exec_done.set()  # Thread never started — clear the gate
-            logger.error("Unexpected execution error: %s", e, exc_info=True)
-            return ExecutionResult(
-                success=False,
-                error=f"Execution error: {e}",
-            )
+            yield buf_out, buf_err
         finally:
-            sys.stdout = old_out
-            sys.stderr = old_err
+            sys.stdout, sys.stderr = old_out, old_err
 
-        stdout = buf_out.getvalue()
-        stderr = buf_err.getvalue()
-
-        # Collect variables created in this execution
-        vars_created = self._detect_new_variables(pre_keys)
-
-        # Handle errors
-        if result.error_before_exec:
-            err_msg = str(result.error_before_exec)
-            if stderr:
-                err_msg = f"{err_msg}\n--- stderr ---\n{stderr}"
-            return ExecutionResult(
-                success=False,
-                output=stdout or "",
-                error=err_msg,
-                variables_created=vars_created,
-            )
-        if result.error_in_exec:
-            err_msg = str(result.error_in_exec)
+    def _build_cell_result(
+        self,
+        result: Any,
+        stdout: str,
+        stderr: str,
+        vars_created: list[str],
+    ) -> ExecutionResult:
+        """Convert IPython ExecutionResult into platform ExecutionResult."""
+        error = result.error_before_exec or result.error_in_exec
+        if error:
+            err_msg = str(error)
             if stderr:
                 err_msg = f"{err_msg}\n--- stderr ---\n{stderr}"
             return ExecutionResult(

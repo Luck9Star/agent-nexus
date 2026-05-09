@@ -36,8 +36,7 @@ def main() -> None:
         except ImportError as e:
             print(f"Error: {e}", file=sys.stderr)
             print(
-                "Install full dependencies with: "
-                "pip install agent-code-reviewer[full]",
+                "Install full dependencies with: pip install agent-code-reviewer[full]",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -48,9 +47,7 @@ def _run_cli() -> None:
     from agent_code_reviewer.agent import CodeReviewerAgent
     from agent_code_reviewer.models import CodeAnalysis
 
-    parser = argparse.ArgumentParser(
-        description="code-reviewer -- 代码质量审查专家"
-    )
+    parser = argparse.ArgumentParser(description="code-reviewer -- 代码质量审查专家")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # analyze command
@@ -65,9 +62,7 @@ def _run_cli() -> None:
 
     # review command
     review_parser = subparsers.add_parser("review", help="Generate review report")
-    review_parser.add_argument(
-        "--analysis", required=True, help="JSON string of CodeAnalysis"
-    )
+    review_parser.add_argument("--analysis", required=True, help="JSON string of CodeAnalysis")
 
     args = parser.parse_args()
     agent = CodeReviewerAgent()
@@ -78,11 +73,13 @@ def _run_cli() -> None:
 
     elif args.command == "check":
         patterns = agent.check(args.code, args.language)
-        print(json.dumps(
-            {"patterns": [p.model_dump() for p in patterns]},
-            indent=2,
-            ensure_ascii=False,
-        ))
+        print(
+            json.dumps(
+                {"patterns": [p.model_dump() for p in patterns]},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
 
     elif args.command == "review":
         try:

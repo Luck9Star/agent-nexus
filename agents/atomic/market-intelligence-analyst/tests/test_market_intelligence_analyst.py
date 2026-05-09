@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from agent_market_intelligence_analyst.agent import MarketIntelligenceAgent
 from agent_market_intelligence_analyst.local_adapter import handle_message
@@ -25,23 +26,19 @@ from agent_market_intelligence_analyst.models import (
     TrendReport,
 )
 from agent_market_intelligence_analyst.tools.analyze_market import (
-    FRAMEWORK_FACTORS,
-    SUPPORTED_FRAMEWORKS,
     _compute_score,
     _count_keyword_hits,
     _generate_insights,
     analyze_market,
 )
 from agent_market_intelligence_analyst.tools.generate_briefing import (
-    FRAMEWORK_NAMES,
     generate_briefing,
 )
 from agent_market_intelligence_analyst.tools.identify_trends import (
-    identify_trends,
     _compute_confidence,
     _generate_summary,
+    identify_trends,
 )
-
 
 # ---------------------------------------------------------------------------
 # Sample market data
@@ -129,7 +126,7 @@ class TestMarketAnalysis:
 
     def test_frozen(self) -> None:
         ma = MarketAnalysis(framework="porter")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ma.framework = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -174,7 +171,7 @@ class TestTrendItem:
 
     def test_frozen(self) -> None:
         t = TrendItem(name="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             t.name = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -204,7 +201,7 @@ class TestTrendReport:
 
     def test_frozen(self) -> None:
         tr = TrendReport()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             tr.trends = []  # type: ignore[misc]
 
 
@@ -230,7 +227,7 @@ class TestBriefingReport:
 
     def test_frozen(self) -> None:
         br = BriefingReport()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             br.title = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -644,16 +641,12 @@ class TestLocalAdapter:
         assert "Unknown method" in response["error"]
 
     def test_handle_missing_data(self, agent: MarketIntelligenceAgent) -> None:
-        response = handle_message(
-            agent, {"method": "analyze_market", "params": {}}
-        )
+        response = handle_message(agent, {"method": "analyze_market", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
     def test_handle_missing_analysis(self, agent: MarketIntelligenceAgent) -> None:
-        response = handle_message(
-            agent, {"method": "generate_briefing", "params": {}}
-        )
+        response = handle_message(agent, {"method": "generate_briefing", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 

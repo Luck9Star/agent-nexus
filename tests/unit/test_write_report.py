@@ -29,13 +29,15 @@ def _make_result(
 def test_write_report_skips_empty_sections(tmp_path: Path) -> None:
     from agent_nexus.platform.agency.cli import _write_report
 
-    result = _make_result({
-        "summary": "Rich content here",
-        "context": "",
-        "empty_list": [],
-        "none_val": None,
-        "real_section": "Actual content",
-    })
+    result = _make_result(
+        {
+            "summary": "Rich content here",
+            "context": "",
+            "empty_list": [],
+            "none_val": None,
+            "real_section": "Actual content",
+        }
+    )
     report_path = tmp_path / "report.md"
     _write_report(result, report_path)
 
@@ -53,9 +55,11 @@ def test_write_report_skips_empty_sections(tmp_path: Path) -> None:
 def test_write_report_formats_list_as_bullets(tmp_path: Path) -> None:
     from agent_nexus.platform.agency.cli import _write_report
 
-    result = _make_result({
-        "recommendations": ["Use param queries", "Add rate limiting"],
-    })
+    result = _make_result(
+        {
+            "recommendations": ["Use param queries", "Add rate limiting"],
+        }
+    )
     report_path = tmp_path / "report.md"
     _write_report(result, report_path)
 
@@ -69,9 +73,11 @@ def test_write_report_formats_list_as_bullets(tmp_path: Path) -> None:
 def test_write_report_formats_dict_as_kv(tmp_path: Path) -> None:
     from agent_nexus.platform.agency.cli import _write_report
 
-    result = _make_result({
-        "agent_assignments": {"frontend": "agent-a", "backend": "agent-b"},
-    })
+    result = _make_result(
+        {
+            "agent_assignments": {"frontend": "agent-a", "backend": "agent-b"},
+        }
+    )
     report_path = tmp_path / "report.md"
     _write_report(result, report_path)
 
@@ -84,9 +90,11 @@ def test_write_report_formats_dict_as_kv(tmp_path: Path) -> None:
 def test_write_report_string_value_normal(tmp_path: Path) -> None:
     from agent_nexus.platform.agency.cli import _write_report
 
-    result = _make_result({
-        "proposed_design": "## Architecture\n\nUse microservices.",
-    })
+    result = _make_result(
+        {
+            "proposed_design": "## Architecture\n\nUse microservices.",
+        }
+    )
     report_path = tmp_path / "report.md"
     _write_report(result, report_path)
 

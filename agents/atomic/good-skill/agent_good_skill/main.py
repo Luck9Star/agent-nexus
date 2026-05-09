@@ -67,9 +67,7 @@ def _run_cli() -> None:
                 print(f"Invalid JSON for --context: {e}", file=sys.stderr)
                 sys.exit(1)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            agent.run(args.task, context)
-        )
+        result = asyncio.get_event_loop().run_until_complete(agent.run(args.task, context))
         print(result)
 
     else:

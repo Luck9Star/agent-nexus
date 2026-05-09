@@ -38,7 +38,6 @@ from agent_code_reviewer.tools.generate_review import (
     generate_review,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -216,7 +215,13 @@ class TestMeasureNesting:
         assert _measure_nesting(["if True:", "    x = 1"]) == 1
 
     def test_deep_nesting(self) -> None:
-        lines = ["if a:", "    if b:", "        if c:", "            if d:", "                x = 1"]
+        lines = [
+            "if a:",
+            "    if b:",
+            "        if c:",
+            "            if d:",
+            "                x = 1",
+        ]
         assert _measure_nesting(lines) == 4
 
     def test_empty_lines_ignored(self) -> None:
@@ -351,7 +356,7 @@ class TestAnalyzeCode:
         assert "JS004" in rule_ids
 
     def test_javascript_dynamic_code_execution(self, tmp_dir: str) -> None:
-        code = 'var r = eval(userInput)\n'
+        code = "var r = eval(userInput)\n"
         path = _write_file(tmp_dir, "dyn.js", code)
         result = analyze_code(path)
         rule_ids = [i.rule_id for i in result.issues]

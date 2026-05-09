@@ -15,8 +15,8 @@ from agent_contract_analyzer.models import (
     ComplianceReport,
     RiskAnalysis,
 )
-from agent_contract_analyzer.tools.check_compliance import check_compliance
 from agent_contract_analyzer.tools.analyze_risks import analyze_risks
+from agent_contract_analyzer.tools.check_compliance import check_compliance
 from agent_contract_analyzer.tools.extract_clauses import extract_clauses
 
 
@@ -64,9 +64,7 @@ class ContractAnalyzerAgent:
         """
         return analyze_risks(clauses)
 
-    def check_compliance(
-        self, clauses: list[ClauseInfo], jurisdiction: str
-    ) -> ComplianceReport:
+    def check_compliance(self, clauses: list[ClauseInfo], jurisdiction: str) -> ComplianceReport:
         """Phase 3: Check clauses against jurisdiction-specific regulations.
 
         Validates whether the contract clauses comply with the regulations

@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -236,6 +237,35 @@ class SkillLoader:
         return sections
 
     @staticmethod
+    def _validate_required(frontmatter: dict) -> tuple[str, str]:
+        """Validate and return (name, agent_type) from frontmatter."""
+        missing = [k for k in ("name", "agent_type") if k not in frontmatter]
+        if missing:
+            raise ValueError(
+                f"SKILL.md frontmatter missing required field(s): {', '.join(missing)}"
+            )
+
+        name_val = str(frontmatter["name"]).strip()
+        if not name_val:
+            raise ValueError("SKILL.md frontmatter 'name' must not be empty or whitespace-only")
+
+        type_val = str(frontmatter["agent_type"]).strip()
+        if not type_val:
+            raise ValueError(
+                "SKILL.md frontmatter 'agent_type' must not be empty or whitespace-only"
+            )
+        return name_val, type_val
+
+    @staticmethod
+    def _normalize_triggers(raw: Any) -> list[str]:
+        """Normalize triggers field to a list of strings."""
+        if isinstance(raw, list):
+            return [str(t) for t in raw if t is not None]
+        if raw is not None:
+            return [str(raw)]
+        return []
+
+    @staticmethod
     def _build_metadata(frontmatter: dict) -> SkillMetadata:
         """Build a :class:`SkillMetadata` from raw frontmatter dict.
 
@@ -246,34 +276,12 @@ class SkillLoader:
         Raises:
             ValueError: If ``name`` or ``agent_type`` is missing from frontmatter.
         """
-        missing = [k for k in ("name", "agent_type") if k not in frontmatter]
-        if missing:
-            raise ValueError(
-                f"SKILL.md frontmatter missing required field(s): {', '.join(missing)}"
-            )
-
-        name_val = str(frontmatter["name"]).strip()
-        if not name_val:
-            raise ValueError(
-                "SKILL.md frontmatter 'name' must not be empty or whitespace-only"
-            )
-
-        type_val = str(frontmatter["agent_type"]).strip()
-        if not type_val:
-            raise ValueError(
-                "SKILL.md frontmatter 'agent_type' must not be empty or whitespace-only"
-            )
+        name_val, type_val = SkillLoader._validate_required(frontmatter)
 
         known_keys = {"name", "agent_type", "triggers", "capabilities", "model_config"}
         extra = {k: v for k, v in frontmatter.items() if k not in known_keys}
 
-        raw_triggers = frontmatter.get("triggers", [])
-        if isinstance(raw_triggers, list):
-            raw_triggers = [str(t) for t in raw_triggers if t is not None]
-        elif raw_triggers is not None:
-            raw_triggers = [str(raw_triggers)]
-        else:
-            raw_triggers = []
+        raw_triggers = SkillLoader._normalize_triggers(frontmatter.get("triggers", []))
         raw_capabilities = frontmatter.get("capabilities", [])
         raw_model_config = frontmatter.get("model_config", {})
 
@@ -282,9 +290,7 @@ class SkillLoader:
             agent_type=type_val,
             triggers=raw_triggers,
             capabilities=(
-                raw_capabilities
-                if isinstance(raw_capabilities, list)
-                else [raw_capabilities]
+                raw_capabilities if isinstance(raw_capabilities, list) else [raw_capabilities]
             ),
             model_config=raw_model_config if isinstance(raw_model_config, dict) else {},
             extra=extra,

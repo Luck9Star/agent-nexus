@@ -254,25 +254,8 @@ class MCPGateway:
         disambiguates by appending a numeric suffix.
         """
         async with self._reg_lock:
-            if agent_name in self._registered_agents:
-                # Check if the agent process is still alive.  If not,
-                # clean up stale state so we can re-register fresh tools.
-                info = self._registry.get_agent_info(agent_name)
-                if info is not None and info.handle is not None and info.handle.is_alive:
-                    logger.debug(
-                        "Agent '%s' tools already registered and process alive, skipping",
-                        agent_name,
-                    )
-                    return
-                # Stale registration — clean up old tool names
-                logger.info(
-                    "Agent '%s' registered but process dead; cleaning up for re-registration",
-                    agent_name,
-                )
-                adapters = self._registry.get_tool_adapters(agent_name)
-                for ad in adapters:
-                    self._registered_tool_names.discard(ad.full_name)
-                self._registered_agents.discard(agent_name)
+            if self._is_stale_registration(agent_name):
+                self._cleanup_agent_registration(agent_name)
 
             info = self._registry.get_agent_info(agent_name)
             if info is None or info.tool_schemas is None:
@@ -285,43 +268,62 @@ class MCPGateway:
                 return
 
             adapters = self._registry.get_tool_adapters(agent_name)
-
             for adapter in adapters:
-                full_name = adapter.full_name
-                # Detect collision with an already-registered tool name
-                if full_name in self._registered_tool_names:
-                    # Append numeric suffix to disambiguate
-                    suffix = 2
-                    while f"{full_name}_{suffix}" in self._registered_tool_names:
-                        suffix += 1
-                        if suffix > 100:
-                            raise ValueError(
-                                f"Too many tool name collisions for '{full_name}' "
-                                f"(max 100 disambiguations)"
-                            )
-                    disambiguated = f"{full_name}_{suffix}"
-                    logger.warning(
-                        "Tool name collision: '%s' from agent '%s' "
-                        "already registered, renaming to '%s'",
-                        full_name,
-                        agent_name,
-                        disambiguated,
-                    )
-                    full_name = disambiguated
-
-                try:
-                    self._mcp.tool(self._make_tool_func(adapter, registered_name=full_name))
-                    self._registered_tool_names.add(full_name)
-                    logger.debug("Registered gateway tool: %s", full_name)
-                except Exception as exc:
-                    # FastMCP may raise if tool name already registered
-                    logger.warning(
-                        "Tool '%s' already registered or error: %s",
-                        full_name,
-                        exc,
-                    )
+                self._register_single_tool(adapter, agent_name)
 
             self._registered_agents.add(agent_name)
+
+    def _is_stale_registration(self, agent_name: str) -> bool:
+        """Check if an already-registered agent has a dead process (stale)."""
+        if agent_name not in self._registered_agents:
+            return False
+        info = self._registry.get_agent_info(agent_name)
+        if info is not None and info.handle is not None and info.handle.is_alive:
+            logger.debug(
+                "Agent '%s' tools already registered and process alive, skipping",
+                agent_name,
+            )
+            return False
+        logger.info(
+            "Agent '%s' registered but process dead; cleaning up for re-registration",
+            agent_name,
+        )
+        return True
+
+    def _register_single_tool(self, adapter: Any, agent_name: str) -> None:
+        """Register a single tool adapter, handling name collisions."""
+        full_name = adapter.full_name
+        if full_name in self._registered_tool_names:
+            full_name = self._disambiguate_tool_name(full_name, agent_name)
+
+        try:
+            self._mcp.tool(self._make_tool_func(adapter, registered_name=full_name))
+            self._registered_tool_names.add(full_name)
+            logger.debug("Registered gateway tool: %s", full_name)
+        except Exception as exc:
+            logger.warning(
+                "Tool '%s' already registered or error: %s",
+                full_name,
+                exc,
+            )
+
+    def _disambiguate_tool_name(self, full_name: str, agent_name: str) -> str:
+        """Append numeric suffix to resolve tool name collision."""
+        suffix = 2
+        while f"{full_name}_{suffix}" in self._registered_tool_names:
+            suffix += 1
+            if suffix > 100:
+                raise ValueError(
+                    f"Too many tool name collisions for '{full_name}' (max 100 disambiguations)"
+                )
+        disambiguated = f"{full_name}_{suffix}"
+        logger.warning(
+            "Tool name collision: '%s' from agent '%s' already registered, renaming to '%s'",
+            full_name,
+            agent_name,
+            disambiguated,
+        )
+        return disambiguated
 
     def _cleanup_agent_registration(self, agent_name: str) -> None:
         """Clean up stale registration state for a dead agent.
@@ -348,6 +350,40 @@ class MCPGateway:
                 )
         remove_lock(agent_name)
 
+    def _check_agent_health(
+        self,
+        agent_name: str,
+        adapter: McpToolAdapter,
+    ) -> tuple[Any | None, str | None]:
+        """Check agent health. Returns (info, error_msg) — error_msg set means agent unavailable."""
+        info = self._registry.get_agent_info(agent_name)
+        if info is None or info.handle is None:
+            return None, f"Error: agent '{agent_name}' not available"
+        if not info.handle.is_alive:
+            self._cleanup_agent_registration(agent_name)
+            return None, f"Error: agent '{agent_name}' process has died"
+        return info, None
+
+    def _handle_ipc_result(
+        self,
+        result: dict,
+        agent_name: str,
+    ) -> str:
+        """Process IPC call result and return string response."""
+        if result["success"]:
+            return result["output"]
+        error_type = result.get("error_type", "")
+        if error_type in IPC_FATAL_ERROR_TYPES:
+            try:
+                self._cleanup_agent_registration(agent_name)
+            except Exception:
+                logger.debug(
+                    "Failed to clean up dead agent '%s' registration",
+                    agent_name,
+                    exc_info=True,
+                )
+        return f"Error: {result.get('error', 'unknown failure')}"
+
     def _make_tool_func(
         self,
         adapter: McpToolAdapter,
@@ -368,47 +404,21 @@ class MCPGateway:
         display_name = registered_name or adapter.full_name
 
         async def _invoke(**kwargs: Any) -> str:
-            info = self._registry.get_agent_info(adapter.agent_name)
-            if info is None or info.handle is None:
-                return f"Error: agent '{adapter.agent_name}' not available"
-
-            # Health check: clean up stale registration if process died
-            if not info.handle.is_alive:
-                # No lock: set.discard is atomic under GIL, and
-                # reacquiring _reg_lock here would deadlock if
-                # _register_agent_tools still holds it (asyncio.Lock
-                # is non-reentrant).
-                self._cleanup_agent_registration(adapter.agent_name)
-                return f"Error: agent '{adapter.agent_name}' process has died"
+            info, health_err = self._check_agent_health(adapter.agent_name, adapter)
+            if health_err:
+                return health_err
+            assert info is not None  # guaranteed when health_err is None
 
             try:
                 result = await adapter.execute(info.handle, kwargs)
             except (TimeoutError, OSError, ConnectionError, IPCError) as exc:
-                # Transport-level failure: process died between is_alive
-                # check and IPC send.  adapter.execute() handles IPCError
-                # internally — reaching here means a low-level OS failure.
                 self._cleanup_agent_registration(adapter.agent_name)
                 return (
                     f"Error: IPC failed for agent "
                     f"'{adapter.agent_name}' [{type(exc).__name__}]: {exc}"
                 )
-            if result["success"]:
-                return result["output"]
-            # If the error indicates the agent process is dead
-            # (IPC/connection failure), clean up stale registration
-            # so get_tools() reflects reality immediately instead of
-            # waiting for the next _invoke call's is_alive check.
-            error_type = result.get("error_type", "")
-            if error_type in IPC_FATAL_ERROR_TYPES:
-                try:
-                    self._cleanup_agent_registration(adapter.agent_name)
-                except Exception:
-                    logger.debug(
-                        "Failed to clean up dead agent '%s' registration",
-                        adapter.agent_name,
-                        exc_info=True,
-                    )
-            return f"Error: {result.get('error', 'unknown failure')}"
+
+            return self._handle_ipc_result(result, adapter.agent_name)
 
         # Override __signature__ and __annotations__ so FastMCP's
         # ParsedFunction.from_function() sees explicit typed parameters
@@ -437,13 +447,26 @@ class MCPGateway:
         schema = adapter._input_schema
         if not schema or "properties" not in schema:
             return [], {"return": str}
+        return MCPGateway._build_params_from_schema(schema)
 
-        properties = schema.get("properties", {})
-        required = set(schema.get("required", []))
+    @staticmethod
+    def _build_params_from_schema(
+        input_schema: dict,
+    ) -> tuple[list[inspect.Parameter], dict[str, Any]]:
+        """Build inspect.Parameter list from a JSON-schema dict.
+
+        Shared implementation used by both internal tool adapters and
+        external MCP server tools.
+        """
+        if not input_schema or "properties" not in input_schema:
+            return [], {"return": str}
+
+        properties = input_schema.get("properties", {})
+        required = set(input_schema.get("required", []))
         params: list[inspect.Parameter] = []
         annotations: dict[str, Any] = {}
 
-        transformer = SchemaTransformer(schema)
+        transformer = SchemaTransformer(input_schema)
         for prop_name, prop_def in properties.items():
             if not isinstance(prop_def, dict):
                 continue
@@ -537,7 +560,7 @@ class MCPGateway:
 
             # Build signature from inputSchema so FastMCP can parse parameters
             params, annotations = self._build_params_from_schema(input_schema)
-            _invoke.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+            _invoke.__signature__ = inspect.Signature(
                 parameters=params,
                 return_annotation=str,
             )
@@ -597,57 +620,6 @@ class MCPGateway:
                 return f"Error: {type(exc).__name__}: {exc}"
 
         return _invoke
-
-    @staticmethod
-    def _build_params_from_schema(
-        input_schema: dict,
-    ) -> tuple[list[inspect.Parameter], dict[str, Any]]:
-        """Build inspect.Parameter list from a JSON-schema dict.
-
-        Similar to _build_params but works directly with a raw schema
-        dict instead of a McpToolAdapter.
-        """
-        if not input_schema or "properties" not in input_schema:
-            return [], {"return": str}
-
-        properties = input_schema.get("properties", {})
-        required = set(input_schema.get("required", []))
-        params: list[inspect.Parameter] = []
-        annotations: dict[str, Any] = {}
-
-        transformer = SchemaTransformer(input_schema)
-        for prop_name, prop_def in properties.items():
-            if not isinstance(prop_def, dict):
-                continue
-            py_type = transformer.resolve(prop_def, name=prop_name)
-            annotations[prop_name] = py_type
-
-            if prop_name in required:
-                params.append(
-                    inspect.Parameter(
-                        prop_name,
-                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        annotation=py_type,
-                    )
-                )
-            else:
-                has_default = "default" in prop_def
-                if has_default:
-                    default = prop_def["default"]
-                else:
-                    default = None
-                    py_type = py_type | None  # type: ignore[assignment]
-                annotations[prop_name] = py_type
-                params.append(
-                    inspect.Parameter(
-                        prop_name,
-                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        annotation=py_type,
-                        default=default,
-                    )
-                )
-
-        return params, annotations
 
     # ------------------------------------------------------------------
     # Runtime

@@ -13,9 +13,9 @@ Covers:
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from agent_accessibility_auditor.agent import AccessibilityAuditorAgent
 from agent_accessibility_auditor.local_adapter import handle_message
@@ -38,10 +38,8 @@ from agent_accessibility_auditor.tools.audit_content import (
 from agent_accessibility_auditor.tools.check_html import check_html
 from agent_accessibility_auditor.tools.generate_remediation import (
     _categorize_issue,
-    _estimate_effort,
     generate_remediation,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -83,7 +81,7 @@ class TestAccessibilityIssue:
 
     def test_frozen(self) -> None:
         i = AccessibilityIssue(criterion="1.1.1")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             i.criterion = "2.0"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -116,7 +114,7 @@ class TestAuditResult:
 
     def test_frozen(self) -> None:
         r = AuditResult()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.compliance_score = 50.0  # type: ignore[misc]
 
 
@@ -136,7 +134,7 @@ class TestRemediationPlan:
 
     def test_frozen(self) -> None:
         p = RemediationPlan()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             p.estimated_effort = "2 hours"  # type: ignore[misc]
 
 
@@ -307,7 +305,9 @@ class TestCheckTables:
         assert any("header" in i.description.lower() for i in issues)
 
     def test_table_with_headers(self) -> None:
-        issues = _check_tables("<table><tr><th scope='col'>Name</th></tr><tr><td>Data</td></tr></table>")
+        issues = _check_tables(
+            "<table><tr><th scope='col'>Name</th></tr><tr><td>Data</td></tr></table>"
+        )
         assert not any("header" in i.description.lower() for i in issues)
 
 
@@ -406,7 +406,9 @@ class TestGenerateRemediation:
 
     def test_effort_estimation(self) -> None:
         issues = [
-            AccessibilityIssue(criterion="1.1.1", level="A", element="img", description="Image alt"),
+            AccessibilityIssue(
+                criterion="1.1.1", level="A", element="img", description="Image alt"
+            ),
         ]
         plan = generate_remediation(issues)
         assert plan.estimated_effort != "TBD"
@@ -433,7 +435,9 @@ class TestCategorizeIssue:
         assert _categorize_issue(i) == "forms"
 
     def test_heading_category(self) -> None:
-        i = AccessibilityIssue(criterion="1.3.1", level="A", element="h2", description="heading skip")
+        i = AccessibilityIssue(
+            criterion="1.3.1", level="A", element="h2", description="heading skip"
+        )
         assert _categorize_issue(i) == "headings"
 
 
@@ -460,14 +464,7 @@ class TestAccessibilityAuditorAgent:
         assert isinstance(result, RemediationPlan)
 
     def test_full_pipeline(self, agent: AccessibilityAuditorAgent) -> None:
-        html = (
-            "<html>"
-            "<body>"
-            "<h2>No h1</h2>"
-            '<img src="photo.jpg">'
-            '<input type="text">'
-            "</body></html>"
-        )
+        html = '<html><body><h2>No h1</h2><img src="photo.jpg"><input type="text"></body></html>'
         audit = agent.audit_content(html, "html")
         assert audit.compliance_score < 100.0
 
@@ -525,9 +522,7 @@ class TestLocalAdapter:
         assert "result" in response
 
     def test_handle_audit_missing_content(self, agent: AccessibilityAuditorAgent) -> None:
-        response = handle_message(
-            agent, {"method": "audit", "params": {}}
-        )
+        response = handle_message(agent, {"method": "audit", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
@@ -540,9 +535,7 @@ class TestLocalAdapter:
         assert isinstance(response["result"], list)
 
     def test_handle_check_html_missing(self, agent: AccessibilityAuditorAgent) -> None:
-        response = handle_message(
-            agent, {"method": "check_html", "params": {}}
-        )
+        response = handle_message(agent, {"method": "check_html", "params": {}})
         assert response["status"] == "error"
 
     def test_handle_remediation(self, agent: AccessibilityAuditorAgent) -> None:
@@ -550,11 +543,7 @@ class TestLocalAdapter:
             agent,
             {
                 "method": "remediation",
-                "params": {
-                    "issues": [
-                        {"criterion": "1.1.1", "level": "A", "element": "img"}
-                    ]
-                },
+                "params": {"issues": [{"criterion": "1.1.1", "level": "A", "element": "img"}]},
             },
         )
         assert response["status"] == "ok"

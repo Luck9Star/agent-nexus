@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 import yaml
 from typer.testing import CliRunner
 
@@ -33,9 +31,7 @@ def _write_atomic_agent(base: Path, name: str = "test-agent") -> Path:
         "type": "atomic",
         "description": "Test agent",
     }
-    (agent_dir / "agent-manifest.yaml").write_text(
-        yaml.dump(manifest), encoding="utf-8"
-    )
+    (agent_dir / "agent-manifest.yaml").write_text(yaml.dump(manifest), encoding="utf-8")
 
     # SKILL.md with YAML frontmatter
     skill_md = (
@@ -60,9 +56,7 @@ def _write_atomic_agent(base: Path, name: str = "test-agent") -> Path:
     )
 
     # mcp_adapter.py
-    (pkg_dir / "mcp_adapter.py").write_text(
-        "def create_mcp_server(): pass\n", encoding="utf-8"
-    )
+    (pkg_dir / "mcp_adapter.py").write_text("def create_mcp_server(): pass\n", encoding="utf-8")
     (pkg_dir / "__init__.py").write_text("", encoding="utf-8")
 
     return agent_dir
@@ -79,9 +73,7 @@ def _write_composite_agent(base: Path, name: str = "test-composite") -> Path:
         "type": "composite",
         "description": "Test composite agent",
     }
-    (agent_dir / "agent-manifest.yaml").write_text(
-        yaml.dump(manifest), encoding="utf-8"
-    )
+    (agent_dir / "agent-manifest.yaml").write_text(yaml.dump(manifest), encoding="utf-8")
 
     composition_toml = (
         '[composition]\nname = "test-composite"\ndescription = "test"\n\n'
@@ -184,9 +176,7 @@ class TestCheckInvalidContent:
             "type": "atomic",
             "description": "Test",
         }
-        (agent_dir / "agent-manifest.yaml").write_text(
-            yaml.dump(manifest), encoding="utf-8"
-        )
+        (agent_dir / "agent-manifest.yaml").write_text(yaml.dump(manifest), encoding="utf-8")
         result = runner.invoke(app, ["check", str(agent_dir)])
         assert result.exit_code == 1
         assert "name" in result.output.lower()

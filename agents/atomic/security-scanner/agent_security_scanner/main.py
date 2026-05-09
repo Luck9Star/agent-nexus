@@ -57,9 +57,7 @@ def _run_cli() -> None:
 
     # deps command
     deps_parser = subparsers.add_parser("deps", help="Check dependencies for CVEs")
-    deps_parser.add_argument(
-        "--deps", required=True, help="JSON string of {package: version}"
-    )
+    deps_parser.add_argument("--deps", required=True, help="JSON string of {package: version}")
 
     # report command
     report_parser = subparsers.add_parser("report", help="Generate security report")

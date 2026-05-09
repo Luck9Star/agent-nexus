@@ -8,6 +8,7 @@ Validates that:
 - TaskComposer uses ProfileBasedExecutor by default
 - _build_profile_package preserves custom imported_at dates
 """
+
 from __future__ import annotations
 
 import tempfile
@@ -139,9 +140,7 @@ class TestProfileDifferentiation:
             artifact_a.artifact_type != artifact_b.artifact_type
             or artifact_a.sections != artifact_b.sections
         )
-        assert different, (
-            f"Profiles {ids[0]} and {ids[1]} produced identical artifacts"
-        )
+        assert different, f"Profiles {ids[0]} and {ids[1]} produced identical artifacts"
 
     def test_capabilities_drive_different_findings(self, populated_registry):
         """Agents with different capabilities produce different 'findings' sections."""
@@ -160,9 +159,7 @@ class TestProfileDifferentiation:
         for art in artifacts_by_id.values():
             section_keys_set.add(frozenset(art.sections.keys()))
 
-        assert len(section_keys_set) > 1, (
-            "All profiles produced identical section structures"
-        )
+        assert len(section_keys_set) > 1, "All profiles produced identical section structures"
 
 
 # ---------------------------------------------------------------------------
@@ -220,9 +217,7 @@ class TestTaskComposerDefaultExecutor:
             # The integrated artifact should have merged sections from real profiles,
             # not the same stub "context" key from every agent
             merged = result.integrated.merged_sections
-            assert len(merged) > 1, (
-                f"Expected >1 merged sections, got: {list(merged.keys())}"
-            )
+            assert len(merged) > 1, f"Expected >1 merged sections, got: {list(merged.keys())}"
 
     def test_default_not_stub_anymore(self, populated_registry):
         """Default executor output is NOT the old stub format (just 'context')."""
@@ -328,28 +323,36 @@ class TestImporterImportedAt:
 def _make_registry_with_model_override():
     """Registry where one expert has a model override."""
     registry = ExpertRegistry()
-    registry.add("agency.expert-a", {
-        "id": "agency.expert-a",
-        "name": "Expert A",
-        "capabilities": ["code_review"],
-        "profile": {"body": "You are a code reviewer."},
-        "output_contract": {
-            "artifact_type": "report",
-            "required_sections": ["summary"],
+    registry.add(
+        "agency.expert-a",
+        {
+            "id": "agency.expert-a",
+            "name": "Expert A",
+            "capabilities": ["code_review"],
+            "profile": {"body": "You are a code reviewer."},
+            "output_contract": {
+                "artifact_type": "report",
+                "required_sections": ["summary"],
+            },
+            # No model override — uses default
         },
-        # No model override — uses default
-    }, ["code_review"])
-    registry.add("agency.expert-b", {
-        "id": "agency.expert-b",
-        "name": "Expert B",
-        "capabilities": ["security_review"],
-        "profile": {"body": "You are a security expert."},
-        "output_contract": {
-            "artifact_type": "report",
-            "required_sections": ["summary"],
+        ["code_review"],
+    )
+    registry.add(
+        "agency.expert-b",
+        {
+            "id": "agency.expert-b",
+            "name": "Expert B",
+            "capabilities": ["security_review"],
+            "profile": {"body": "You are a security expert."},
+            "output_contract": {
+                "artifact_type": "report",
+                "required_sections": ["summary"],
+            },
+            "model": "anthropic:claude-sonnet-4-20250514",  # Per-expert override
         },
-        "model": "anthropic:claude-sonnet-4-20250514",  # Per-expert override
-    }, ["security_review"])
+        ["security_review"],
+    )
     return registry
 
 

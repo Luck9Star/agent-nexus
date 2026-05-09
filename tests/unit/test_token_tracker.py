@@ -6,17 +6,17 @@ import pytest
 
 from agent_nexus.models.context import BudgetAlertLevel, ContextBudget, ContextBudgetLogEntry
 from agent_nexus.platform.runtime.token_tracker import (
+    _ALERT_OK,
     MAX_TOKENS,
     TokenAlert,
     TokenTracker,
-    _ALERT_OK,
     _alert_from_budget,
 )
-
 
 # ---------------------------------------------------------------------------
 # TokenAlert
 # ---------------------------------------------------------------------------
+
 
 class TestTokenAlert:
     """Tests for TokenAlert frozen dataclass."""
@@ -31,13 +31,14 @@ class TestTokenAlert:
     def test_frozen(self) -> None:
         """Modifying fields on TokenAlert raises FrozenInstanceError."""
         alert = TokenAlert(level="ok", message="Within budget", usage_pct=50.0)
-        with pytest.raises(Exception):  # FrozenInstanceError
+        with pytest.raises(AttributeError):  # FrozenInstanceError is an AttributeError
             alert.level = BudgetAlertLevel.COMPACTION  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
 # _alert_from_budget helper
 # ---------------------------------------------------------------------------
+
 
 class TestAlertFromBudget:
     """Tests for _alert_from_budget helper function."""
@@ -70,6 +71,7 @@ class TestAlertFromBudget:
 # ---------------------------------------------------------------------------
 # TokenTracker
 # ---------------------------------------------------------------------------
+
 
 class TestTokenTracker:
     """Tests for TokenTracker class."""
@@ -343,6 +345,7 @@ class TestLogTrimming:
 
 
 # iter122 regression: max_tokens minimum guard
+
 
 class TestTokenTrackerMaxTokensGuard:
     """TokenTracker raises ValueError when max_tokens < 1."""

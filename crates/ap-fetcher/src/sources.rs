@@ -311,7 +311,7 @@ branch = "main"
         assert_eq!(entries.len(), 2);
 
         // Verify other sections preserved
-        let content = std::fs::read_to_string(&dir.path().join("config.toml")).unwrap();
+        let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
         assert!(content.contains("[models]"));
         assert!(content.contains("openai:gpt-4o"));
     }

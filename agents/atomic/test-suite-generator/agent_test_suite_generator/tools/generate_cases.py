@@ -6,7 +6,7 @@ paths, boundary conditions, and error scenarios.
 
 from __future__ import annotations
 
-from agent_test_suite_generator.models import TestCase, TestAnalysis, TestUnit
+from agent_test_suite_generator.models import TestAnalysis, TestCase, TestUnit
 
 
 def _generate_unit_test(unit: TestUnit) -> TestCase:
@@ -63,7 +63,7 @@ def _generate_class_tests(unit: TestUnit) -> list[TestCase]:
     cases.append(
         TestCase(
             name=f"test_{unit.name}_instantiation",
-            setup=f"Prepare constructor arguments",
+            setup="Prepare constructor arguments",
             actions=[f"Create instance of {unit.name}"],
             assertions=[
                 f"Verify {unit.name} instance is created",

@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 
 def main() -> None:
@@ -81,7 +82,7 @@ def _run_cli() -> None:
 
     if args.command == "analyze":
         try:
-            text = open(args.file_path).read()
+            text = Path(args.file_path).read_text()
             result = agent.analyze_market(text, args.framework)
             print(json.dumps(result.model_dump(), indent=2, ensure_ascii=False))
         except FileNotFoundError as e:
@@ -90,7 +91,7 @@ def _run_cli() -> None:
 
     elif args.command == "trends":
         try:
-            text = open(args.file_path).read()
+            text = Path(args.file_path).read_text()
             result = agent.identify_trends(text)
             print(json.dumps(result.model_dump(), indent=2, ensure_ascii=False))
         except FileNotFoundError as e:
@@ -99,7 +100,7 @@ def _run_cli() -> None:
 
     elif args.command == "briefing":
         try:
-            text = open(args.file_path).read()
+            text = Path(args.file_path).read_text()
             analysis = agent.analyze_market(text, args.framework)
             result = agent.generate_briefing(analysis)
             print(json.dumps(result.model_dump(), indent=2, ensure_ascii=False))

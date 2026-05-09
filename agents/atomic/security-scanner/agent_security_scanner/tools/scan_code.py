@@ -23,7 +23,7 @@ _SQL_INJECTION_PATTERNS: list[tuple[str, str, str, str, str, str]] = [
         "Use parameterized queries with placeholders instead of string formatting",
     ),
     (
-        r'(?:SELECT|INSERT|UPDATE|DELETE)\s+.*(?:\+\s*\w+|\.format\()',
+        r"(?:SELECT|INSERT|UPDATE|DELETE)\s+.*(?:\+\s*\w+|\.format\()",
         "injection",
         "CWE-89",
         "high",
@@ -42,7 +42,7 @@ _SQL_INJECTION_PATTERNS: list[tuple[str, str, str, str, str, str]] = [
 
 _XSS_PATTERNS: list[tuple[str, str, str, str, str, str]] = [
     (
-        r'(?:render_template_string|Markup)\s*\(.*(?:request\.|user_input)',
+        r"(?:render_template_string|Markup)\s*\(.*(?:request\.|user_input)",
         "xss",
         "CWE-79",
         "high",
@@ -50,7 +50,7 @@ _XSS_PATTERNS: list[tuple[str, str, str, str, str, str]] = [
         "Always escape user input; use template auto-escaping",
     ),
     (
-        r'\.innerHTML\s*=.*(?:document\.|user_input|params)',
+        r"\.innerHTML\s*=.*(?:document\.|user_input|params)",
         "xss",
         "CWE-79",
         "high",
@@ -61,7 +61,7 @@ _XSS_PATTERNS: list[tuple[str, str, str, str, str, str]] = [
 
 _PATH_TRAVERSAL_PATTERNS: list[tuple[str, str, str, str, str, str]] = [
     (
-        r'open\s*\(\s*(?:request\.|user_input|os\.path\.join\(.*request)',
+        r"open\s*\(\s*(?:request\.|user_input|os\.path\.join\(.*request)",
         "path_traversal",
         "CWE-22",
         "high",
@@ -69,7 +69,7 @@ _PATH_TRAVERSAL_PATTERNS: list[tuple[str, str, str, str, str, str]] = [
         "Validate and sanitize file paths; use allowlists for permitted directories",
     ),
     (
-        r'\.\./|\.\.\\',
+        r"\.\./|\.\.\\",
         "path_traversal",
         "CWE-22",
         "medium",
@@ -80,7 +80,7 @@ _PATH_TRAVERSAL_PATTERNS: list[tuple[str, str, str, str, str, str]] = [
 
 _COMMAND_INJECTION_PATTERNS: list[tuple[str, str, str, str, str, str]] = [
     (
-        r'(?:os\.system|subprocess\.(?:call|run|Popen))\s*\(.*(?:request\.|user_input|input\()',
+        r"(?:os\.system|subprocess\.(?:call|run|Popen))\s*\(.*(?:request\.|user_input|input\()",
         "command_injection",
         "CWE-78",
         "critical",
@@ -88,7 +88,7 @@ _COMMAND_INJECTION_PATTERNS: list[tuple[str, str, str, str, str, str]] = [
         "Avoid shell commands with user input; use subprocess with shell=False and list args",
     ),
     (
-        r'(?:eval|exec)\s*\(.*(?:request\.|user_input|input\()',
+        r"(?:eval|exec)\s*\(.*(?:request\.|user_input|input\()",
         "command_injection",
         "CWE-78",
         "critical",
@@ -171,7 +171,7 @@ def _scan_file(path: Path) -> SecurityScanResult:
     # Build line offset table once for O(log n) line-number lookup
     line_offsets = [0]
     for i, ch in enumerate(content):
-        if ch == '\n':
+        if ch == "\n":
             line_offsets.append(i + 1)
 
     findings: list[SecurityFinding] = []
@@ -210,7 +210,13 @@ def _scan_directory(dir_path: Path) -> SecurityScanResult:
 
 def _build_summary(findings: list[SecurityFinding]) -> dict:
     """Build severity summary from findings."""
-    summary: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "total": len(findings)}
+    summary: dict[str, int] = {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "total": len(findings),
+    }
     for f in findings:
         key = f.severity.lower()
         if key in summary:

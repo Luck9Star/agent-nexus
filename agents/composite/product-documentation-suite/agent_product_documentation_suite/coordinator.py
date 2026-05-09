@@ -16,14 +16,14 @@ import os
 import uuid
 
 from agent_nexus.models.composition import Composition, CompositionError
-
-logger = logging.getLogger(__name__)
+from agent_nexus.platform.utils import detect_cycles_dfs
 
 from agent_product_documentation_suite.models import (
     DocArtifact,
     DocumentationResult,
 )
-from agent_nexus.platform.utils import detect_cycles_dfs
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Simulated Atomic Agent helpers (POC -- no real subprocesses)
@@ -131,6 +131,27 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
+def _validate_task_fields(tasks: dict, task_ids: set[str], errors: list[str]) -> None:
+    """Validate each task has required fields and valid dependencies."""
+    for task_id, task_def in tasks.items():
+        if "name" not in task_def:
+            errors.append(f"Task '{task_id}' missing 'name'")
+        if "agent" not in task_def:
+            errors.append(f"Task '{task_id}' missing 'agent'")
+
+        blocked_by = task_def.get("blocked_by", [])
+        if not isinstance(blocked_by, list):
+            errors.append(f"Task '{task_id}' blocked_by must be a list")
+            continue
+
+        for dep in blocked_by:
+            if dep not in task_ids:
+                errors.append(f"Task '{task_id}' references unknown dependency '{dep}'")
+
+        if task_id in blocked_by:
+            errors.append(f"Task '{task_id}' cannot depend on itself")
+
+
 # ---------------------------------------------------------------------------
 # Coordinator
 # ---------------------------------------------------------------------------
@@ -231,7 +252,7 @@ class DocumentationSuiteCoordinator:
             *[_simulate_localization_async(summary_text, lang) for lang in target_langs],
             return_exceptions=True,
         )
-        for lang, loc_result in zip(target_langs, loc_results):
+        for lang, loc_result in zip(target_langs, loc_results, strict=True):
             if isinstance(loc_result, Exception):
                 logger.exception("Localization failed for language '%s'", lang)
             else:
@@ -335,28 +356,8 @@ class DocumentationSuiteCoordinator:
             return errors
 
         task_ids = set(tasks.keys())
+        _validate_task_fields(tasks, task_ids, errors)
 
-        for task_id, task_def in tasks.items():
-            if "name" not in task_def:
-                errors.append(f"Task '{task_id}' missing 'name'")
-            if "agent" not in task_def:
-                errors.append(f"Task '{task_id}' missing 'agent'")
-
-            blocked_by = task_def.get("blocked_by", [])
-            if not isinstance(blocked_by, list):
-                errors.append(f"Task '{task_id}' blocked_by must be a list")
-                continue
-
-            for dep in blocked_by:
-                if dep not in task_ids:
-                    errors.append(
-                        f"Task '{task_id}' references unknown dependency '{dep}'"
-                    )
-
-            if task_id in blocked_by:
-                errors.append(f"Task '{task_id}' cannot depend on itself")
-
-        # Shared cycle detection from platform utils
         cycles = detect_cycles_dfs(
             task_ids,
             lambda tid: [d for d in tasks[tid].get("blocked_by", []) if d in task_ids],

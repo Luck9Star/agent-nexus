@@ -13,17 +13,16 @@ import asyncio
 import logging
 import os
 import uuid
-from pathlib import Path
 
 import toml
-
-logger = logging.getLogger(__name__)
+from agent_nexus.platform.utils import detect_cycles_dfs
 
 from agent_competitive_intelligence_briefing.models import (
     BriefingResult,
     PipelineStep,
 )
-from agent_nexus.platform.utils import detect_cycles_dfs, resolve_composition_path
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Simulated Atomic Agent helpers (POC -- no real subprocesses)
@@ -54,9 +53,7 @@ def _simulate_market_intel(query: str, framework: str = "porter") -> dict:
     }
 
 
-def _simulate_doc_filler(
-    analysis: dict, template_path: str | None = None
-) -> dict:
+def _simulate_doc_filler(analysis: dict, template_path: str | None = None) -> dict:
     """Simulate doc-filler output.
 
     Returns a dict mirroring FillResult.model_dump().
@@ -83,9 +80,7 @@ def _simulate_doc_filler(
     }
 
 
-def _simulate_localization(
-    text: str, target_lang: str
-) -> dict:
+def _simulate_localization(text: str, target_lang: str) -> dict:
     """Simulate localization-specialist output.
 
     Returns a dict mirroring LocalizationResult.model_dump().
@@ -110,6 +105,27 @@ def _simulate_localization(
 async def _simulate_localization_async(text: str, target_lang: str) -> dict:
     """Async wrapper for _simulate_localization."""
     return _simulate_localization(text, target_lang)
+
+
+def _validate_task_fields(tasks: dict, task_ids: set[str], errors: list[str]) -> None:
+    """Validate each task has required fields and valid dependencies."""
+    for task_id, task_def in tasks.items():
+        if "name" not in task_def:
+            errors.append(f"Task '{task_id}' missing 'name'")
+        if "agent" not in task_def:
+            errors.append(f"Task '{task_id}' missing 'agent'")
+
+        blocked_by = task_def.get("blocked_by", [])
+        if not isinstance(blocked_by, list):
+            errors.append(f"Task '{task_id}' blocked_by must be a list")
+            continue
+
+        for dep in blocked_by:
+            if dep not in task_ids:
+                errors.append(f"Task '{task_id}' references unknown dependency '{dep}'")
+
+        if task_id in blocked_by:
+            errors.append(f"Task '{task_id}' cannot depend on itself")
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +167,9 @@ class CompetitiveIntelCoordinator:
         """
         if target_langs is None:
             target_langs = ["en"]
-        return asyncio.run(self._generate_briefing_async(query, target_langs, template_path, framework))
+        return asyncio.run(
+            self._generate_briefing_async(query, target_langs, template_path, framework)
+        )
 
     async def generate_briefing_async(
         self,
@@ -191,7 +209,7 @@ class CompetitiveIntelCoordinator:
                 output_data=analysis,
                 status="completed",
             )
-        except Exception as exc:
+        except Exception:
             steps[0] = PipelineStep(
                 name=steps[0].name,
                 agent=steps[0].agent,
@@ -221,7 +239,7 @@ class CompetitiveIntelCoordinator:
                 output_data=fill_result,
                 status="completed",
             )
-        except Exception as exc:
+        except Exception:
             steps[1] = PipelineStep(
                 name=steps[1].name,
                 agent=steps[1].agent,
@@ -256,7 +274,7 @@ class CompetitiveIntelCoordinator:
             return_exceptions=True,
         )
         loc_results: list[dict] = []
-        for lang, result in zip(target_langs, loc_raw):
+        for lang, result in zip(target_langs, loc_raw, strict=True):
             if isinstance(result, Exception):
                 logger.exception("Localization failed for language '%s'", lang)
                 localizations[lang] = f"[localization failed for {lang}]"
@@ -280,9 +298,7 @@ class CompetitiveIntelCoordinator:
             success=True,
         )
 
-    def _build_steps(
-        self, query: str, template_path: str | None = None
-    ) -> list[PipelineStep]:
+    def _build_steps(self, query: str, template_path: str | None = None) -> list[PipelineStep]:
         """Build the initial pipeline steps (all pending).
 
         Returns:
@@ -362,28 +378,8 @@ class CompetitiveIntelCoordinator:
             return errors
 
         task_ids = set(tasks.keys())
+        _validate_task_fields(tasks, task_ids, errors)
 
-        for task_id, task_def in tasks.items():
-            if "name" not in task_def:
-                errors.append(f"Task '{task_id}' missing 'name'")
-            if "agent" not in task_def:
-                errors.append(f"Task '{task_id}' missing 'agent'")
-
-            blocked_by = task_def.get("blocked_by", [])
-            if not isinstance(blocked_by, list):
-                errors.append(f"Task '{task_id}' blocked_by must be a list")
-                continue
-
-            for dep in blocked_by:
-                if dep not in task_ids:
-                    errors.append(
-                        f"Task '{task_id}' references unknown dependency '{dep}'"
-                    )
-
-            if task_id in blocked_by:
-                errors.append(f"Task '{task_id}' cannot depend on itself")
-
-        # Shared cycle detection from platform utils
         cycles = detect_cycles_dfs(
             task_ids,
             lambda tid: [d for d in tasks[tid].get("blocked_by", []) if d in task_ids],

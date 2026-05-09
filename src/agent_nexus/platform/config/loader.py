@@ -44,6 +44,57 @@ from .defaults import (
 logger = logging.getLogger(__name__)
 
 
+def _read_sources_yaml(path: Path) -> object | None:
+    """Load and parse sources.yaml, returning raw object or None on failure."""
+    logger.debug("Loading sources from %s", path)
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        logger.error("Failed to parse %s: %s", path, exc)
+        return None
+    except OSError as exc:
+        logger.error("Cannot read %s: %s", path, exc)
+        return None
+    if not isinstance(raw, dict) or "sources" not in raw:
+        logger.warning("sources.yaml is empty or missing 'sources' key")
+        return None
+    sources_list = raw["sources"]
+    if not isinstance(sources_list, list):
+        logger.warning("sources.yaml 'sources' key is not a list")
+        return None
+    return sources_list
+
+
+def _parse_sources_list(raw: object | None) -> list[SourceEntry]:
+    """Validate raw YAML entries and return SourceEntry list."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        return []
+    entries: list[SourceEntry] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            logger.warning("Skipping non-mapping source entry: %r", item)
+            continue
+        item_dict: dict[str, Any] = item  # ty: ignore[invalid-assignment]
+        name = item_dict.get("name")
+        if not isinstance(name, str) or not name.strip():
+            logger.error("Skipping source entry with missing/invalid 'name': %r", item)
+            continue
+        try:
+            entries.append(
+                SourceEntry(
+                    name=name,
+                    type=item_dict.get("type", "git"),
+                    url=item_dict.get("url", ""),
+                    branch=item_dict.get("branch", "main"),
+                )
+            )
+        except Exception as exc:
+            logger.warning("Skipping invalid source entry %s: %s", item, exc)
+    return entries
+
+
 class ConfigLoader:
     """Load and merge platform configuration from multiple sources.
 
@@ -65,6 +116,52 @@ class ConfigLoader:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def _load_raw_toml(self, config_path: Path) -> dict[str, Any]:
+        """Load raw TOML dict. Returns empty dict if not found; raises on parse error."""
+        try:
+            return toml.loads(config_path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+        except FileNotFoundError:
+            logger.debug("Config file not found at %s, using defaults", config_path)
+            return {}
+
+    def _parse_runtime(self, raw: dict[str, Any]) -> RuntimeConfig:
+        """Extract RuntimeConfig from raw config."""
+        runtime_raw = raw.get("runtime", {})
+        return RuntimeConfig(
+            python_path=runtime_raw.get("python_path", "python3"),
+            uv_path=runtime_raw.get("uv_path", "uv"),
+            log_level=runtime_raw.get("log_level", "INFO"),
+        )
+
+    def _parse_models(self, raw: dict[str, Any]) -> ModelConfig:
+        """Extract ModelConfig from raw config."""
+        models_raw = raw.get("models", {})
+
+        default_model = (
+            os.environ.get("AGENT_MODEL")
+            or os.environ.get("DEFAULT_MODEL")
+            or models_raw.get("default", DEFAULT_MODEL_STRING)
+        )
+
+        providers_raw = models_raw.get("providers", {})
+        if not isinstance(providers_raw, dict):
+            logger.warning("config.toml [models].providers is not a mapping, ignoring it")
+            providers_raw = {}
+        providers = self._build_providers(providers_raw)
+
+        stages_raw = models_raw.get("stages", {})
+        if not isinstance(stages_raw, dict):
+            logger.warning("config.toml [models].stages is not a mapping, ignoring it")
+            stages_raw = {}
+        stages: dict[str, str] = {str(k): str(v) for k, v in stages_raw.items()}
+
+        return ModelConfig(
+            default=default_model,
+            providers=providers,
+            stages=stages,
+            streaming_default=models_raw.get("streaming_default", True),
+        )
 
     def load_config(self) -> PlatformConfig:
         """Load ``config.toml``, merge with env vars and built-in defaults.
@@ -89,67 +186,20 @@ class ConfigLoader:
             logger.debug("Returning cached config (mtime unchanged)")
             return self._config_cache
 
-        raw: dict[str, Any] = {}
-
         try:
-            raw = toml.loads(config_path.read_text(encoding="utf-8"))
-            logger.debug("Loading config from %s", config_path)
-        except FileNotFoundError:
-            logger.debug("Config file not found at %s, using defaults", config_path)
+            raw = self._load_raw_toml(config_path)
         except toml.TomlDecodeError as exc:
             logger.error("Failed to parse config file %s: %s", config_path, exc)
             raise
 
-        # --- Schema version ---
-        schema_version = raw.get("schema_version", "1.0")
-
-        # --- Runtime section ---
-        runtime_raw = raw.get("runtime", {})
-        runtime = RuntimeConfig(
-            python_path=runtime_raw.get("python_path", "python3"),
-            uv_path=runtime_raw.get("uv_path", "uv"),
-            log_level=runtime_raw.get("log_level", "INFO"),
-        )
-
-        # --- Models section ---
-        models_raw = raw.get("models", {})
-
-        # Determine default model: env vars > config > hardcoded default
-        default_model = (
-            os.environ.get("AGENT_MODEL")
-            or os.environ.get("DEFAULT_MODEL")
-            or models_raw.get("default", DEFAULT_MODEL_STRING)
-        )
-
-        # Build provider registry: built-in defaults merged with config.toml
-        providers_raw = models_raw.get("providers", {})
-        if not isinstance(providers_raw, dict):
-            logger.warning("config.toml [models].providers is not a mapping, ignoring it")
-            providers_raw = {}
-        providers = self._build_providers(providers_raw)
-
-        # Parse stages
-        stages_raw = models_raw.get("stages", {})
-        if not isinstance(stages_raw, dict):
-            logger.warning("config.toml [models].stages is not a mapping, ignoring it")
-            stages_raw = {}
-        stages: dict[str, str] = {str(k): str(v) for k, v in stages_raw.items()}
-
-        models = ModelConfig(
-            default=default_model,
-            providers=providers,
-            stages=stages,
-            streaming_default=models_raw.get("streaming_default", True),
-        )
-
-        # --- Sources section ---
-        sources = self._parse_sources_from_raw(raw)
+        if raw:
+            logger.debug("Loading config from %s", config_path)
 
         config = PlatformConfig(
-            schema_version=schema_version,
-            runtime=runtime,
-            models=models,
-            sources=sources,
+            schema_version=raw.get("schema_version", "1.0"),
+            runtime=self._parse_runtime(raw),
+            models=self._parse_models(raw),
+            sources=self._parse_sources_from_raw(raw),
         )
 
         logger.info(
@@ -450,44 +500,8 @@ class ConfigLoader:
             self._sources_cache_mtime = mtime
             return entries
 
-        logger.debug("Loading sources from %s", sources_path)
-        try:
-            raw = yaml.safe_load(sources_path.read_text(encoding="utf-8"))
-        except yaml.YAMLError as exc:
-            logger.error("Failed to parse %s: %s", sources_path, exc)
-            return []
-        except OSError as exc:
-            logger.error("Cannot read %s: %s", sources_path, exc)
-            return []
-
-        if not isinstance(raw, dict) or "sources" not in raw:
-            logger.warning("sources.yaml is empty or missing 'sources' key")
-            return []
-
-        sources_list = raw["sources"]
-        if not isinstance(sources_list, list):
-            logger.warning("sources.yaml 'sources' key is not a list")
-            return []
-
-        entries: list[SourceEntry] = []
-        for item in sources_list:
-            if not isinstance(item, dict):
-                logger.warning("Skipping non-mapping source entry: %r", item)
-                continue
-            name = item.get("name")
-            if not isinstance(name, str) or not name.strip():
-                logger.error("Skipping source entry with missing/invalid 'name': %r", item)
-                continue
-            try:
-                entry = SourceEntry(
-                    name=name,
-                    type=item.get("type", "git"),
-                    url=item.get("url", ""),
-                    branch=item.get("branch", "main"),
-                )
-                entries.append(entry)
-            except Exception as exc:
-                logger.warning("Skipping invalid source entry %s: %s", item, exc)
+        raw = _read_sources_yaml(sources_path)
+        entries = _parse_sources_list(raw)
 
         logger.info("Loaded %d source(s) from sources.yaml", len(entries))
         self._sources_cache = entries

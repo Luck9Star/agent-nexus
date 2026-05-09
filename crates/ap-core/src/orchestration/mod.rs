@@ -8,11 +8,13 @@
 //! - `OrchestrationDsl` — TOML DAG parser
 //! - `SubtaskController` — timeout, retry, bounded parallelism
 //! - `WorkflowPhase` — 4-phase composite agent orchestration types
+//! - `Mailbox` — cross-agent data reference passing
 
 pub mod dsl;
 pub mod ipc;
 pub mod ipc_lock;
 pub mod ipc_protocol;
+pub mod mailbox;
 pub mod process_manager;
 pub mod subtask;
 pub mod task_graph;
@@ -21,6 +23,7 @@ pub mod workflow;
 pub use dsl::{DslError, DslTask, OrchestrationDsl};
 pub use ipc::{IpcError, IpcStream};
 pub use ipc_lock::IpcLockRegistry;
+pub use mailbox::{DataRef, Mailbox, MailboxError, MailboxMessage};
 pub use ipc_protocol::{AgentResult, IpcProtocol};
 pub use process_manager::{HandleError, ManagedProcess, ProcessError, ProcessManager, ProcessManagerHandle, SpawnConfig};
 pub use subtask::{SubtaskConfig, SubtaskController, SubtaskError};

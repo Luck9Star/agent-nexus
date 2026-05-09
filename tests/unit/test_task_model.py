@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from agent_nexus.models.task import TaskItem, TaskState
 
-
 # ---------------------------------------------------------------------------
 # TaskState enum
 # ---------------------------------------------------------------------------
@@ -27,10 +26,6 @@ class TestTaskState:
         assert TaskState.IN_PROGRESS == "in_progress"
         assert TaskState.COMPLETED == "completed"
         assert TaskState.FAILED == "failed"
-
-    def test_is_str_enum(self):
-        assert isinstance(TaskState.PENDING, str)
-
 
 # ---------------------------------------------------------------------------
 # TaskItem construction (happy path)
@@ -177,6 +172,7 @@ class TestTaskItemFieldConstraints:
 # ---------------------------------------------------------------------------
 # iter100 regression: TaskState.BLOCKED removed
 # ---------------------------------------------------------------------------
+
 
 class TestTaskStateBlockedRemoved:
     def test_blocked_not_in_enum(self):

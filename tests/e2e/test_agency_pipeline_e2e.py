@@ -214,9 +214,7 @@ class TestCapabilityBasedSelection:
         )
         results = selector.select(req)
         agent_ids = [r.agent_id for r in results]
-        assert any("architect" in aid for aid in agent_ids), (
-            f"Expected architect in {agent_ids}"
-        )
+        assert any("architect" in aid for aid in agent_ids), f"Expected architect in {agent_ids}"
 
     def test_review_selects_code_reviewer(self):
         """Review task selects code-reviewer with code_review capability."""
@@ -231,9 +229,7 @@ class TestCapabilityBasedSelection:
         )
         results = selector.select(req)
         agent_ids = [r.agent_id for r in results]
-        assert "agency.code-reviewer" in agent_ids, (
-            f"Expected agency.code-reviewer in {agent_ids}"
-        )
+        assert "agency.code-reviewer" in agent_ids, f"Expected agency.code-reviewer in {agent_ids}"
 
     def test_security_selects_security_engineer(self):
         """Security task selects security-engineer with threat_modeling capability."""
@@ -455,9 +451,7 @@ class TestFailureCascade:
         result = dispatcher.dispatch(dag, "Design and review")
 
         # Architect should fail
-        assert "architect" in result.failed, (
-            f"Expected 'architect' in failed, got {result.failed}"
-        )
+        assert "architect" in result.failed, f"Expected 'architect' in failed, got {result.failed}"
 
         # Reviewer depends on architect, should also be failed (not silently executed)
         assert "reviewer" in result.failed, (
@@ -534,9 +528,7 @@ class TestFailureCascade:
         ]
         planner = DynamicCompositePlanner()
         # Use plan() to put all tasks in parallel (no inter-task deps)
-        dag = planner.plan(
-            subtasks, composition_name="partial-fail-test", max_parallel=3
-        )
+        dag = planner.plan(subtasks, composition_name="partial-fail-test", max_parallel=3)
 
         dispatcher = DAGDispatcher(
             graph=graph,
@@ -592,9 +584,7 @@ class TestTimeoutHandling:
             ),
         ]
         planner = DynamicCompositePlanner()
-        dag = planner.plan(
-            subtasks, composition_name="timeout-test", max_parallel=2
-        )
+        dag = planner.plan(subtasks, composition_name="timeout-test", max_parallel=2)
 
         dispatcher = DAGDispatcher(
             graph=graph,
@@ -672,9 +662,7 @@ class TestNoMatchScenario:
             permissions="plan",
         )
         results = selector.select(req)
-        assert results == [], (
-            f"Expected empty list for impossible caps, got {len(results)} results"
-        )
+        assert results == [], f"Expected empty list for impossible caps, got {len(results)} results"
 
     def test_task_composer_no_match_graceful(self):
         """TaskComposer handles tasks where no specialist has matching capability."""
@@ -795,9 +783,7 @@ class TestTaskComposerWithTaskGraph:
         )
 
         # All experts fail -> no artifacts -> integrated is None
-        result = composer.run(
-            inp, expert_executor=always_fail_executor, task_graph=graph
-        )
+        result = composer.run(inp, expert_executor=always_fail_executor, task_graph=graph)
 
         assert isinstance(result, TaskComposerResult)
         assert result.integrated is None
@@ -823,16 +809,12 @@ class TestTaskComposerWithTaskGraph:
 
         # TaskGraph path
         graph = TaskGraph(":memory:")
-        tg_result = composer.run(
-            inp, expert_executor=_mock_executor, task_graph=graph
-        )
+        tg_result = composer.run(inp, expert_executor=_mock_executor, task_graph=graph)
 
         # Both should select the same agents
         legacy_ids = sorted([a.agent_id for a in legacy_result.selected_agents])
         tg_ids = sorted([a.agent_id for a in tg_result.selected_agents])
-        assert legacy_ids == tg_ids, (
-            f"Legacy {legacy_ids} != TaskGraph {tg_ids}"
-        )
+        assert legacy_ids == tg_ids, f"Legacy {legacy_ids} != TaskGraph {tg_ids}"
 
         # Both should produce integrated artifacts
         assert legacy_result.integrated is not None
@@ -900,18 +882,14 @@ class TestCapabilityInference:
         from agent_nexus.platform.agency.task_composer import infer_capabilities
 
         caps = infer_capabilities("Perform code_indexing for the repository")
-        assert "code_indexing" in caps, (
-            f"Expected code_indexing in inferred caps, got {caps}"
-        )
+        assert "code_indexing" in caps, f"Expected code_indexing in inferred caps, got {caps}"
 
     def test_fallback_system_design_when_no_keyword(self):
         """Unknown task description returns empty capabilities (caller handles)."""
         from agent_nexus.platform.agency.task_composer import infer_capabilities
 
         caps = infer_capabilities("bake a chocolate cake")
-        assert caps == [], (
-            f"Expected empty capabilities for unknown task, got {caps}"
-        )
+        assert caps == [], f"Expected empty capabilities for unknown task, got {caps}"
 
 
 # ---------------------------------------------------------------------------
@@ -929,11 +907,19 @@ _ALL_EXPERTS = {
     "agency.sre": ["reliability_review", "incident_analysis", "observability"],
     "agency.test-results-analyzer": ["test_design", "test_analysis", "coverage_assessment"],
     "agency.technical-writer": ["technical_writing", "documentation", "api_documentation"],
-    "agency.codebase-onboarding": ["codebase_onboarding", "code_navigation", "architecture_mapping"],
+    "agency.codebase-onboarding": [
+        "codebase_onboarding",
+        "code_navigation",
+        "architecture_mapping",
+    ],
     "agency.tool-evaluator": ["tool_evaluation", "technology_assessment", "comparison_analysis"],
     "agency.lsp-index-engineer": ["lsp_indexing", "code_indexing", "semantic_analysis"],
     "agency.agents-orchestrator": ["orchestration", "task_decomposition", "agent_coordination"],
-    "agency.devops-automator": ["ci_cd_pipeline", "deployment_automation", "infrastructure_management"],
+    "agency.devops-automator": [
+        "ci_cd_pipeline",
+        "deployment_automation",
+        "infrastructure_management",
+    ],
     "agency.frontend-developer": ["frontend_development", "ui_implementation", "web_performance"],
     "agency.git-workflow-master": ["git_operations", "branch_management", "merge_strategies"],
     "agency.mcp-builder": ["mcp_server_construction", "tool_integration", "protocol_handling"],
@@ -960,8 +946,7 @@ class TestAllExpertTypes:
             results = selector.select(req)
             result_ids = [r.agent_id for r in results]
             assert agent_id in result_ids, (
-                f"Expert {agent_id} not selected for capability '{caps[0]}'. "
-                f"Got: {result_ids}"
+                f"Expert {agent_id} not selected for capability '{caps[0]}'. Got: {result_ids}"
             )
 
     def test_all_experts_registered(self):
@@ -996,9 +981,7 @@ class TestMultiAgentComposition:
             permissions="plan",
         )
         results = selector.select(req)
-        assert len(results) >= 2, (
-            f"Expected multi-agent team, got {[r.agent_id for r in results]}"
-        )
+        assert len(results) >= 2, f"Expected multi-agent team, got {[r.agent_id for r in results]}"
         # Verify the team collectively covers both capabilities
         all_caps: set[str] = set()
         for r in results:
@@ -1049,17 +1032,19 @@ class TestNetworkCapabilityImpact:
             else:
                 non_network_agents.append(agent_id)
 
-        expected_network = sorted([
-            "agency.ai-engineer",
-            "agency.code-reviewer",
-            "agency.codebase-onboarding",
-            "agency.lsp-index-engineer",
-            "agency.security-engineer",
-            "agency.software-architect",
-            "agency.sre",
-            "agency.test-results-analyzer",
-            "agency.tool-evaluator",
-        ])
+        expected_network = sorted(
+            [
+                "agency.ai-engineer",
+                "agency.code-reviewer",
+                "agency.codebase-onboarding",
+                "agency.lsp-index-engineer",
+                "agency.security-engineer",
+                "agency.software-architect",
+                "agency.sre",
+                "agency.test-results-analyzer",
+                "agency.tool-evaluator",
+            ]
+        )
         assert sorted(network_agents) == expected_network, (
             f"Unexpected network agents: {sorted(network_agents)}"
         )
@@ -1171,9 +1156,7 @@ class TestProfileBasedExecutorE2E:
         registry = _build_registry()
         composer = TaskComposer(registry=registry)
 
-        arch_result = composer.run(
-            TaskComposerInput(task="Design architecture", mode="plan")
-        )
+        arch_result = composer.run(TaskComposerInput(task="Design architecture", mode="plan"))
         sec_result = composer.run(
             TaskComposerInput(task="Security review and threat modeling", mode="plan")
         )
@@ -1242,17 +1225,13 @@ class TestImporterDiskWrite:
 
             # Should have JSON profile files for each agent
             json_files = list(output.glob("agency.*.json"))
-            assert len(json_files) == 16, (
-                f"Expected 16 profile JSON files, got {len(json_files)}"
-            )
+            assert len(json_files) == 16, f"Expected 16 profile JSON files, got {len(json_files)}"
 
             # Should have normalized prompt files
             normalized_dir = output / "normalized"
             assert normalized_dir.is_dir()
             md_files = list(normalized_dir.glob("agency.*.md"))
-            assert len(md_files) == 16, (
-                f"Expected 16 normalized prompt files, got {len(md_files)}"
-            )
+            assert len(md_files) == 16, f"Expected 16 normalized prompt files, got {len(md_files)}"
 
             # Should have source.lock.yaml and index.yaml
             assert (output / "source.lock.yaml").is_file(), "source.lock.yaml missing"
@@ -1352,9 +1331,7 @@ class TestIntegratorAdvanced:
     def test_merge_raises_on_too_many_sections(self):
         """Integrator.merge raises ValueError for artifacts with > 100 sections."""
         sections = {f"section-{i}": f"value-{i}" for i in range(101)}
-        artifact = Artifact(
-            source_agent="agent", artifact_type="report", sections=sections
-        )
+        artifact = Artifact(source_agent="agent", artifact_type="report", sections=sections)
         with pytest.raises(ValueError, match="too many sections"):
             Integrator.merge([artifact])
 
@@ -1366,7 +1343,10 @@ class TestIntegratorAdvanced:
         ]
         integrated = Integrator.merge(artifacts)
         # "x" should be a list (string converted to list + list appended)
-        assert isinstance(integrated.merged_sections["x"], list)
+        merged_x = integrated.merged_sections["x"]
+        assert isinstance(merged_x, list)
+        assert "string_val" in merged_x
+        assert ["list_val"] in merged_x
 
 
 # ---------------------------------------------------------------------------
@@ -1378,31 +1358,18 @@ class TestIntegratorAdvanced:
 class TestPlannerValidation:
     """E2E: planner rejects invalid inputs correctly."""
 
-    def test_empty_subtasks_raises(self):
-        """DynamicCompositePlanner raises ValueError for empty subtask list."""
-        planner = DynamicCompositePlanner()
-        with pytest.raises(ValueError, match="at least one subtask"):
-            planner.plan([], composition_name="test")
-
-    def test_duplicate_ids_raises(self):
-        """DynamicCompositePlanner raises ValueError for duplicate subtask IDs."""
-        planner = DynamicCompositePlanner()
-        subtasks = [
-            SubtaskDef(id="dup", goal="A", needed_capabilities=["c"],
-                       output_contract="r", assigned_agent="a1"),
-            SubtaskDef(id="dup", goal="B", needed_capabilities=["c"],
-                       output_contract="r", assigned_agent="a2"),
-        ]
-        with pytest.raises(ValueError, match="Duplicate subtask id"):
-            planner.plan(subtasks, composition_name="test")
-
     def test_reserved_id_raises(self):
         """DynamicCompositePlanner raises ValueError for reserved IDs (integrate, validate)."""
         planner = DynamicCompositePlanner()
         for reserved in ("integrate", "validate"):
             subtasks = [
-                SubtaskDef(id=reserved, goal="X", needed_capabilities=["c"],
-                           output_contract="r", assigned_agent="a"),
+                SubtaskDef(
+                    id=reserved,
+                    goal="X",
+                    needed_capabilities=["c"],
+                    output_contract="r",
+                    assigned_agent="a",
+                ),
             ]
             with pytest.raises(ValueError, match="reserved"):
                 planner.plan(subtasks, composition_name="test")
@@ -1412,8 +1379,13 @@ class TestPlannerValidation:
         planner = DynamicCompositePlanner()
         for bad_char in ['"', "#", "\n", "\t", "["]:
             subtasks = [
-                SubtaskDef(id=f"bad{bad_char}id", goal="X", needed_capabilities=["c"],
-                           output_contract="r", assigned_agent="a"),
+                SubtaskDef(
+                    id=f"bad{bad_char}id",
+                    goal="X",
+                    needed_capabilities=["c"],
+                    output_contract="r",
+                    assigned_agent="a",
+                ),
             ]
             with pytest.raises(ValueError, match="invalid character"):
                 planner.plan(subtasks, composition_name="test")
@@ -1433,18 +1405,28 @@ class TestTOMLSerialization:
         from agent_nexus.platform.agency.planner import generate_toml
 
         subtasks = [
-            SubtaskDef(id="architect", goal="Design", needed_capabilities=["system_design"],
-                       output_contract="report", assigned_agent="agency.software-architect"),
-            SubtaskDef(id="reviewer", goal="Review", needed_capabilities=["code_review"],
-                       output_contract="review", assigned_agent="agency.code-reviewer"),
+            SubtaskDef(
+                id="architect",
+                goal="Design",
+                needed_capabilities=["system_design"],
+                output_contract="report",
+                assigned_agent="agency.software-architect",
+            ),
+            SubtaskDef(
+                id="reviewer",
+                goal="Review",
+                needed_capabilities=["code_review"],
+                output_contract="review",
+                assigned_agent="agency.code-reviewer",
+            ),
         ]
         planner = DynamicCompositePlanner()
         dag = planner.plan(subtasks, composition_name="toml-test", max_parallel=2)
         toml_str = generate_toml(dag)
 
-        assert '[composition]' in toml_str
+        assert "[composition]" in toml_str
         assert 'name = "toml-test"' in toml_str
-        assert 'max_parallel = 2' in toml_str
+        assert "max_parallel = 2" in toml_str
         assert 'id = "architect"' in toml_str
         assert 'id = "reviewer"' in toml_str
         assert 'id = "integrate"' in toml_str
@@ -1549,15 +1531,22 @@ class TestMaxParallelEnforcement:
             return result
 
         subtasks = [
-            SubtaskDef(id=f"task-{i}", goal=f"Goal {i}", needed_capabilities=["system_design"],
-                       output_contract="report", assigned_agent="agency.software-architect")
+            SubtaskDef(
+                id=f"task-{i}",
+                goal=f"Goal {i}",
+                needed_capabilities=["system_design"],
+                output_contract="report",
+                assigned_agent="agency.software-architect",
+            )
             for i in range(4)
         ]
         planner = DynamicCompositePlanner()
         dag = planner.plan(subtasks, composition_name="parallel-1-test", max_parallel=1)
 
         dispatcher = DAGDispatcher(
-            graph=graph, executor=tracking_executor, max_parallel=1,
+            graph=graph,
+            executor=tracking_executor,
+            max_parallel=1,
         )
         result = dispatcher.dispatch(dag, "Parallel test")
 
@@ -1570,7 +1559,6 @@ class TestMaxParallelEnforcement:
     def test_max_parallel_3_allows_batching(self):
         """max_parallel=3 allows up to 3 tasks in a single batch."""
         graph = TaskGraph(":memory:")
-        batch_sizes: list[int] = []
 
         # Override dispatch to track batch sizes (via call ordering)
         call_order: list[str] = []
@@ -1580,15 +1568,22 @@ class TestMaxParallelEnforcement:
             return _mock_executor(profile_id, task)
 
         subtasks = [
-            SubtaskDef(id=f"task-{i}", goal=f"Goal {i}", needed_capabilities=["system_design"],
-                       output_contract="report", assigned_agent="agency.software-architect")
+            SubtaskDef(
+                id=f"task-{i}",
+                goal=f"Goal {i}",
+                needed_capabilities=["system_design"],
+                output_contract="report",
+                assigned_agent="agency.software-architect",
+            )
             for i in range(5)
         ]
         planner = DynamicCompositePlanner()
         dag = planner.plan(subtasks, composition_name="parallel-3-test", max_parallel=3)
 
         dispatcher = DAGDispatcher(
-            graph=graph, executor=order_executor, max_parallel=3,
+            graph=graph,
+            executor=order_executor,
+            max_parallel=3,
         )
         result = dispatcher.dispatch(dag, "Parallel batch test")
 

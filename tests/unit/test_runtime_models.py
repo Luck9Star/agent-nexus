@@ -1,6 +1,5 @@
 """Unit tests for agent_nexus.models.runtime module."""
 
-import json
 
 import pytest
 from pydantic import ValidationError
@@ -13,10 +12,10 @@ from agent_nexus.models.runtime import (
     Variable,
 )
 
-
 # ---------------------------------------------------------------------------
 # Variable
 # ---------------------------------------------------------------------------
+
 
 class TestVariable:
     def test_construction_with_all_fields(self):
@@ -67,6 +66,7 @@ class TestVariable:
 # Function
 # ---------------------------------------------------------------------------
 
+
 class TestFunction:
     def test_construction_with_all_fields(self):
         f = Function(
@@ -101,6 +101,7 @@ class TestFunction:
 # ---------------------------------------------------------------------------
 # RuntimeType
 # ---------------------------------------------------------------------------
+
 
 class TestRuntimeType:
     def test_construction_with_all_fields(self):
@@ -139,6 +140,7 @@ class TestRuntimeType:
 # ---------------------------------------------------------------------------
 # ExecutionResult
 # ---------------------------------------------------------------------------
+
 
 class TestExecutionResult:
     def test_success_result(self):
@@ -198,6 +200,7 @@ class TestExecutionResult:
 # SecurityViolation
 # ---------------------------------------------------------------------------
 
+
 class TestSecurityViolation:
     def test_construction_with_all_fields(self):
         sv = SecurityViolation(
@@ -239,9 +242,7 @@ class TestSecurityViolation:
         assert sv2 == sv
 
     def test_json_serialization(self):
-        sv = SecurityViolation(
-            rule_type="attribute", node_type="Attribute", message="no access"
-        )
+        sv = SecurityViolation(rule_type="attribute", node_type="Attribute", message="no access")
         json_str = sv.model_dump_json()
         sv2 = SecurityViolation.model_validate_json(json_str)
         assert sv2 == sv

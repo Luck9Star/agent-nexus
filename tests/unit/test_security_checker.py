@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import ast
 import logging
 
 import pytest
 
-from agent_nexus.models.runtime import SecurityViolation
 from agent_nexus.platform.runtime.security_checker import SecurityChecker
 from agent_nexus.platform.runtime.security_rules import (
     AttributeRule,
@@ -123,10 +121,12 @@ class TestSecurityCheckerCheckCode:
             def check(self, node):
                 raise RuntimeError("intentional test failure")
 
-        checker = SecurityChecker(rules=[
-            BrokenRule(forbidden=["os"]),
-            FunctionRule(forbidden=[EVAL_CODE]),
-        ])
+        checker = SecurityChecker(
+            rules=[
+                BrokenRule(forbidden=["os"]),
+                FunctionRule(forbidden=[EVAL_CODE]),
+            ]
+        )
         with caplog.at_level(logging.WARNING):
             violations = checker.check_code(EVAL_CODE + '("x")')
         assert any(v.rule_type == "function" for v in violations)
@@ -209,7 +209,7 @@ class TestTypeSandboxEscapeBlocked:
         code = "type('', obj.__bases__[0], {}).__subclasses__()"
         violations = checker.check_code(code)
         rule_types = {v.rule_type for v in violations}
-        assert "function" in rule_types   # type() call
+        assert "function" in rule_types  # type() call
         assert "attribute" in rule_types  # __bases__ and __subclasses__
 
 
@@ -224,24 +224,53 @@ class TestExhaustiveForbiddenCoverage:
     defaults, the corresponding test here will fail."""
 
     FORBIDDEN_IMPORTS = [
-        "os", "subprocess", "sys", "shutil", "signal", "ctypes",
-        "multiprocessing", "importlib", "threading",
+        "os",
+        "subprocess",
+        "sys",
+        "shutil",
+        "signal",
+        "ctypes",
+        "multiprocessing",
+        "importlib",
+        "threading",
         "\x70\x69\x63\x6b\x6c\x65",  # obfuscated to bypass security hook
         "marshal",
-        "code", "codeop", "runpy", "socket", "http", "urllib",
-        "pathlib", "tempfile", "builtins", "pdb",
+        "code",
+        "codeop",
+        "runpy",
+        "socket",
+        "http",
+        "urllib",
+        "pathlib",
+        "tempfile",
+        "builtins",
+        "pdb",
     ]
 
     FORBIDDEN_FUNCTIONS = [
-        EVAL_CODE,           # eval
-        "exec", "compile", "__import__", "open", "globals", "vars",
-        "locals", "breakpoint", "input", "type", "getattr", "setattr",
+        EVAL_CODE,  # eval
+        "exec",
+        "compile",
+        "__import__",
+        "open",
+        "globals",
+        "vars",
+        "locals",
+        "breakpoint",
+        "input",
+        "type",
+        "getattr",
+        "setattr",
         "delattr",
     ]
 
     FORBIDDEN_ATTRIBUTES = [
-        "__subclasses__", "__globals__", "__code__",
-        "__builtins__", "__bases__", "__mro__",
+        "__subclasses__",
+        "__globals__",
+        "__code__",
+        "__builtins__",
+        "__bases__",
+        "__mro__",
     ]
 
     @pytest.mark.parametrize("module", FORBIDDEN_IMPORTS)
@@ -273,11 +302,14 @@ class TestExhaustiveForbiddenCoverage:
         assert len(violations) >= 1, f"obj.{attr} should be blocked"
         assert any(v.rule_type == "attribute" for v in violations)
 
-    @pytest.mark.parametrize("pattern_code", [
-        "getattr(obj, 'eval')",
-        "__builtins__['eval']",
-        "__builtins__.__getitem__('eval')",
-    ])
+    @pytest.mark.parametrize(
+        "pattern_code",
+        [
+            "getattr(obj, 'eval')",
+            "__builtins__['eval']",
+            "__builtins__.__getitem__('eval')",
+        ],
+    )
     def test_regex_patterns_blocked(self, pattern_code: str) -> None:
         checker = SecurityChecker()
         violations = checker.check_code(pattern_code)

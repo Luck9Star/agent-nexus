@@ -139,8 +139,10 @@ class TestLockfileAddRemove:
         lf.add_entry_by_name("agent-x", entry_v1)
 
         entry_v2 = LockfileEntry(
-            version="2.0.0", source="official",
-            commit_sha="b" * 40, agent_type=AgentType.ATOMIC,
+            version="2.0.0",
+            source="official",
+            commit_sha="b" * 40,
+            agent_type=AgentType.ATOMIC,
         )
         lf.add_entry_by_name("agent-x", entry_v2)
 
@@ -178,6 +180,7 @@ class TestLockfileListEntries:
 
 
 # -- iter99 regression: _file_lock FD leak on flock failure --
+
 
 class TestFileLockFDCleanup:
     """Verify that _file_lock closes the file descriptor if flock() fails."""

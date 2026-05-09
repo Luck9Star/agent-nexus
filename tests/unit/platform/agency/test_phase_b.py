@@ -1,16 +1,14 @@
 """Phase B tests: Agency importer — parser, allowlist, content policy, registry, dry-run."""
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
-import yaml
+import pytest
 
+from agent_nexus.platform.agency.allowlist import load_allowlist, validate_allowlist_entry
 from agent_nexus.platform.agency.importer import AgencyImporter
 from agent_nexus.platform.agency.parser import parse_frontmatter
-from agent_nexus.platform.agency.allowlist import load_allowlist, validate_allowlist_entry
 from agent_nexus.platform.agency.policy import check_content_policy
 from agent_nexus.platform.agency.registry import ExpertRegistry
-import pytest
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -46,11 +44,8 @@ def test_parse_frontmatter():
 @pytest.mark.timeout(30)
 def test_parse_frontmatter_no_delimiter():
     """A string without --- frontmatter should raise ValueError."""
-    try:
+    with pytest.raises(ValueError):
         parse_frontmatter("This is just plain text with no frontmatter at all.")
-        raise AssertionError("Expected ValueError for missing frontmatter delimiters")
-    except ValueError:
-        pass  # expected
 
 
 # ===================================================================
@@ -85,12 +80,8 @@ def test_allowlist_entry_schema():
         )
 
         # Explicitly check capabilities is a non-empty list
-        assert isinstance(entry["capabilities"], list), (
-            f"entry #{i} capabilities is not a list"
-        )
-        assert len(entry["capabilities"]) > 0, (
-            f"entry #{i} capabilities list is empty"
-        )
+        assert isinstance(entry["capabilities"], list), f"entry #{i} capabilities is not a list"
+        assert len(entry["capabilities"]) > 0, f"entry #{i} capabilities list is empty"
 
 
 # ===================================================================

@@ -64,20 +64,24 @@ def _generate_gap_questions(gaps: list[str]) -> list[Question]:
     for gap in gaps:
         templates = GAP_QUESTION_TEMPLATES.get(gap, [])
         for tmpl in templates:
-            questions.append(Question(
-                text=tmpl["text"],
-                category=tmpl["category"],
-                priority=tmpl["priority"],
-                context=f"缺口: {gap}",
-            ))
+            questions.append(
+                Question(
+                    text=tmpl["text"],
+                    category=tmpl["category"],
+                    priority=tmpl["priority"],
+                    context=f"缺口: {gap}",
+                )
+            )
         if not templates:
             # Generic question for unknown gap type
-            questions.append(Question(
-                text=f"请补充关于「{gap}」的详细信息",
-                category="functional",
-                priority="medium",
-                context=f"缺口: {gap}",
-            ))
+            questions.append(
+                Question(
+                    text=f"请补充关于「{gap}」的详细信息",
+                    category="functional",
+                    priority="medium",
+                    context=f"缺口: {gap}",
+                )
+            )
     return questions
 
 
@@ -94,12 +98,14 @@ def _generate_ambiguity_questions(ambiguities: list[str]) -> list[Question]:
 
         # Extract the ambiguous phrase
         phrase = ambiguity.replace("模糊表述: ", "").strip("'\"")
-        questions.append(Question(
-            text=f"「{phrase}」具体指什么？请给出明确的量化标准或具体场景。",
-            category=category,
-            priority="high",
-            context=ambiguity,
-        ))
+        questions.append(
+            Question(
+                text=f"「{phrase}」具体指什么？请给出明确的量化标准或具体场景。",
+                category=category,
+                priority="high",
+                context=ambiguity,
+            )
+        )
     return questions
 
 
@@ -107,12 +113,14 @@ def _generate_contradiction_questions(contradictions: list[str]) -> list[Questio
     """Generate questions for identified contradictions."""
     questions: list[Question] = []
     for contradiction in contradictions:
-        questions.append(Question(
-            text=f"需求中存在矛盾: {contradiction}。请确认优先满足哪个？",
-            category="constraint",
-            priority="high",
-            context=f"矛盾: {contradiction}",
-        ))
+        questions.append(
+            Question(
+                text=f"需求中存在矛盾: {contradiction}。请确认优先满足哪个？",
+                category="constraint",
+                priority="high",
+                context=f"矛盾: {contradiction}",
+            )
+        )
     return questions
 
 
@@ -123,12 +131,14 @@ def _generate_priority_questions(
     questions: list[Question] = []
     high_items = priorities.get("high", [])
     if len(high_items) > 3:
-        questions.append(Question(
-            text=f"列出了 {len(high_items)} 个高优先级需求，是否可以进一步区分优先级？",
-            category="priority",
-            priority="medium",
-            context=f"高优先级需求数量: {len(high_items)}",
-        ))
+        questions.append(
+            Question(
+                text=f"列出了 {len(high_items)} 个高优先级需求，是否可以进一步区分优先级？",
+                category="priority",
+                priority="medium",
+                context=f"高优先级需求数量: {len(high_items)}",
+            )
+        )
     return questions
 
 

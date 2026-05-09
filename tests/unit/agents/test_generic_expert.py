@@ -1,11 +1,8 @@
 """Tests for generic-expert-agent: profile loading, prompt assembly, output contract, permissions, manifest."""
 
-import os
 import textwrap
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
-import pytest
 import yaml
 
 # ---------------------------------------------------------------------------

@@ -56,41 +56,54 @@ def _dump_yaml(data: object, f: Any, indent: int = 0) -> None:
     prefix = "  " * indent
     if isinstance(data, dict):
         for key, value in data.items():
-            if isinstance(value, (dict, list)):
-                f.write(f"{prefix}{key}:\n")
-                _dump_yaml(value, f, indent + 1)
-            elif value is None:
-                f.write(f"{prefix}{key}: null\n")
-            elif isinstance(value, bool):
-                f.write(f"{prefix}{key}: {'true' if value else 'false'}\n")
-            elif isinstance(value, (int, float)):
-                f.write(f"{prefix}{key}: {value}\n")
-            else:
-                f.write(f"{prefix}{key}: {_yaml_quote(str(value))}\n")
+            _write_kv(f, prefix, str(key), value, indent)
     elif isinstance(data, list):
         for item in data:
             if isinstance(item, dict):
-                first = True
-                for key, value in item.items():
-                    if first:
-                        prefix_item = f"{prefix}- "
-                        first = False
-                    else:
-                        prefix_item = f"{prefix}  "
-                    safe_key = _yaml_quote(str(key))
-                    if isinstance(value, (dict, list)):
-                        f.write(f"{prefix_item}{safe_key}:\n")
-                        _dump_yaml(value, f, indent + 2)
-                    elif value is None:
-                        f.write(f"{prefix_item}{safe_key}: null\n")
-                    elif isinstance(value, bool):
-                        f.write(f"{prefix_item}{safe_key}: {'true' if value else 'false'}\n")
-                    elif isinstance(value, (int, float)):
-                        f.write(f"{prefix_item}{safe_key}: {value}\n")
-                    else:
-                        f.write(f"{prefix_item}{safe_key}: {_yaml_quote(str(value))}\n")
+                _dump_list_dict(item, f, prefix, indent)
             else:
                 f.write(f"{prefix}- {_yaml_quote(str(item))}\n")
+
+
+def _write_kv(f: Any, prefix: str, key: str, value: object, indent: int) -> None:
+    """Write a single key: value pair to the YAML output."""
+    if isinstance(value, (dict, list)):
+        f.write(f"{prefix}{key}:\n")
+        _dump_yaml(value, f, indent + 1)
+    elif value is None:
+        f.write(f"{prefix}{key}: null\n")
+    elif isinstance(value, bool):
+        f.write(f"{prefix}{key}: {'true' if value else 'false'}\n")
+    elif isinstance(value, (int, float)):
+        f.write(f"{prefix}{key}: {value}\n")
+    else:
+        f.write(f"{prefix}{key}: {_yaml_quote(str(value))}\n")
+
+
+def _dump_list_dict(item: dict, f: Any, prefix: str, indent: int) -> None:
+    """Write a dict item inside a YAML list with '- ' prefix on first key."""
+    first = True
+    for key, value in item.items():
+        prefix_item = f"{prefix}- " if first else f"{prefix}  "
+        first = False
+        safe_key = _yaml_quote(str(key))
+        if isinstance(value, (dict, list)):
+            f.write(f"{prefix_item}{safe_key}:\n")
+            _dump_yaml(value, f, indent + 2)
+        else:
+            _write_scalar(f, prefix_item, safe_key, value)
+
+
+def _write_scalar(f: Any, prefix: str, key: str, value: object) -> None:
+    """Write a scalar value (non-dict, non-list) after a key."""
+    if value is None:
+        f.write(f"{prefix}{key}: null\n")
+    elif isinstance(value, bool):
+        f.write(f"{prefix}{key}: {'true' if value else 'false'}\n")
+    elif isinstance(value, (int, float)):
+        f.write(f"{prefix}{key}: {value}\n")
+    else:
+        f.write(f"{prefix}{key}: {_yaml_quote(str(value))}\n")
 
 
 _YAML_KEYWORDS = frozenset(

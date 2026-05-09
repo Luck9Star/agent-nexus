@@ -13,7 +13,6 @@ from agent_nexus.models.hooks import (
     AggregatedHookResult,
     HookDefinition,
     HookEvent,
-    HookExecution,
     HookType,
 )
 from agent_nexus.platform.hooks.executor import HookExecutor
@@ -316,9 +315,7 @@ class TestCommandHook:
     async def test_command_hook_non_allowed_command_rejected(self) -> None:
         """Command not in allowlist is rejected even when allowlist is non-empty."""
         hook = _cmd_hook(command="rm -rf /")
-        executor = HookExecutor(
-            hooks=[hook], allowed_commands=["echo", "cat"]
-        )
+        executor = HookExecutor(hooks=[hook], allowed_commands=["echo", "cat"])
 
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.results[0].passed is False
@@ -558,9 +555,7 @@ class TestCommandHookProcessCleanup:
                 side_effect=RuntimeError("simulated subprocess failure")
             )
             mock_proc.kill = Mock()
-            mock_proc.wait = AsyncMock(
-                side_effect=ProcessLookupError("already dead")
-            )
+            mock_proc.wait = AsyncMock(side_effect=ProcessLookupError("already dead"))
             mock_proc.returncode = None
             mock_sp.return_value = mock_proc
 
@@ -624,24 +619,20 @@ pre_execution:
         assert executor._hooks[0].command == "echo valid"
 
     def test_from_yaml_invalid_hook_dict_skipped(self, tmp_path: Path) -> None:
-        """Lines 106-107: a dict that fails model_validate -> warning, skip."""
+        """Lines 106-107: a dict without required fields is skipped."""
         yaml_content = """
 pre_execution:
   - type: command
     command: "echo valid"
-  - type: command
-    # missing required fields -- model_validate will fail because
-    # 'event' is injected but the dict has extra garbage that confuses pydantic
-    not_a_real_field: true
+  - not_a_real_field: true
 """
         yaml_file = tmp_path / "hooks.yaml"
         yaml_file.write_text(yaml_content)
 
         executor = HookExecutor.from_yaml(yaml_file)
-        # The second entry has type=command but no 'command' field set via yaml.
-        # model_validate still succeeds (command is Optional). So let's make one
-        # that truly fails: omit 'type' entirely.
-        pass  # covered by the next test instead
+        # Second entry lacks 'type' -> model_validate fails -> skipped
+        assert len(executor._hooks) == 1
+        assert executor._hooks[0].command == "echo valid"
 
     def test_from_yaml_hook_missing_type_field(self, tmp_path: Path) -> None:
         """Lines 106-107: hook dict without 'type' -> validation error, skipped."""
@@ -763,16 +754,14 @@ class TestTimeoutKillFailure:
         with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
             mock_proc = AsyncMock()
             # communicate() will time out
-            mock_proc.communicate = AsyncMock(
-                side_effect=asyncio.TimeoutError()
-            )
+            mock_proc.communicate = AsyncMock(side_effect=TimeoutError())
             # kill() raises -- this is the branch we want
             mock_proc.kill = Mock(side_effect=RuntimeError("kill failed"))
             mock_proc.wait = AsyncMock()
             mock_proc.returncode = None
             mock_sp.return_value = mock_proc
 
-            with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
+            with patch("asyncio.wait_for", side_effect=TimeoutError()):
                 result = await executor.execute_event(HookEvent.PRE_EXECUTION)
 
         assert len(result.results) == 1
@@ -797,9 +786,7 @@ class TestCancelledError:
         with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
             mock_proc = AsyncMock()
             # communicate raises CancelledError (BaseException)
-            mock_proc.communicate = AsyncMock(
-                side_effect=asyncio.CancelledError()
-            )
+            mock_proc.communicate = AsyncMock(side_effect=asyncio.CancelledError())
             mock_proc.kill = Mock()
             mock_proc.wait = AsyncMock()
             mock_proc.returncode = None
@@ -820,9 +807,7 @@ class TestCancelledError:
 
         with patch.object(asyncio, "create_subprocess_exec") as mock_sp:
             mock_proc = AsyncMock()
-            mock_proc.communicate = AsyncMock(
-                side_effect=asyncio.CancelledError()
-            )
+            mock_proc.communicate = AsyncMock(side_effect=asyncio.CancelledError())
             mock_proc.kill = Mock(side_effect=RuntimeError("cannot kill"))
             mock_proc.wait = AsyncMock()
             mock_proc.returncode = None
@@ -851,6 +836,7 @@ class TestEmptyCommandAfterSplit:
 
 
 # iter122 regression: SSRF scheme validation
+
 
 class TestHTTPHookSSRF:
     """HTTP hooks reject non-http/https URL schemes."""
@@ -881,3 +867,79 @@ class TestHTTPHookSSRF:
         result = await executor.execute_event(HookEvent.PRE_EXECUTION)
         assert result.results[0].passed is False
         assert "unsupported scheme" in result.results[0].error.lower()
+
+
+# ---------------------------------------------------------------------------
+# 10. from_yaml preserves allowed_commands on parse failure (security fix)
+# ---------------------------------------------------------------------------
+
+
+class TestFromYamlAllowedCommandsPreserved:
+    """Security regression: from_yaml must not silently drop allowed_commands
+    when YAML parsing fails. Previously, the error path returned
+    cls(hooks=[]) without forwarding allowed_commands."""
+
+    def test_malformed_yaml_preserves_allowed_commands(self, tmp_path: Path) -> None:
+        import yaml
+
+        yaml_file = tmp_path / "hooks.yaml"
+        yaml_file.write_text("pre_execution: []")
+
+        with patch.object(yaml, "safe_load", side_effect=RuntimeError("bad yaml")):
+            executor = HookExecutor.from_yaml(
+                yaml_file, allowed_commands=["git", "npm"]
+            )
+        assert executor._hooks == []
+        assert "git" in executor._allowed_commands
+        assert "npm" in executor._allowed_commands
+
+    def test_nonexistent_file_preserves_allowed_commands(self, tmp_path: Path) -> None:
+        executor = HookExecutor.from_yaml(
+            tmp_path / "nonexistent.yaml", allowed_commands=["git"]
+        )
+        assert executor._hooks == []
+        assert "git" in executor._allowed_commands
+
+
+# ---------------------------------------------------------------------------
+# _parse_hooks_for_event
+# ---------------------------------------------------------------------------
+
+
+class TestParseHooksForEvent:
+    """Unit tests for HookExecutor._parse_hooks_for_event static method."""
+
+    def test_valid_hook_dicts_return_definitions(self) -> None:
+        hook_list = [{"type": "command", "command": "echo hello"}]
+        result = HookExecutor._parse_hooks_for_event(
+            HookEvent.PRE_EXECUTION, hook_list, Path("test.yaml")
+        )
+        assert len(result) == 1
+        assert isinstance(result[0], HookDefinition)
+        assert result[0].type == HookType.COMMAND
+        assert result[0].event == HookEvent.PRE_EXECUTION
+
+    def test_non_dict_entries_are_skipped(self) -> None:
+        hook_list = ["not_a_dict", 42, None]
+        result = HookExecutor._parse_hooks_for_event(
+            HookEvent.PRE_EXECUTION, hook_list, Path("test.yaml")
+        )
+        assert result == []
+
+    def test_invalid_hook_dicts_are_skipped_not_exception(self) -> None:
+        """A dict that fails model_validate is skipped, not raised."""
+        hook_list = [
+            {"type": "command", "command": "echo ok"},
+            {"not_a_valid_field": True},  # missing 'type', will fail validation
+        ]
+        result = HookExecutor._parse_hooks_for_event(
+            HookEvent.PRE_EXECUTION, hook_list, Path("test.yaml")
+        )
+        assert len(result) == 1
+        assert result[0].command == "echo ok"
+
+    def test_empty_list_returns_empty_list(self) -> None:
+        result = HookExecutor._parse_hooks_for_event(
+            HookEvent.PRE_EXECUTION, [], Path("test.yaml")
+        )
+        assert result == []

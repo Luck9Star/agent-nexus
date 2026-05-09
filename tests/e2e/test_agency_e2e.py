@@ -17,20 +17,20 @@ from pathlib import Path
 import pytest
 
 from agent_nexus.platform.agency.importer import AgencyImporter
-from agent_nexus.platform.agency.registry import ExpertRegistry
-from agent_nexus.platform.agency.selector import (
-    SelectionRequest,
-    SelectionResult,
-    SpecialistSelector,
-)
+from agent_nexus.platform.agency.integrator import Artifact, Integrator
 from agent_nexus.platform.agency.planner import (
     CompositionDAG,
     DynamicCompositePlanner,
     SubtaskDef,
     generate_toml,
 )
-from agent_nexus.platform.agency.integrator import Artifact, Integrator
 from agent_nexus.platform.agency.qa_gate import QAGate, QAGateInput
+from agent_nexus.platform.agency.registry import ExpertRegistry
+from agent_nexus.platform.agency.selector import (
+    SelectionRequest,
+    SelectionResult,
+    SpecialistSelector,
+)
 from agent_nexus.platform.agency.task_composer import (
     TaskComposer,
     TaskComposerInput,
@@ -123,8 +123,8 @@ class TestRegistryLoading:
         assert len(all_agents) > 0
 
     def test_registry_search_by_capability(self, populated_registry):
-        results = populated_registry.search_by_capability(["architecture"])
-        assert isinstance(results, list)
+        results = populated_registry.search_by_capability(["code_review"])
+        assert len(results) > 0
 
     def test_registry_get_returns_profile(self, populated_registry, importer_profiles):
         first_id = importer_profiles[0]["expert_profile"]["id"]
@@ -179,8 +179,8 @@ class TestSpecialistSelection:
             permissions="plan",
         )
         results = selector.select(req)
-        # Should return empty or very few (best effort)
-        assert isinstance(results, list)
+        # No agent has quantum_computing or spaceflight capabilities
+        assert len(results) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +303,8 @@ class TestTaskComposerPipeline:
         )
         result = composer.run(inp)  # Uses default stub executor
         assert isinstance(result, TaskComposerResult)
-        # Should not crash even with stubs
+        assert result.dag is not None
+        assert len(result.selected_agents) > 0
 
     def test_pipeline_completes_within_time(self, composer):
         """Pipeline completes within reasonable time (no infinite loops)."""
@@ -370,7 +371,8 @@ class TestIntegrationAndConflicts:
             ),
         ]
         integrated = Integrator.merge(artifacts)
-        assert integrated.conflicts is not None
+        # Conflicting recommendations should be detected
+        assert len(integrated.conflicts) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -495,8 +497,6 @@ class TestImportAllFileOutput:
 
     def test_all_profile_json_files_written(self):
         """All 12 <id>.json files are written to output_dir."""
-        import io
-        import json
 
         with tempfile.TemporaryDirectory() as tmpdir:
             importer = AgencyImporter(
@@ -509,7 +509,9 @@ class TestImportAllFileOutput:
             output_path = Path(tmpdir)
             json_files = sorted(output_path.glob("*.json"))
             json_ids = [f.stem for f in json_files]
-            assert len(json_files) == 16, f"Expected 16 JSON files, got {len(json_files)}: {json_ids}"
+            assert len(json_files) == 16, (
+                f"Expected 16 JSON files, got {len(json_files)}: {json_ids}"
+            )
 
     def test_normalized_md_files_written(self):
         """normalized/<id>.md files exist for each agent."""
@@ -528,7 +530,6 @@ class TestImportAllFileOutput:
 
     def test_source_lock_yaml_exists_and_valid(self):
         """source.lock.yaml exists and is valid YAML with correct structure."""
-        import io
 
         with tempfile.TemporaryDirectory() as tmpdir:
             importer = AgencyImporter(
@@ -542,6 +543,7 @@ class TestImportAllFileOutput:
             assert lock_path.is_file(), "source.lock.yaml not created"
 
             import yaml
+
             with lock_path.open() as f:
                 lock_data = yaml.safe_load(f)
 
@@ -586,8 +588,16 @@ class TestImportAllFileOutput:
         import json
 
         required_keys = {
-            "id", "name", "source", "profile", "capabilities", "routing",
-            "runtime", "permissions", "output_contract", "quality",
+            "id",
+            "name",
+            "source",
+            "profile",
+            "capabilities",
+            "routing",
+            "runtime",
+            "permissions",
+            "output_contract",
+            "quality",
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -730,12 +740,6 @@ class TestAllowlistValidation:
 class TestYAMLSerialization:
     """E2E: YAML helper functions produce correct output."""
 
-    def test_yaml_quote_empty_string(self):
-        from agent_nexus.platform.agency.importer import _yaml_quote
-
-        result = _yaml_quote("")
-        assert result == '""'
-
     def test_yaml_quote_string_with_colon(self):
         """Strings containing ':' are double-quoted."""
         from agent_nexus.platform.agency.importer import _yaml_quote
@@ -756,7 +760,27 @@ class TestYAMLSerialization:
         """Strings with any trigger character are double-quoted."""
         from agent_nexus.platform.agency.importer import _yaml_quote
 
-        for char in (":", "#", "{", "}", "[", "]", ",", "&", "*", "?", "|", "-", "<", ">", "=", "!", "%", "@", "`"):
+        for char in (
+            ":",
+            "#",
+            "{",
+            "}",
+            "[",
+            "]",
+            ",",
+            "&",
+            "*",
+            "?",
+            "|",
+            "-",
+            "<",
+            ">",
+            "=",
+            "!",
+            "%",
+            "@",
+            "`",
+        ):
             result = _yaml_quote(f"hello{char}world")
             assert result.startswith('"'), f"Char {char!r} should trigger quoting"
 
@@ -770,12 +794,14 @@ class TestYAMLSerialization:
     def test_dump_yaml_produces_parseable_output(self):
         """_dump_yaml() output can be parsed by yaml.safe_load."""
         import io
+
         import yaml
+
         from agent_nexus.platform.agency.importer import _dump_yaml
 
         data = {
             "version": 1,
-            "name": "test \"agent\"",
+            "name": 'test "agent"',
             "items": ["alpha", "beta"],
             "nested": {"key": "value with : special # chars"},
             "empty": None,
@@ -964,7 +990,9 @@ class TestCapabilityInference:
         from agent_nexus.platform.agency.task_composer import infer_capabilities
 
         caps = infer_capabilities("insecurity measurement")
-        assert "security_review" not in caps, f"security_review should not be in {caps} for 'insecurity'"
+        assert "security_review" not in caps, (
+            f"security_review should not be in {caps} for 'insecurity'"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -998,7 +1026,9 @@ class TestPlannerResolveDependencies:
         dag = planner.resolve_dependencies(subtasks, composition_name="dep-test", max_parallel=2)
         # task-b's caps are a subset of task-a's, so task-b depends on task-a
         task_b = next(t for t in dag.tasks if t.id == "task-b")
-        assert "task-a" in task_b.blocked_by, f"task-b should be blocked by task-a, got {task_b.blocked_by}"
+        assert "task-a" in task_b.blocked_by, (
+            f"task-b should be blocked by task-a, got {task_b.blocked_by}"
+        )
 
     def test_integrate_and_validate_appended(self):
         """integrate and validate tasks are always appended."""

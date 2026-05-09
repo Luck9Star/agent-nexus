@@ -10,22 +10,30 @@ from agent_nexus.platform.agency.task_composer import TaskComposer, TaskComposer
 
 def _registry_with_two_experts():
     registry = ExpertRegistry()
-    registry.add("agency.reviewer", {
-        "id": "agency.reviewer",
-        "name": "Code Reviewer",
-        "capabilities": ["code_review"],
-        "permissions": {"mode": "plan"},
-        "output_contract": {"artifact_type": "report", "required_sections": ["summary"]},
-        "profile": {"body": "You review code."},
-    }, ["code_review"])
-    registry.add("agency.security", {
-        "id": "agency.security",
-        "name": "Security Expert",
-        "capabilities": ["security_review"],
-        "permissions": {"mode": "plan"},
-        "output_contract": {"artifact_type": "report", "required_sections": ["summary"]},
-        "profile": {"body": "You review security."},
-    }, ["security_review"])
+    registry.add(
+        "agency.reviewer",
+        {
+            "id": "agency.reviewer",
+            "name": "Code Reviewer",
+            "capabilities": ["code_review"],
+            "permissions": {"mode": "plan"},
+            "output_contract": {"artifact_type": "report", "required_sections": ["summary"]},
+            "profile": {"body": "You review code."},
+        },
+        ["code_review"],
+    )
+    registry.add(
+        "agency.security",
+        {
+            "id": "agency.security",
+            "name": "Security Expert",
+            "capabilities": ["security_review"],
+            "permissions": {"mode": "plan"},
+            "output_contract": {"artifact_type": "report", "required_sections": ["summary"]},
+            "profile": {"body": "You review security."},
+        },
+        ["security_review"],
+    )
     return registry
 
 

@@ -120,25 +120,12 @@ class SpecialistSelector:
         """
         required_set = set(request.required_capabilities)
         optional_set = set(request.optional_capabilities)
-        request_perm_level = _permission_level(request.permissions)
 
-        # 1. Get all experts and filter by permission
-        all_ids = self.registry.list_all()
-        eligible: list[dict[str, Any]] = []
-        for pid in all_ids:
-            profile = self.registry.get(pid)
-            if profile is None:
-                continue
-            profile.setdefault("id", pid)
-            agent_perm = profile.get("permissions", {}).get("mode", "plan")
-            if _permission_level(agent_perm) > request_perm_level:
-                continue
-            eligible.append(profile)
-
+        eligible = self._filter_by_permission(request)
         if not eligible:
             return []
 
-        # 2. Fast path: find agents that individually cover ALL required caps
+        # Fast path: find agents that individually cover ALL required caps
         full_match = [
             p
             for p in eligible
@@ -148,8 +135,7 @@ class SpecialistSelector:
         if full_match:
             return self._score_and_rank(full_match, required_set, optional_set, request)
 
-        # 3. Slow path: no single agent covers all required caps.
-        #    Use greedy set-cover to find a multi-agent team.
+        # Slow path: no single agent covers all required caps.
         if not required_set:
             return self._score_and_rank(eligible, required_set, optional_set, request)
 
@@ -163,6 +149,44 @@ class SpecialistSelector:
 
         return self._score_and_rank(
             team, required_set, optional_set, request, protect_coverage=True
+        )
+
+    def _filter_by_permission(self, request: SelectionRequest) -> list[dict[str, Any]]:
+        """Filter registry experts by permission level."""
+        request_perm_level = _permission_level(request.permissions)
+        all_ids = self.registry.list_all()
+        eligible: list[dict[str, Any]] = []
+        for pid in all_ids:
+            profile = self.registry.get(pid)
+            if profile is None:
+                continue
+            profile.setdefault("id", pid)
+            agent_perm = profile.get("permissions", {}).get("mode", "plan")
+            if _permission_level(agent_perm) > request_perm_level:
+                continue
+            eligible.append(profile)
+        return eligible
+
+    @staticmethod
+    def _is_better_candidate(
+        profile: dict[str, Any],
+        coverage: set[str],
+        best_profile: dict[str, Any] | None,
+        best_coverage: set[str],
+        best_score: float,
+    ) -> bool:
+        """Determine if *profile* is a strictly better greedy choice than the current best."""
+        coverage_len = len(coverage)
+        if coverage_len > len(best_coverage):
+            return True
+        total_caps = len(set(profile.get("capabilities", [])))
+        if coverage_len == len(best_coverage) and total_caps > best_score:
+            return True
+        return bool(
+            coverage_len == len(best_coverage)
+            and total_caps == best_score
+            and best_profile is not None
+            and profile["id"] < best_profile["id"]
         )
 
     def _greedy_set_cover(
@@ -188,24 +212,17 @@ class SpecialistSelector:
                 pid = profile["id"]
                 if pid in used_ids:
                     continue
-                agent_caps = set(profile.get("capabilities", []))
-                coverage = agent_caps & remaining
-                # Deterministic tie-breaking: prefer more uncovered caps,
-                # then higher overall capability count, then lexicographic id
-                coverage_len = len(coverage)
-                total_caps = len(agent_caps)
-                if (
-                    coverage_len > len(best_coverage)
-                    or (coverage_len == len(best_coverage) and total_caps > best_score)
-                    or (
-                        coverage_len == len(best_coverage)
-                        and total_caps == best_score
-                        and pid < (best_profile["id"] if best_profile else "")
-                    )
+                coverage = set(profile.get("capabilities", [])) & remaining
+                if self._is_better_candidate(
+                    profile,
+                    coverage,
+                    best_profile,
+                    best_coverage,
+                    best_score,
                 ):
                     best_profile = profile
                     best_coverage = coverage
-                    best_score = total_caps
+                    best_score = len(set(profile.get("capabilities", [])))
 
             if best_profile is None or not best_coverage:
                 break  # No agent can cover remaining caps
@@ -217,6 +234,90 @@ class SpecialistSelector:
         if remaining:
             logger.warning("Greedy set-cover could not cover capabilities: %s", remaining)
         return selected
+
+    def _score_candidate(
+        self,
+        profile: dict[str, Any],
+        required_set: set[str],
+        optional_set: set[str],
+        request: SelectionRequest,
+        request_perm_level: int,
+    ) -> tuple[float, dict[str, Any], list[str]]:
+        """Score a single candidate profile and return (raw_score, profile, reasons)."""
+        agent_caps = set(profile.get("capabilities", []))
+        reasons: list[str] = []
+
+        req_overlap = _capability_overlap(agent_caps, required_set)
+        if req_overlap > 0:
+            matched = agent_caps & required_set
+            reasons.append(f"Required capability match: {sorted(matched)}")
+
+        opt_overlap = _optional_overlap(agent_caps, optional_set)
+
+        task_types = set(profile.get("routing", {}).get("task_types", []))
+        task_match = 1.0 if request.task_type in task_types else 0.0
+        if task_match > 0:
+            reasons.append(f"Task type match: {request.task_type}")
+
+        agent_perm = profile.get("permissions", {}).get("mode", "plan")
+        agent_perm_level = _permission_level(agent_perm)
+        perm_fit = (agent_perm_level + 1) / (request_perm_level + 1)
+        if perm_fit >= 1.0:
+            reasons.append(f"Permission fit: {agent_perm} (exact match)")
+        else:
+            reasons.append(
+                f"Permission fit: {agent_perm} (less permissive than request {request.permissions})"  # noqa: E501
+            )
+
+        raw_score = (
+            self.WEIGHT_REQUIRED * req_overlap
+            + self.WEIGHT_OPTIONAL * opt_overlap
+            + self.WEIGHT_TASK_TYPE * task_match
+            + self.WEIGHT_PERMISSION * perm_fit
+        )
+        return (raw_score, profile, reasons)
+
+    def _apply_diversity_dedup(
+        self,
+        scored: list[tuple[float, dict[str, Any], list[str]]],
+    ) -> list[tuple[float, dict[str, Any], list[str]]]:
+        """Filter out candidates with >DIVERSITY_THRESHOLD Jaccard similarity."""
+        selected: list[tuple[float, dict[str, Any], list[str]]] = []
+        for raw_score, profile, reasons in scored:
+            agent_caps = set(profile.get("capabilities", []))
+            is_duplicate = any(
+                _jaccard_similarity(agent_caps, set(sel.get("capabilities", [])))
+                > self.DIVERSITY_THRESHOLD
+                for _, sel, _ in selected
+            )
+            if not is_duplicate:
+                selected.append((raw_score, profile, reasons))
+        return selected
+
+    def _normalize_and_build_results(
+        self,
+        selected: list[tuple[float, dict[str, Any], list[str]]],
+    ) -> list[SelectionResult]:
+        """Normalize raw scores and build SelectionResult objects."""
+        max_possible = (
+            self.WEIGHT_REQUIRED
+            + self.WEIGHT_OPTIONAL
+            + self.WEIGHT_TASK_TYPE
+            + self.WEIGHT_PERMISSION
+        )
+        results: list[SelectionResult] = []
+        for raw_score, profile, reasons in selected:
+            normalized = raw_score / max_possible if max_possible > 0 else 0.0
+            final_score = normalized * (1.0 - self.WEIGHT_DIVERSITY) + self.WEIGHT_DIVERSITY
+            final_score = max(final_score, 0.01)
+            results.append(
+                SelectionResult(
+                    agent_id=profile["id"],
+                    score=round(final_score, 4),
+                    reasons=reasons,
+                )
+            )
+        return results
 
     def _score_and_rank(
         self,
@@ -236,88 +337,15 @@ class SpecialistSelector:
         """
         request_perm_level = _permission_level(request.permissions)
 
-        # Score each candidate
-        scored: list[tuple[float, dict[str, Any], list[str]]] = []
-        for profile in candidates:
-            agent_caps = set(profile.get("capabilities", []))
-            reasons: list[str] = []
-
-            req_overlap = _capability_overlap(agent_caps, required_set)
-            if req_overlap > 0:
-                matched = agent_caps & required_set
-                reasons.append(f"Required capability match: {sorted(matched)}")
-
-            opt_overlap = _optional_overlap(agent_caps, optional_set)
-
-            task_types = set(profile.get("routing", {}).get("task_types", []))
-            task_match = 1.0 if request.task_type in task_types else 0.0
-            if task_match > 0:
-                reasons.append(f"Task type match: {request.task_type}")
-
-            agent_perm = profile.get("permissions", {}).get("mode", "plan")
-            agent_perm_level = _permission_level(agent_perm)
-            perm_fit = (agent_perm_level + 1) / (request_perm_level + 1)
-            if perm_fit >= 1.0:
-                reasons.append(f"Permission fit: {agent_perm} (exact match)")
-            else:
-                reasons.append(
-                    f"Permission fit: {agent_perm} (less permissive than request {request.permissions})"  # noqa: E501
-                )
-
-            raw_score = (
-                self.WEIGHT_REQUIRED * req_overlap
-                + self.WEIGHT_OPTIONAL * opt_overlap
-                + self.WEIGHT_TASK_TYPE * task_match
-                + self.WEIGHT_PERMISSION * perm_fit
-            )
-
-            scored.append((raw_score, profile, reasons))
-
-        # Sort by score descending, break ties by id for determinism
+        scored = [
+            self._score_candidate(p, required_set, optional_set, request, request_perm_level)
+            for p in candidates
+        ]
         scored.sort(key=lambda t: (-t[0], t[1]["id"]))
 
         if protect_coverage:
-            # Set-cover team: every member is needed for coverage.
-            # Skip diversity dedup and respect max_agents as a ceiling only.
             selected = scored[: request.max_agents] if request.max_agents else scored
         else:
-            # Apply diversity dedup
-            selected: list[tuple[float, dict[str, Any], list[str]]] = []
-            for raw_score, profile, reasons in scored:
-                agent_caps = set(profile.get("capabilities", []))
-                is_duplicate = False
-                for _, sel_profile, _ in selected:
-                    sel_caps = set(sel_profile.get("capabilities", []))
-                    if _jaccard_similarity(agent_caps, sel_caps) > self.DIVERSITY_THRESHOLD:
-                        is_duplicate = True
-                        break
-                if is_duplicate:
-                    continue
-                selected.append((raw_score, profile, reasons))
+            selected = self._apply_diversity_dedup(scored)[: request.max_agents]
 
-            # Take top max_agents
-            selected = selected[: request.max_agents]
-
-        # Build results with adjusted score including diversity weight
-        results: list[SelectionResult] = []
-        max_possible = (
-            self.WEIGHT_REQUIRED
-            + self.WEIGHT_OPTIONAL
-            + self.WEIGHT_TASK_TYPE
-            + self.WEIGHT_PERMISSION
-        )
-        for raw_score, profile, reasons in selected:
-            normalized = raw_score / max_possible if max_possible > 0 else 0.0
-            final_score = normalized * (1.0 - self.WEIGHT_DIVERSITY) + self.WEIGHT_DIVERSITY
-            # Floor ensures every selected agent has a non-zero score
-            final_score = max(final_score, 0.01)
-
-            results.append(
-                SelectionResult(
-                    agent_id=profile["id"],
-                    score=round(final_score, 4),
-                    reasons=reasons,
-                )
-            )
-
-        return results
+        return self._normalize_and_build_results(selected)

@@ -89,7 +89,9 @@ class TestConfigPath:
 
 
 class TestConfigProviders:
-    def test_providers_lists_providers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_providers_lists_providers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         config_dir = _make_config_dir(tmp_path, monkeypatch)
 
         with patch("agent_nexus.platform.local.cli._shared._init_managers") as mock_init:

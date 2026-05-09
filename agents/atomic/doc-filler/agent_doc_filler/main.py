@@ -57,9 +57,7 @@ def _run_cli() -> None:
     # fill command
     fill_parser = subparsers.add_parser("fill", help="Fill a template with values")
     fill_parser.add_argument("template_path", help="Path to .docx template")
-    fill_parser.add_argument(
-        "--values", required=True, help="JSON string of placeholder values"
-    )
+    fill_parser.add_argument("--values", required=True, help="JSON string of placeholder values")
     fill_parser.add_argument("--output", help="Output file path")
 
     args = parser.parse_args()

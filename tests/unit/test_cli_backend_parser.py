@@ -1,4 +1,5 @@
 """Unit tests for CLI output parser — JSON path extraction and text regex."""
+
 from __future__ import annotations
 
 import json
@@ -42,12 +43,14 @@ class TestExtractJsonValue:
 
 class TestParseJsonOutput:
     def test_claude_code_format(self):
-        stdout = json.dumps({
-            "result": "task completed",
-            "session_id": "sess-001",
-            "model": "claude-sonnet-4-20250514",
-            "usage": {"input_tokens": 200, "output_tokens": 100},
-        })
+        stdout = json.dumps(
+            {
+                "result": "task completed",
+                "session_id": "sess-001",
+                "model": "claude-sonnet-4-20250514",
+                "usage": {"input_tokens": 200, "output_tokens": 100},
+            }
+        )
         config = BackendConfig(
             command="claude",
             json_paths=JsonPathConfig(
@@ -67,12 +70,14 @@ class TestParseJsonOutput:
         assert result.parse_error is False
 
     def test_gemini_format(self):
-        stdout = json.dumps({
-            "response": {"text": "gemini answer"},
-            "session": {"id": "gsess-1"},
-            "model_version": "gemini-2.5-flash",
-            "usage_metadata": {"prompt_token_count": 300, "candidates_token_count": 150},
-        })
+        stdout = json.dumps(
+            {
+                "response": {"text": "gemini answer"},
+                "session": {"id": "gsess-1"},
+                "model_version": "gemini-2.5-flash",
+                "usage_metadata": {"prompt_token_count": 300, "candidates_token_count": 150},
+            }
+        )
         config = BackendConfig(
             command="gemini",
             json_paths=JsonPathConfig(

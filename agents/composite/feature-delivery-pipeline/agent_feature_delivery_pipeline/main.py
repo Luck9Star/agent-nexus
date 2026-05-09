@@ -37,8 +37,7 @@ def main() -> None:
         except ImportError as e:
             print(f"Error: {e}", file=sys.stderr)
             print(
-                "Install full dependencies with: "
-                "pip install agent-feature-delivery-pipeline[full]",
+                "Install full dependencies with: pip install agent-feature-delivery-pipeline[full]",
                 file=sys.stderr,
             )
             sys.exit(1)

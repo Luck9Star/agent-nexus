@@ -5,9 +5,7 @@ cross-stage data flow via ReflectionFeedbackProvider.
 """
 
 import json
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from agent_nexus.platform.agency.context_provider import ReflectionFeedbackProvider
 from agent_nexus.platform.agency.llm_client import LLMResponse
@@ -15,10 +13,8 @@ from agent_nexus.platform.agency.reflector import (
     EmptyResultRule,
     LLMReflector,
     MaxIterationRule,
-    Reflection,
     Reflector,
 )
-
 
 # ---------------------------------------------------------------------------
 # 1. Single pass — sufficient result
@@ -105,7 +101,9 @@ class TestReflectLoopRetryOnInsufficient:
 
         # Next round can read the feedback
         assert feedback_provider.get_context() != ""
-        assert "详细" in feedback_provider.get_context() or "内容" in feedback_provider.get_context()
+        assert (
+            "详细" in feedback_provider.get_context() or "内容" in feedback_provider.get_context()
+        )
 
     def test_retry_loop_simulation(self):
         """Simulate a full retry loop: empty -> feedback -> sufficient."""
@@ -252,12 +250,14 @@ class TestReflectorWithLLM:
     def test_llm_returns_sufficient(self):
         mock_client = MagicMock()
         mock_client.call.return_value = LLMResponse(
-            text=json.dumps({
-                "sufficient": True,
-                "reason": "Result covers all required aspects",
-                "feedback": "",
-                "next_queries": [],
-            }),
+            text=json.dumps(
+                {
+                    "sufficient": True,
+                    "reason": "Result covers all required aspects",
+                    "feedback": "",
+                    "next_queries": [],
+                }
+            ),
             model="test:model",
             provider="test",
         )
@@ -272,12 +272,14 @@ class TestReflectorWithLLM:
     def test_llm_returns_insufficient_with_feedback(self):
         mock_client = MagicMock()
         mock_client.call.return_value = LLMResponse(
-            text=json.dumps({
-                "sufficient": False,
-                "reason": "Missing depth",
-                "feedback": "Add more technical details about the architecture",
-                "next_queries": ["search for design patterns", "review module structure"],
-            }),
+            text=json.dumps(
+                {
+                    "sufficient": False,
+                    "reason": "Missing depth",
+                    "feedback": "Add more technical details about the architecture",
+                    "next_queries": ["search for design patterns", "review module structure"],
+                }
+            ),
             model="test:model",
             provider="test",
         )

@@ -8,10 +8,10 @@ Provides three MCP tools:
 
 from __future__ import annotations
 
-from agent_contract_analyzer.models import ClauseInfo, RiskAnalysis, ComplianceReport
-from agent_contract_analyzer.tools.extract_clauses import extract_clauses as _extract
+from agent_contract_analyzer.models import ClauseInfo
 from agent_contract_analyzer.tools.analyze_risks import analyze_risks as _analyze_risks
 from agent_contract_analyzer.tools.check_compliance import check_compliance as _check
+from agent_contract_analyzer.tools.extract_clauses import extract_clauses as _extract
 
 
 def create_mcp_server() -> object:
@@ -33,7 +33,7 @@ def create_mcp_server() -> object:
         raise ImportError(
             "FastMCP is required for MCP mode. "
             "Install with: pip install agent-contract-analyzer[full]"
-        )
+        ) from None
 
     mcp = FastMCP("contract-analyzer")
 

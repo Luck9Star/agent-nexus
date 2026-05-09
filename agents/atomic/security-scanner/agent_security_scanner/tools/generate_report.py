@@ -63,13 +63,14 @@ def _generate_recommendations(findings: list[SecurityFinding]) -> list[str]:
         List of recommendation strings, ordered by severity (most critical first).
     """
     severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-    sorted_findings = sorted(
-        findings, key=lambda f: severity_order.get(f.severity.lower(), 99)
-    )
+    sorted_findings = sorted(findings, key=lambda f: severity_order.get(f.severity.lower(), 99))
 
     recommendations: list[str] = []
     for finding in sorted_findings:
-        rec = finding.remediation or f"No specific remediation provided for {finding.category} at {finding.location}"
+        rec = (
+            finding.remediation
+            or f"No specific remediation provided for {finding.category} at {finding.location}"
+        )
         prefix = f"[{finding.severity.upper()}] {finding.location}: "
         recommendations.append(prefix + rec)
 

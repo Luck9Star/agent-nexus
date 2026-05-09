@@ -3,18 +3,17 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from agent_nexus.models.evolution import EvolutionContext, SkillRecord
+from agent_nexus.models.evolution import EvolutionContext, EvolutionType, SkillRecord
 from agent_nexus.platform.evolution.analyzer import AnalysisResult
 from agent_nexus.platform.evolution.compaction import AgentContext
 from agent_nexus.platform.evolution.engine import EvolutionEngine
-from agent_nexus.platform.evolution.evolver import EvolveResult, EvolutionTrigger
+from agent_nexus.platform.evolution.evolver import EvolutionTrigger, EvolveResult
 from agent_nexus.platform.evolution.promotion import PromotionCandidate, PromotionResult
-from agent_nexus.models.evolution import EvolutionType
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_store() -> MagicMock:
     store = MagicMock()
@@ -41,6 +40,7 @@ def _make_ctx(**overrides) -> EvolutionContext:
 # Constructor + properties
 # ---------------------------------------------------------------------------
 
+
 class TestInit:
     def test_creates_sub_components(self):
         store = _make_store()
@@ -64,6 +64,7 @@ class TestInit:
 # evolve() routing
 # ---------------------------------------------------------------------------
 
+
 class TestEvolvePostAnalysis:
     def test_post_analysis_returns_analysis_result(self):
         store = _make_store()
@@ -86,12 +87,13 @@ class TestEvolvePostAnalysis:
         result = engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
         # Analyzer records analysis even if no suggestions produced
         store.record_analysis.assert_called_once()
-        assert isinstance(result, AnalysisResult)
+        assert result.task_id == "task-1"
 
     def test_post_analysis_requires_ctx(self):
         store = _make_store()
         engine = EvolutionEngine(store)
         import pytest  # pyright: ignore[reportMissingImports]
+
         with pytest.raises(ValueError, match="ctx"):
             engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS)
 
@@ -104,12 +106,14 @@ class TestEvolveToolDegradation:
         ]
         engine = EvolutionEngine(store)
         results = engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION, tool_key="api-x")
-        assert isinstance(results, list)
+        assert len(results) == 1
+        assert results[0].success is False
 
     def test_tool_degradation_requires_tool_key(self):
         store = _make_store()
         engine = EvolutionEngine(store)
         import pytest  # pyright: ignore[reportMissingImports]
+
         with pytest.raises(ValueError, match="tool_key"):
             engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION)
 
@@ -119,7 +123,7 @@ class TestEvolveMetricCheck:
         store = _make_store()
         engine = EvolutionEngine(store)
         results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
-        assert isinstance(results, list)
+        assert results == []
 
 
 class TestEvolveUnknownTrigger:
@@ -127,6 +131,7 @@ class TestEvolveUnknownTrigger:
         store = _make_store()
         engine = EvolutionEngine(store)
         import pytest  # pyright: ignore[reportMissingImports]
+
         with pytest.raises(ValueError, match="Unknown trigger"):
             engine.evolve(trigger="bogus")  # type: ignore[arg-type]
 
@@ -135,11 +140,18 @@ class TestEvolveUnknownTrigger:
 # Convenience methods
 # ---------------------------------------------------------------------------
 
+
 class TestCheckHealth:
     def test_delegates_to_health_checker(self):
         store = _make_store()
-        skill = SkillRecord(id="sk-1", name="s1", total_selections=10,
-                            total_applied=6, total_completions=1, total_fallbacks=5)
+        skill = SkillRecord(
+            id="sk-1",
+            name="s1",
+            total_selections=10,
+            total_applied=6,
+            total_completions=1,
+            total_fallbacks=5,
+        )
         store.get_skill_record.return_value = skill
         engine = EvolutionEngine(store)
         suggestions = engine.check_health("sk-1")
@@ -150,6 +162,7 @@ class TestCheckHealth:
         store.get_skill_record.return_value = None
         engine = EvolutionEngine(store)
         import pytest  # pyright: ignore[reportMissingImports]
+
         with pytest.raises(ValueError, match="Skill not found"):
             engine.check_health("missing")
 
@@ -171,13 +184,16 @@ class TestPromoteCandidate:
         store = _make_store()
         engine = EvolutionEngine(store)
         candidate = PromotionCandidate(
-            skill_id="sk-1", skill_name="good-skill",
-            effective_rate=0.9, total_selections=100,
+            skill_id="sk-1",
+            skill_name="good-skill",
+            effective_rate=0.9,
+            total_selections=100,
             directory="skills/good",
             reason="high performance",
         )
         result = engine.promote_candidate(candidate)
-        assert isinstance(result, PromotionResult)
+        assert result.success is True
+        assert result.agent_name == "good-skill"
 
 
 class TestShouldCompact:
@@ -185,14 +201,17 @@ class TestShouldCompact:
         store = _make_store()
         engine = EvolutionEngine(store)
         from agent_nexus.models.context import TokenUsage
+
         ctx = AgentContext(
-            agent_id="a1", session_id="s1",
+            agent_id="a1",
+            session_id="s1",
             token_usage=TokenUsage(prompt_tokens=10, completion_tokens=10),
         )
         assert engine.should_compact(ctx) is False
 
 
 # iter122 regression: min_selections minimum guard
+
 
 class TestEvolveMinSelections:
     """evolve(metric_check) clamps min_selections to max(n, 1)."""
@@ -203,11 +222,11 @@ class TestEvolveMinSelections:
         engine = EvolutionEngine(store)
         # min_selections=0 is clamped to 1 — should not error
         result = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK, min_selections=0)
-        assert isinstance(result, list)
+        assert result == []
 
     def test_metric_check_min_selections_negative(self) -> None:
         store = _make_store()
         store.get_active_skills.return_value = []
         engine = EvolutionEngine(store)
         result = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK, min_selections=-5)
-        assert isinstance(result, list)
+        assert result == []

@@ -97,10 +97,7 @@ def generate_openapi(
 
     paths = _build_paths(endpoints)
 
-    if schemas:
-        components = _build_components(schemas)
-    else:
-        components = {"schemas": {}}
+    components = _build_components(schemas) if schemas else {"schemas": {}}
 
     return OpenAPISpec(
         openapi_version="3.1.0",

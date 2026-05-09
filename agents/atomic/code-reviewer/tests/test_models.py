@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from agent_code_reviewer.models import (
     CodeAnalysis,
@@ -17,7 +18,6 @@ from agent_code_reviewer.models import (
     PatternMatch,
     ReviewReport,
 )
-
 
 # ---------------------------------------------------------------------------
 # CodeMetrics
@@ -60,7 +60,7 @@ class TestCodeMetrics:
 
     def test_frozen(self) -> None:
         m = CodeMetrics()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             m.lines_of_code = 999  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -109,7 +109,7 @@ class TestCodeIssue:
 
     def test_frozen(self) -> None:
         issue = CodeIssue(line=1, severity="warning")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             issue.severity = "critical"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -159,7 +159,7 @@ class TestCodeAnalysis:
 
     def test_frozen(self) -> None:
         a = CodeAnalysis(file_path="f.py")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             a.language = "rust"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -210,7 +210,7 @@ class TestPatternMatch:
 
     def test_frozen(self) -> None:
         p = PatternMatch(pattern="x")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             p.pattern = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -261,7 +261,7 @@ class TestReviewReport:
 
     def test_frozen(self) -> None:
         r = ReviewReport()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.summary = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:

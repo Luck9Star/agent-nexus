@@ -8,27 +8,24 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent_nexus.platform.orchestration.ipc import IPCProtocol, IPCStream
 from agent_nexus.platform.orchestration.process_manager import (
     AgentHandle,
     ProcessManager,
 )
-from agent_nexus.platform.orchestration.ipc import IPCProtocol, IPCStream
-
 
 # ============================================================================
 # Fixtures
 # ============================================================================
 
 
-def _make_mock_process(
-    returncode: int | None = None, pid: int = 12345
-) -> MagicMock:
+def _make_mock_process(returncode: int | None = None, pid: int = 12345) -> MagicMock:
     """Create a mock asyncio.subprocess.Process.
 
     Stream read/readline methods return b"" (falsy) so that:
@@ -65,9 +62,7 @@ def pm() -> ProcessManager:
 
 class TestStartAgent:
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_start_agent_success(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_start_agent_success(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """start_agent returns AgentHandle with correct fields."""
         mock_proc = _make_mock_process()
         mock_spawn.return_value = mock_proc
@@ -107,9 +102,7 @@ class TestStartAgent:
             await pm.start_agent(name="dup", command=["echo"])
 
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_start_agent_dead_reuse(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_start_agent_dead_reuse(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """Starting agent with same name after process died succeeds (stale cleanup)."""
         # First start
         mock_spawn.return_value = _make_mock_process(returncode=None)
@@ -126,9 +119,7 @@ class TestStartAgent:
         assert handle.start_command == ["echo", "2"]
 
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_start_agent_failure(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_start_agent_failure(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """Subprocess creation failure raises RuntimeError."""
         mock_spawn.side_effect = OSError("spawn failed")
 
@@ -154,9 +145,7 @@ class TestStartAgent:
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
 class TestStopAgent:
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_stop_clean_exit(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_stop_clean_exit(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """Stop: IPC close + process exits cleanly (stage 1).
 
         Mock asyncio.wait_for so process.wait() returns immediately without
@@ -194,6 +183,7 @@ class TestStopAgent:
         handle.process.returncode = 0
 
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             await pm.stop_agent("drain-test")
@@ -207,9 +197,7 @@ class TestStopAgent:
             await pm.stop_agent("ghost")
 
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_stop_already_dead(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_stop_already_dead(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """Stopping an already-dead process cleans up gracefully."""
         mock_proc = _make_mock_process(returncode=0)
         mock_spawn.return_value = mock_proc
@@ -217,6 +205,7 @@ class TestStopAgent:
         await pm.start_agent(name="dead", command=["echo"])
         # Process already has returncode set (dead)
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             await pm.stop_agent("dead")
@@ -224,9 +213,7 @@ class TestStopAgent:
         assert pm.get_agent("dead") is None
 
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_stop_sigterm_stage(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_stop_sigterm_stage(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """Stop: stage 1 timeout, then SIGTERM (stage 2) succeeds.
 
         Note: stop_agent calls IPCStream.close() TWICE (line 236 always +
@@ -249,7 +236,7 @@ class TestStopAgent:
                 # call 1: first IPCStream.close() drain (tolerated)
                 # call 2: second IPCStream.close() drain (stage 1 close)
                 # call 3: stage 1 process.wait timeout
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             # call 4: stage 2 process.wait succeeds after SIGTERM
             mock_proc.returncode = -signal.SIGTERM
 
@@ -263,9 +250,7 @@ class TestStopAgent:
         assert pm.get_agent("stubborn") is None
 
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_stop_sigkill_stage(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_stop_sigkill_stage(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """Stop: SIGTERM timeout, then SIGKILL (stage 3)."""
         mock_proc = _make_mock_process(returncode=None)
         mock_spawn.return_value = mock_proc
@@ -275,7 +260,7 @@ class TestStopAgent:
         async def _always_timeout(coro, timeout=None):
             # Close coroutine to suppress "never awaited" warning
             coro.close()
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         with patch(
             "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
@@ -301,7 +286,7 @@ class TestStopAgent:
         # Stage 1 timeout, then SIGTERM raises ProcessLookupError
         async def _timeout_then_race(coro, timeout=None):
             coro.close()
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         mock_proc.send_signal.side_effect = ProcessLookupError()
 
@@ -321,13 +306,11 @@ class TestStopAgent:
 
 class TestRestartAgent:
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_restart_reuses_params(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_restart_reuses_params(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """restart_agent stops and starts with same params."""
         mock_spawn.return_value = _make_mock_process(returncode=None, pid=100)
 
-        original = await pm.start_agent(
+        await pm.start_agent(
             name="restarter",
             command=["cmd"],
             cwd=Path("/work"),
@@ -358,9 +341,7 @@ class TestRestartAgent:
 
 class TestHealthCheck:
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_health_check_alive(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_health_check_alive(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """Health check returns True when heartbeat succeeds."""
         mock_spawn.return_value = _make_mock_process(returncode=None)
         handle = await pm.start_agent(name="healthy", command=["echo"])
@@ -371,7 +352,7 @@ class TestHealthCheck:
         result = await pm.health_check("healthy")
         assert result is True
         # last_heartbeat should be updated
-        assert handle.last_heartbeat > datetime(2000, 1, 1, tzinfo=timezone.utc)
+        assert handle.last_heartbeat > datetime(2000, 1, 1, tzinfo=UTC)
 
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
     async def test_health_check_dead_process(
@@ -398,9 +379,7 @@ class TestHealthCheck:
             await pm.health_check("ghost")
 
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_health_check_ipc_error(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_health_check_ipc_error(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """Health check returns False on IPC error."""
         from agent_nexus.platform.orchestration.ipc import IPCError
 
@@ -420,9 +399,7 @@ class TestHealthCheck:
 
 class TestGetAgent:
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_get_agent_found(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_get_agent_found(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """get_agent returns handle for known agent."""
         mock_spawn.return_value = _make_mock_process()
         handle = await pm.start_agent(name="known", command=["echo"])
@@ -436,9 +413,7 @@ class TestGetAgent:
 
 class TestListRunning:
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_list_running_alive_only(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_list_running_alive_only(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """list_running returns only alive agents."""
         # Each start_agent call needs its own mock process
         mock_spawn.side_effect = [
@@ -467,9 +442,7 @@ class TestListRunning:
 
 class TestStopAll:
     @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_stop_all_parallel(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
+    async def test_stop_all_parallel(self, mock_spawn: AsyncMock, pm: ProcessManager) -> None:
         """stop_all stops all agents."""
         mock_spawn.side_effect = [
             _make_mock_process(returncode=None, pid=1),
@@ -489,7 +462,8 @@ class TestStopAll:
 
     async def test_stop_all_empty(self, pm: ProcessManager) -> None:
         """stop_all on empty manager is a no-op."""
-        await pm.stop_all()  # Should not raise
+        await pm.stop_all()
+        assert len(pm._agents) == 0
 
 
 # ============================================================================
@@ -629,6 +603,7 @@ class TestProcessManagerDelRobustness:
         pm = ProcessManager()
         del pm._agents  # simulate interpreter GC having collected the dict
         pm.__del__()  # must not raise
+        assert not hasattr(pm, "_agents")
 
     def test_del_handle_attr_error(self) -> None:
         """__del__ skips handles whose .process raises RuntimeError."""
@@ -649,11 +624,11 @@ class TestProcessManagerDelRobustness:
         )
         pm._agents["broken"] = handle
         pm.__del__()  # must not raise — OSError caught by broad except
+        mock_proc.kill.assert_called_once()
 
 
 _SUBPROCESS_PATCH = (
-    "agent_nexus.platform.orchestration.process_manager"
-    ".asyncio.create_subprocess_exec"
+    "agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec"
 )
 
 
@@ -765,7 +740,8 @@ class TestProcessManagerLock:
         new_proc = _iter17_make_mock_process(pid=55555)
         with patch(_SUBPROCESS_PATCH, return_value=new_proc):
             handle = await pm.start_agent(
-                "recycle-agent", command=["echo", "new"],
+                "recycle-agent",
+                command=["echo", "new"],
             )
 
         assert handle.pid == 55555
@@ -810,7 +786,6 @@ class TestProcessManagerLock:
 
 
 class TestStopAgentLockProtection:
-
     def _make_pm(self):
         pm = ProcessManager()
         mock_proc = MagicMock()
@@ -981,7 +956,9 @@ class TestProcessManagerStopAllLogsErrors:
         # Make process.wait raise to simulate stop failure
         mock_proc.wait = AsyncMock(side_effect=RuntimeError("stop exploded"))
 
-        with caplog.at_level(logging.ERROR, logger="agent_nexus.platform.orchestration.process_manager"):
+        with caplog.at_level(
+            logging.ERROR, logger="agent_nexus.platform.orchestration.process_manager"
+        ):
             await pm.stop_all(timeout=0.1)
 
         # Should have logged the error
@@ -1047,17 +1024,14 @@ class TestRestartAgentRaceCondition:
 
         with patch.object(pm, "stop_agent", side_effect=_stop_raises_keyerror):
             new_proc = _iter17_make_mock_process(pid=50002)
-            with patch(_SUBPROCESS_PATCH, return_value=new_proc):
-                with caplog.at_level(
-                    logging.WARNING,
-                    logger="agent_nexus.platform.orchestration.process_manager",
-                ):
-                    result = await pm.restart_agent("warn-agent")
+            with patch(_SUBPROCESS_PATCH, return_value=new_proc), caplog.at_level(
+                logging.WARNING,
+                logger="agent_nexus.platform.orchestration.process_manager",
+            ):
+                result = await pm.restart_agent("warn-agent")
 
         assert isinstance(result, AgentHandle)
-        assert any(
-            "already removed during restart" in r.message for r in caplog.records
-        )
+        assert any("already removed during restart" in r.message for r in caplog.records)
 
 
 class TestHealthCheckCleanup:
@@ -1203,7 +1177,9 @@ class TestDrainStderrLogging:
         mock_stderr.readline.side_effect = [b"error: something failed\n", b""]
         mock_proc.stderr = mock_stderr
 
-        with caplog.at_level(logging.DEBUG, logger="agent_nexus.platform.orchestration.process_manager"):
+        with caplog.at_level(
+            logging.DEBUG, logger="agent_nexus.platform.orchestration.process_manager"
+        ):
             await pm._drain_stderr(mock_proc, "test-agent")
 
         assert any("error: something failed" in r.message for r in caplog.records)
@@ -1232,18 +1208,17 @@ class TestDrainStderrExceptionHandling:
         mock_stderr.readline.side_effect = OSError("pipe broken")
         mock_proc.stderr = mock_stderr
 
-        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.orchestration.process_manager"):
+        with caplog.at_level(
+            logging.WARNING, logger="agent_nexus.platform.orchestration.process_manager"
+        ):
             # Should NOT raise — exception is caught and logged
             await pm._drain_stderr(mock_proc, "crash-agent")
 
-        assert any(
-            "stderr drain task failed unexpectedly" in r.message
-            for r in caplog.records
-        )
+        assert any("stderr drain task failed unexpectedly" in r.message for r in caplog.records)
 
     @pytest.mark.asyncio
-    async def test_drain_stderr_cancelled_is_silent(self, caplog) -> None:
-        """CancelledError is expected (stop_agent cancel) — no error log."""
+    async def test_drain_stderr_cancelled_re_raises(self, caplog) -> None:
+        """CancelledError re-raises so cancellation propagates to parent task."""
         import logging
 
         pm = ProcessManager()
@@ -1252,14 +1227,16 @@ class TestDrainStderrExceptionHandling:
         mock_stderr.readline.side_effect = asyncio.CancelledError()
         mock_proc.stderr = mock_stderr
 
-        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.orchestration.process_manager"):
+        with (
+            caplog.at_level(
+                logging.WARNING, logger="agent_nexus.platform.orchestration.process_manager"
+            ),
+            pytest.raises(asyncio.CancelledError),
+        ):
             await pm._drain_stderr(mock_proc, "cancelled-agent")
 
         # CancelledError should NOT produce "failed unexpectedly" log
-        assert not any(
-            "failed unexpectedly" in r.message
-            for r in caplog.records
-        )
+        assert not any("failed unexpectedly" in r.message for r in caplog.records)
 
     @pytest.mark.asyncio
     async def test_drain_stderr_assertion_error_caught(self, caplog) -> None:
@@ -1270,13 +1247,12 @@ class TestDrainStderrExceptionHandling:
         mock_proc = MagicMock()
         mock_proc.stderr = None  # Triggers assertion
 
-        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.orchestration.process_manager"):
+        with caplog.at_level(
+            logging.WARNING, logger="agent_nexus.platform.orchestration.process_manager"
+        ):
             await pm._drain_stderr(mock_proc, "null-stderr-agent")
 
-        assert any(
-            "stderr drain task failed unexpectedly" in r.message
-            for r in caplog.records
-        )
+        assert any("stderr drain task failed unexpectedly" in r.message for r in caplog.records)
 
 
 # ============================================================================
@@ -1453,7 +1429,7 @@ class TestStopAgentSigtermSuccess:
             if call_count <= 2:
                 # call 1: IPCStream.close() drain
                 # call 2: stage 1 process.wait timeout
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             # call 3: stage 2 process.wait succeeds after SIGTERM
             mock_proc.returncode = -signal.SIGTERM
 
@@ -1498,7 +1474,7 @@ class TestStopAgentSigkillEdgeCases:
 
         async def _always_timeout(coro, timeout=None):
             coro.close()
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         with patch(
             "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
@@ -1532,7 +1508,7 @@ class TestStopAgentSigkillEdgeCases:
 
         async def _always_timeout(coro, timeout=None):
             coro.close()
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         with patch(
             "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
@@ -1613,7 +1589,7 @@ class TestStopAgentSigtermRealWait:
             wait_call_count += 1
             # First wait (stage 1): simulate timeout by not setting returncode
             if wait_call_count == 1:
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             # Second wait (stage 2 after SIGTERM): success
             mock_proc.returncode = -signal.SIGTERM
 

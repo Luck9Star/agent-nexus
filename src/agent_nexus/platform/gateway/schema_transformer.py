@@ -7,9 +7,12 @@ full JSON Schema support including ``$ref`` resolution, ``allOf`` merging,
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from pydantic import BaseModel, Field, create_model
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Primitive type mapping
@@ -74,13 +77,13 @@ class SchemaTransformer:
     # Internal dispatch
     # ------------------------------------------------------------------
 
-    def _resolve_any(self, schema: dict[str, Any], name: str = "Anonymous") -> type:  # noqa: PLR0911, PLR0912
+    def _resolve_any(self, schema: dict[str, Any], name: str = "Anonymous") -> Any:  # noqa: PLR0911
         """Dispatch based on schema keywords."""
         # 1. ``$ref`` — highest priority
         if "$ref" in schema:
             resolved = self._resolve_ref(schema["$ref"], name)
             nullable = schema.get("nullable", False)
-            return resolved | None if nullable else resolved  # type: ignore[return-value]
+            return resolved | None if nullable else resolved
 
         # 2. ``allOf`` — merge all sub-schemas into one model
         if "allOf" in schema:
@@ -93,18 +96,8 @@ class SchemaTransformer:
 
         # 4. Explicit ``type``
         type_str = schema.get("type")
-
-        if isinstance(type_str, list):
-            # OpenAPI 3.1 style: ["string", "null"]
-            non_null = [t for t in type_str if t != "null"]
-            has_null = "null" in type_str
-            inner_type = self._resolve_typed(non_null[0], schema, name) if non_null else str
-            return inner_type | None if has_null else inner_type  # type: ignore[return-value]
-
-        if isinstance(type_str, str):
-            nullable = schema.get("nullable", False)
-            inner = self._resolve_typed(type_str, schema, name)
-            return inner | None if nullable else inner  # type: ignore[return-value]
+        if type_str is not None:
+            return self._resolve_by_type_str(type_str, schema, name)
 
         # 5. Fallback — treat as object if properties present, else str
         if "properties" in schema:
@@ -112,11 +105,29 @@ class SchemaTransformer:
 
         return str
 
+    def _resolve_by_type_str(
+        self,
+        type_str: str | list[str],
+        schema: dict[str, Any],
+        name: str,
+    ) -> Any:
+        """Resolve a schema that has an explicit ``type`` field."""
+        if isinstance(type_str, list):
+            # OpenAPI 3.1 style: ["string", "null"]
+            non_null = [t for t in type_str if t != "null"]
+            has_null = "null" in type_str
+            inner_type = self._resolve_typed(non_null[0], schema, name) if non_null else str
+            return inner_type | None if has_null else inner_type
+
+        nullable = schema.get("nullable", False)
+        inner = self._resolve_typed(type_str, schema, name)
+        return inner | None if nullable else inner
+
     # ------------------------------------------------------------------
     # Type-specific resolvers
     # ------------------------------------------------------------------
 
-    def _resolve_typed(self, type_str: str, schema: dict[str, Any], name: str) -> type:
+    def _resolve_typed(self, type_str: str, schema: dict[str, Any], name: str) -> Any:
         """Resolve a schema with an explicit ``type`` field."""
         if type_str in _PRIMITIVE_MAP:
             fmt = schema.get("format")
@@ -126,18 +137,29 @@ class SchemaTransformer:
 
         if type_str == "array":
             items = schema.get("items", {})
-            item_type = self._resolve_any(items, f"{name}Item") if isinstance(items, dict) else Any  # type: ignore[assignment]
-            return list[item_type]  # type: ignore[valid-type]
+            item_type = self._resolve_any(items, f"{name}Item") if isinstance(items, dict) else Any
+            return list[item_type]
 
         if type_str == "object":
             return self._build_object_model(schema, name)
 
         return str
 
+    @staticmethod
+    def _navigate_ref(schema: Any, parts: list[str]) -> Any:
+        """Navigate schema along parts path, returning empty dict on failure."""
+        current = schema
+        for part in parts:
+            if isinstance(current, dict):
+                current = current.get(part, {})
+            else:
+                return {}
+        return current
+
     def _resolve_ref(self, ref: str, _name: str = "RefModel") -> type:
         """Resolve a ``$ref`` pointer (``#/$defs/X`` or ``#/definitions/X``)."""
         if not ref.startswith("#/"):
-            # External refs are not supported — degrade to str
+            logger.warning("External $ref %r is not supported — degrading to str", ref)
             return str
 
         parts = ref[2:].split("/")
@@ -147,15 +169,7 @@ class SchemaTransformer:
         if ref_name in self._model_cache:
             return self._model_cache[ref_name]
 
-        # Navigate the full schema to the referenced definition
-        resolved_schema: Any = self._full_schema
-        for part in parts:
-            if isinstance(resolved_schema, dict):
-                resolved_schema = resolved_schema.get(part, {})
-            else:
-                resolved_schema = {}
-                break
-
+        resolved_schema = self._navigate_ref(self._full_schema, parts)
         if not isinstance(resolved_schema, dict) or not resolved_schema:
             return str
 
@@ -186,15 +200,19 @@ class SchemaTransformer:
                         )
             elif "properties" in sub:
                 self._merge_properties(sub, merged_props)
+            elif sub:
+                # Inline constraint-only schemas (e.g. {"type": "string"})
+                # are valid JSON Schema but have no fields to merge — skip.
+                pass
 
         return create_model(name, **merged_props)  # type: ignore[call-overload]
 
-    def _resolve_one_of_any_of(self, variants: list[dict[str, Any]], name: str) -> type:
+    def _resolve_one_of_any_of(self, variants: list[dict[str, Any]], name: str) -> Any:
         """Resolve ``oneOf`` / ``anyOf`` into ``Union[...]`` or ``X | None``."""
         if not variants:
             return str
 
-        resolved_variants: list[type] = []
+        resolved_variants: list[Any] = []
         has_null = False
 
         for variant in variants:
@@ -211,29 +229,37 @@ class SchemaTransformer:
 
         # Single non-null variant + null → Optional
         if len(resolved_variants) == 1:
-            return resolved_variants[0] | None if has_null else resolved_variants[0]  # type: ignore[return-value]
+            return resolved_variants[0] | None if has_null else resolved_variants[0]
 
         # Multiple non-null variants — build Union[X, Y, ...]
         union = resolved_variants[0]
         for v in resolved_variants[1:]:
-            union = union | v  # type: ignore[assignment]
-        return union | None if has_null else union  # type: ignore[return-value]
+            union = union | v
+        return union | None if has_null else union
 
     # ------------------------------------------------------------------
     # Object model builder
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _model_cache_key(schema: dict[str, Any], name: str) -> str:
+        """Generate a unique cache key combining name with property fingerprint."""
+        props = schema.get("properties", {})
+        prop_names = ",".join(sorted(props.keys())) if isinstance(props, dict) else ""
+        return f"{name}:{prop_names}" if prop_names else name
+
     def _build_object_model(self, schema: dict[str, Any], name: str) -> type[BaseModel]:
         """Build a dynamic Pydantic model from an object schema."""
-        if name in self._model_cache:
-            return self._model_cache[name]
+        cache_key = self._model_cache_key(schema, name)
+        if cache_key in self._model_cache:
+            return self._model_cache[cache_key]
 
         properties = schema.get("properties", {})
         required = set(schema.get("required", []))
 
         # Insert placeholder to break cycles
         placeholder: type[BaseModel] = create_model(name)  # type: ignore[call-overload]
-        self._model_cache[name] = placeholder
+        self._model_cache[cache_key] = placeholder
 
         fields: dict[str, Any] = {}
         for prop_name, prop_def in properties.items():
@@ -253,7 +279,7 @@ class SchemaTransformer:
                     fields[prop_name] = (prop_type, None)
 
         model = create_model(name, **fields)  # type: ignore[call-overload]
-        self._model_cache[name] = model
+        self._model_cache[cache_key] = model
         return model
 
     # ------------------------------------------------------------------

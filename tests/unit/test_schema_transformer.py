@@ -1,10 +1,11 @@
 """Tests for SchemaTransformer — JSON Schema to Python/Pydantic conversion."""
 
-import pytest
 from pydantic import BaseModel
 
 from agent_nexus.platform.gateway.schema_transformer import SchemaTransformer
 
+import logging
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -75,14 +76,16 @@ class TestArray:
 class TestObjectModel:
     def test_flat_object(self):
         t = _make_transformer()
-        model = t.resolve({
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "age": {"type": "integer"},
-            },
-            "required": ["name"],
-        })
+        model = t.resolve(
+            {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "age": {"type": "integer"},
+                },
+                "required": ["name"],
+            }
+        )
         assert issubclass(model, BaseModel)
         # Required field 'name' should accept str
         instance = model(name="Alice")
@@ -90,25 +93,29 @@ class TestObjectModel:
 
     def test_optional_field_gets_none_default(self):
         t = _make_transformer()
-        model = t.resolve({
-            "type": "object",
-            "properties": {
-                "id": {"type": "integer"},
-                "label": {"type": "string"},
-            },
-            "required": ["id"],
-        })
+        model = t.resolve(
+            {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "label": {"type": "string"},
+                },
+                "required": ["id"],
+            }
+        )
         instance = model(id=1)
         assert instance.label is None  # type: ignore[attr-defined]
 
     def test_field_with_explicit_default(self):
         t = _make_transformer()
-        model = t.resolve({
-            "type": "object",
-            "properties": {
-                "status": {"type": "string", "default": "active"},
-            },
-        })
+        model = t.resolve(
+            {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "default": "active"},
+                },
+            }
+        )
         instance = model()
         assert instance.status == "active"  # type: ignore[attr-defined]
 
@@ -212,20 +219,22 @@ class TestAllOf:
     def test_all_of_merges_inline_properties(self):
         """allOf merges inline sub-schemas into one model."""
         t = _make_transformer()
-        model = t.resolve({
-            "allOf": [
-                {
-                    "type": "object",
-                    "properties": {"id": {"type": "integer"}},
-                    "required": ["id"],
-                },
-                {
-                    "type": "object",
-                    "properties": {"name": {"type": "string"}},
-                    "required": ["name"],
-                },
-            ],
-        })
+        model = t.resolve(
+            {
+                "allOf": [
+                    {
+                        "type": "object",
+                        "properties": {"id": {"type": "integer"}},
+                        "required": ["id"],
+                    },
+                    {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                        "required": ["name"],
+                    },
+                ],
+            }
+        )
         assert issubclass(model, BaseModel)
         instance = model(id=1, name="test")
         assert instance.id == 1  # type: ignore[attr-defined]
@@ -259,6 +268,7 @@ class TestNullable:
         result = t.resolve({"$ref": "#/$defs/Item", "nullable": True})
         # Result should be BaseModel | None (or None | BaseModel)
         import typing
+
         args = typing.get_args(result)
         assert len(args) == 2
         non_null = [a for a in args if a is not type(None)]
@@ -346,11 +356,13 @@ class TestResolveModel:
     def test_resolve_model_object(self):
         """resolve_model on object schema returns BaseModel directly."""
         t = _make_transformer()
-        model = t.resolve_model({
-            "type": "object",
-            "properties": {"x": {"type": "integer"}},
-            "required": ["x"],
-        })
+        model = t.resolve_model(
+            {
+                "type": "object",
+                "properties": {"x": {"type": "integer"}},
+                "required": ["x"],
+            }
+        )
         assert issubclass(model, BaseModel)
         assert model(x=42).x == 42  # type: ignore[attr-defined]
 
@@ -369,10 +381,97 @@ class TestFallback:
     def test_properties_without_type_builds_object(self):
         """Schema with properties but no explicit type builds object model."""
         t = _make_transformer()
-        model = t.resolve({
-            "properties": {
-                "key": {"type": "string"},
-            },
-            "required": ["key"],
-        })
+        model = t.resolve(
+            {
+                "properties": {
+                    "key": {"type": "string"},
+                },
+                "required": ["key"],
+            }
+        )
         assert issubclass(model, BaseModel)
+
+
+class TestSchemaCacheCollision:
+    """Verify _build_object_model doesn't collide on same-name objects."""
+
+    def test_different_objects_same_name_no_collision(self):
+        """Two objects both named 'Properties' with different fields produce distinct models."""
+        t = _make_transformer()
+        model_a = t.resolve(
+            {
+                "type": "object",
+                "properties": {"alpha": {"type": "string"}},
+                "required": ["alpha"],
+            },
+            name="Properties",
+        )
+        model_b = t.resolve(
+            {
+                "type": "object",
+                "properties": {"beta": {"type": "integer"}},
+                "required": ["beta"],
+            },
+            name="Properties",
+        )
+        # model_a should have 'alpha', model_b should have 'beta'
+        assert hasattr(model_a, "model_fields")
+        assert hasattr(model_b, "model_fields")
+        assert "alpha" in model_a.model_fields
+        assert "beta" in model_b.model_fields
+        # They should NOT share fields
+        assert "beta" not in model_a.model_fields
+        assert "alpha" not in model_b.model_fields
+
+    def test_cache_hit_on_identical_schema(self):
+        """Same name + same properties returns the cached model."""
+        t = _make_transformer()
+        schema = {
+            "type": "object",
+            "properties": {"x": {"type": "string"}},
+            "required": ["x"],
+        }
+        first = t.resolve(schema, name="Same")
+        second = t.resolve(schema, name="Same")
+        assert first is second
+
+
+class TestAllOfInlineSchema:
+    """allOf with inline constraint-only schemas."""
+
+    def test_all_of_with_inline_type_constraint(self):
+        """Inline schema with only 'type' (no $ref, no properties) is handled gracefully."""
+        t = _make_transformer()
+        model = t.resolve(
+            {
+                "allOf": [
+                    {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                        "required": ["name"],
+                    },
+                    {"type": "string"},  # constraint-only, no properties
+                ],
+            }
+        )
+        assert issubclass(model, BaseModel)
+        # Should still have the merged properties from the first sub-schema
+        instance = model(name="test")
+        assert instance.name == "test"  # type: ignore[attr-defined]
+
+    def test_all_of_with_only_inline_schemas(self):
+        """allOf with only inline schemas produces empty model (no crash)."""
+        t = _make_transformer()
+        model = t.resolve({"allOf": [{"type": "string"}, {"type": "integer"}]})
+        assert issubclass(model, BaseModel)
+
+
+class TestExternalRefWarning:
+    """Verify that _resolve_ref logs a warning on external $ref."""
+
+    def test_external_ref_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        t = _make_transformer()
+        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.gateway.schema_transformer"):
+            result = t.resolve({"$ref": "https://other-host.com/schemas/X"})
+        assert result is str
+        assert any("External $ref" in rec.message for rec in caplog.records)

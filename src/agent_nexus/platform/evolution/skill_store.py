@@ -40,6 +40,17 @@ logger = logging.getLogger(__name__)
 ConnFactory = Callable[..., AbstractContextManager[sqlite3.Connection]]
 
 
+def _safe_json_loads(value: str | None, default: Any) -> Any:
+    """Parse JSON from a DB column, returning *default* on corruption."""
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Corrupt JSON in database column, using default")
+        return default
+
+
 class SkillStore:
     """SQLite-backed persistence for skill records, lineage, and agent records.
 
@@ -322,81 +333,14 @@ class SkillStore:
         parent_skill_ids: list[str],
     ) -> EvolveResult:
         """Atomic evolution: insert new version, deactivate old for FIX."""
-        from agent_nexus.platform.evolution._shared import _SQL_CHUNK_SIZE
         from agent_nexus.platform.evolution.evolver import EvolveResult
 
         try:
             with self._conn(immediate=True) as conn:
                 if new_record.lineage.origin == SkillOrigin.FIXED:
-                    if parent_skill_ids:
-                        found = {
-                            r[0]
-                            for r in _chunked_in_fetchall(
-                                conn,
-                                "SELECT id FROM skill_records WHERE id IN ({IN})",
-                                parent_skill_ids,
-                            )
-                        }
-                        missing = set(parent_skill_ids) - found
-                        if missing:
-                            raise ValueError(
-                                f"Parent skill_id(s) not found: {missing} — "
-                                f"cannot deactivate for FIX evolution"
-                            )
+                    self._handle_fixed_evolution(conn, new_record, parent_skill_ids)
 
-                    if parent_skill_ids:
-                        now = _now_iso()
-                        for ci in range(0, len(parent_skill_ids), _SQL_CHUNK_SIZE):
-                            chunk = parent_skill_ids[ci : ci + _SQL_CHUNK_SIZE]
-                            ph = ",".join("?" * len(chunk))
-                            conn.execute(
-                                f"UPDATE skill_records SET is_active = 0, updated_at = ? "
-                                f"WHERE id IN ({ph})",
-                                (now, *chunk),
-                            )
-
-                    dup = conn.execute(
-                        "SELECT id FROM skill_records WHERE name = ? AND is_active = 1 AND id != ?",
-                        (new_record.name, new_record.id),
-                    ).fetchone()
-                    if dup is not None:
-                        raise ValueError(
-                            f"Duplicate active skill: '{new_record.name}' "
-                            f"(id={dup[0]}) already active"
-                        )
-
-                lin = new_record.lineage
-                snapshot_json = json.dumps(lin.content_snapshot or {}, ensure_ascii=False)
-                conn.execute(
-                    """
-                    INSERT INTO skill_records (
-                        id, name, version,
-                        lineage_origin, lineage_generation,
-                        lineage_content_diff, lineage_content_snapshot,
-                        directory, is_active,
-                        total_selections, total_applied,
-                        total_completions, total_fallbacks,
-                        created_at, updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                    """,
-                    (
-                        new_record.id,
-                        new_record.name,
-                        new_record.version,
-                        lin.origin.value,
-                        lin.generation,
-                        lin.content_diff or "",
-                        snapshot_json,
-                        new_record.directory,
-                        int(new_record.is_active),
-                        new_record.total_selections,
-                        new_record.total_applied,
-                        new_record.total_completions,
-                        new_record.total_fallbacks,
-                        new_record.first_seen.isoformat(),
-                        new_record.last_updated.isoformat(),
-                    ),
-                )
+                self._insert_skill_record(conn, new_record)
 
                 if parent_skill_ids:
                     conn.executemany(
@@ -417,10 +361,88 @@ class SkillStore:
             logger.error("Database error during skill evolution: %s", exc, exc_info=True)
             return EvolveResult(
                 success=False,
-                error=f"Database error during evolution: {exc}",
+                error="Database error during evolution",
             )
 
         return EvolveResult(success=True, new_record=new_record)
+
+    def _handle_fixed_evolution(
+        self,
+        conn: sqlite3.Connection,
+        new_record: SkillRecord,
+        parent_skill_ids: list[str],
+    ) -> None:
+        """Validate parents, deactivate them, and check for duplicate active skills."""
+        from agent_nexus.platform.evolution._shared import _SQL_CHUNK_SIZE
+
+        if parent_skill_ids:
+            found = {
+                r[0]
+                for r in _chunked_in_fetchall(
+                    conn,
+                    "SELECT id FROM skill_records WHERE id IN ({IN})",
+                    parent_skill_ids,
+                )
+            }
+            missing = set(parent_skill_ids) - found
+            if missing:
+                raise ValueError(
+                    f"Parent skill_id(s) not found: {missing} — cannot deactivate for FIX evolution"
+                )
+
+            now = _now_iso()
+            for ci in range(0, len(parent_skill_ids), _SQL_CHUNK_SIZE):
+                chunk = parent_skill_ids[ci : ci + _SQL_CHUNK_SIZE]
+                ph = ",".join("?" * len(chunk))
+                conn.execute(
+                    f"UPDATE skill_records SET is_active = 0, updated_at = ? WHERE id IN ({ph})",
+                    (now, *chunk),
+                )
+
+        dup = conn.execute(
+            "SELECT id FROM skill_records WHERE name = ? AND is_active = 1 AND id != ?",
+            (new_record.name, new_record.id),
+        ).fetchone()
+        if dup is not None:
+            raise ValueError(
+                f"Duplicate active skill: '{new_record.name}' (id={dup[0]}) already active"
+            )
+
+    @staticmethod
+    def _insert_skill_record(conn: sqlite3.Connection, new_record: SkillRecord) -> None:
+        """Insert a new skill record row."""
+        lin = new_record.lineage
+        snapshot_json = json.dumps(lin.content_snapshot or {}, ensure_ascii=False)
+        conn.execute(
+            """
+            INSERT INTO skill_records (
+                id, name, version,
+                lineage_origin, lineage_generation,
+                lineage_content_diff, lineage_content_snapshot,
+                directory, is_active,
+                total_selections, total_applied,
+                total_completions, total_fallbacks,
+                created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                new_record.id,
+                new_record.name,
+                new_record.version,
+                lin.origin.value,
+                lin.generation,
+                lin.content_diff or "",
+                snapshot_json,
+                new_record.directory,
+                int(new_record.is_active),
+                new_record.total_selections,
+                new_record.total_applied,
+                new_record.total_completions,
+                new_record.total_fallbacks,
+                new_record.first_seen.isoformat(),
+                new_record.last_updated.isoformat(),
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Lineage queries
@@ -433,80 +455,100 @@ class SkillStore:
         if not skill_ids:
             return {}
         with self._conn() as conn:
-            visited_per_skill: dict[str, set[str]] = {sid: set() for sid in skill_ids}
-            frontiers: dict[str, list[str]] = {sid: [sid] for sid in skill_ids}
+            visited = self._ancestry_bfs(conn, skill_ids, max_depth)
+            records_by_id = self._load_ancestry_records(conn, visited)
+            return self._build_ancestry_result(skill_ids, visited, records_by_id)
 
-            for _ in range(max_depth):
-                all_frontier_ids: set[str] = set()
-                for sid in skill_ids:
-                    all_frontier_ids.update(frontiers[sid])
-
-                if not all_frontier_ids:
-                    break
-
-                round_parents = self._batch_load_parents(conn, all_frontier_ids)
-
-                next_frontiers: dict[str, list[str]] = {sid: [] for sid in skill_ids}
-                any_progress = False
-                for sid in skill_ids:
-                    for fid in frontiers[sid]:
-                        for pid in round_parents.get(fid, []):
-                            if pid not in visited_per_skill[sid]:
-                                visited_per_skill[sid].add(pid)
-                                next_frontiers[sid].append(pid)
-                                any_progress = True
-                frontiers = next_frontiers
-                if not any_progress:
-                    break
-
-            all_ancestor_ids: set[str] = set()
-            for s in visited_per_skill.values():
-                all_ancestor_ids.update(s)
-
-            if not all_ancestor_ids:
-                return {sid: [] for sid in skill_ids}
-
-            rows = _chunked_in_fetchall(
-                conn,
-                f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE id IN ({{IN}})",
-                list(all_ancestor_ids),
-            )
-
-            ancestors_ids = {r[0] for r in rows}
-            parents = self._batch_load_parents(conn, ancestors_ids)
-            records_by_id: dict[str, SkillRecord] = {}
-            for row in rows:
-                record = self._row_to_record(conn, row, parents)
-                records_by_id[record.id] = record
-
-            result: dict[str, list[SkillRecord]] = {}
+    def _ancestry_bfs(
+        self,
+        conn: sqlite3.Connection,
+        skill_ids: list[str],
+        max_depth: int,
+    ) -> dict[str, set[str]]:
+        """BFS traversal collecting visited ancestor IDs per skill."""
+        visited: dict[str, set[str]] = {sid: set() for sid in skill_ids}
+        frontiers: dict[str, list[str]] = {sid: [sid] for sid in skill_ids}
+        for _ in range(max_depth):
+            all_frontier_ids: set[str] = set()
             for sid in skill_ids:
-                ancestors = [
-                    records_by_id[aid] for aid in visited_per_skill[sid] if aid in records_by_id
-                ]
-                ancestors.sort(key=lambda r: r.lineage.generation)
-                result[sid] = ancestors
-            return result
+                all_frontier_ids.update(frontiers[sid])
+            if not all_frontier_ids:
+                break
+            round_parents = self._batch_load_parents(conn, all_frontier_ids)
+            next_frontiers, any_progress = self._expand_frontiers(
+                skill_ids,
+                frontiers,
+                round_parents,
+                visited,
+            )
+            frontiers = next_frontiers
+            if not any_progress:
+                break
+        return visited
+
+    @staticmethod
+    def _expand_frontiers(
+        skill_ids: list[str],
+        frontiers: dict[str, list[str]],
+        round_parents: dict[str, list[str]],
+        visited: dict[str, set[str]],
+    ) -> tuple[dict[str, list[str]], bool]:
+        """Expand BFS frontiers one level. Returns (next_frontiers, any_progress)."""
+        next_frontiers: dict[str, list[str]] = {sid: [] for sid in skill_ids}
+        any_progress = False
+        for sid in skill_ids:
+            new_parents = [
+                pid
+                for fid in frontiers[sid]
+                for pid in round_parents.get(fid, [])
+                if pid not in visited[sid]
+            ]
+            for pid in new_parents:
+                visited[sid].add(pid)
+                next_frontiers[sid].append(pid)
+                any_progress = True
+        return next_frontiers, any_progress
+
+    def _load_ancestry_records(
+        self,
+        conn: sqlite3.Connection,
+        visited: dict[str, set[str]],
+    ) -> dict[str, SkillRecord]:
+        """Batch-load SkillRecords for all discovered ancestor IDs."""
+        all_ids: set[str] = set()
+        for s in visited.values():
+            all_ids.update(s)
+        if not all_ids:
+            return {}
+        rows = _chunked_in_fetchall(
+            conn,
+            f"SELECT {_SKILL_COLUMNS} FROM skill_records WHERE id IN ({{IN}})",
+            list(all_ids),
+        )
+        ancestors_ids = {r[0] for r in rows}
+        parents = self._batch_load_parents(conn, ancestors_ids)
+        return {(rec := self._row_to_record(conn, row, parents)).id: rec for row in rows}
+
+    @staticmethod
+    def _build_ancestry_result(
+        skill_ids: list[str],
+        visited: dict[str, set[str]],
+        records_by_id: dict[str, SkillRecord],
+    ) -> dict[str, list[SkillRecord]]:
+        """Build sorted per-skill ancestry lists from visited IDs and records."""
+        if not records_by_id:
+            return {sid: [] for sid in skill_ids}
+        result: dict[str, list[SkillRecord]] = {}
+        for sid in skill_ids:
+            ancestors = [records_by_id[aid] for aid in visited[sid] if aid in records_by_id]
+            ancestors.sort(key=lambda r: r.lineage.generation)
+            result[sid] = ancestors
+        return result
 
     def get_ancestry(self, skill_id: str, max_depth: int = 10) -> list[SkillRecord]:
         """Walk up the lineage tree, returns ancestors oldest-first."""
         with self._conn() as conn:
-            visited: set[str] = set()
-            frontier = [skill_id]
-
-            for _ in range(max_depth):
-                if not frontier:
-                    break
-                round_parents = self._batch_load_parents(conn, set(frontier))
-                next_frontier: list[str] = []
-                for sid in frontier:
-                    for pid in round_parents.get(sid, []):
-                        if pid in visited:
-                            continue
-                        visited.add(pid)
-                        next_frontier.append(pid)
-                frontier = next_frontier
-
+            visited = self._walk_lineage_bfs(conn, skill_id, max_depth)
             if not visited:
                 return []
 
@@ -524,6 +566,26 @@ class SkillStore:
 
             ancestors.sort(key=lambda r: r.lineage.generation)
             return ancestors
+
+    def _walk_lineage_bfs(self, conn: Any, skill_id: str, max_depth: int) -> set[str]:
+        """BFS traversal of lineage tree, returning visited ancestor IDs."""
+        visited: set[str] = set()
+        frontier = [skill_id]
+
+        for _ in range(max_depth):
+            if not frontier:
+                break
+            round_parents = self._batch_load_parents(conn, set(frontier))
+            next_frontier: list[str] = []
+            for sid in frontier:
+                for pid in round_parents.get(sid, []):
+                    if pid in visited:
+                        continue
+                    visited.add(pid)
+                    next_frontier.append(pid)
+            frontier = next_frontier
+
+        return visited
 
     def get_children(self, parent_id: str) -> list[str]:
         """Find skill IDs derived from the given parent."""
@@ -687,7 +749,7 @@ class SkillStore:
             "agent_id": row[0],
             "name": row[1],
             "type": row[2],
-            "skill_ids": json.loads(row[3]) if row[3] else [],
+            "skill_ids": _safe_json_loads(row[3], []),
             "orchestration_toml": row[4],
             "effective_rate": row[5],
             "avg_steps": row[6],
@@ -719,6 +781,46 @@ class SkillStore:
         for skill_id, parent_id in rows:
             parents.setdefault(skill_id, []).append(parent_id)
         return parents
+
+    @staticmethod
+    def _parse_snapshot(raw: Any, skill_id: str) -> dict[str, str]:
+        """Parse and validate a content_snapshot JSON string."""
+        if not raw or raw in ('""', "{}", "null"):
+            return {}
+        try:
+            loaded = json.loads(raw)
+            if not isinstance(loaded, dict) or not loaded:
+                return {}
+            if all(isinstance(v, str) for v in loaded.values()):
+                return loaded
+            non_str = [k for k, v in loaded.items() if not isinstance(v, str)]
+            logger.warning(
+                "content_snapshot for skill '%s' has non-string "
+                "values in keys %s, discarding snapshot",
+                skill_id,
+                non_str,
+            )
+            return {}
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Corrupted content_snapshot for skill '%s': %s",
+                skill_id,
+                exc,
+            )
+            return {}
+
+    @staticmethod
+    def _resolve_origin(raw_origin: str, skill_id: str) -> SkillOrigin:
+        """Parse lineage_origin with fallback to CAPTURED."""
+        try:
+            return SkillOrigin(raw_origin)
+        except ValueError:
+            logger.warning(
+                "Invalid lineage_origin '%s' for skill '%s', defaulting to CAPTURED",
+                raw_origin,
+                skill_id,
+            )
+            return SkillOrigin.CAPTURED
 
     def _row_to_record(
         self,
@@ -754,38 +856,8 @@ class SkillStore:
             ).fetchall()
             parent_ids = [r[0] for r in parent_rows]
 
-        snapshot: dict[str, str] = {}
-        if lineage_content_snapshot and lineage_content_snapshot not in ('""', "{}", "null"):
-            try:
-                loaded = json.loads(lineage_content_snapshot)
-                if isinstance(loaded, dict) and loaded:
-                    if all(isinstance(v, str) for v in loaded.values()):
-                        snapshot = loaded
-                    else:
-                        non_str = [k for k, v in loaded.items() if not isinstance(v, str)]
-                        logger.warning(
-                            "content_snapshot for skill '%s' has non-string "
-                            "values in keys %s, discarding snapshot",
-                            skill_id,
-                            non_str,
-                        )
-            except (json.JSONDecodeError, TypeError, ValueError) as exc:
-                logger.warning(
-                    "Corrupted content_snapshot for skill '%s': %s",
-                    skill_id,
-                    exc,
-                )
-
-        try:
-            origin = SkillOrigin(lineage_origin)
-        except ValueError:
-            logger.warning(
-                "Invalid lineage_origin '%s' for skill '%s', defaulting to CAPTURED",
-                lineage_origin,
-                skill_id,
-            )
-            origin = SkillOrigin.CAPTURED
-
+        snapshot = self._parse_snapshot(lineage_content_snapshot, skill_id)
+        origin = self._resolve_origin(lineage_origin, skill_id)
         lineage = SkillLineage(
             origin=origin,
             generation=lineage_generation,

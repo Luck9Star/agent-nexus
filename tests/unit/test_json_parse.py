@@ -7,17 +7,15 @@ Validates that:
 - robust_json_parse returns None for empty/invalid inputs
 - robust_json_parse handles nested objects, arrays, unicode, and extra text
 """
+
 from __future__ import annotations
 
 import json
-
-import pytest
 
 from agent_nexus.platform.agency.json_parse import (
     robust_json_parse,
     strip_markdown_fence,
 )
-
 
 # ---------------------------------------------------------------------------
 # strip_markdown_fence
@@ -28,12 +26,12 @@ class TestStripMarkdownFence:
     """Tests for strip_markdown_fence function."""
 
     def test_removes_json_fence(self):
-        text = "```json\n{\"key\": \"value\"}\n```"
+        text = '```json\n{"key": "value"}\n```'
         result = strip_markdown_fence(text)
         assert result == '{"key": "value"}'
 
     def test_removes_fence_without_language_tag(self):
-        text = "```\n{\"key\": \"value\"}\n```"
+        text = '```\n{"key": "value"}\n```'
         result = strip_markdown_fence(text)
         assert result == '{"key": "value"}'
 
@@ -43,7 +41,7 @@ class TestStripMarkdownFence:
         assert result == '{"key": "value"}'
 
     def test_fence_with_extra_whitespace(self):
-        text = "```json   \n   {\"key\": \"value\"}   \n   ```"
+        text = '```json   \n   {"key": "value"}   \n   ```'
         result = strip_markdown_fence(text)
         assert result == '{"key": "value"}'
 
@@ -79,12 +77,12 @@ class TestStripMarkdownFence:
 
     def test_text_before_and_after_fence(self):
         """When there's text around the fence, only the fenced content is returned."""
-        text = "Here is the JSON:\n```json\n{\"a\": 1}\n```\nThat's it."
+        text = 'Here is the JSON:\n```json\n{"a": 1}\n```\nThat\'s it.'
         result = strip_markdown_fence(text)
         assert result == '{"a": 1}'
 
     def test_fence_with_no_newline(self):
-        text = "```json{\"a\": 1}```"
+        text = '```json{"a": 1}```'
         result = strip_markdown_fence(text)
         # The regex allows optional newline; content should still be extracted
         assert "a" in result
@@ -126,7 +124,7 @@ class TestRobustJsonParse:
 
     def test_json_array_returns_none(self):
         """robust_json_parse only returns dict objects, not arrays."""
-        text = '[1, 2, 3]'
+        text = "[1, 2, 3]"
         result = robust_json_parse(text)
         assert result is None
 

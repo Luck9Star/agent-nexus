@@ -122,38 +122,32 @@ def _fnmatch_recursive(value: str, pattern: str) -> bool:
     idx = pattern.index("/**")
     prefix = pattern[:idx]
     remainder = pattern[idx + 3 :]  # after the /**
-    # remainder examples: "" | "/*.txt" | "/bar/*"
-
     if not remainder:
         # Simple /** — prefix matches value or any descendant.
         return value == prefix or value.startswith(prefix + "/")
-
-    # value must start with the prefix (or be the prefix itself).
     if value != prefix and not value.startswith(prefix + "/"):
         return False
+    tail = "" if value == prefix else value[len(prefix) :]
+    return _try_glob_splits(tail, remainder)
 
-    # Tail is everything after the prefix in value (starts with "/").
-    tail = "" if value == prefix else value[len(prefix) :]  # e.g. "/a/b/c.txt"
 
-    # ``**`` matches zero or more path segments.
-    # Walk every possible split point in *tail* and check if the
-    # remainder matches the suffix via plain fnmatch.
-    # Split positions: start of each path segment.
+def _try_glob_splits(tail: str, remainder: str) -> bool:
+    """Try matching *tail* against *remainder* at every path-segment boundary."""
+    positions = _segment_positions(tail)
+    stripped = remainder.lstrip("/")
+    for pos in positions:
+        if _fnmatch_recursive(tail[pos:], stripped):
+            return True
+    return _fnmatch_recursive(tail, remainder)
+
+
+def _segment_positions(tail: str) -> list[int]:
+    """Return [0] plus start-of-segment indices in *tail*."""
     positions = [0]
     for i, ch in enumerate(tail):
         if ch == "/" and i + 1 < len(tail):
             positions.append(i + 1)
-
-    for pos in positions:
-        suffix = tail[pos:]  # e.g. "c.txt", "b/c.txt"
-        if _fnmatch_recursive(suffix, remainder.lstrip("/")):
-            return True
-
-    # Also try matching the entire tail (including leading "/")
-    # for patterns like "/*.txt" where fnmatch may handle the "/".
-    # Use recursive call so patterns with additional /** segments
-    # (e.g. /tmp/**/bar/**) are handled correctly.
-    return _fnmatch_recursive(tail, remainder)
+    return positions
 
 
 def _matches_any_pattern(value: str, patterns: list[str] | tuple[str, ...]) -> bool:

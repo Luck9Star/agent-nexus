@@ -5,7 +5,7 @@ Pydantic v2 models for task execution.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class TaskInput(BaseModel):

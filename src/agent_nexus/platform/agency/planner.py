@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 
@@ -56,6 +57,13 @@ _RESERVED_IDS = {"integrate", "validate"}
 _INVALID_ID_CHARS = {'"', "#", "\n", "\t", "[", "\r", "\\"}
 
 
+def _check_invalid_chars(text: str, label: str) -> None:
+    """Raise ValueError if *text* contains TOML-special characters."""
+    for ch in _INVALID_ID_CHARS:
+        if ch in text:
+            raise ValueError(f"{label} contains invalid character: {ch!r}")
+
+
 def _validate_subtasks(subtasks: list[SubtaskDef], composition_name: str) -> None:
     """Validate subtask list and composition name.
 
@@ -66,28 +74,16 @@ def _validate_subtasks(subtasks: list[SubtaskDef], composition_name: str) -> Non
     if not subtasks:
         raise ValueError("Need at least one subtask to plan a composition")
 
-    # Validate IDs don't contain TOML-special characters
-    for st in subtasks:
-        for ch in _INVALID_ID_CHARS:
-            if ch in st.id:
-                raise ValueError(f"Subtask id '{st.id}' contains invalid character: {ch!r}")
+    _check_invalid_chars(composition_name, "composition_name")
 
-    # Validate composition_name for TOML-special characters
-    for ch in _INVALID_ID_CHARS:
-        if ch in composition_name:
-            raise ValueError(f"composition_name contains invalid character: {ch!r}")
-
-    # Validate no duplicate IDs
     seen_ids: set[str] = set()
     for st in subtasks:
+        _check_invalid_chars(st.id, f"Subtask id '{st.id}'")
         if st.id in seen_ids:
             raise ValueError(f"Duplicate subtask id: '{st.id}'")
-        seen_ids.add(st.id)
-
-    # Validate no reserved IDs
-    for st in subtasks:
         if st.id in _RESERVED_IDS:
             raise ValueError(f"Subtask id '{st.id}' is reserved for synthetic tasks")
+        seen_ids.add(st.id)
 
 
 class DynamicCompositePlanner:
@@ -195,10 +191,12 @@ class DynamicCompositePlanner:
             for earlier in subtasks:
                 if earlier.id == st.id:
                     continue
-                if set(st.needed_capabilities) < set(earlier.needed_capabilities):
+                if (
+                    set(st.needed_capabilities) < set(earlier.needed_capabilities)
+                    and earlier.id not in blocked_by
+                ):
                     # st's caps are a strict subset of earlier's caps → dep
-                    if earlier.id not in blocked_by:
-                        blocked_by.append(earlier.id)
+                    blocked_by.append(earlier.id)
             dag_tasks.append(
                 DAGTask(
                     id=st.id,
@@ -239,6 +237,19 @@ class DynamicCompositePlanner:
         )
 
 
+_SAFE_TOML_FIELD = re.compile(r"^[a-zA-Z0-9_\-.: /]+\Z")
+
+
+def _validate_toml_field(value: str, context: str) -> None:
+    """Validate a string is safe for TOML f-string serialization."""
+    if not value:
+        raise ValueError(f"{context} must not be empty")
+    if "\x00" in value:
+        raise ValueError(f"{context!r} contains null byte")
+    if not _SAFE_TOML_FIELD.match(value):
+        raise ValueError(f"{context!r} contains invalid characters")
+
+
 def generate_toml(dag: CompositionDAG) -> str:
     """Serialize a CompositionDAG to TOML string.
 
@@ -253,23 +264,13 @@ def generate_toml(dag: CompositionDAG) -> str:
       output = "..."
       blocked_by = ["..."]
     """
-    # Validate all string fields for TOML-special characters
-    _invalid_chars = {'"', "#", "\n", "\t", "\r", "\\"}
-    for ch in _invalid_chars:
-        if ch in dag.name:
-            raise ValueError(f"DAG name contains invalid character: {ch!r}")
+    _validate_toml_field(dag.name, "DAG name")
 
     for task in dag.tasks:
         for field_name, value in [("id", task.id), ("agent", task.agent), ("output", task.output)]:
-            for ch in _invalid_chars:
-                if ch in value:
-                    raise ValueError(
-                        f"Task {field_name} '{value}' contains invalid character: {ch!r}"
-                    )
+            _validate_toml_field(value, f"Task {field_name}")
         for b in task.blocked_by:
-            for ch in _invalid_chars:
-                if ch in b:
-                    raise ValueError(f"Task blocked_by '{b}' contains invalid character: {ch!r}")
+            _validate_toml_field(b, "Task blocked_by")
 
     lines: list[str] = []
     lines.append("[composition]")

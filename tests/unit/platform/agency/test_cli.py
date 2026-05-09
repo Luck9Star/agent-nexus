@@ -3,11 +3,12 @@
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
-from agent_nexus.platform.agency.cli import cli
-import pytest
+from agent_nexus.platform.agency.cli import cli, _setup_llm_components
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _VENDOR_DIR = _PROJECT_ROOT / "vendor" / "agency-agents"
@@ -25,9 +26,12 @@ class TestImportExpertsCommand:
                 cli,
                 [
                     "import-experts",
-                    "--vendor-path", str(_VENDOR_DIR),
-                    "--allowlist", str(_ALLOWLIST_PATH),
-                    "--output-dir", tmpdir,
+                    "--vendor-path",
+                    str(_VENDOR_DIR),
+                    "--allowlist",
+                    str(_ALLOWLIST_PATH),
+                    "--output-dir",
+                    tmpdir,
                     "--dry-run",
                 ],
             )
@@ -41,9 +45,12 @@ class TestImportExpertsCommand:
                 cli,
                 [
                     "import-experts",
-                    "--vendor-path", str(_VENDOR_DIR),
-                    "--allowlist", str(_ALLOWLIST_PATH),
-                    "--output-dir", tmpdir,
+                    "--vendor-path",
+                    str(_VENDOR_DIR),
+                    "--allowlist",
+                    str(_ALLOWLIST_PATH),
+                    "--output-dir",
+                    tmpdir,
                 ],
             )
             assert result.exit_code == 0, f"CLI error: {result.output}"
@@ -62,10 +69,14 @@ class TestPlanCompositionCommand:
             cli,
             [
                 "plan-composition",
-                "--task", "Design a system architecture",
-                "--mode", "plan",
-                "--vendor-path", str(_VENDOR_DIR),
-                "--allowlist", str(_ALLOWLIST_PATH),
+                "--task",
+                "Design a system architecture",
+                "--mode",
+                "plan",
+                "--vendor-path",
+                str(_VENDOR_DIR),
+                "--allowlist",
+                str(_ALLOWLIST_PATH),
             ],
         )
         assert result.exit_code == 0, f"CLI error: {result.output}"
@@ -79,22 +90,28 @@ class TestValidateOutputCommand:
     def test_validate_output_passes(self, tmp_path: Path) -> None:
         runner = CliRunner()
         output_file = tmp_path / "output.json"
-        output_file.write_text(json.dumps({
-            "sections": {
-                "context": "test",
-                "assumptions": [],
-                "proposed_design": "test",
-                "tradeoffs": [],
-                "risks": [],
-                "next_steps": [],
-            }
-        }))
+        output_file.write_text(
+            json.dumps(
+                {
+                    "sections": {
+                        "context": "test",
+                        "assumptions": [],
+                        "proposed_design": "test",
+                        "tradeoffs": [],
+                        "risks": [],
+                        "next_steps": [],
+                    }
+                }
+            )
+        )
         result = runner.invoke(
             cli,
             [
                 "validate-output",
-                "--output-file", str(output_file),
-                "--required-sections", "context,assumptions,proposed_design,tradeoffs,risks,next_steps",
+                "--output-file",
+                str(output_file),
+                "--required-sections",
+                "context,assumptions,proposed_design,tradeoffs,risks,next_steps",
             ],
         )
         assert result.exit_code == 0, f"CLI error: {result.output}"
@@ -108,8 +125,10 @@ class TestValidateOutputCommand:
             cli,
             [
                 "validate-output",
-                "--output-file", str(output_file),
-                "--required-sections", "context,risks,next_steps",
+                "--output-file",
+                str(output_file),
+                "--required-sections",
+                "context,risks,next_steps",
             ],
         )
         assert result.exit_code != 0 or "missing" in result.output.lower()
@@ -122,13 +141,20 @@ class TestValidateOutputCommand:
             cli,
             [
                 "validate-output",
-                "--output-file", str(output_file),
-                "--required-sections", "summary",
-                "--task-type", "code_change",
+                "--output-file",
+                str(output_file),
+                "--required-sections",
+                "summary",
+                "--task-type",
+                "code_change",
             ],
         )
         # code_change should trigger GitNexus gate failure
-        assert "gitnexus" in result.output.lower() or result.exit_code != 0 or "failed" in result.output.lower()
+        assert (
+            "gitnexus" in result.output.lower()
+            or result.exit_code != 0
+            or "failed" in result.output.lower()
+        )
 
 
 @pytest.mark.timeout(30)
@@ -141,8 +167,10 @@ class TestListExpertsCommand:
             cli,
             [
                 "list-experts",
-                "--vendor-path", str(_VENDOR_DIR),
-                "--allowlist", str(_ALLOWLIST_PATH),
+                "--vendor-path",
+                str(_VENDOR_DIR),
+                "--allowlist",
+                str(_ALLOWLIST_PATH),
             ],
         )
         assert result.exit_code == 0, f"CLI error: {result.output}"
@@ -156,8 +184,10 @@ class TestListExpertsCommand:
             cli,
             [
                 "list-experts",
-                "--vendor-path", str(_VENDOR_DIR),
-                "--allowlist", str(_ALLOWLIST_PATH),
+                "--vendor-path",
+                str(_VENDOR_DIR),
+                "--allowlist",
+                str(_ALLOWLIST_PATH),
             ],
         )
         assert result.exit_code == 0, f"CLI error: {result.output}"
@@ -170,8 +200,10 @@ class TestListExpertsCommand:
             cli,
             [
                 "list-experts",
-                "--vendor-path", "/nonexistent/path",
-                "--allowlist", str(_ALLOWLIST_PATH),
+                "--vendor-path",
+                "/nonexistent/path",
+                "--allowlist",
+                str(_ALLOWLIST_PATH),
             ],
         )
         assert result.exit_code != 0
@@ -189,9 +221,12 @@ class TestCheckProfilesCommand:
                 cli,
                 [
                     "import-experts",
-                    "--vendor-path", str(_VENDOR_DIR),
-                    "--allowlist", str(_ALLOWLIST_PATH),
-                    "--output-dir", tmpdir,
+                    "--vendor-path",
+                    str(_VENDOR_DIR),
+                    "--allowlist",
+                    str(_ALLOWLIST_PATH),
+                    "--output-dir",
+                    tmpdir,
                 ],
             )
             assert import_result.exit_code == 0
@@ -233,3 +268,75 @@ class TestCheckProfilesCommand:
             ["check-profiles", "--output-dir", "/nonexistent/path"],
         )
         assert result.exit_code != 0
+
+
+# ===================================================================
+# _setup_llm_components — resource leak regression
+# ===================================================================
+
+
+class TestSetupLLMComponentsResourceCleanup:
+    """Verify LLMClient.close() is called on component init failure."""
+
+    def test_client_closed_on_import_error(self):
+        """LLMClient must be closed if LLMPlanner constructor raises."""
+        mock_client = MagicMock()
+        mock_registry = MagicMock()
+        with (
+            patch.dict(
+                "sys.modules",
+                {
+                    **__import__("sys").modules,
+                    "agent_nexus.models.capability": MagicMock(
+                        ModelCapabilityRegistry=mock_registry,
+                    ),
+                    "agent_nexus.platform.agency.llm_client": MagicMock(
+                        LLMClient=MagicMock(return_value=mock_client),
+                    ),
+                    "agent_nexus.platform.agency.llm_planner": MagicMock(
+                        LLMPlanner=MagicMock(side_effect=ImportError("no planner")),
+                    ),
+                    "agent_nexus.platform.agency.llm_integrator": MagicMock(
+                        LLMIntegrator=MagicMock(),
+                    ),
+                    "agent_nexus.platform.agency.llm_qa_gate": MagicMock(
+                        LLMQualityGate=MagicMock(),
+                    ),
+                },
+            ),
+        ):
+            result = _setup_llm_components(
+                model="test:model",
+                config_dir=None,
+                temperature=None,
+                registry=MagicMock(),
+            )
+            assert result == (None, None, None, None, None)
+            mock_client.close.assert_called_once()
+
+    def test_client_not_created_when_import_fails(self):
+        """If ModelCapabilityRegistry import fails, no client is created."""
+        with patch.dict(
+            "sys.modules",
+            {
+                **__import__("sys").modules,
+            },
+        ):
+            # Force import failure by temporarily removing the module
+            import sys
+
+            orig = sys.modules.get("agent_nexus.models.capability")
+            sys.modules["agent_nexus.models.capability"] = None  # type: ignore[assignment]
+            try:
+                result = _setup_llm_components(
+                    model="test:model",
+                    config_dir=None,
+                    temperature=None,
+                    registry=MagicMock(),
+                )
+                assert result == (None, None, None, None, None)
+            finally:
+                if orig is not None:
+                    sys.modules["agent_nexus.models.capability"] = orig
+                else:
+                    sys.modules.pop("agent_nexus.models.capability", None)

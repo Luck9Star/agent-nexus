@@ -11,22 +11,20 @@ Tests cover:
 
 from __future__ import annotations
 
-import asyncio
 from contextlib import AsyncExitStack
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent_nexus.platform.config.loader import ConfigLoader
-from agent_nexus.platform.gateway.external_mcp_adapter import ExternalMcpAdapter
 from agent_nexus.models.external_mcp import (
     ExternalServerConfig,
     TransportType,
 )
+from agent_nexus.platform.config.loader import ConfigLoader
+from agent_nexus.platform.gateway.external_mcp_adapter import ExternalMcpAdapter
 from agent_nexus.platform.gateway.gateway import MCPGateway
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
-
 
 # ============================================================================
 # Helpers / Fixtures
@@ -188,21 +186,20 @@ class TestExternalMcpAdapterStdio:
         with patch(
             "agent_nexus.platform.gateway.external_mcp_adapter.stdio_client",
             return_value=mock_context,
+        ), patch(
+            "agent_nexus.platform.gateway.external_mcp_adapter.ClientSession",
+            return_value=mock_session,
         ):
-            with patch(
-                "agent_nexus.platform.gateway.external_mcp_adapter.ClientSession",
-                return_value=mock_session,
-            ):
-                adapter._exit_stack = AsyncExitStack()
-                await adapter._exit_stack.__aenter__()
+            adapter._exit_stack = AsyncExitStack()
+            await adapter._exit_stack.__aenter__()
 
-                with patch.object(
-                    adapter._exit_stack,
-                    "enter_async_context",
-                    side_effect=[AsyncMock(), AsyncMock()],
-                ):
-                    adapter._session = mock_session
-                    await adapter._discover_tools()
+            with patch.object(
+                adapter._exit_stack,
+                "enter_async_context",
+                side_effect=[AsyncMock(), AsyncMock()],
+            ):
+                adapter._session = mock_session
+                await adapter._discover_tools()
 
         assert len(adapter.tool_schemas) == 2
         assert adapter.tool_schemas[0]["name"] == "read_file"
@@ -296,20 +293,19 @@ class TestExternalMcpAdapterSSE:
         with patch(
             "agent_nexus.platform.gateway.external_mcp_adapter.sse_client",
             return_value=mock_context,
+        ), patch(
+            "agent_nexus.platform.gateway.external_mcp_adapter.ClientSession",
+            return_value=mock_session,
         ):
-            with patch(
-                "agent_nexus.platform.gateway.external_mcp_adapter.ClientSession",
-                return_value=mock_session,
+            adapter._exit_stack = AsyncExitStack()
+            await adapter._exit_stack.__aenter__()
+            with patch.object(
+                adapter._exit_stack,
+                "enter_async_context",
+                side_effect=[AsyncMock(), AsyncMock()],
             ):
-                adapter._exit_stack = AsyncExitStack()
-                await adapter._exit_stack.__aenter__()
-                with patch.object(
-                    adapter._exit_stack,
-                    "enter_async_context",
-                    side_effect=[AsyncMock(), AsyncMock()],
-                ):
-                    adapter._session = mock_session
-                    await adapter._discover_tools()
+                adapter._session = mock_session
+                await adapter._discover_tools()
 
         assert len(adapter.tool_schemas) == 1
         assert adapter.tool_schemas[0]["name"] == "search"
@@ -379,20 +375,19 @@ class TestExternalMcpAdapterHttpStream:
         with patch(
             "agent_nexus.platform.gateway.external_mcp_adapter.streamablehttp_client",
             return_value=mock_context,
+        ), patch(
+            "agent_nexus.platform.gateway.external_mcp_adapter.ClientSession",
+            return_value=mock_session,
         ):
-            with patch(
-                "agent_nexus.platform.gateway.external_mcp_adapter.ClientSession",
-                return_value=mock_session,
+            adapter._exit_stack = AsyncExitStack()
+            await adapter._exit_stack.__aenter__()
+            with patch.object(
+                adapter._exit_stack,
+                "enter_async_context",
+                side_effect=[AsyncMock(), AsyncMock()],
             ):
-                adapter._exit_stack = AsyncExitStack()
-                await adapter._exit_stack.__aenter__()
-                with patch.object(
-                    adapter._exit_stack,
-                    "enter_async_context",
-                    side_effect=[AsyncMock(), AsyncMock()],
-                ):
-                    adapter._session = mock_session
-                    await adapter._discover_tools()
+                adapter._session = mock_session
+                await adapter._discover_tools()
 
         assert len(adapter.tool_schemas) == 1
         assert adapter.tool_schemas[0]["name"] == "compute"
@@ -764,9 +759,8 @@ class TestGatewayRegisterExternalServer:
         with patch(
             "agent_nexus.platform.gateway.gateway.ExternalMcpAdapter",
             return_value=adapter,
-        ):
-            with patch.object(adapter, "connect", new_callable=AsyncMock):
-                await gateway.register_external_server(config)
+        ), patch.object(adapter, "connect", new_callable=AsyncMock):
+            await gateway.register_external_server(config)
 
         # Check tool names follow ext__ convention
         assert "ext__search_srv__search" in gateway._registered_tool_names
@@ -785,9 +779,8 @@ class TestGatewayRegisterExternalServer:
         with patch(
             "agent_nexus.platform.gateway.gateway.ExternalMcpAdapter",
             return_value=adapter,
-        ):
-            with patch.object(adapter, "connect", new_callable=AsyncMock):
-                await gateway.register_external_server(config)
+        ), patch.object(adapter, "connect", new_callable=AsyncMock):
+            await gateway.register_external_server(config)
 
         assert "dead-srv" not in gateway._external_adapters
         assert len(gateway._registered_tool_names) == 0
@@ -804,9 +797,8 @@ class TestGatewayRegisterExternalServer:
         with patch(
             "agent_nexus.platform.gateway.gateway.ExternalMcpAdapter",
             return_value=adapter,
-        ):
-            with patch.object(adapter, "connect", new_callable=AsyncMock):
-                await gateway.register_external_server(config)
+        ), patch.object(adapter, "connect", new_callable=AsyncMock):
+            await gateway.register_external_server(config)
 
         assert "empty-srv" not in gateway._external_adapters
 
@@ -823,9 +815,8 @@ class TestGatewayRegisterExternalServer:
         with patch(
             "agent_nexus.platform.gateway.gateway.ExternalMcpAdapter",
             return_value=adapter,
-        ):
-            with patch.object(adapter, "connect", new_callable=AsyncMock):
-                await gateway.register_external_server(config)
+        ), patch.object(adapter, "connect", new_callable=AsyncMock):
+            await gateway.register_external_server(config)
 
         tool_names = list(gateway._registered_tool_names)
         assert len(tool_names) == 1
@@ -848,9 +839,8 @@ class TestGatewayRegisterExternalServer:
         with patch(
             "agent_nexus.platform.gateway.gateway.ExternalMcpAdapter",
             return_value=adapter,
-        ):
-            with patch.object(adapter, "connect", new_callable=AsyncMock):
-                await gateway.register_external_server(config)
+        ), patch.object(adapter, "connect", new_callable=AsyncMock):
+            await gateway.register_external_server(config)
 
         # Tool still registered (from pre-registration)
         assert "ext__dup_srv__search" in gateway._registered_tool_names
@@ -922,12 +912,11 @@ class TestExternalMcpAdapterFullConnect:
         with patch(
             "agent_nexus.platform.gateway.external_mcp_adapter.stdio_client",
             return_value=mock_stdio_ctx,
+        ), patch(
+            "agent_nexus.platform.gateway.external_mcp_adapter.ClientSession",
+            return_value=mock_session,
         ):
-            with patch(
-                "agent_nexus.platform.gateway.external_mcp_adapter.ClientSession",
-                return_value=mock_session,
-            ):
-                await adapter.connect()
+            await adapter.connect()
 
         assert adapter.is_alive is True
         assert len(adapter.tool_schemas) == 1
@@ -963,12 +952,11 @@ class TestExternalMcpAdapterFullConnect:
         with patch(
             "agent_nexus.platform.gateway.external_mcp_adapter.sse_client",
             return_value=mock_sse_ctx,
+        ), patch(
+            "agent_nexus.platform.gateway.external_mcp_adapter.ClientSession",
+            return_value=mock_session,
         ):
-            with patch(
-                "agent_nexus.platform.gateway.external_mcp_adapter.ClientSession",
-                return_value=mock_session,
-            ):
-                await adapter.connect()
+            await adapter.connect()
 
         assert adapter.is_alive is True
         assert len(adapter.tool_schemas) == 1
@@ -1007,12 +995,11 @@ class TestExternalMcpAdapterFullConnect:
         with patch(
             "agent_nexus.platform.gateway.external_mcp_adapter.streamablehttp_client",
             return_value=mock_http_ctx,
+        ), patch(
+            "agent_nexus.platform.gateway.external_mcp_adapter.ClientSession",
+            return_value=mock_session,
         ):
-            with patch(
-                "agent_nexus.platform.gateway.external_mcp_adapter.ClientSession",
-                return_value=mock_session,
-            ):
-                await adapter.connect()
+            await adapter.connect()
 
         assert adapter.is_alive is True
         assert len(adapter.tool_schemas) == 1
@@ -1081,8 +1068,8 @@ class TestExternalMcpAdapterCallToolErrors:
     """Tests for call_tool error handling."""
 
     @pytest.mark.asyncio
-    async def test_call_tool_error_result_still_returns_text(self) -> None:
-        """Tool error result still returns text content."""
+    async def test_call_tool_error_result_raises_runtime_error(self) -> None:
+        """Tool error result raises RuntimeError with error details."""
         config = _make_sse_config()
         adapter = ExternalMcpAdapter(config)
 
@@ -1095,8 +1082,8 @@ class TestExternalMcpAdapterCallToolErrors:
         adapter._session = mock_session
         adapter._exit_stack = AsyncExitStack()
 
-        result = await adapter.call_tool("fail_tool", {})
-        assert result == "something went wrong"
+        with pytest.raises(RuntimeError, match="returned error: something went wrong"):
+            await adapter.call_tool("fail_tool", {})
 
     @pytest.mark.asyncio
     async def test_call_tool_empty_content_returns_empty_string(self) -> None:

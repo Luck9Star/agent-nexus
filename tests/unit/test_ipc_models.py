@@ -14,10 +14,10 @@ from agent_nexus.models.ipc import (
     PlatformToAgentType,
 )
 
-
 # ---------------------------------------------------------------------------
 # Enum tests
 # ---------------------------------------------------------------------------
+
 
 class TestEnums:
     def test_message_direction(self):
@@ -50,6 +50,7 @@ class TestEnums:
 # ---------------------------------------------------------------------------
 # PlatformToAgent
 # ---------------------------------------------------------------------------
+
 
 class TestPlatformToAgent:
     def test_chat_message(self):
@@ -99,6 +100,7 @@ class TestPlatformToAgent:
 # ---------------------------------------------------------------------------
 # AgentToPlatform
 # ---------------------------------------------------------------------------
+
 
 class TestAgentToPlatform:
     def test_result_message(self):
@@ -150,6 +152,7 @@ class TestAgentToPlatform:
 # IPCMessage
 # ---------------------------------------------------------------------------
 
+
 class TestIPCMessage:
     def test_platform_to_agent_envelope(self):
         payload = PlatformToAgent(
@@ -188,6 +191,7 @@ class TestIPCMessage:
 # ---------------------------------------------------------------------------
 # Round-trip serialization
 # ---------------------------------------------------------------------------
+
 
 class TestSerializationRoundTrip:
     def test_platform_to_agent_round_trip(self):

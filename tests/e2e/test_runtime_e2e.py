@@ -5,8 +5,6 @@ Tests the full runtime lifecycle from setup through execution to cleanup.
 
 import asyncio
 
-import pytest
-
 
 class TestRuntimeE2E:
     """E2E runtime scenarios."""
@@ -31,16 +29,18 @@ class TestRuntimeE2E:
 
     def test_runtime_inject_and_use_variable(self):
         """Runtime injects variable and executes code using it."""
-        from agent_nexus.platform.runtime.runtime import PythonRuntime
         from agent_nexus.models.runtime import Variable
+        from agent_nexus.platform.runtime.runtime import PythonRuntime
 
         rt = PythonRuntime()
         try:
-            rt.inject_variable(Variable(
-                name="data",
-                description="input data",
-                value=[1, 2, 3, 4, 5],
-            ))
+            rt.inject_variable(
+                Variable(
+                    name="data",
+                    description="input data",
+                    value=[1, 2, 3, 4, 5],
+                )
+            )
 
             result = self._run(rt.execute("total = sum(data)"))
             assert result.success
@@ -77,16 +77,18 @@ class TestRuntimeE2E:
 
     def test_runtime_reset_clears_state(self):
         """Runtime reset clears injected variables and execution state."""
-        from agent_nexus.platform.runtime.runtime import PythonRuntime
         from agent_nexus.models.runtime import Variable
+        from agent_nexus.platform.runtime.runtime import PythonRuntime
 
         rt = PythonRuntime()
         try:
-            rt.inject_variable(Variable(
-                name="my_var",
-                description="test",
-                value=42,
-            ))
+            rt.inject_variable(
+                Variable(
+                    name="my_var",
+                    description="test",
+                    value=42,
+                )
+            )
 
             result = self._run(rt.execute("y = my_var + 1"))
             assert result.success

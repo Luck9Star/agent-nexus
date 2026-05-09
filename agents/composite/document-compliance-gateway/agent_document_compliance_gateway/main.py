@@ -92,9 +92,7 @@ def _run_cli() -> None:
 
     run_parser = subparsers.add_parser("run", help="Run compliance check")
     run_parser.add_argument("--document", required=True, help="Document text to check")
-    run_parser.add_argument(
-        "--jurisdictions", default="[]", help="JSON list of jurisdiction codes"
-    )
+    run_parser.add_argument("--jurisdictions", default="[]", help="JSON list of jurisdiction codes")
 
     args = parser.parse_args()
 

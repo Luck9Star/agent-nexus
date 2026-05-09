@@ -122,3 +122,130 @@ impl WorkflowContext {
         self.started_at.elapsed()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workflow_phase_ordered_returns_correct_sequence() {
+        let order = WorkflowPhase::ordered();
+        assert_eq!(order[0], WorkflowPhase::Research);
+        assert_eq!(order[1], WorkflowPhase::Synthesis);
+        assert_eq!(order[2], WorkflowPhase::Implementation);
+        assert_eq!(order[3], WorkflowPhase::Verification);
+    }
+
+    #[test]
+    fn workflow_phase_is_parallel() {
+        assert!(WorkflowPhase::Research.is_parallel());
+        assert!(!WorkflowPhase::Synthesis.is_parallel());
+        assert!(WorkflowPhase::Implementation.is_parallel());
+        assert!(!WorkflowPhase::Verification.is_parallel());
+    }
+
+    #[test]
+    fn workflow_phase_display() {
+        assert_eq!(WorkflowPhase::Research.to_string(), "research");
+        assert_eq!(WorkflowPhase::Synthesis.to_string(), "synthesis");
+        assert_eq!(WorkflowPhase::Implementation.to_string(), "implementation");
+        assert_eq!(WorkflowPhase::Verification.to_string(), "verification");
+    }
+
+    #[test]
+    fn workflow_phase_serde_roundtrip() {
+        for phase in WorkflowPhase::ordered() {
+            let json = serde_json::to_string(&phase).unwrap();
+            let de: WorkflowPhase = serde_json::from_str(&json).unwrap();
+            assert_eq!(phase, de);
+        }
+    }
+
+    #[test]
+    fn workflow_phase_serde_renames_to_snake_case() {
+        let json = serde_json::to_string(&WorkflowPhase::Research).unwrap();
+        assert_eq!(json, "\"research\"");
+    }
+
+    #[test]
+    fn phase_result_serialization() {
+        let result = PhaseResult {
+            phase: WorkflowPhase::Research,
+            success: true,
+            output: "found 3 references".to_string(),
+            error: None,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"phase\":\"research\""));
+        assert!(json.contains("\"success\":true"));
+    }
+
+    #[test]
+    fn phase_result_with_error_serializes_error() {
+        let result = PhaseResult {
+            phase: WorkflowPhase::Synthesis,
+            success: false,
+            output: String::new(),
+            error: Some("timeout exceeded".to_string()),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"error\":\"timeout exceeded\""));
+    }
+
+    #[test]
+    fn composite_workflow_result_serialization() {
+        let mut phase_results = HashMap::new();
+        phase_results.insert(
+            WorkflowPhase::Research,
+            PhaseResult {
+                phase: WorkflowPhase::Research,
+                success: true,
+                output: "ok".to_string(),
+                error: None,
+            },
+        );
+
+        let result = CompositeWorkflowResult {
+            success: true,
+            final_output: "done".to_string(),
+            phase_results,
+            total_phases: 4,
+            completed_phases: 1,
+            error: None,
+            error_type: None,
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        let de: CompositeWorkflowResult = serde_json::from_str(&json).unwrap();
+        assert!(de.success);
+        assert_eq!(de.total_phases, 4);
+    }
+
+    #[test]
+    fn workflow_context_new_initializes_correctly() {
+        let ctx = WorkflowContext::new(
+            "conv-1".to_string(),
+            "build feature".to_string(),
+            "composer".to_string(),
+        );
+        assert_eq!(ctx.conversation_id, "conv-1");
+        assert_eq!(ctx.message, "build feature");
+        assert_eq!(ctx.agent_name, "composer");
+        assert_eq!(ctx.phase_context, "build feature");
+        assert!(ctx.phase_results.is_empty());
+        assert!(ctx.current_phase.is_none());
+        assert!(ctx.task_graph_id.is_none());
+    }
+
+    #[test]
+    fn workflow_context_close_returns_elapsed() {
+        let ctx = WorkflowContext::new(
+            "conv-1".to_string(),
+            "msg".to_string(),
+            "agent".to_string(),
+        );
+        let elapsed = ctx.close();
+        // Elapsed should be very small since we just created it
+        assert!(elapsed.as_millis() < 1000);
+    }
+}

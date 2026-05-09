@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import toml
 
@@ -238,55 +238,15 @@ class OrchestrationDSL:
         return self._parse(raw)
 
     def validate(self, definition: OrchestrationDefinition) -> ValidationResult:
-        """Validate the definition.
-
-        Checks:
-        1. All task.agent references exist in agents dict
-        2. All task.blocked_by references exist in tasks
-        3. No cycles in the dependency graph
-        4. All agents have at least one task (warning)
-        5. Global preload_agents reference valid agent names
-
-        Returns:
-            ValidationResult with separate errors and warnings lists.
-        """
         errors: list[str] = []
         warnings: list[str] = []
-        task_ids = {t.id for t in definition.tasks}
-        agent_names = set(definition.agents.keys())
 
-        # 1. task.agent references
-        for task in definition.tasks:
-            if task.agent not in agent_names:
-                errors.append(f"Task '{task.id}' references unknown agent '{task.agent}'")
-
-        # 2. task.blocked_by references
-        for task in definition.tasks:
-            for dep_id in task.blocked_by:
-                if dep_id not in task_ids:
-                    errors.append(f"Task '{task.id}' blocked_by unknown task '{dep_id}'")
-
-        # 2b. Self-reference check
-        for task in definition.tasks:
-            if task.id in task.blocked_by:
-                errors.append(f"Task '{task.id}' cannot block itself")
-
-        # 3. Cycle detection (DFS with visiting/visited sets)
-        task_map = {t.id: t for t in definition.tasks}
-        cycles = self._detect_cycles(task_map)
-        for cycle in cycles:
-            errors.append(f"Dependency cycle detected: {' -> '.join(cycle)}")
-
-        # 4. Agents with no tasks (warning only)
-        tasked_agents = {t.agent for t in definition.tasks}
-        for name in agent_names:
-            if name not in tasked_agents:
-                warnings.append(f"Agent '{name}' has no tasks assigned")
-
-        # 5. Global preload_agents references
-        for agent_name in definition.tool_loading.preload_agents:
-            if agent_name not in agent_names:
-                errors.append(f"preload_agents references unknown agent '{agent_name}'")
+        self._check_agent_refs(definition, errors)
+        self._check_blocked_by_refs(definition, errors)
+        self._check_no_self_blocks(definition, errors)
+        self._check_cycles(definition, errors)
+        self._check_unused_agents(definition, warnings)
+        self._check_preload_agents(definition, errors)
 
         return ValidationResult(errors=errors, warnings=warnings)
 
@@ -309,95 +269,10 @@ class OrchestrationDSL:
         if isinstance(raw.get("composition"), dict):
             return self._parse_composition_format(raw)
 
-        # -- [goal] --
-        goal_section = raw.get("goal")
-        if not isinstance(goal_section, dict):
-            raise DSLSyntaxError("Missing [goal] section with 'description'")
-        goal = goal_section.get("description")
-        if not goal or not isinstance(goal, str):
-            raise DSLSyntaxError("[goal].description must be a non-empty string")
-
-        # -- [agent_name] --
-        agent_name_section = raw.get("agent_name")
-        if not isinstance(agent_name_section, dict):
-            raise DSLSyntaxError("Missing [agent_name] section with 'value'")
-        agent_name = agent_name_section.get("value")
-        if not agent_name or not isinstance(agent_name, str):
-            raise DSLSyntaxError("[agent_name].value must be a non-empty string")
-
-        # -- [[agents]] --
-        raw_agents = raw.get("agents", [])
-        if not isinstance(raw_agents, list):
-            raise DSLSyntaxError("[[agents]] must be an array of tables")
-        agents: dict[str, DSLAgent] = {}
-        for idx, raw_agent in enumerate(raw_agents):
-            if not isinstance(raw_agent, dict):
-                raise DSLSyntaxError(f"agents[{idx}] must be a table")
-            name = raw_agent.get("name")
-            if not name or not isinstance(name, str):
-                raise DSLSyntaxError(f"agents[{idx}].name must be a non-empty string")
-            if name in agents:
-                raise DSLSyntaxError(f"Duplicate agent name: '{name}'")
-            description = raw_agent.get("description", "")
-            role = raw_agent.get("role", "worker")
-            tool_loading = raw_agent.get("tool_loading", "lazy")
-            try:
-                agents[name] = DSLAgent(
-                    name=name,
-                    description=description,
-                    role=role,
-                    tool_loading=tool_loading,
-                )
-            except ValueError as exc:
-                raise DSLSyntaxError(f"agents[{idx}] ({name}): {exc}") from exc
-
-        # -- [[tasks]] --
-        raw_tasks = raw.get("tasks", [])
-        if not isinstance(raw_tasks, list):
-            raise DSLSyntaxError("[[tasks]] must be an array of tables")
-        tasks: list[DSLTask] = []
-        seen_task_ids: set[str] = set()
-        for idx, raw_task in enumerate(raw_tasks):
-            if not isinstance(raw_task, dict):
-                raise DSLSyntaxError(f"tasks[{idx}] must be a table")
-            task_id = raw_task.get("id")
-            if not task_id or not isinstance(task_id, str):
-                raise DSLSyntaxError(f"tasks[{idx}].id must be a non-empty string")
-            if task_id in seen_task_ids:
-                raise DSLSyntaxError(f"Duplicate task id: '{task_id}'")
-            seen_task_ids.add(task_id)
-
-            description = raw_task.get("description", "")
-            if not description or not isinstance(description, str):
-                raise DSLSyntaxError(
-                    f"tasks[{idx}] ({task_id}): .description must be a non-empty string"
-                )
-            agent = raw_task.get("agent")
-            if not agent or not isinstance(agent, str):
-                raise DSLSyntaxError(f"tasks[{idx}] ({task_id}): .agent must be a non-empty string")
-            blocked_by = raw_task.get("blocked_by", [])
-            if not isinstance(blocked_by, list):
-                raise DSLSyntaxError(f"tasks[{idx}] ({task_id}): .blocked_by must be a list")
-            for dep_idx, dep in enumerate(blocked_by):
-                if not isinstance(dep, str) or not dep:
-                    raise DSLSyntaxError(
-                        f"tasks[{idx}] ({task_id}): .blocked_by[{dep_idx}] must be a "
-                        f"non-empty string, got {dep!r}"
-                    )
-            task_vars = raw_task.get("vars", {})
-            if not isinstance(task_vars, dict):
-                raise DSLSyntaxError(f"tasks[{idx}] ({task_id}): .vars must be a table")
-            tasks.append(
-                DSLTask(
-                    id=task_id,
-                    description=description,
-                    agent=agent,
-                    blocked_by=list(blocked_by),
-                    vars=dict(task_vars),
-                )
-            )
-
-        # -- [tool_loading] (optional) --
+        goal = self._parse_goal_section(raw)
+        agent_name = self._parse_agent_name_section(raw)
+        agents = self._parse_canonical_agents(raw)
+        tasks = self._parse_canonical_tasks(raw)
         tool_loading = self._parse_tool_loading(raw)
 
         definition = OrchestrationDefinition(
@@ -416,6 +291,130 @@ class OrchestrationDSL:
             )
 
         return definition
+
+    @staticmethod
+    def _parse_goal_section(raw: dict[str, Any]) -> str:
+        goal_section = raw.get("goal")
+        if not isinstance(goal_section, dict):
+            raise DSLSyntaxError("Missing [goal] section with 'description'")
+        goal = goal_section.get("description")
+        if not goal or not isinstance(goal, str):
+            raise DSLSyntaxError("[goal].description must be a non-empty string")
+        return goal
+
+    @staticmethod
+    def _parse_agent_name_section(raw: dict[str, Any]) -> str:
+        agent_name_section = raw.get("agent_name")
+        if not isinstance(agent_name_section, dict):
+            raise DSLSyntaxError("Missing [agent_name] section with 'value'")
+        agent_name = agent_name_section.get("value")
+        if not agent_name or not isinstance(agent_name, str):
+            raise DSLSyntaxError("[agent_name].value must be a non-empty string")
+        return agent_name
+
+    @staticmethod
+    def _validate_blocked_by(blocked_by: Any, context: str) -> list[str]:
+        if not isinstance(blocked_by, list):
+            raise DSLSyntaxError(f"{context}.blocked_by must be a list")
+        for dep_idx, dep in enumerate(blocked_by):
+            if not isinstance(dep, str) or not dep:
+                raise DSLSyntaxError(
+                    f"{context}.blocked_by[{dep_idx}] must be a non-empty string, got {dep!r}"
+                )
+        return cast("list[str]", blocked_by)
+
+    @staticmethod
+    def _parse_canonical_agents(raw: dict[str, Any]) -> dict[str, DSLAgent]:
+        raw_agents = raw.get("agents", [])
+        if not isinstance(raw_agents, list):
+            raise DSLSyntaxError("[[agents]] must be an array of tables")
+        agents: dict[str, DSLAgent] = {}
+        for idx, raw_agent in enumerate(raw_agents):
+            if not isinstance(raw_agent, dict):
+                raise DSLSyntaxError(f"agents[{idx}] must be a table")
+            raw_agent = cast("dict[str, Any]", raw_agent)
+            name = raw_agent.get("name")
+            if not name or not isinstance(name, str):
+                raise DSLSyntaxError(f"agents[{idx}].name must be a non-empty string")
+            if name in agents:
+                raise DSLSyntaxError(f"Duplicate agent name: '{name}'")
+            description = raw_agent.get("description", "")
+            role = raw_agent.get("role", "worker")
+            tool_loading = raw_agent.get("tool_loading", "lazy")
+            try:
+                agents[name] = DSLAgent(
+                    name=name,
+                    description=description,
+                    role=role,
+                    tool_loading=tool_loading,
+                )
+            except ValueError as exc:
+                raise DSLSyntaxError(f"agents[{idx}] ({name}): {exc}") from exc
+        return agents
+
+    @staticmethod
+    def _parse_canonical_tasks(raw: dict[str, Any]) -> list[DSLTask]:
+        raw_tasks = raw.get("tasks", [])
+        if not isinstance(raw_tasks, list):
+            raise DSLSyntaxError("[[tasks]] must be an array of tables")
+        tasks: list[DSLTask] = []
+        seen_task_ids: set[str] = set()
+        for idx, raw_task in enumerate(raw_tasks):
+            if not isinstance(raw_task, dict):
+                raise DSLSyntaxError(f"tasks[{idx}] must be a table")
+            raw_task = cast("dict[str, Any]", raw_task)
+            task = OrchestrationDSL._parse_single_task(raw_task, idx, seen_task_ids)
+            seen_task_ids.add(task.id)
+            tasks.append(task)
+        return tasks
+
+    @staticmethod
+    def _require_str(
+        raw: dict[str, Any],
+        key: str,
+        ctx: str,
+    ) -> str:
+        """Return raw[key] if it's a non-empty string, else raise DSLSyntaxError."""
+        val = raw.get(key)
+        if val and isinstance(val, str):
+            return val
+        raise DSLSyntaxError(f"{ctx}.{key} must be a non-empty string")
+
+    @staticmethod
+    def _parse_single_task(
+        raw_task: dict[str, Any],
+        idx: int,
+        seen_ids: set[str],
+    ) -> DSLTask:
+        ctx = f"tasks[{idx}]"
+        task_id = OrchestrationDSL._require_str(raw_task, "id", ctx)
+        if task_id in seen_ids:
+            raise DSLSyntaxError(f"Duplicate task id: '{task_id}'")
+
+        description = OrchestrationDSL._require_str(
+            raw_task,
+            "description",
+            f"{ctx} ({task_id})",
+        )
+        agent = OrchestrationDSL._require_str(
+            raw_task,
+            "agent",
+            f"{ctx} ({task_id})",
+        )
+        blocked_by = OrchestrationDSL._validate_blocked_by(
+            raw_task.get("blocked_by", []),
+            f"{ctx} ({task_id})",
+        )
+        task_vars = raw_task.get("vars", {})
+        if not isinstance(task_vars, dict):
+            raise DSLSyntaxError(f"{ctx} ({task_id}): .vars must be a table")
+        return DSLTask(
+            id=task_id,
+            description=description,
+            agent=agent,
+            blocked_by=blocked_by,
+            vars=dict(task_vars),
+        )
 
     def _parse_composition_format(self, raw: dict[str, Any]) -> OrchestrationDefinition:
         """Parse the ``[composition]`` / ``[tasks.X]`` TOML format.
@@ -458,48 +457,7 @@ class OrchestrationDSL:
         if not agent_name or not isinstance(agent_name, str):
             raise DSLSyntaxError("[composition].name must be a non-empty string")
 
-        # -- [tasks.X] (dict-of-tables) → list of DSLTask --
-        raw_tasks = raw.get("tasks", {})
-        if not isinstance(raw_tasks, dict):
-            raise DSLSyntaxError("[tasks] must be a table of task definitions")
-
-        tasks: list[DSLTask] = []
-        seen_task_ids: set[str] = set()
-        agent_names_seen: set[str] = set()
-
-        for task_id, task_def in raw_tasks.items():
-            if not isinstance(task_def, dict):
-                raise DSLSyntaxError(f"tasks.{task_id} must be a table")
-            if task_id in seen_task_ids:
-                raise DSLSyntaxError(f"Duplicate task id: '{task_id}'")
-            seen_task_ids.add(task_id)
-
-            name = task_def.get("name", task_id)
-            if not isinstance(name, str) or not name:
-                name = task_id
-            agent = task_def.get("agent", "")
-            if not isinstance(agent, str) or not agent:
-                raise DSLSyntaxError(f"tasks.{task_id}.agent must be a non-empty string")
-            agent_names_seen.add(agent)
-
-            blocked_by = task_def.get("blocked_by", [])
-            if not isinstance(blocked_by, list):
-                raise DSLSyntaxError(f"tasks.{task_id}.blocked_by must be a list")
-            for dep_idx, dep in enumerate(blocked_by):
-                if not isinstance(dep, str) or not dep:
-                    raise DSLSyntaxError(
-                        f"tasks.{task_id}.blocked_by[{dep_idx}] must be a "
-                        f"non-empty string, got {dep!r}"
-                    )
-
-            tasks.append(
-                DSLTask(
-                    id=task_id,
-                    description=name,
-                    agent=agent,
-                    blocked_by=list(blocked_by),
-                )
-            )
+        tasks, agent_names_seen = self._parse_composition_tasks(raw)
 
         # -- Infer [[agents]] from unique agent references --
         agents: dict[str, DSLAgent] = {}
@@ -527,6 +485,49 @@ class OrchestrationDSL:
         return definition
 
     @staticmethod
+    def _parse_composition_tasks(
+        raw: dict[str, Any],
+    ) -> tuple[list[DSLTask], set[str]]:
+        raw_tasks = raw.get("tasks", {})
+        if not isinstance(raw_tasks, dict):
+            raise DSLSyntaxError("[tasks] must be a table of task definitions")
+
+        tasks: list[DSLTask] = []
+        seen_task_ids: set[str] = set()
+        agent_names_seen: set[str] = set()
+
+        for task_id, task_def in raw_tasks.items():
+            if not isinstance(task_def, dict):
+                raise DSLSyntaxError(f"tasks.{task_id} must be a table")
+            if task_id in seen_task_ids:
+                raise DSLSyntaxError(f"Duplicate task id: '{task_id}'")
+            seen_task_ids.add(task_id)
+
+            name = task_def.get("name", task_id)
+            if not isinstance(name, str) or not name:
+                name = task_id
+            agent = task_def.get("agent", "")
+            if not isinstance(agent, str) or not agent:
+                raise DSLSyntaxError(f"tasks.{task_id}.agent must be a non-empty string")
+            agent_names_seen.add(agent)
+
+            blocked_by = OrchestrationDSL._validate_blocked_by(
+                task_def.get("blocked_by", []),
+                f"tasks.{task_id}",
+            )
+
+            tasks.append(
+                DSLTask(
+                    id=task_id,
+                    description=name,
+                    agent=agent,
+                    blocked_by=blocked_by,
+                )
+            )
+
+        return tasks, agent_names_seen
+
+    @staticmethod
     def _parse_tool_loading(raw: dict[str, Any]) -> DSLToolLoading:
         """Parse [tool_loading] section from raw TOML dict."""
         raw_tl = raw.get("tool_loading", {})
@@ -539,7 +540,7 @@ class OrchestrationDSL:
         try:
             return DSLToolLoading(
                 strategy=tl_strategy,
-                preload_agents=list(tl_preload),
+                preload_agents=cast("list[str]", tl_preload),
             )
         except ValueError as exc:
             raise DSLSyntaxError(f"[tool_loading]: {exc}") from exc
@@ -553,3 +554,43 @@ class OrchestrationDSL:
             nodes=task_map.keys(),
             get_deps=lambda name: [dep for dep in task_map[name].blocked_by if dep in task_map],
         )
+
+    @staticmethod
+    def _check_agent_refs(definition: OrchestrationDefinition, errors: list[str]) -> None:
+        agent_names = set(definition.agents.keys())
+        for task in definition.tasks:
+            if task.agent not in agent_names:
+                errors.append(f"Task '{task.id}' references unknown agent '{task.agent}'")
+
+    @staticmethod
+    def _check_blocked_by_refs(definition: OrchestrationDefinition, errors: list[str]) -> None:
+        task_ids = {t.id for t in definition.tasks}
+        for task in definition.tasks:
+            for dep_id in task.blocked_by:
+                if dep_id not in task_ids:
+                    errors.append(f"Task '{task.id}' blocked_by unknown task '{dep_id}'")
+
+    @staticmethod
+    def _check_no_self_blocks(definition: OrchestrationDefinition, errors: list[str]) -> None:
+        for task in definition.tasks:
+            if task.id in task.blocked_by:
+                errors.append(f"Task '{task.id}' cannot block itself")
+
+    def _check_cycles(self, definition: OrchestrationDefinition, errors: list[str]) -> None:
+        task_map = {t.id: t for t in definition.tasks}
+        for cycle in self._detect_cycles(task_map):
+            errors.append(f"Dependency cycle detected: {' -> '.join(cycle)}")
+
+    @staticmethod
+    def _check_unused_agents(definition: OrchestrationDefinition, warnings: list[str]) -> None:
+        tasked_agents = {t.agent for t in definition.tasks}
+        for name in definition.agents:
+            if name not in tasked_agents:
+                warnings.append(f"Agent '{name}' has no tasks assigned")
+
+    @staticmethod
+    def _check_preload_agents(definition: OrchestrationDefinition, errors: list[str]) -> None:
+        agent_names = set(definition.agents.keys())
+        for agent_name in definition.tool_loading.preload_agents:
+            if agent_name not in agent_names:
+                errors.append(f"preload_agents references unknown agent '{agent_name}'")

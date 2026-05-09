@@ -15,10 +15,10 @@ from agent_nexus.models.hooks import (
 )
 from agent_nexus.platform.hooks.executor import HookExecutor
 
-
 # ---------------------------------------------------------------------------
 # HookType enum
 # ---------------------------------------------------------------------------
+
 
 class TestHookType:
     def test_members(self):
@@ -47,6 +47,7 @@ class TestHookType:
 # ---------------------------------------------------------------------------
 # HookEvent enum
 # ---------------------------------------------------------------------------
+
 
 class TestHookEvent:
     def test_members(self):
@@ -78,6 +79,7 @@ class TestHookEvent:
 # ---------------------------------------------------------------------------
 # HookDefinition
 # ---------------------------------------------------------------------------
+
 
 class TestHookDefinition:
     def test_construction_command(self):
@@ -193,6 +195,7 @@ class TestHookDefinition:
 # HookExecution
 # ---------------------------------------------------------------------------
 
+
 class TestHookExecution:
     def test_construction(self):
         hook = HookDefinition(
@@ -254,6 +257,7 @@ class TestHookExecution:
 # ---------------------------------------------------------------------------
 # AggregatedHookResult
 # ---------------------------------------------------------------------------
+
 
 class TestAggregatedHookResult:
     def test_default_construction(self):

@@ -80,9 +80,7 @@ class ModelDBClient:
         cache_ttl: int = 0,
     ) -> None:
         self._index_ttl = index_ttl
-        self._disk_cache_path = (
-            Path(disk_cache_path).resolve() if disk_cache_path else None
-        )
+        self._disk_cache_path = Path(disk_cache_path).resolve() if disk_cache_path else None
         # Flat index: normalized_model_id → transformed dict
         self._model_index: dict[str, dict] = {}
         self._index_fetched_at: float = 0.0
@@ -193,35 +191,41 @@ class ModelDBClient:
             models = provider.get("models", {})
             if not isinstance(models, dict):
                 continue
-            for model_id, model_data in models.items():
-                if not isinstance(model_data, dict):
-                    continue
-                transformed = _transform_model(model_data, provider_id)
-                # Index by normalized id (lowercase)
-                key = model_id.strip().lower()
-                index[key] = transformed
-                # Also index short name if model_id has a prefix
-                if "/" in key:
-                    short = key.rsplit("/", 1)[-1]
-                    if short not in index:
-                        index[short] = transformed
+            self._index_provider_models(index, provider_id, models)
+
         self._model_index = index
         self._index_fetched_at = time.time()
         self._build_search_index()
         logger.info(
             "ModelDB: index built — %d models from %d providers",
-            len(index), len(data),
+            len(index),
+            len(data),
         )
+
+    def _index_provider_models(
+        self, index: dict[str, dict], provider_id: str, models: dict[str, Any]
+    ) -> None:
+        """Index all models for a single provider, including short-name aliases."""
+        for model_id, model_data in models.items():
+            if not isinstance(model_data, dict):
+                continue
+            transformed = _transform_model(model_data, provider_id)
+            key = model_id.strip().lower()
+            index[key] = transformed
+            if "/" in key:
+                short = key.rsplit("/", 1)[-1]
+                if short not in index:
+                    index[short] = transformed
 
     def _build_search_index(self) -> None:
         """Build trigram index for fast substring matching."""
         trigrams: dict[str, set[str]] = {}
         for key, val in self._model_index.items():
             for i in range(max(len(key) - 2, 0)):
-                trigrams.setdefault(key[i:i + 3], set()).add(key)
+                trigrams.setdefault(key[i : i + 3], set()).add(key)
             name = val.get("name", "").lower()
             for i in range(max(len(name) - 2, 0)):
-                trigrams.setdefault(name[i:i + 3], set()).add(key)
+                trigrams.setdefault(name[i : i + 3], set()).add(key)
         self._trigram_index = trigrams
 
     def _trigram_candidates(self, query: str) -> set[str]:
@@ -234,7 +238,7 @@ class ModelDBClient:
         if len(query) < 3:
             exact = self._model_index.get(query)
             return {query} if exact is not None else set()
-        query_trigrams = [query[i:i + 3] for i in range(len(query) - 2)]
+        query_trigrams = [query[i : i + 3] for i in range(len(query) - 2)]
         candidate_scores: dict[str, int] = {}
         for tri in query_trigrams:
             for key in self._trigram_index.get(tri, set()):
@@ -276,7 +280,8 @@ class ModelDBClient:
                 "index": self._model_index,
             }
             cache_file.write_text(
-                json.dumps(payload, ensure_ascii=False), encoding="utf-8",
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
             )
         except Exception:
             logger.debug("ModelDB: failed to save disk cache", exc_info=True)
@@ -289,7 +294,8 @@ class ModelDBClient:
         """Return a persistent ``httpx.Client``, creating on first use."""
         if self._http_client is None or self._http_client.is_closed:
             self._http_client = httpx.Client(
-                timeout=_DEFAULT_TIMEOUT, follow_redirects=True,
+                timeout=_DEFAULT_TIMEOUT,
+                follow_redirects=True,
             )
         return self._http_client
 

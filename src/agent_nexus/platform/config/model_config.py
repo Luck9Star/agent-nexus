@@ -45,6 +45,31 @@ class ModelConfigManager:
     # Public API
     # ------------------------------------------------------------------
 
+    def _resolve_tier_model(self, agent_name: str, recommended_tier: str | ModelTier) -> str | None:
+        """Resolve a model string from a tier recommendation, or ``None``."""
+        try:
+            tier_key = (
+                ModelTier(recommended_tier)
+                if isinstance(recommended_tier, str)
+                else recommended_tier
+            )
+        except ValueError:
+            logger.warning(
+                "Unknown model tier '%s' for agent '%s', ignoring",
+                recommended_tier,
+                agent_name,
+            )
+            return None
+        tier_model = MODEL_TIER_MAP.get(tier_key)
+        if tier_model:
+            logger.debug(
+                "Model for '%s' resolved from tier %s: %s",
+                agent_name,
+                tier_key,
+                tier_model,
+            )
+        return tier_model
+
     def resolve_model(
         self,
         agent_name: str,
@@ -90,29 +115,9 @@ class ModelConfigManager:
 
         # 3. Tier mapping
         if recommended_tier:
-            try:
-                tier_key = (
-                    ModelTier(recommended_tier)
-                    if isinstance(recommended_tier, str)
-                    else recommended_tier
-                )
-            except ValueError:
-                logger.warning(
-                    "Unknown model tier '%s' for agent '%s', ignoring",
-                    recommended_tier,
-                    agent_name,
-                )
-                tier_key = None
-            if tier_key is not None:
-                tier_model = MODEL_TIER_MAP.get(tier_key)
-                if tier_model:
-                    logger.debug(
-                        "Model for '%s' resolved from tier %s: %s",
-                        agent_name,
-                        tier_key,
-                        tier_model,
-                    )
-                    return tier_model
+            tier_model = self._resolve_tier_model(agent_name, recommended_tier)
+            if tier_model:
+                return tier_model
 
         # 4. Config default
         default = self._config.models.default
@@ -185,18 +190,7 @@ class ModelConfigManager:
         str
             The API key string, or empty string if not set.
         """
-        if isinstance(provider, str):
-            # Look up by name so we can also do fallback lookups
-            provider_cfg = self.get_provider_config(provider)
-            provider_name = provider
-        else:
-            provider_cfg = provider
-            # Find the provider name by identity in the registry
-            provider_name = ""
-            for pname, pcfg in self._config.models.providers.items():
-                if pcfg is provider_cfg:
-                    provider_name = pname
-                    break
+        provider_cfg, provider_name = self._resolve_provider_identity(provider)
 
         # Primary: read from the configured env var
         if provider_cfg.api_key_env:
@@ -205,7 +199,6 @@ class ModelConfigManager:
                 return key
 
         # Secondary: try well-known fallback env vars for the provider
-        # Normalize to lowercase so callers can pass "OpenAI" / "OPENAI" etc.
         provider_name = provider_name.lower()
         for env_var in _PROVIDER_ENV_FALLBACKS.get(provider_name, []):
             key = os.environ.get(env_var, "")
@@ -218,6 +211,20 @@ class ModelConfigManager:
             [provider_cfg.api_key_env] + _PROVIDER_ENV_FALLBACKS.get(provider_name.lower(), []),
         )
         return ""
+
+    def _resolve_provider_identity(
+        self, provider: ProviderConfig | str
+    ) -> tuple[ProviderConfig, str]:
+        """Resolve a provider argument to (config, name) pair."""
+        if isinstance(provider, str):
+            return self.get_provider_config(provider), provider
+        # Find the provider name by identity in the registry
+        provider_name = ""
+        for pname, pcfg in self._config.models.providers.items():
+            if pcfg is provider:
+                provider_name = pname
+                break
+        return provider, provider_name
 
     def resolve_stage_model(self, stage: str) -> str | None:
         """Resolve the model string for a specific pipeline stage.
@@ -277,18 +284,14 @@ class ModelConfigManager:
         if ":" in model_string:
             provider, model_name = model_string.split(":", 1)
             if not provider.strip():
-                raise ValueError(
-                    f"Provider part is empty in model string: {model_string!r}"
-                )
+                raise ValueError(f"Provider part is empty in model string: {model_string!r}")
             provider = provider.strip()
             # CLI providers may have empty model part (e.g. "claude-code:")
             provider_cfg = self._config.models.providers.get(provider)
             if not model_name.strip():
                 if provider_cfg and provider_cfg.api == ProviderApiType.CLI:
                     return provider, ""
-                raise ValueError(
-                    f"Model name part is empty in model string: {model_string!r}"
-                )
+                raise ValueError(f"Model name part is empty in model string: {model_string!r}")
             return provider, model_name.strip()
 
         # No colon: check if bare string is a known provider (e.g. "claude-code")

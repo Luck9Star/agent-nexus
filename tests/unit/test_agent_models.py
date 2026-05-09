@@ -6,8 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from agent_nexus.models.agent import (
-    AgentDependencies,
     AgentDefinition,
+    AgentDependencies,
     AgentManifest,
     AgentModelConfig,
     AgentPackage,
@@ -23,10 +23,10 @@ from agent_nexus.models.agent import (
 from agent_nexus.models.hooks import HookEvent, HookType
 from agent_nexus.models.permission import PermissionConfig, PermissionMode
 
-
 # ---------------------------------------------------------------------------
 # AgentType enum
 # ---------------------------------------------------------------------------
+
 
 class TestAgentType:
     def test_members(self):
@@ -52,6 +52,7 @@ class TestAgentType:
 # RunMode enum
 # ---------------------------------------------------------------------------
 
+
 class TestRunMode:
     def test_members(self):
         assert set(RunMode) == {
@@ -69,6 +70,7 @@ class TestRunMode:
 # ---------------------------------------------------------------------------
 # AgentRole enum
 # ---------------------------------------------------------------------------
+
 
 class TestAgentRole:
     def test_members(self):
@@ -90,6 +92,7 @@ class TestAgentRole:
 # ModelTier enum
 # ---------------------------------------------------------------------------
 
+
 class TestModelTier:
     def test_members(self):
         assert set(ModelTier) == {
@@ -109,6 +112,7 @@ class TestModelTier:
 # ---------------------------------------------------------------------------
 # AgentModelConfig
 # ---------------------------------------------------------------------------
+
 
 class TestAgentModelConfig:
     def test_defaults(self):
@@ -136,6 +140,7 @@ class TestAgentModelConfig:
 # McpServerConfig
 # ---------------------------------------------------------------------------
 
+
 class TestMcpServerConfig:
     def test_defaults(self):
         cfg = McpServerConfig(command="uvx")
@@ -162,6 +167,7 @@ class TestMcpServerConfig:
 # ---------------------------------------------------------------------------
 # AgentManifest
 # ---------------------------------------------------------------------------
+
 
 class TestAgentManifest:
     def test_minimal_construction(self):
@@ -208,9 +214,7 @@ class TestAgentManifest:
         assert m.max_turns == 50
 
     def test_frozen(self):
-        m = AgentManifest(
-            name="test", version="1.0.0", type=AgentType.ATOMIC, description="t"
-        )
+        m = AgentManifest(name="test", version="1.0.0", type=AgentType.ATOMIC, description="t")
         with pytest.raises(ValidationError):
             m.name = "changed"
 
@@ -256,6 +260,7 @@ class TestAgentManifest:
 # SkillDefinition
 # ---------------------------------------------------------------------------
 
+
 class TestSkillDefinition:
     def test_construction(self):
         s = SkillDefinition(
@@ -271,9 +276,7 @@ class TestSkillDefinition:
         assert "docx" in s.capabilities
 
     def test_defaults(self):
-        s = SkillDefinition(
-            name="test", agent_type=AgentType.ATOMIC, description="test"
-        )
+        s = SkillDefinition(name="test", agent_type=AgentType.ATOMIC, description="test")
         assert s.triggers == []
         assert s.compatible_agents == []
         assert s.capabilities == []
@@ -281,9 +284,7 @@ class TestSkillDefinition:
         assert s.resources is None
 
     def test_frozen(self):
-        s = SkillDefinition(
-            name="test", agent_type=AgentType.ATOMIC, description="test"
-        )
+        s = SkillDefinition(name="test", agent_type=AgentType.ATOMIC, description="test")
         with pytest.raises(ValidationError):
             s.name = "changed"
 
@@ -291,6 +292,7 @@ class TestSkillDefinition:
 # ---------------------------------------------------------------------------
 # CommandDef
 # ---------------------------------------------------------------------------
+
 
 class TestCommandDef:
     def test_construction(self):
@@ -316,6 +318,7 @@ class TestCommandDef:
 # AgentDefinition
 # ---------------------------------------------------------------------------
 
+
 class TestAgentDefinition:
     def test_construction(self):
         a = AgentDefinition(name="reviewer", description="Code reviewer")
@@ -339,6 +342,7 @@ class TestAgentDefinition:
 # HookDef
 # ---------------------------------------------------------------------------
 
+
 class TestHookDef:
     def test_construction(self):
         h = HookDef(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
@@ -352,6 +356,7 @@ class TestHookDef:
 # ---------------------------------------------------------------------------
 # AgentPackage
 # ---------------------------------------------------------------------------
+
 
 class TestAgentPackage:
     def test_minimal_construction(self):
@@ -583,16 +588,12 @@ class TestAgentManifestNameValidation:
 
     def test_valid_name_at_max_length(self):
         name = "a" * 128
-        m = AgentManifest(
-            name=name, version="1.0.0", type=AgentType.ATOMIC, description="d"
-        )
+        m = AgentManifest(name=name, version="1.0.0", type=AgentType.ATOMIC, description="d")
         assert len(m.name) == 128
 
     def test_rejects_name_too_long(self):
         with pytest.raises(ValidationError, match="at most 128 characters"):
-            AgentManifest(
-                name="a" * 129, version="1.0.0", type=AgentType.ATOMIC, description="d"
-            )
+            AgentManifest(name="a" * 129, version="1.0.0", type=AgentType.ATOMIC, description="d")
 
     def test_rejects_path_traversal_characters(self):
         with pytest.raises(ValidationError, match="should match"):
@@ -605,15 +606,11 @@ class TestAgentManifestNameValidation:
 
     def test_rejects_spaces(self):
         with pytest.raises(ValidationError, match="should match"):
-            AgentManifest(
-                name="my agent", version="1.0.0", type=AgentType.ATOMIC, description="d"
-            )
+            AgentManifest(name="my agent", version="1.0.0", type=AgentType.ATOMIC, description="d")
 
     def test_rejects_special_characters(self):
         with pytest.raises(ValidationError, match="should match"):
-            AgentManifest(
-                name="agent!@#", version="1.0.0", type=AgentType.ATOMIC, description="d"
-            )
+            AgentManifest(name="agent!@#", version="1.0.0", type=AgentType.ATOMIC, description="d")
 
 
 # ---------------------------------------------------------------------------
@@ -649,9 +646,7 @@ class TestMcpServerConfigTransportValidation:
 
     def test_sse_with_url_and_command_is_valid(self):
         """Having both url and command with sse transport is allowed (command ignored)."""
-        cfg = McpServerConfig(
-            transport="sse", url="http://localhost:8080/mcp", command="helper"
-        )
+        cfg = McpServerConfig(transport="sse", url="http://localhost:8080/mcp", command="helper")
         assert cfg.url == "http://localhost:8080/mcp"
 
 

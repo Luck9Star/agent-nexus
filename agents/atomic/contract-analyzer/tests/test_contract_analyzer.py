@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from agent_contract_analyzer.agent import ContractAnalyzerAgent
 from agent_contract_analyzer.local_adapter import handle_message
@@ -25,8 +26,6 @@ from agent_contract_analyzer.models import (
     RiskItem,
 )
 from agent_contract_analyzer.tools.analyze_risks import (
-    _check_keyword_risks,
-    _check_missing_clauses,
     _compute_severity_map,
     _generate_recommendations,
     analyze_risks,
@@ -43,7 +42,6 @@ from agent_contract_analyzer.tools.extract_clauses import (
     _split_into_sections,
     extract_clauses,
 )
-
 
 # ---------------------------------------------------------------------------
 # Sample contract texts
@@ -74,7 +72,8 @@ Section 1. Definitions
 For purposes of this Agreement, the following terms shall have the meanings set forth below.
 
 Section 2. Obligations
-The Buyer shall make all payments in a timely manner. The Seller shall deliver the goods as specified.
+The Buyer shall make all payments in a timely manner.
+The Seller shall deliver the goods as specified.
 
 Section 3. Payment
 Payment terms are negotiable and to be agreed upon by both parties.
@@ -133,7 +132,7 @@ class TestClauseInfo:
 
     def test_frozen(self) -> None:
         c = ClauseInfo(clause_id="1")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             c.clause_id = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -174,7 +173,7 @@ class TestRiskItem:
 
     def test_frozen(self) -> None:
         r = RiskItem(category="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.category = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -204,7 +203,7 @@ class TestRiskAnalysis:
 
     def test_frozen(self) -> None:
         ra = RiskAnalysis()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ra.risks = []  # type: ignore[misc]
 
 
@@ -228,7 +227,7 @@ class TestComplianceReport:
 
     def test_frozen(self) -> None:
         cr = ComplianceReport()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             cr.compliant = False  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -310,7 +309,9 @@ class TestExtractObligations:
         assert len(obs) >= 1
 
     def test_english_obligations(self) -> None:
-        obs = _extract_obligations("The party shall pay within 30 days. The seller must deliver goods.")
+        obs = _extract_obligations(
+            "The party shall pay within 30 days. The seller must deliver goods."
+        )
         assert len(obs) >= 1
 
     def test_no_obligations(self) -> None:
@@ -565,7 +566,11 @@ class TestCheckCompliance:
     def test_us_with_indemnification(self) -> None:
         clauses = [
             ClauseInfo(clause_id="1", type="governing_law", content="Governing law"),
-            ClauseInfo(clause_id="2", type="indemnification", content="Indemnification clause with liability cap"),
+            ClauseInfo(
+                clause_id="2",
+                type="indemnification",
+                content="Indemnification clause with liability cap",
+            ),
         ]
         result = check_compliance(clauses, "US")
         assert result.compliant is True
@@ -733,16 +738,12 @@ class TestLocalAdapter:
         assert "Unknown method" in response["error"]
 
     def test_handle_missing_text(self, agent: ContractAnalyzerAgent) -> None:
-        response = handle_message(
-            agent, {"method": "extract_clauses", "params": {}}
-        )
+        response = handle_message(agent, {"method": "extract_clauses", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
     def test_handle_missing_clauses(self, agent: ContractAnalyzerAgent) -> None:
-        response = handle_message(
-            agent, {"method": "analyze_risks", "params": {}}
-        )
+        response = handle_message(agent, {"method": "analyze_risks", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 

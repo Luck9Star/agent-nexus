@@ -50,9 +50,7 @@ def _generate_fixtures(cases: list[TestCase]) -> dict[str, str]:
     return fixtures
 
 
-def build_test_suite(
-    cases: list[TestCase], framework: str = "pytest"
-) -> TestSuite:
+def build_test_suite(cases: list[TestCase], framework: str = "pytest") -> TestSuite:
     """Assemble test cases into a complete test suite.
 
     Organizes test cases with proper imports, fixtures, and framework-

@@ -1,6 +1,5 @@
 """Unit tests for agent_nexus.models.evolution module."""
 
-import json
 from datetime import datetime
 
 import pytest
@@ -15,10 +14,10 @@ from agent_nexus.models.evolution import (
     SkillRecord,
 )
 
-
 # ---------------------------------------------------------------------------
 # EvolutionType enum
 # ---------------------------------------------------------------------------
+
 
 class TestEvolutionType:
     def test_members(self):
@@ -42,6 +41,7 @@ class TestEvolutionType:
 # SkillOrigin enum
 # ---------------------------------------------------------------------------
 
+
 class TestSkillOrigin:
     def test_members(self):
         assert set(SkillOrigin) == {
@@ -61,6 +61,7 @@ class TestSkillOrigin:
 # ---------------------------------------------------------------------------
 # SkillLineage
 # ---------------------------------------------------------------------------
+
 
 class TestSkillLineage:
     def test_defaults(self):
@@ -111,6 +112,7 @@ class TestSkillLineage:
 # ---------------------------------------------------------------------------
 # SkillRecord
 # ---------------------------------------------------------------------------
+
 
 class TestSkillRecord:
     def test_construction_with_required_fields(self):
@@ -186,6 +188,7 @@ class TestSkillRecord:
 # EvolutionMetrics
 # ---------------------------------------------------------------------------
 
+
 class TestEvolutionMetrics:
     def test_defaults(self):
         em = EvolutionMetrics()
@@ -241,6 +244,7 @@ class TestEvolutionMetrics:
 # ---------------------------------------------------------------------------
 # EvolutionContext
 # ---------------------------------------------------------------------------
+
 
 class TestEvolutionContext:
     def test_construction_with_required_fields(self):

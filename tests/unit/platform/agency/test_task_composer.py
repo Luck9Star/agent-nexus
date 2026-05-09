@@ -5,10 +5,8 @@ from pathlib import Path
 import pytest
 
 from agent_nexus.platform.agency.importer import AgencyImporter
+from agent_nexus.platform.agency.integrator import Artifact
 from agent_nexus.platform.agency.registry import ExpertRegistry
-from agent_nexus.platform.agency.selector import SelectionRequest, SpecialistSelector
-from agent_nexus.platform.agency.integrator import Artifact, Integrator
-from agent_nexus.platform.agency.qa_gate import QAGate, QAGateInput
 from agent_nexus.platform.agency.task_composer import (
     TaskComposer,
     TaskComposerInput,
@@ -161,9 +159,7 @@ class TestTaskComposerWithTaskGraph:
                 },
             )
 
-        result = composer.run(
-            inp, expert_executor=mock_executor, task_graph=graph
-        )
+        result = composer.run(inp, expert_executor=mock_executor, task_graph=graph)
 
         assert isinstance(result, TaskComposerResult)
         assert result.selected_agents is not None
@@ -200,10 +196,10 @@ class TestChineseCapabilityInference:
         caps = infer_capabilities("安全评审")
         assert "security_review" in caps
 
-    def test_unknown_chinese_returns_something_or_empty(self) -> None:
-        """Unknown Chinese text returns a list (may be empty if no keywords match)."""
+    def test_unknown_chinese_returns_empty(self) -> None:
+        """Chinese text with no matching keywords returns empty list."""
         caps = infer_capabilities("这是一段随机文字没有关键词")
-        assert isinstance(caps, list)
+        assert caps == []
 
     def test_deduplication_across_maps(self) -> None:
         """Deduplication when both Chinese and English keywords match same capability.

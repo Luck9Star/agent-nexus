@@ -6,8 +6,8 @@ test cases with edge cases, and assembles complete test suites.
 
 from agent_test_suite_generator.agent import TestSuiteGeneratorAgent
 from agent_test_suite_generator.models import (
-    TestCase,
     TestAnalysis,
+    TestCase,
     TestSuite,
     TestUnit,
 )

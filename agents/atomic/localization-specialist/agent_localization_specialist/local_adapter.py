@@ -20,9 +20,49 @@ from __future__ import annotations
 import json
 import sys
 import traceback
+from collections.abc import Callable
 
 from agent_localization_specialist.agent import LocalizationSpecialistAgent
-from agent_localization_specialist.models import Glossary
+
+
+def _handle_analyze(agent: LocalizationSpecialistAgent, params: dict) -> dict:
+    """Handle the 'analyze' method."""
+    text = params.get("text", "")
+    source_lang = params.get("source_lang", "en")
+    if not text:
+        return {"status": "error", "error": "Missing 'text' parameter"}
+    result = agent.analyze_text(text, source_lang)
+    return {"status": "ok", "result": result.model_dump()}
+
+
+def _handle_glossary(agent: LocalizationSpecialistAgent, params: dict) -> dict:
+    """Handle the 'glossary' method."""
+    action = params.get("action", "")
+    entries = params.get("entries", [])
+    if not action:
+        return {"status": "error", "error": "Missing 'action' parameter"}
+    result = agent.manage_glossary(action, entries)
+    return {"status": "ok", "result": result.model_dump()}
+
+
+def _handle_localize(agent: LocalizationSpecialistAgent, params: dict) -> dict:
+    """Handle the 'localize' method."""
+    text = params.get("text", "")
+    target_lang = params.get("target_lang", "")
+    glossary = params.get("glossary")
+    if not text:
+        return {"status": "error", "error": "Missing 'text' parameter"}
+    if not target_lang:
+        return {"status": "error", "error": "Missing 'target_lang' parameter"}
+    result = agent.localize(text, target_lang, glossary)
+    return {"status": "ok", "result": result.model_dump()}
+
+
+_METHOD_HANDLERS: dict[str, Callable] = {
+    "analyze": _handle_analyze,
+    "glossary": _handle_glossary,
+    "localize": _handle_localize,
+}
 
 
 def handle_message(agent: LocalizationSpecialistAgent, message: dict) -> dict:
@@ -38,36 +78,11 @@ def handle_message(agent: LocalizationSpecialistAgent, message: dict) -> dict:
     method = message.get("method", "")
     params = message.get("params", {})
 
+    handler = _METHOD_HANDLERS.get(method)
+    if not handler:
+        return {"status": "error", "error": f"Unknown method: {method}"}
     try:
-        if method == "analyze":
-            text = params.get("text", "")
-            source_lang = params.get("source_lang", "en")
-            if not text:
-                return {"status": "error", "error": "Missing 'text' parameter"}
-            result = agent.analyze_text(text, source_lang)
-            return {"status": "ok", "result": result.model_dump()}
-
-        elif method == "glossary":
-            action = params.get("action", "")
-            entries = params.get("entries", [])
-            if not action:
-                return {"status": "error", "error": "Missing 'action' parameter"}
-            result = agent.manage_glossary(action, entries)
-            return {"status": "ok", "result": result.model_dump()}
-
-        elif method == "localize":
-            text = params.get("text", "")
-            target_lang = params.get("target_lang", "")
-            glossary = params.get("glossary")
-            if not text:
-                return {"status": "error", "error": "Missing 'text' parameter"}
-            if not target_lang:
-                return {"status": "error", "error": "Missing 'target_lang' parameter"}
-            result = agent.localize(text, target_lang, glossary)
-            return {"status": "ok", "result": result.model_dump()}
-
-        else:
-            return {"status": "error", "error": f"Unknown method: {method}"}
+        return handler(agent, params)
     except Exception as exc:
         return {
             "status": "error",

@@ -17,6 +17,7 @@ ap-cli-backend = { workspace = true }
 ap-evolution = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
+clap_complete = "4"
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yml = { workspace = true }

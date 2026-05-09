@@ -21,6 +21,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from agent_nexus.models.agent import AgentManifest
 from agent_nexus.models.ipc import AgentToPlatformType
@@ -178,102 +179,96 @@ class DeferredAgentRegistry:
     async def activate_agent(self, name: str) -> list[dict]:
         """Activate a deferred agent: start subprocess, discover tools.
 
-        Steps:
-        1. Look up agent info in the deferred registry.
-        2. Start subprocess via ProcessManager (if not already running).
-        3. Send ``__list_tools__`` via IPC to discover available tools.
-        4. Cache the tool schemas and create McpToolAdapter instances.
-
         The entire activation sequence is guarded by an asyncio lock to
-        prevent a race where two concurrent ``search_and_activate`` calls
-        for the same agent both pass the ``is_activated`` check and
-        attempt to start the subprocess twice (leaking one handle).
-
-        Args:
-            name: Agent name to activate.
-
-        Returns:
-            List of MCP-compatible tool schema dicts.
+        prevent a race where two concurrent calls both pass the
+        ``is_activated`` check and attempt to start the subprocess twice.
 
         Raises:
             KeyError: Agent not registered.
             RuntimeError: Agent subprocess failed to start.
         """
         async with await self._get_agent_lock(name):
-            # Check if already activated (could be core or previously activated)
-            if name in self._core_agents:
-                info = self._core_agents[name]
-                if info.tool_schemas is not None:
-                    return info.tool_schemas
-
-            if name in self._deferred_agents:
-                info = self._deferred_agents[name]
-            elif name in self._core_agents:
-                info = self._core_agents[name]
-            else:
+            info = self._find_agent_info(name)
+            if info is None:
                 raise KeyError(f"Agent '{name}' not registered")
-
-            # Already activated?
             if info.is_activated:
-                assert info.tool_schemas is not None
+                if info.tool_schemas is None:
+                    raise RuntimeError(f"Agent '{name}' is activated but has no tool schemas")
                 return info.tool_schemas
 
-            # 1. Start subprocess if not running
-            if not info.is_running and info.start_command:
-                cwd = Path(info.start_cwd) if info.start_cwd else None
-                try:
-                    handle = await self._pm.start_agent(
-                        name=name,
-                        command=info.start_command,
-                        cwd=cwd,
-                        env=info.start_env or None,
-                    )
-                    info.handle = handle
-                    logger.info("Started subprocess for agent '%s'", name)
-                except Exception:
-                    # Clean up handle on start failure so the caller can retry.
-                    info.handle = None
-                    raise
-
-            # 2. Discover tools via IPC
-            if info.handle is not None and info.handle.is_alive:
-                tool_schemas = await self._fetch_agent_tools(info)
-            else:
-                # No running subprocess -> provide manifest-level placeholder
-                tool_schemas = [
-                    {
-                        "name": f"{name}__chat",
-                        "description": info.manifest.description,
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "message": {
-                                    "type": "string",
-                                    "description": "Message to send to the agent",
-                                }
-                            },
-                            "required": ["message"],
-                        },
-                    }
-                ]
-
-            # 3. Cache
-            info.tool_schemas = tool_schemas
-            adapters = [McpToolAdapter(server_name=name, tool_schema=s) for s in tool_schemas]
-            self._tool_adapters[name] = adapters
-            # Populate reverse index for O(1) get_tool_adapter lookups
-            for adapter in adapters:
-                self._tool_by_name[adapter.full_name] = adapter
-
-            logger.info("Activated agent '%s' with %d tools", name, len(tool_schemas))
-            if len(tool_schemas) == 1 and tool_schemas[0].get("name") in ("chat", f"{name}__chat"):
-                logger.warning(
-                    "Agent '%s' activated with fallback chat tool only "
-                    "(tool='%s'). Tool discovery may have failed.",
-                    name,
-                    tool_schemas[0].get("name"),
-                )
+            await self._ensure_subprocess(info, name)
+            tool_schemas = await self._discover_or_fallback_tools(info, name)
+            self._cache_tool_schemas(name, info, tool_schemas)
             return tool_schemas
+
+    def _find_agent_info(self, name: str) -> AgentInfo | None:
+        """Look up agent info, returning early if already cached."""
+        if name in self._core_agents and self._core_agents[name].tool_schemas is not None:
+            return self._core_agents[name]
+        if name in self._deferred_agents:
+            return self._deferred_agents[name]
+        if name in self._core_agents:
+            return self._core_agents[name]
+        return None
+
+    async def _ensure_subprocess(self, info: AgentInfo, name: str) -> None:
+        """Start subprocess if not already running."""
+        if info.is_running or not info.start_command:
+            return
+        cwd = Path(info.start_cwd) if info.start_cwd else None
+        try:
+            handle = await self._pm.start_agent(
+                name=name,
+                command=info.start_command,
+                cwd=cwd,
+                env=info.start_env or None,
+            )
+            info.handle = handle
+            logger.info("Started subprocess for agent '%s'", name)
+        except Exception:
+            info.handle = None
+            raise
+
+    async def _discover_or_fallback_tools(self, info: AgentInfo, name: str) -> list[dict]:
+        """Discover tools via IPC, or return placeholder if no subprocess."""
+        if info.handle is not None and info.handle.is_alive:
+            return await self._fetch_agent_tools(info)
+        return [self._placeholder_chat_tool(name, info.manifest.description)]
+
+    def _cache_tool_schemas(self, name: str, info: AgentInfo, tool_schemas: list[dict]) -> None:
+        """Cache tool schemas and populate reverse index."""
+        info.tool_schemas = tool_schemas
+        adapters = [McpToolAdapter(server_name=name, tool_schema=s) for s in tool_schemas]
+        self._tool_adapters[name] = adapters
+        for adapter in adapters:
+            self._tool_by_name[adapter.full_name] = adapter
+
+        logger.info("Activated agent '%s' with %d tools", name, len(tool_schemas))
+        if len(tool_schemas) == 1 and tool_schemas[0].get("name") in ("chat", f"{name}__chat"):
+            logger.warning(
+                "Agent '%s' activated with fallback chat tool only "
+                "(tool='%s'). Tool discovery may have failed.",
+                name,
+                tool_schemas[0].get("name"),
+            )
+
+    @staticmethod
+    def _placeholder_chat_tool(name: str, description: str) -> dict:
+        """Build a manifest-level placeholder chat tool."""
+        return {
+            "name": f"{name}__chat",
+            "description": description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "Message to send to the agent",
+                    }
+                },
+                "required": ["message"],
+            },
+        }
 
     async def _fetch_agent_tools(self, info: AgentInfo) -> list[dict]:
         """Fetch tool schemas from a running agent via IPC.
@@ -292,30 +287,7 @@ class DeferredAgentRegistry:
                 await handle.ipc.send_chat(_LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID)
                 response = await handle.ipc.receive_until_result(timeout=10.0)
 
-            if response.type == AgentToPlatformType.ERROR:
-                logger.warning(
-                    "Agent '%s' returned ERROR response during tool "
-                    "discovery: %s. Using generic chat tool as fallback.",
-                    info.name,
-                    response.error or "unknown error",
-                )
-                return [self._fallback_chat_tool(info)]
-
-            if isinstance(response.output, list):
-                return self._validate_tool_schemas(response.output)
-
-            # Fallback: parse content as JSON list
-            if response.content:
-                try:
-                    parsed = json.loads(response.content)
-                    if isinstance(parsed, list):
-                        return self._validate_tool_schemas(parsed)
-                except json.JSONDecodeError:
-                    logger.debug(
-                        "Agent '%s' tool response not valid JSON: %.200s",
-                        info.name,
-                        response.content[:200],
-                    )
+            return self._parse_tool_response(info, response)
 
         except Exception as exc:
             logger.warning(
@@ -327,7 +299,33 @@ class DeferredAgentRegistry:
             )
             return [self._fallback_chat_tool(info)]
 
-        # No tool schemas found in response
+    def _parse_tool_response(self, info: AgentInfo, response: Any) -> list[dict]:
+        """Parse IPC response into validated tool schemas."""
+        if response.type == AgentToPlatformType.ERROR:
+            logger.warning(
+                "Agent '%s' returned ERROR response during tool "
+                "discovery: %s. Using generic chat tool as fallback.",
+                info.name,
+                response.error or "unknown error",
+            )
+            return [self._fallback_chat_tool(info)]
+
+        if isinstance(response.output, list):
+            return self._validate_tool_schemas(response.output)
+
+        # Fallback: parse content as JSON list
+        if response.content:
+            try:
+                parsed = json.loads(response.content)
+                if isinstance(parsed, list):
+                    return self._validate_tool_schemas(parsed)
+            except json.JSONDecodeError:
+                logger.debug(
+                    "Agent '%s' tool response not valid JSON: %.200s",
+                    info.name,
+                    response.content[:200],
+                )
+
         logger.warning(
             "Agent '%s' returned no tool schemas. Using generic chat tool as fallback.",
             info.name,
@@ -407,6 +405,15 @@ class DeferredAgentRegistry:
     # Query helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _collect_unique_tools(tools: list[dict], seen: set[str], schemas: list[dict]) -> None:
+        """Append unique tool schemas, skipping names already in *seen*."""
+        for schema in schemas:
+            name = schema.get("name", "")
+            if name not in seen:
+                tools.append(schema)
+                seen.add(name)
+
     def get_tools_for_llm(self) -> list[dict]:
         """Get all available tool schemas (core + activated deferred).
 
@@ -419,21 +426,11 @@ class DeferredAgentRegistry:
         tools: list[dict] = []
         seen: set[str] = set()
 
-        # Core agents: always included
         for info in self._core_agents.values():
             if info.tool_schemas:
-                for schema in info.tool_schemas:
-                    name = schema.get("name", "")
-                    if name not in seen:
-                        tools.append(schema)
-                        seen.add(name)
-            elif info.is_running:
-                # Core agent is running but tools not yet discovered
-                # (will be discovered on first gateway startup)
-                pass
+                self._collect_unique_tools(tools, seen, info.tool_schemas)
 
-        # Activated deferred agents (skip duplicates)
-        for _, adapters in self._tool_adapters.items():
+        for adapters in self._tool_adapters.values():
             for adapter in adapters:
                 if adapter.full_name not in seen:
                     tools.append(adapter.get_tool_definition())

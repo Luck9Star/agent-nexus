@@ -23,6 +23,7 @@ import logging
 import sqlite3
 import uuid
 from collections import deque
+from collections.abc import Iterable
 from typing import Any
 
 from agent_nexus.models.errors import AgentNexusError
@@ -133,6 +134,18 @@ class PlatformRouter:
         """
         self._composite_defs[name] = definition
 
+    @staticmethod
+    def _validate_chat_args(
+        agent_name: str,
+        message: str,
+    ) -> dict | None:
+        """Return error dict if args are invalid, else None."""
+        if not agent_name or not agent_name.strip():
+            return _make_error_result("agent_name is required", "ValueError")
+        if not message or not message.strip():
+            return _make_error_result("message is required", "ValueError")
+        return None
+
     async def route_chat(
         self,
         agent_name: str,
@@ -152,29 +165,100 @@ class PlatformRouter:
         Returns:
             Dict with ``output`` and ``success`` keys.
         """
-        conv_id = conversation_id or str(uuid.uuid4())
+        validation_err = self._validate_chat_args(agent_name, message)
+        if validation_err is not None:
+            return validation_err
 
-        if not agent_name or not agent_name.strip():
-            return _make_error_result("agent_name is required", "ValueError")
-        if not message or not message.strip():
-            return _make_error_result("message is required", "ValueError")
+        conv_id = conversation_id or str(uuid.uuid4())
 
         # Check if this is a composite agent with an orchestration definition
         definition = self._composite_defs.get(agent_name)
         if definition is not None:
-            result = await self.route_composite(definition, message, conv_id)
-            result_dict: dict[str, Any] = {
-                "output": result.final_output,
-                "success": result.success,
-            }
-            if not result.success:
-                if result.error:
-                    result_dict["error"] = result.error
-                if result.error_type:
-                    result_dict["error_type"] = result.error_type
-            return result_dict
+            return await self._route_composite_wrapped(definition, message, conv_id)
 
         return await self.route_to_atomic(agent_name, message, conv_id)
+
+    async def _route_composite_wrapped(
+        self,
+        definition: OrchestrationDefinition,
+        message: str,
+        conv_id: str,
+    ) -> dict[str, Any]:
+        """Execute composite routing and wrap result in a dict."""
+        result = await self.route_composite(definition, message, conv_id)
+        result_dict: dict[str, Any] = {
+            "output": result.final_output,
+            "success": result.success,
+        }
+        if not result.success:
+            if result.error:
+                result_dict["error"] = result.error
+            if result.error_type:
+                result_dict["error_type"] = result.error_type
+        return result_dict
+
+    def _setup_task_graph(
+        self,
+        ctx: WorkflowContext,
+        definition: OrchestrationDefinition,
+    ) -> tuple[str, str] | None:
+        """Populate *ctx.task_graph* from *definition*.
+
+        Returns ``(error_msg, error_type)`` on failure, ``None`` on success.
+        """
+        ctx.task_graph = TaskGraph(":memory:")
+        try:
+            sorted_tasks = self._topological_sort_tasks(definition.tasks)
+            ctx.task_graph.add_tasks([dsl_task.to_task_item() for dsl_task in sorted_tasks])
+            return None
+        except (ValueError, KeyError, TypeError, RuntimeError, sqlite3.Error) as exc:
+            error = f"TaskGraph setup failed: {exc}"
+            logger.error(error, exc_info=exc)
+            return error, type(exc).__name__
+
+    async def _execute_phases(
+        self,
+        ctx: WorkflowContext,
+        definition: OrchestrationDefinition,
+        message: str,
+        role_agents: dict[str, list[str]],
+        phase_results: dict[WorkflowPhase, str],
+    ) -> tuple[int, str | None, str | None]:
+        """Run all workflow phases with an overall timeout.
+
+        Returns ``(completed_count, last_error, last_error_type)``.
+        """
+        completed = 0
+        last_error: str | None = None
+        last_error_type: str | None = None
+
+        async def _run_phases() -> None:
+            nonlocal message, completed, last_error, last_error_type
+            for phase in _PHASE_ORDER:
+                ctx.current_phase = phase
+                try:
+                    result = await self._execute_phase(
+                        ctx, phase, definition, message, role_agents=role_agents
+                    )
+                    phase_results[phase] = result
+                    completed += 1
+                    message = self._build_phase_message(phase, result)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    last_error = f"Phase {phase.value} failed: {exc}"
+                    last_error_type = type(exc).__name__
+                    logger.error(last_error, exc_info=exc)
+                    break
+
+        try:
+            await asyncio.wait_for(_run_phases(), timeout=_DEFAULT_COMPOSITE_TIMEOUT)
+        except TimeoutError:
+            last_error = f"Composite workflow timed out after {_DEFAULT_COMPOSITE_TIMEOUT:.0f}s"
+            last_error_type = "TimeoutError"
+            logger.error(last_error)
+
+        return completed, last_error, last_error_type
 
     async def route_composite(
         self,
@@ -189,99 +273,51 @@ class PlatformRouter:
         2. Populate TaskGraph from the OrchestrationDefinition's tasks.
         3. Execute each phase in order, collecting results.
         4. Return WorkflowResult with aggregated outputs.
-
-        Args:
-            definition: Parsed TOML orchestration definition.
-            message: User message / goal for the workflow.
-            conversation_id: Conversation identifier.
-
-        Returns:
-            WorkflowResult summarizing the workflow outcome.
         """
-        # 1. Create fresh context per workflow -- no cross-workflow state leakage
         ctx = WorkflowContext(
             conversation_id=conversation_id,
             message=message,
             agent_name=definition.agent_name,
         )
 
-        # Initialize result variables before TaskGraph setup so they are
-        # always defined even if add_task() raises during population.
-        phase_results: dict[WorkflowPhase, str] = {}
-        completed = 0
         total = len(_PHASE_ORDER)
-        last_error: str | None = None
-        last_error_type: str | None = None
 
-        # 2. Create in-memory TaskGraph and populate from definition.
-        #    Tasks must be added in dependency order (deps before dependents)
-        #    so that add_task can validate blocked_by references.  The DSL
-        #    validate() method checks that all blocked_by IDs exist in the
-        #    task set but does NOT enforce topological ordering of the list.
-        ctx.task_graph = TaskGraph(":memory:")
-        try:
-            sorted_tasks = self._topological_sort_tasks(definition.tasks)
-            ctx.task_graph.add_tasks([dsl_task.to_task_item() for dsl_task in sorted_tasks])
-        except (ValueError, KeyError, TypeError, RuntimeError, sqlite3.Error) as exc:
-            last_error = f"TaskGraph setup failed: {exc}"
-            last_error_type = type(exc).__name__
-            logger.error(last_error, exc_info=exc)
+        # 2. Set up TaskGraph — early return on failure.
+        setup_error = self._setup_task_graph(ctx, definition)
+        if setup_error is not None:
+            error_msg, error_type = setup_error
             try:
-                ctx.close()
+                await ctx.aclose()
             except Exception:
                 logger.debug("Failed to close context after TaskGraph error", exc_info=True)
             return WorkflowResult(
                 success=False,
                 final_output="",
-                phase_results=phase_results,
+                phase_results={},
                 total_phases=total,
-                completed_phases=completed,
-                error=last_error,
-                error_type=type(exc).__name__,
+                completed_phases=0,
+                error=error_msg,
+                error_type=error_type,
             )
 
-        # Pre-compute role->agent mapping once (deterministic across phases)
+        # Pre-compute role->agent mapping once
         role_agents: dict[str, list[str]] = {}
         for name, agent_def in definition.agents.items():
             role_agents.setdefault(agent_def.role, []).append(name)
 
         # 3. Execute phases
+        phase_results: dict[WorkflowPhase, str] = {}
         try:
-
-            async def _run_phases() -> None:
-                nonlocal message, completed, last_error, last_error_type
-                for phase in _PHASE_ORDER:
-                    ctx.current_phase = phase
-                    try:
-                        result = await self._execute_phase(
-                            ctx, phase, definition, message, role_agents=role_agents
-                        )
-                        phase_results[phase] = result
-                        completed += 1
-
-                        # Feed previous phase output into next phase's message
-                        message = self._build_phase_message(phase, result)
-
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as exc:
-                        last_error = f"Phase {phase.value} failed: {exc}"
-                        last_error_type = type(exc).__name__
-                        logger.error(last_error, exc_info=exc)
-                        break
-
-            try:
-                await asyncio.wait_for(
-                    _run_phases(),
-                    timeout=_DEFAULT_COMPOSITE_TIMEOUT,
-                )
-            except TimeoutError:
-                last_error = f"Composite workflow timed out after {_DEFAULT_COMPOSITE_TIMEOUT:.0f}s"
-                last_error_type = "TimeoutError"
-                logger.error(last_error)
+            completed, last_error, last_error_type = await self._execute_phases(
+                ctx,
+                definition,
+                message,
+                role_agents,
+                phase_results,
+            )
         finally:
             try:
-                ctx.close()
+                await ctx.aclose()
             except Exception:
                 logger.debug("Failed to close context after composite workflow", exc_info=True)
 
@@ -289,7 +325,6 @@ class PlatformRouter:
         success = completed == total
         final_output = phase_results.get(WorkflowPhase.verification, "")
         if not success and WorkflowPhase.synthesis in phase_results:
-            # Use synthesis output as partial result if available
             final_output = phase_results.get(WorkflowPhase.synthesis, "")
 
         return WorkflowResult(
@@ -342,79 +377,21 @@ class PlatformRouter:
     async def get_tools(self) -> list[dict]:
         """Get aggregated tool schemas from the gateway registry.
 
-        Delegates to the DeferredAgentRegistry (the canonical tool source)
-        rather than independently querying agents via IPC.  This avoids
-        returning raw tool names that don't match the sanitized
-        ``mcp__server__tool`` format used by the gateway.
-
-        Falls back to querying running agents via IPC only when no
-        registry is available (backward-compatibility).
-
-        Returns:
-            Flat list of tool definition dicts with sanitized names.
+        Delegates to the DeferredAgentRegistry when available.
+        Falls back to querying running agents via IPC (legacy path).
         """
-        # Use the registry as the canonical source when available.
-        # The router does not own a registry directly; it accesses it
-        # through the gateway if one has been configured.
         registry = getattr(self, "_registry", None)
         if registry is not None:
             return registry.get_tools_for_llm()
 
-        # Fallback: query running agents directly via IPC (legacy path)
-        async def _fetch_tools_from_agent(name: str) -> list[dict]:
-            handle = self._pm.get_agent(name)
-            if handle is None or not handle.is_alive:
-                return []
-            try:
-                async with get_ipc_lock(name):
-                    await handle.ipc.send_chat(_LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID)
-                    response = await handle.ipc.receive_until_result(timeout=10.0)
-                if response.type == AgentToPlatformType.ERROR:
-                    logger.warning(
-                        "Agent '%s' returned error during tool discovery: %s",
-                        name,
-                        response.error or "unknown error",
-                    )
-                    return []
-                if response.content:
-                    content = response.content
-                    if isinstance(content, str):
-                        try:
-                            parsed = json.loads(content)
-                            if isinstance(parsed, list):
-                                return parsed
-                        except (json.JSONDecodeError, ValueError) as exc:
-                            logger.warning(
-                                "Agent '%s' returned invalid JSON tool definitions: %s",
-                                name,
-                                exc,
-                            )
-                return []
-            except (TimeoutError, IPCError, OSError, RuntimeError) as exc:
-                logger.warning("Failed to get tools from agent '%s': %s", name, exc)
-                return []
+        return await self._fetch_tools_from_running_agents()
 
-        tools: list[dict] = []
-        seen_names: set[str] = set()
+    async def _fetch_tools_from_running_agents(self) -> list[dict]:
+        """Query running agents via IPC to discover their tools (legacy path)."""
         all_agent_tools = await asyncio.gather(
-            *[_fetch_tools_from_agent(name) for name in self._pm.list_running()],
+            *[_fetch_single_agent_tools(self._pm, name) for name in self._pm.list_running()],
         )
-        for tool_list in all_agent_tools:
-            for tool in tool_list:
-                tool_name = tool.get("name", "")
-                if not tool_name:
-                    logger.warning("Tool from agent has no 'name' key, skipping")
-                    continue
-                if tool_name in seen_names:
-                    logger.warning(
-                        "Tool name collision: '%s' already registered, skipping",
-                        tool_name,
-                    )
-                    continue
-                seen_names.add(tool_name)
-                tools.append(tool)
-
-        return tools
+        return _deduplicate_tool_lists(all_agent_tools)
 
     async def stop_all(self) -> None:
         """Stop all agents managed by this router."""
@@ -458,46 +435,45 @@ class PlatformRouter:
         if tg is None:
             raise RuntimeError("TaskGraph not initialized in context")
 
-        role = self._phase_to_role(phase)
-        if role_agents is not None:
-            phase_agents = list(role_agents.get(role, []))
-        else:
-            phase_agents = [
-                name for name, agent_def in definition.agents.items() if agent_def.role == role
-            ]
-
-        if not phase_agents:
-            # Fallback: if no agents have the matching role, use root tasks
-            # for research and first available agent for other phases
-            logger.warning(
-                "No agents with role '%s' found for %s phase, "
-                "falling back to default agent selection",
-                role,
-                phase.value,
-            )
-            if phase == WorkflowPhase.research:
-                root_tasks = definition.get_root_tasks()
-                phase_agents = list({t.agent for t in root_tasks})
-            elif definition.agents:
-                phase_agents = [next(iter(definition.agents.keys()))]
-
+        phase_agents = self._resolve_phase_agents(phase, definition, role_agents)
         if not phase_agents:
             raise RuntimeError(f"No agents available for {phase.value} phase")
 
-        # Build message for this phase
-        phase_message = message
-
         if phase in (WorkflowPhase.research, WorkflowPhase.implementation):
-            # Parallel execution
             results = await self._execute_parallel_agents(
-                phase_agents, phase_message, ctx.conversation_id
+                phase_agents, message, ctx.conversation_id
             )
             return self._aggregate_results(results, phase)
 
+        return await self._execute_single_agent(phase_agents[0], message, ctx.conversation_id)
+
+    def _resolve_phase_agents(
+        self,
+        phase: WorkflowPhase,
+        definition: OrchestrationDefinition,
+        role_agents: dict[str, list[str]] | None,
+    ) -> list[str]:
+        """Resolve agents for a given phase with fallback logic."""
+        role = self._phase_to_role(phase)
+        if role_agents is not None:
+            agents = list(role_agents.get(role, []))
         else:
-            # Single agent execution (synthesis, verification)
-            agent_name = phase_agents[0]
-            return await self._execute_single_agent(agent_name, phase_message, ctx.conversation_id)
+            agents = [name for name, ad in definition.agents.items() if ad.role == role]
+
+        if agents:
+            return agents
+
+        # Fallback: no agents have the matching role
+        logger.warning(
+            "No agents with role '%s' found for %s phase, falling back to default agent selection",
+            role,
+            phase.value,
+        )
+        if phase == WorkflowPhase.research:
+            return list({t.agent for t in definition.get_root_tasks()})
+        if definition.agents:
+            return [next(iter(definition.agents.keys()))]
+        return []
 
     async def _execute_parallel_agents(
         self,
@@ -561,6 +537,37 @@ class PlatformRouter:
     # IPC helpers
     # ------------------------------------------------------------------
 
+    async def _ipc_call_safe(
+        self,
+        coro: Any,
+        agent_name: str,
+        operation: str,
+    ) -> Any:
+        """Await *coro*, re-raising IPC errors and wrapping others as AgentExecutionError."""
+        try:
+            return await coro
+        except (IPCConnectionError, IPCTimeoutError, IPCError):
+            raise
+        except (TimeoutError, OSError, RuntimeError) as exc:
+            raise AgentExecutionError(
+                f"IPC {operation} error for agent '{agent_name}': {exc}",
+                type(exc).__name__,
+            ) from exc
+
+    @staticmethod
+    def _check_ipc_response(response: Any, agent_name: str) -> None:
+        """Raise AgentExecutionError if the IPC response indicates failure."""
+        if response.type == AgentToPlatformType.ERROR:
+            raise AgentExecutionError(
+                f"Agent '{agent_name}' error: {response.error or 'unknown'}",
+                "AgentError",
+            )
+        if not response.is_success:
+            raise AgentExecutionError(
+                f"Agent '{agent_name}' returned status: {response.status or 'unknown'}",
+                "AgentStatusError",
+            )
+
     async def _ipc_chat(
         self,
         agent_name: str,
@@ -587,42 +594,19 @@ class PlatformRouter:
                 "ProcessNotAliveError",
             )
 
-        # Serialize send+receive per agent to prevent concurrent IPC
-        # calls from interleaving responses on the same handle.
         lock = get_ipc_lock(agent_name)
         async with lock:
-            try:
-                await handle.ipc.send_chat(message, conversation_id=conversation_id)
-            except (IPCConnectionError, IPCTimeoutError, IPCError):
-                raise
-            except (TimeoutError, OSError, RuntimeError) as exc:
-                raise AgentExecutionError(
-                    f"IPC send error for agent '{agent_name}': {exc}",
-                    type(exc).__name__,
-                ) from exc
-
-            try:
-                response = await handle.ipc.receive_until_result(timeout=timeout)
-            except (IPCConnectionError, IPCTimeoutError, IPCError):
-                raise
-            except (TimeoutError, OSError, RuntimeError) as exc:
-                raise AgentExecutionError(
-                    f"IPC error communicating with agent '{agent_name}': {exc}",
-                    type(exc).__name__,
-                ) from exc
-
-            if response.type == AgentToPlatformType.ERROR:
-                raise AgentExecutionError(
-                    f"Agent '{agent_name}' error: {response.error or 'unknown'}",
-                    "AgentError",
-                )
-
-            if not response.is_success:
-                raise AgentExecutionError(
-                    f"Agent '{agent_name}' returned status: {response.status or 'unknown'}",
-                    "AgentStatusError",
-                )
-
+            await self._ipc_call_safe(
+                handle.ipc.send_chat(message, conversation_id=conversation_id),
+                agent_name,
+                "send",
+            )
+            response = await self._ipc_call_safe(
+                handle.ipc.receive_until_result(timeout=timeout),
+                agent_name,
+                "receive",
+            )
+            self._check_ipc_response(response, agent_name)
             return str(response.content) if response.content is not None else ""
 
     # ------------------------------------------------------------------
@@ -652,6 +636,38 @@ class PlatformRouter:
         return phase_result
 
     @staticmethod
+    def _build_in_degree(tasks: list[Any]) -> tuple[dict[str, int], dict[str, list[str]]]:
+        """Compute in-degree counts and reverse adjacency for topological sort."""
+        in_degree: dict[str, int] = {t.id: 0 for t in tasks}
+        dependents: dict[str, list[str]] = {t.id: [] for t in tasks}
+        for t in tasks:
+            for dep_id in t.blocked_by:
+                if dep_id in in_degree:
+                    in_degree[t.id] += 1
+                    dependents[dep_id].append(t.id)
+        return in_degree, dependents
+
+    @staticmethod
+    def _kahn_bfs(
+        task_map: dict[str, Any],
+        in_degree: dict[str, int],
+        dependents: dict[str, list[str]],
+        queue: deque[str],
+    ) -> list[Any]:
+        """Run Kahn's algorithm BFS to produce sorted task list."""
+        sorted_tasks: list[Any] = []
+        while queue:
+            tid = queue.popleft()
+            task = task_map.get(tid)
+            if task is not None:
+                sorted_tasks.append(task)
+            for dependent_id in dependents[tid]:
+                in_degree[dependent_id] -= 1
+                if in_degree[dependent_id] == 0:
+                    queue.append(dependent_id)
+        return sorted_tasks
+
+    @staticmethod
     def _topological_sort_tasks(tasks: list[Any]) -> list[Any]:
         """Sort tasks so that dependencies appear before dependents.
 
@@ -664,38 +680,30 @@ class PlatformRouter:
         Time complexity: O(V + E) using deque + reverse adjacency map.
         """
         task_map = {t.id: t for t in tasks}
-        in_degree: dict[str, int] = {t.id: 0 for t in tasks}
-
-        # Build reverse adjacency: dep_id -> list of task IDs that depend on it
-        dependents: dict[str, list[str]] = {t.id: [] for t in tasks}
-        for t in tasks:
-            for dep_id in t.blocked_by:
-                if dep_id in in_degree:
-                    in_degree[t.id] += 1
-                    dependents[dep_id].append(t.id)
+        in_degree, dependents = PlatformRouter._build_in_degree(tasks)
 
         queue: deque[str] = deque(tid for tid, deg in in_degree.items() if deg == 0)
-        sorted_tasks: list[Any] = []
+        sorted_tasks = PlatformRouter._kahn_bfs(task_map, in_degree, dependents, queue)
 
-        while queue:
-            tid = queue.popleft()
-            task = task_map.get(tid)
-            if task is not None:
-                sorted_tasks.append(task)
-            for dependent_id in dependents[tid]:
-                in_degree[dependent_id] -= 1
-                if in_degree[dependent_id] == 0:
-                    queue.append(dependent_id)
-
-        # If cycle prevents full sort, append remaining tasks so the
-        # caller still gets all of them (add_task will detect the cycle).
         if len(sorted_tasks) < len(tasks):
             sorted_ids = {t.id for t in sorted_tasks}
-            for t in tasks:
-                if t.id not in sorted_ids:
-                    sorted_tasks.append(t)
+            sorted_tasks.extend(t for t in tasks if t.id not in sorted_ids)
 
         return sorted_tasks
+
+    @staticmethod
+    def _classify_result(
+        result: Any,
+        idx: int,
+    ) -> tuple[str | None, str | None]:
+        """Classify a single worker result into (output, error)."""
+        if isinstance(result, dict) and not result.get("success", True):
+            return None, f"Worker {idx + 1} failed: {result.get('error', 'unknown error')}"
+        if isinstance(result, Exception):
+            return None, f"Worker {idx + 1} failed: {result}"
+        if result is None or (isinstance(result, str) and not result):
+            return f"Worker {idx + 1}: (no output)", None
+        return str(result), None
 
     @staticmethod
     def _aggregate_results(results: list[Any], phase: WorkflowPhase) -> str:
@@ -708,18 +716,79 @@ class PlatformRouter:
         errors: list[str] = []
 
         for i, result in enumerate(results):
-            if isinstance(result, dict) and not result.get("success", True):
-                # Error dict returned by _execute_single_agent
-                errors.append(f"Worker {i + 1} failed: {result.get('error', 'unknown error')}")
-            elif isinstance(result, Exception):
-                errors.append(f"Worker {i + 1} failed: {result}")
-            elif result is None or (isinstance(result, str) and not result):
-                parts.append(f"Worker {i + 1}: (no output)")
-            else:
-                parts.append(str(result))
+            output, error = PlatformRouter._classify_result(result, i)
+            if output:
+                parts.append(output)
+            if error:
+                errors.append(error)
 
         output = "\n\n---\n\n".join(parts)
         if errors:
             output += "\n\n## Warnings\n" + "\n".join(f"- {e}" for e in errors)
 
         return output if output else f"No results from {phase.value} phase"
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers for legacy IPC tool discovery
+# ---------------------------------------------------------------------------
+
+
+def _parse_tool_response(content: str | None, agent_name: str) -> list[dict]:
+    """Parse JSON tool list from IPC response content."""
+    if not content or not isinstance(content, str):
+        return []
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, list):
+            return parsed
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.warning(
+            "Agent '%s' returned invalid JSON tool definitions: %s",
+            agent_name,
+            exc,
+        )
+    return []
+
+
+async def _fetch_single_agent_tools(pm: ProcessManager, name: str) -> list[dict]:
+    """Fetch tool schemas from a single running agent via IPC."""
+    handle = pm.get_agent(name)
+    if handle is None or not handle.is_alive:
+        return []
+    try:
+        async with get_ipc_lock(name):
+            await handle.ipc.send_chat(_LIST_TOOLS_MSG, conversation_id=_INTERNAL_CID)
+            response = await handle.ipc.receive_until_result(timeout=10.0)
+        if response.type == AgentToPlatformType.ERROR:
+            logger.warning(
+                "Agent '%s' returned error during tool discovery: %s",
+                name,
+                response.error or "unknown error",
+            )
+            return []
+        return _parse_tool_response(response.content, name)
+    except (TimeoutError, IPCError, OSError, RuntimeError) as exc:
+        logger.warning("Failed to get tools from agent '%s': %s", name, exc)
+        return []
+
+
+def _deduplicate_tool_lists(tool_lists: Iterable[list[dict]]) -> list[dict]:
+    """Merge tool lists, keeping the first occurrence of each tool name."""
+    tools: list[dict] = []
+    seen: set[str] = set()
+    for tool_list in tool_lists:
+        for tool in tool_list:
+            tool_name = tool.get("name", "")
+            if not tool_name:
+                logger.warning("Tool from agent has no 'name' key, skipping")
+                continue
+            if tool_name in seen:
+                logger.warning(
+                    "Tool name collision: '%s' already registered, skipping",
+                    tool_name,
+                )
+                continue
+            seen.add(tool_name)
+            tools.append(tool)
+    return tools

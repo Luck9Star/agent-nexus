@@ -31,9 +31,8 @@ def create_mcp_server() -> object:
         from fastmcp import FastMCP
     except ImportError:
         raise ImportError(
-            "FastMCP is required for MCP mode. "
-            "Install with: pip install agent-code-reviewer[full]"
-        )
+            "FastMCP is required for MCP mode. Install with: pip install agent-code-reviewer[full]"
+        ) from None
 
     mcp = FastMCP("code-reviewer")
 
@@ -70,6 +69,7 @@ def create_mcp_server() -> object:
         parsed_patterns = None
         if patterns:
             from agent_code_reviewer.models import PatternMatch
+
             parsed_patterns = [PatternMatch.model_validate(p) for p in patterns]
         result = _review(parsed_analysis, parsed_patterns)
         return result.model_dump()

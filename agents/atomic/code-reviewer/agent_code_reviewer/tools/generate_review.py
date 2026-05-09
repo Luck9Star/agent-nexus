@@ -87,12 +87,11 @@ def _generate_suggestions(
     security_issues = [i for i in issues if i.category == "security"]
     security_patterns = [p for p in patterns if p.severity == "critical"]
     if security_issues or security_patterns:
-        suggestions.append(
-            "Security: Address critical security findings before deployment."
-        )
+        suggestions.append("Security: Address critical security findings before deployment.")
 
-    if any(i.category == "performance" for i in issues) or \
-       any(p.pattern == "n_plus_one" for p in patterns):
+    if any(i.category == "performance" for i in issues) or any(
+        p.pattern == "n_plus_one" for p in patterns
+    ):
         suggestions.append(
             "Performance: Review database query patterns for optimization opportunities."
         )
@@ -100,9 +99,7 @@ def _generate_suggestions(
     complex_issues = [i for i in issues if "complex" in i.message.lower()]
     deep_nesting = [p for p in patterns if p.pattern == "deep_nesting"]
     if complex_issues or deep_nesting:
-        suggestions.append(
-            "Maintainability: Reduce complexity by extracting helper functions."
-        )
+        suggestions.append("Maintainability: Reduce complexity by extracting helper functions.")
 
     if any(p.pattern == "hardcoded_secret" for p in patterns):
         suggestions.append(
@@ -110,14 +107,10 @@ def _generate_suggestions(
         )
 
     if any(p.pattern == "empty_catch" for p in patterns):
-        suggestions.append(
-            "Error handling: Add proper error handling in catch/except blocks."
-        )
+        suggestions.append("Error handling: Add proper error handling in catch/except blocks.")
 
     if any(p.pattern == "magic_number" for p in patterns):
-        suggestions.append(
-            "Readability: Extract magic numbers to named constants."
-        )
+        suggestions.append("Readability: Extract magic numbers to named constants.")
 
     if not suggestions:
         suggestions.append("Code looks good! No major improvements needed.")

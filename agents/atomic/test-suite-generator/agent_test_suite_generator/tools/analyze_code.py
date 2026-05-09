@@ -36,10 +36,9 @@ def _infer_type_from_annotation(annotation: ast.expr | None) -> str:
         return "default"
     if isinstance(annotation, ast.Name):
         return annotation.id.lower()
-    if isinstance(annotation, ast.Subscript):
+    if isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name):
         # e.g. list[str], dict[str, int]
-        if isinstance(annotation.value, ast.Name):
-            return annotation.value.id.lower()
+        return annotation.value.id.lower()
 
     return "default"
 
@@ -100,14 +99,13 @@ def _analyze_python_file(file_path: str) -> list[TestUnit]:
     units: list[TestUnit] = []
 
     for node in ast.iter_child_nodes(tree):
-        if isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             units.append(_extract_function_info(node))
 
         elif isinstance(node, ast.ClassDef):
             # Add the class itself as a testable unit
             methods = [
-                n for n in node.body
-                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                n for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
             ]
 
             class_unit = TestUnit(

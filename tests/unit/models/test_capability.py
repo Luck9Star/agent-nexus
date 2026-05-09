@@ -8,7 +8,6 @@ from agent_nexus.models.capability import (
     ModelCapabilityRegistry,
 )
 
-
 # ---------------------------------------------------------------------------
 # ModelCapability dataclass basics
 # ---------------------------------------------------------------------------

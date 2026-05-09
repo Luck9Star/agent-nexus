@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from agent_nexus.models.permission import (
     PathAccess,
@@ -15,7 +16,6 @@ from agent_nexus.platform.runtime.permission_checker import (
     PermissionChecker,
     _fnmatch_recursive,
 )
-
 
 # ======================================================================
 # Helpers
@@ -318,7 +318,6 @@ class TestCheckPathSensitive:
         resolve to sensitive locations regardless of test environment.
         """
         import os
-
         from pathlib import Path
 
         checker = _checker(mode=PermissionMode.FULL_AUTO)
@@ -332,9 +331,7 @@ class TestCheckPathSensitive:
         for target in targets:
             traversal = os.path.relpath(target)
             d = checker.check_path("file_read", traversal)
-            assert not d.allowed, (
-                f"Traversal '{traversal}' (→ {target}) should be blocked"
-            )
+            assert not d.allowed, f"Traversal '{traversal}' (→ {target}) should be blocked"
             assert "sensitive" in d.reason.lower()
 
 
@@ -444,8 +441,8 @@ class TestEdgeCases:
     def test_config_is_frozen(self) -> None:
         """PermissionConfig is frozen (immutable Pydantic model)."""
         cfg = PermissionConfig()
-        with pytest.raises(Exception):
-            cfg.mode = PermissionMode.FLAN_AUTO  # type: ignore[misc]
+        with pytest.raises(ValidationError):
+            cfg.mode = PermissionMode.FULL_AUTO  # type: ignore[misc]
 
     def test_multiple_denied_tools(self) -> None:
         checker = _checker(denied_tools=["bash", "exec", "eval"])
@@ -511,37 +508,45 @@ class TestPathRuleRecursiveGlob:
 
     def test_recursive_glob_deny(self) -> None:
         """PathRule with /tmp/** pattern denies nested paths."""
-        checker = PermissionChecker(PermissionConfig(
-            mode=PermissionMode.FULL_AUTO,
-            path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.DENY)],
-        ))
+        checker = PermissionChecker(
+            PermissionConfig(
+                mode=PermissionMode.FULL_AUTO,
+                path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.DENY)],
+            )
+        )
         d = checker.check_path("file_read", "/tmp/secrets/deep/nested/key.pem")
         assert not d.allowed
 
     def test_recursive_glob_write(self) -> None:
         """PathRule with /data/** WRITE pattern allows write to nested paths."""
-        checker = PermissionChecker(PermissionConfig(
-            mode=PermissionMode.FULL_AUTO,
-            path_rules=[PathRule(pattern="/data/**", access=PathAccess.WRITE)],
-        ))
+        checker = PermissionChecker(
+            PermissionConfig(
+                mode=PermissionMode.FULL_AUTO,
+                path_rules=[PathRule(pattern="/data/**", access=PathAccess.WRITE)],
+            )
+        )
         d = checker.check_path("file_write", "/data/projects/myapp/config.json")
         assert d.allowed
 
     def test_recursive_glob_read_blocks_write_tool(self) -> None:
         """PathRule with /docs/** READ pattern blocks write tool on nested paths."""
-        checker = PermissionChecker(PermissionConfig(
-            mode=PermissionMode.FULL_AUTO,
-            path_rules=[PathRule(pattern="/docs/**", access=PathAccess.READ)],
-        ))
+        checker = PermissionChecker(
+            PermissionConfig(
+                mode=PermissionMode.FULL_AUTO,
+                path_rules=[PathRule(pattern="/docs/**", access=PathAccess.READ)],
+            )
+        )
         d = checker.check_path("file_write", "/docs/archive/old/report.txt")
         assert not d.allowed
 
     def test_recursive_glob_does_not_match_unrelated(self) -> None:
         """PathRule with /tmp/** does not affect /home paths."""
-        checker = PermissionChecker(PermissionConfig(
-            mode=PermissionMode.FULL_AUTO,
-            path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.DENY)],
-        ))
+        checker = PermissionChecker(
+            PermissionConfig(
+                mode=PermissionMode.FULL_AUTO,
+                path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.DENY)],
+            )
+        )
         d = checker.check_path("file_read", "/home/user/file.txt")
         assert d.allowed
 
@@ -601,6 +606,36 @@ class TestFnmatchRecursiveSuffixBranches:
         assert _fnmatch_recursive("/tmp/bar/x/y", "/tmp/**/bar/**")
 
 
+class TestSegmentPositions:
+    """Tests for _segment_positions helper (extracted from _fnmatch_recursive)."""
+
+    def test_empty_tail(self) -> None:
+        from agent_nexus.platform.runtime.permission_checker import _segment_positions
+
+        assert _segment_positions("") == [0]
+
+    def test_single_segment(self) -> None:
+        from agent_nexus.platform.runtime.permission_checker import _segment_positions
+
+        assert _segment_positions("file.txt") == [0]
+
+    def test_multi_segment(self) -> None:
+        from agent_nexus.platform.runtime.permission_checker import _segment_positions
+
+        # "/a/b/c.txt" -> [0, after /a -> index 2, after /b -> index 4]... wait
+        # positions: [0, (i+1 where ch='/' and i+1 < len)] -> "/" at 0, "a" at 1; "/" at 2 -> pos 3; "/" at... no
+        # "/" at index 0 -> i+1=1 < 5 -> add 1; "a" at 1; "/" at 2 -> i+1=3 < 5 -> add 3; "b" at 3; "/" at 4 -> i+1=5 == 5, NOT added
+        # Actually: len("/a/b/c.txt") = 9, chars: /,a,/,b,/,c,.,t,x,t
+        # "/" at 0 -> 1<9 -> add 1; "/" at 2 -> 3<9 -> add 3; "/" at 4 -> 5<9 -> add 5
+        assert _segment_positions("/a/b/c.txt") == [0, 1, 3, 5]
+
+    def test_trailing_slash(self) -> None:
+        from agent_nexus.platform.runtime.permission_checker import _segment_positions
+
+        # "/a/b/" -> "/" at 0 -> add 1; "/" at 2 -> add 3; "/" at 4 -> 5 not < 5 -> NOT added
+        assert _segment_positions("/a/b/") == [0, 1, 3]
+
+
 class TestCheckToolEmpty:
     """Empty tool_name rejection."""
 
@@ -645,11 +680,11 @@ class TestApplyPathAccessFallback:
             path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.READ)],
         )
         # Use _apply_path_access directly with a mock PathAccess
-        from agent_nexus.models.permission import PathAccess as PA
 
         # Create a mock PathAccess that is not in the known set
         class FakeAccess:
             """Fake enum value that won't match any real PathAccess."""
+
             def __eq__(self, other):
                 # Never equals any real PathAccess
                 return False

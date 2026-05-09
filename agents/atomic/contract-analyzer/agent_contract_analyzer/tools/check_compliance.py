@@ -7,7 +7,7 @@ pluggable rule system.
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from agent_contract_analyzer.models import ClauseInfo, ComplianceReport
 
@@ -63,9 +63,7 @@ CONTENT_REQUIREMENTS: dict[str, list[dict]] = {
 SUPPORTED_JURISDICTIONS = {"CN", "US", "UK", "EU", "HK", "SG"}
 
 
-def _check_mandatory_types(
-    clauses: Sequence[ClauseInfo], jurisdiction: str
-) -> list[str]:
+def _check_mandatory_types(clauses: Sequence[ClauseInfo], jurisdiction: str) -> list[str]:
     """Check for missing mandatory clause types for the jurisdiction."""
     required_types = MANDATORY_CLAUSE_TYPES.get(jurisdiction, [])
     existing_types = {c.type for c in clauses}
@@ -78,9 +76,7 @@ def _check_mandatory_types(
     return missing
 
 
-def _check_content_requirements(
-    clauses: Sequence[ClauseInfo], jurisdiction: str
-) -> list[str]:
+def _check_content_requirements(clauses: Sequence[ClauseInfo], jurisdiction: str) -> list[str]:
     """Check content-level requirements for the jurisdiction."""
     requirements = CONTENT_REQUIREMENTS.get(jurisdiction, [])
     violations: list[str] = []
@@ -141,7 +137,10 @@ def check_compliance(clauses: list[ClauseInfo], jurisdiction: str) -> Compliance
     if jurisdiction not in SUPPORTED_JURISDICTIONS:
         return ComplianceReport(
             compliant=False,
-            violations=[f"不支持的管辖区: {jurisdiction}。支持: {', '.join(sorted(SUPPORTED_JURISDICTIONS))}"],
+            violations=[
+                f"不支持的管辖区: {jurisdiction}。"
+                f"支持: {', '.join(sorted(SUPPORTED_JURISDICTIONS))}"
+            ],
             suggestions=[f"请使用以下管辖区代码之一: {', '.join(sorted(SUPPORTED_JURISDICTIONS))}"],
         )
 

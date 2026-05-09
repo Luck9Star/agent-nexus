@@ -7,21 +7,19 @@ Target: ~65 tests across all modules.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from agent_nexus.models.context import BudgetAlertLevel, ContextBudget, TokenUsage
 from agent_nexus.models.evolution import (
     EvolutionContext,
-    EvolutionMetrics,
     EvolutionType,
     SkillLineage,
     SkillOrigin,
     SkillRecord,
 )
-from agent_nexus.models.context import BudgetAlertLevel, ContextBudget, TokenUsage
-from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.analyzer import (
     AnalysisResult,
     EvolutionSuggestion,
@@ -29,25 +27,25 @@ from agent_nexus.platform.evolution.analyzer import (
     _correct_skill_ids,
     _edit_distance,
 )
+from agent_nexus.platform.evolution.compaction import AgentContext, CompactionGuard
 from agent_nexus.platform.evolution.evolver import (
-    EvolveResult,
     EvolutionTrigger,
+    EvolveResult,
     SkillEvolver,
 )
-from agent_nexus.platform.evolution.compaction import AgentContext, CompactionGuard
+from agent_nexus.platform.evolution.health import HealthChecker, HealthReport
 from agent_nexus.platform.evolution.promotion import (
     AgentPromoter,
     PromotionCandidate,
     PromotionResult,
 )
-from agent_nexus.platform.evolution.health import HealthChecker, HealthReport
-
+from agent_nexus.platform.evolution.store import EvolutionStore
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-_now = datetime.now(timezone.utc)
+_now = datetime.now(UTC)
 
 
 def _make_record(
@@ -105,7 +103,7 @@ def _store_with_records(tmp_path: Path, *records: SkillRecord) -> EvolutionStore
 class TestEvolutionStoreInit:
     def test_creates_database_file(self, tmp_path: Path) -> None:
         db = tmp_path / "evo.db"
-        store = EvolutionStore(db)
+        EvolutionStore(db)
         assert db.exists()
         # Opening again should not fail (idempotent schema)
         EvolutionStore(db)
@@ -123,9 +121,7 @@ class TestEvolutionStoreInit:
 
 class TestEvolutionStoreCRUD:
     def test_save_and_get(self, tmp_path: Path) -> None:
-        store = _store_with_records(
-            tmp_path, _make_record("s1", "my-skill")
-        )
+        store = _store_with_records(tmp_path, _make_record("s1", "my-skill"))
         record = store.get_skill_record("s1")
         assert record is not None
         assert record.id == "s1"
@@ -185,9 +181,7 @@ class TestEvolutionStoreLineageParents:
     def test_parents_persisted(self, tmp_path: Path) -> None:
         p1 = _make_record("p1", "parent-a")
         p2 = _make_record("p2", "parent-b")
-        r = _make_record(
-            "s1", "child", parent_ids=["p1", "p2"], generation=1
-        )
+        r = _make_record("s1", "child", parent_ids=["p1", "p2"], generation=1)
         store = _store_with_records(tmp_path, p1, p2, r)
         got = store.get_skill_record("s1")
         assert got is not None
@@ -218,9 +212,7 @@ class TestEvolutionStoreCounters:
     def test_increment_multiple(self, tmp_path: Path) -> None:
         r = _make_record("s1", "x", selections=10, applied=5, completions=3)
         store = _store_with_records(tmp_path, r)
-        store.increment_counters(
-            "s1", selected=True, applied=True, completed=True
-        )
+        store.increment_counters("s1", selected=True, applied=True, completed=True)
         got = store.get_skill_record("s1")
         assert got is not None
         assert got.total_selections == 11
@@ -234,7 +226,10 @@ class TestEvolutionStoreCounters:
 
         # Patch _conn to fail if called -- proves the no-op returns before opening it
         from unittest.mock import patch as _patch
-        with _patch.object(store, "_conn", side_effect=AssertionError("_conn should not be called")):
+
+        with _patch.object(
+            store, "_conn", side_effect=AssertionError("_conn should not be called")
+        ):
             store.increment_counters("s1")  # should not raise
 
         got = store.get_skill_record("s1")
@@ -259,8 +254,13 @@ class TestEvolutionStoreAnalysis:
             analysis_text="looks good",
             evolution_suggestions=[{"type": "fix", "target": "s1"}],
             judgments=[
-                {"skill_id": "s1", "selected": True, "applied": True,
-                 "completed": False, "fell_back": False},
+                {
+                    "skill_id": "s1",
+                    "selected": True,
+                    "applied": True,
+                    "completed": False,
+                    "fell_back": False,
+                },
             ],
         )
         assert analysis_id
@@ -276,8 +276,13 @@ class TestEvolutionStoreAnalysis:
             agent_name="a",
             analysis_text="text",
             judgments=[
-                {"skill_id": "s1", "selected": True, "applied": True,
-                 "completed": True, "fell_back": False},
+                {
+                    "skill_id": "s1",
+                    "selected": True,
+                    "applied": True,
+                    "completed": True,
+                    "fell_back": False,
+                },
             ],
         )
         judgments = store.get_judgments_for_skill("s1")
@@ -294,8 +299,13 @@ class TestEvolutionStoreAnalysis:
             agent_name="a",
             analysis_text="",
             judgments=[
-                {"skill_id": "s1", "selected": True, "applied": True,
-                 "completed": False, "fell_back": True},
+                {
+                    "skill_id": "s1",
+                    "selected": True,
+                    "applied": True,
+                    "completed": False,
+                    "fell_back": True,
+                },
             ],
         )
         got = store.get_skill_record("s1")
@@ -352,9 +362,7 @@ class TestEvolutionStoreEvolveSkill:
         p2 = _make_record("p2", "b")
         store = _store_with_records(tmp_path, p1, p2)
 
-        child = _make_record(
-            "c1", "merged", parent_ids=["p1", "p2"], generation=1
-        )
+        child = _make_record("c1", "merged", parent_ids=["p1", "p2"], generation=1)
         store.evolve_skill(child, ["p1", "p2"])
 
         got = store.get_skill_record("c1")
@@ -473,7 +481,10 @@ class TestCorrectSkillIds:
         ],
     )
     def test_correct_skill_ids(
-        self, raw_ids: list[str], known: set[str], expected: list[str],
+        self,
+        raw_ids: list[str],
+        known: set[str],
+        expected: list[str],
     ) -> None:
         assert _correct_skill_ids(raw_ids, known) == expected
 
@@ -494,10 +505,7 @@ class TestExecutionAnalyzer:
         result = analyzer.analyze_execution(ctx)
         assert result.task_id == "t1"
         assert result.agent_name == "agent-a"
-        fix_suggestions = [
-            s for s in result.suggestions
-            if s.evolution_type == EvolutionType.FIX
-        ]
+        fix_suggestions = [s for s in result.suggestions if s.evolution_type == EvolutionType.FIX]
         assert len(fix_suggestions) >= 1
         assert "s1" in fix_suggestions[0].target_skill_ids
 
@@ -512,10 +520,7 @@ class TestExecutionAnalyzer:
             skill_ids_used=[],
         )
         result = analyzer.analyze_execution(ctx)
-        captured = [
-            s for s in result.suggestions
-            if s.evolution_type == EvolutionType.CAPTURED
-        ]
+        captured = [s for s in result.suggestions if s.evolution_type == EvolutionType.CAPTURED]
         assert len(captured) == 1
 
     def test_analyze_healthy_skill_no_suggestion(self, tmp_path: Path) -> None:
@@ -747,9 +752,7 @@ class TestSkillEvolverCaptured:
             evolution_type=EvolutionType.CAPTURED,
             direction="Some pattern",
         )
-        result = evolver.evolve(
-            suggestion, capture_directory="skills/custom"
-        )
+        result = evolver.evolve(suggestion, capture_directory="skills/custom")
         assert result.success
         assert result.new_record is not None
         assert result.new_record.directory == "skills/custom"
@@ -922,9 +925,7 @@ class TestCompactionGuardShouldCompact:
     def test_too_recent_compaction(self, tmp_path: Path) -> None:
         store = _store_with_records(tmp_path)
         guard = CompactionGuard(store, "agent-a")
-        ctx = _make_agent_context(
-            total_tokens=110_000, turn=6, last_compaction_turn=3
-        )
+        ctx = _make_agent_context(total_tokens=110_000, turn=6, last_compaction_turn=3)
         # Only 3 turns since last compaction, need 5
         assert guard.should_compact(ctx) is False
 
@@ -987,9 +988,7 @@ class TestCompactionGuardReinject:
     def test_reinject_logs_budget_event(self, tmp_path: Path) -> None:
         store = _store_with_records(tmp_path)
         guard = CompactionGuard(store, "agent-a")
-        ctx = _make_agent_context(
-            total_tokens=100_000, l0_content="x", l1_content="y"
-        )
+        ctx = _make_agent_context(total_tokens=100_000, l0_content="x", l1_content="y")
         guard.reinject_after_compaction(ctx)
         log = store.get_budget_log("agent-a")
         assert len(log) == 1
@@ -1001,7 +1000,7 @@ class TestCompactionGuardReinject:
         long_l1 = "x" * 5000
         ctx = _make_agent_context(l0_content="id", l1_content=long_l1)
         result = guard.reinject_after_compaction(ctx)
-        budget = ContextBudget()
+        ContextBudget()
         # l1_max is 3000, so l1 should be truncated
         assert len(result) < len("id\n" + long_l1)
 
@@ -1015,9 +1014,7 @@ class TestCompactionGuardReinject:
 
         store = _store_with_records(tmp_path)
         guard = CompactionGuard(store, "agent-a")
-        ctx = _make_agent_context(
-            total_tokens=100_000, l0_content="hello world test data"
-        )
+        ctx = _make_agent_context(total_tokens=100_000, l0_content="hello world test data")
         guard.reinject_after_compaction(ctx)
         log = store.get_budget_log("agent-a")
         assert len(log) == 1
@@ -1100,8 +1097,11 @@ class TestPromotionCandidate:
     def test_find_candidates_meets_thresholds(self, tmp_path: Path) -> None:
         # effective_rate = 90/100 = 0.9 > 0.8, selections=100 > 50
         r = _make_record(
-            "s1", "great-skill",
-            selections=100, applied=90, completions=90,
+            "s1",
+            "great-skill",
+            selections=100,
+            applied=90,
+            completions=90,
             directory="skills/great",
         )
         store = _store_with_records(tmp_path, r)
@@ -1116,8 +1116,11 @@ class TestPromotionCandidate:
     def test_find_candidates_low_effective_rate(self, tmp_path: Path) -> None:
         # effective_rate = 40/100 = 0.4 < 0.8
         r = _make_record(
-            "s1", "mediocre",
-            selections=100, applied=40, completions=40,
+            "s1",
+            "mediocre",
+            selections=100,
+            applied=40,
+            completions=40,
             directory="skills/med",
         )
         store = _store_with_records(tmp_path, r)
@@ -1126,8 +1129,11 @@ class TestPromotionCandidate:
 
     def test_find_candidates_too_few_selections(self, tmp_path: Path) -> None:
         r = _make_record(
-            "s1", "promising",
-            selections=30, applied=28, completions=28,
+            "s1",
+            "promising",
+            selections=30,
+            applied=28,
+            completions=28,
             directory="skills/prom",
         )
         store = _store_with_records(tmp_path, r)
@@ -1136,8 +1142,11 @@ class TestPromotionCandidate:
 
     def test_find_candidates_no_directory(self, tmp_path: Path) -> None:
         r = _make_record(
-            "s1", "naked-skill",
-            selections=100, applied=90, completions=90,
+            "s1",
+            "naked-skill",
+            selections=100,
+            applied=90,
+            completions=90,
             directory="",
         )
         store = _store_with_records(tmp_path, r)
@@ -1148,8 +1157,11 @@ class TestPromotionCandidate:
 class TestPromotionPromote:
     def test_promote_creates_files(self, tmp_path: Path) -> None:
         r = _make_record(
-            "s1", "great-skill",
-            selections=100, applied=90, completions=90,
+            "s1",
+            "great-skill",
+            selections=100,
+            applied=90,
+            completions=90,
             directory="skills/great",
         )
         store = _store_with_records(tmp_path, r)
@@ -1255,7 +1267,10 @@ class TestPromotionPreservesExisting:
         )
 
         # Force a write failure after directory creation
-        with patch("agent_nexus.platform.evolution.promotion._atomic_write", side_effect=OSError("disk full")):
+        with patch(
+            "agent_nexus.platform.evolution.promotion._atomic_write",
+            side_effect=OSError("disk full"),
+        ):
             result = promoter.promote(candidate)
 
         assert not result.success
@@ -1284,7 +1299,10 @@ class TestPromotionPreservesExisting:
         # The directory does not exist yet
         assert not (agents_dir / "new-skill").exists()
 
-        with patch("agent_nexus.platform.evolution.promotion._atomic_write", side_effect=OSError("disk full")):
+        with patch(
+            "agent_nexus.platform.evolution.promotion._atomic_write",
+            side_effect=OSError("disk full"),
+        ):
             result = promoter.promote(candidate)
 
         assert not result.success
@@ -1363,8 +1381,12 @@ class TestPromotionPathTraversalGuard:
 class TestHealthCheckerCheckHealth:
     def test_healthy_skill(self) -> None:
         r = _make_record(
-            "s1", "good",
-            selections=100, applied=80, completions=70, fallbacks=5,
+            "s1",
+            "good",
+            selections=100,
+            applied=80,
+            completions=70,
+            fallbacks=5,
         )
         # With a dummy store (check_health doesn't use store)
         from unittest.mock import MagicMock
@@ -1380,9 +1402,7 @@ class TestHealthCheckerCheckHealth:
 
         checker = HealthChecker(MagicMock())
         suggestions = checker.check_health(r)
-        fix_suggestions = [
-            s for s in suggestions if s.evolution_type == EvolutionType.FIX
-        ]
+        fix_suggestions = [s for s in suggestions if s.evolution_type == EvolutionType.FIX]
         assert len(fix_suggestions) >= 1
         assert any("fallback" in s.direction.lower() for s in fix_suggestions)
 
@@ -1393,9 +1413,7 @@ class TestHealthCheckerCheckHealth:
 
         checker = HealthChecker(MagicMock())
         suggestions = checker.check_health(r)
-        fix_suggestions = [
-            s for s in suggestions if s.evolution_type == EvolutionType.FIX
-        ]
+        fix_suggestions = [s for s in suggestions if s.evolution_type == EvolutionType.FIX]
         assert len(fix_suggestions) >= 1
 
     def test_moderate_effective_triggers_derived(self) -> None:
@@ -1405,9 +1423,7 @@ class TestHealthCheckerCheckHealth:
 
         checker = HealthChecker(MagicMock())
         suggestions = checker.check_health(r)
-        derived = [
-            s for s in suggestions if s.evolution_type == EvolutionType.DERIVED
-        ]
+        derived = [s for s in suggestions if s.evolution_type == EvolutionType.DERIVED]
         assert len(derived) >= 1
 
     def test_zero_selections_no_suggestions(self) -> None:
@@ -1691,13 +1707,8 @@ class TestSuggestionDeduplication:
         )
         result = analyzer.analyze_execution(ctx)
 
-        fix_suggestions = [
-            s for s in result.suggestions
-            if s.evolution_type == EvolutionType.FIX
-        ]
-        assert len(fix_suggestions) == 1, (
-            f"Expected 1 deduplicated FIX, got {len(fix_suggestions)}"
-        )
+        fix_suggestions = [s for s in result.suggestions if s.evolution_type == EvolutionType.FIX]
+        assert len(fix_suggestions) == 1, f"Expected 1 deduplicated FIX, got {len(fix_suggestions)}"
 
     def test_fix_takes_priority_over_derived_for_same_skill(self, tmp_path: Path) -> None:
         """When FIX is triggered, DERIVED is skipped for the same skill."""
@@ -1812,10 +1823,7 @@ class TestAnalyzerCapturedDedup:
             task_completed=True,
         )
         result = analyzer.analyze_execution(ctx)
-        captured = [
-            s for s in result.suggestions
-            if s.evolution_type == EvolutionType.CAPTURED
-        ]
+        captured = [s for s in result.suggestions if s.evolution_type == EvolutionType.CAPTURED]
         assert len(captured) == 1
         assert captured[0].target_skill_ids == []
 
@@ -2069,7 +2077,7 @@ class TestEvolutionEngineEvolvePostAnalysis:
             task_completed=False,
             skill_ids_used=["s1"],
         )
-        result = engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
+        engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
         # The original should be deactivated (FIX evolution)
         original = store.get_skill_record("s1")
         assert original is not None
@@ -2195,8 +2203,11 @@ class TestEvolutionEngineConvenienceMethods:
 
     def test_promote_candidate(self, tmp_path: Path) -> None:
         r = _make_record(
-            "s1", "great",
-            selections=100, applied=90, completions=90,
+            "s1",
+            "great",
+            selections=100,
+            applied=90,
+            completions=90,
             directory="skills/great",
         )
         agents_dir = tmp_path / "agents"
@@ -2234,10 +2245,12 @@ class TestEvolutionEngineImport:
 
     def test_import_from_package(self) -> None:
         from agent_nexus.platform.evolution import EvolutionEngine as EE
+
         assert EE is EvolutionEngine
 
     def test_in_all(self) -> None:
         import agent_nexus.platform.evolution as evo_pkg
+
         assert "EvolutionEngine" in evo_pkg.__all__
 
 
@@ -2292,46 +2305,46 @@ class TestEvolutionEngineFacadeDelegation:
     """
 
     @pytest.fixture
-    def engine(self, tmp_path: Path) -> "EvolutionEngine":
+    def engine(self, tmp_path: Path) -> EvolutionEngine:
         """Create an EvolutionEngine with a temp SQLite store."""
         from agent_nexus.platform.evolution.engine import EvolutionEngine
+
         db_path = tmp_path / "evolution.db"
         store = EvolutionStore(db_path)
         return EvolutionEngine(store, agents_root=tmp_path / "agents")
 
-    def test_properties_return_components(
-        self, engine: "EvolutionEngine"
-    ) -> None:
-        """All sub-component properties return non-None instances."""
-        assert engine.store is not None
-        assert engine.analyzer is not None
-        assert engine.evolver is not None
-        assert engine.health_checker is not None
-        assert engine.compaction_guard is not None
-        assert engine.promoter is not None
+    def test_properties_return_components(self, engine: EvolutionEngine) -> None:
+        """All sub-component properties return correctly typed instances."""
+        from agent_nexus.platform.evolution.store import EvolutionStore
+        from agent_nexus.platform.evolution.analyzer import ExecutionAnalyzer
+        from agent_nexus.platform.evolution.evolver import SkillEvolver
+        from agent_nexus.platform.evolution.health import HealthChecker
+        from agent_nexus.platform.evolution.compaction import CompactionGuard
+        from agent_nexus.platform.evolution.promotion import AgentPromoter
 
-    def test_evolve_post_analysis_requires_ctx(
-        self, engine: "EvolutionEngine"
-    ) -> None:
+        assert isinstance(engine.store, EvolutionStore)
+        assert isinstance(engine.analyzer, ExecutionAnalyzer)
+        assert isinstance(engine.evolver, SkillEvolver)
+        assert isinstance(engine.health_checker, HealthChecker)
+        assert isinstance(engine.compaction_guard, CompactionGuard)
+        assert isinstance(engine.promoter, AgentPromoter)
+
+    def test_evolve_post_analysis_requires_ctx(self, engine: EvolutionEngine) -> None:
         """trigger=POST_ANALYSIS without ctx raises ValueError."""
         with pytest.raises(ValueError, match="ctx.*required"):
             engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=None)
 
-    def test_evolve_tool_degradation_requires_tool_key(
-        self, engine: "EvolutionEngine"
-    ) -> None:
+    def test_evolve_tool_degradation_requires_tool_key(self, engine: EvolutionEngine) -> None:
         """trigger=TOOL_DEGRADATION without tool_key raises ValueError."""
         with pytest.raises(ValueError, match="tool_key.*required"):
             engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION)
 
-    def test_evolve_unknown_trigger(self, engine: "EvolutionEngine") -> None:
+    def test_evolve_unknown_trigger(self, engine: EvolutionEngine) -> None:
         """Unknown trigger raises ValueError."""
         with pytest.raises(ValueError, match="Unknown trigger"):
             engine.evolve(trigger="nonexistent")  # type: ignore[arg-type]
 
-    def test_evolve_post_analysis_returns_analysis_result(
-        self, engine: "EvolutionEngine"
-    ) -> None:
+    def test_evolve_post_analysis_returns_analysis_result(self, engine: EvolutionEngine) -> None:
         """trigger=POST_ANALYSIS with valid ctx returns AnalysisResult."""
         ctx = EvolutionContext(
             agent_id="test-agent",
@@ -2342,9 +2355,7 @@ class TestEvolutionEngineFacadeDelegation:
         # AnalysisResult has .suggestions attribute
         assert hasattr(result, "suggestions")
 
-    def test_evolve_tool_degradation_returns_list(
-        self, engine: "EvolutionEngine"
-    ) -> None:
+    def test_evolve_tool_degradation_returns_list(self, engine: EvolutionEngine) -> None:
         """trigger=TOOL_DEGRADATION returns list[EvolveResult]."""
         results = engine.evolve(
             trigger=EvolutionTrigger.TOOL_DEGRADATION,
@@ -2352,32 +2363,31 @@ class TestEvolutionEngineFacadeDelegation:
             problem_description="tool is slow",
         )
         assert isinstance(results, list)
+        assert all(isinstance(r, EvolveResult) for r in results)
+        assert len(results) == 0  # empty store → no skills to evolve
 
-    def test_evolve_metric_check_returns_list(
-        self, engine: "EvolutionEngine"
-    ) -> None:
+    def test_evolve_metric_check_returns_list(self, engine: EvolutionEngine) -> None:
         """trigger=METRIC_CHECK returns list[EvolveResult]."""
         results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
         assert isinstance(results, list)
+        assert all(isinstance(r, EvolveResult) for r in results)
 
-    def test_should_compact_delegates(
-        self, engine: "EvolutionEngine"
-    ) -> None:
+    def test_should_compact_delegates(self, engine: EvolutionEngine) -> None:
         """should_compact delegates to CompactionGuard."""
         from agent_nexus.platform.evolution.compaction import AgentContext
+
         ctx = AgentContext(agent_id="test", session_id="s1")
         # Should return bool without error
         result = engine.should_compact(ctx)
-        assert isinstance(result, bool)
+        assert result is False  # default compaction guard returns False
 
-    def test_diagnose_all_delegates(self, engine: "EvolutionEngine") -> None:
+    def test_diagnose_all_delegates(self, engine: EvolutionEngine) -> None:
         """diagnose_all delegates to HealthChecker."""
         report = engine.diagnose_all()
         assert isinstance(report, dict)
+        assert len(report) == 0  # empty store yields empty dict
 
-    def test_check_health_missing_skill_raises(
-        self, engine: "EvolutionEngine"
-    ) -> None:
+    def test_check_health_missing_skill_raises(self, engine: EvolutionEngine) -> None:
         """check_health raises ValueError for unknown skill_id."""
         with pytest.raises(ValueError, match="Skill not found"):
             engine.check_health("nonexistent-skill")
@@ -2533,8 +2543,12 @@ class TestProcessMetricCheckHealthySkip:
     def test_healthy_skill_produces_no_evolution(self, tmp_path: Path) -> None:
         """Skill with good metrics is skipped (diagnose returns None)."""
         r = _make_record(
-            "s1", "good",
-            selections=100, applied=80, completions=70, fallbacks=5,
+            "s1",
+            "good",
+            selections=100,
+            applied=80,
+            completions=70,
+            fallbacks=5,
         )
         store = _store_with_records(tmp_path, r)
         evolver = SkillEvolver(store)
@@ -2653,7 +2667,8 @@ class TestEvolveCapturedEmptyName:
     """CAPTURED evolution generates fallback name when direction sanitizes to empty."""
 
     def test_special_chars_direction_uses_fallback_name(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Direction with only special chars produces a 'captured_' fallback name."""
         store = _store_with_records(tmp_path)
@@ -2730,15 +2745,20 @@ class TestEvolutionStoreAnalysisSkipEmptySkillId:
     def test_judgment_without_skill_id_skipped(self, tmp_path: Path) -> None:
         """Judgments missing skill_id are silently skipped."""
         store = _store_with_records(tmp_path, _make_record("s1", "x"))
-        analysis_id = store.record_analysis(
+        store.record_analysis(
             task_id="t1",
             agent_name="a",
             analysis_text="test",
             judgments=[
                 {"skill_id": "", "selected": True},
                 {"skill_id": None, "selected": True},
-                {"skill_id": "s1", "selected": True, "applied": True,
-                 "completed": False, "fell_back": False},
+                {
+                    "skill_id": "s1",
+                    "selected": True,
+                    "applied": True,
+                    "completed": False,
+                    "fell_back": False,
+                },
             ],
         )
         # Only the judgment with skill_id="s1" should be persisted
@@ -2845,8 +2865,12 @@ class TestAnalyzerDerivedSuggestion:
         # fallback_rate = 10/100 = 0.1 <= 0.4 (no FIX)
         # completion_rate = 40/50 = 0.8 >= 0.35 (no FIX)
         r = _make_record(
-            "s1", "moderate",
-            selections=100, applied=50, completions=40, fallbacks=10,
+            "s1",
+            "moderate",
+            selections=100,
+            applied=50,
+            completions=40,
+            fallbacks=10,
         )
         store = _store_with_records(tmp_path, r)
         analyzer = ExecutionAnalyzer(store)

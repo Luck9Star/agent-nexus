@@ -61,9 +61,7 @@ def _run_cli() -> None:
 
     # remediation command
     rem_parser = subparsers.add_parser("remediation", help="Generate remediation plan")
-    rem_parser.add_argument(
-        "--issues", required=True, help="JSON string with issues"
-    )
+    rem_parser.add_argument("--issues", required=True, help="JSON string with issues")
 
     args = parser.parse_args()
     agent = AccessibilityAuditorAgent()

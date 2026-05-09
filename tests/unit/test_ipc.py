@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -27,7 +28,6 @@ from agent_nexus.platform.orchestration.ipc import (
     IPCStream,
     IPCTimeoutError,
 )
-
 
 # ============================================================================
 # Fixtures
@@ -96,7 +96,9 @@ class TestIPCStreamSend:
         await stream.send(msg)
         mock_stdin.drain.assert_awaited_once()
 
-    async def test_send_excludes_none_fields(self, stream: IPCStream, mock_stdin: MagicMock) -> None:
+    async def test_send_excludes_none_fields(
+        self, stream: IPCStream, mock_stdin: MagicMock
+    ) -> None:
         """send() excludes None fields from JSON output."""
         msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
         await stream.send(msg)
@@ -130,7 +132,7 @@ class TestIPCStreamReceive:
 
     async def test_receive_timeout(self, stream: IPCStream, mock_stdout: MagicMock) -> None:
         """receive() raises IPCTimeoutError on timeout."""
-        mock_stdout.readline.side_effect = asyncio.TimeoutError()
+        mock_stdout.readline.side_effect = TimeoutError()
 
         with pytest.raises(IPCTimeoutError, match="Timed out"):
             await stream.receive(timeout=5.0)
@@ -205,15 +207,15 @@ class TestIPCProtocolSendChat:
 class TestIPCProtocolSendTask:
     async def test_send_task(self, protocol: IPCProtocol, mock_stdin: MagicMock) -> None:
         """send_task() creates PlatformToAgent with type=TASK and task_id set."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         task = TaskItem(
             id="task-42",
             description="Write tests",
             agent="tester",
             state=TaskState.PENDING,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         await protocol.send_task(task)
 
@@ -225,9 +227,7 @@ class TestIPCProtocolSendTask:
 
 
 class TestIPCProtocolSendDataReference:
-    async def test_send_data_reference(
-        self, protocol: IPCProtocol, mock_stdin: MagicMock
-    ) -> None:
+    async def test_send_data_reference(self, protocol: IPCProtocol, mock_stdin: MagicMock) -> None:
         """send_data_reference() creates DATA_REFERENCE with ref_id and summary."""
         await protocol.send_data_reference(
             ref_id="var://output/123",
@@ -295,7 +295,7 @@ class TestIPCProtocolHeartbeat:
         self, protocol: IPCProtocol, mock_stdout: MagicMock
     ) -> None:
         """send_heartbeat() returns False on IPCError (timeout)."""
-        mock_stdout.readline.side_effect = asyncio.TimeoutError()
+        mock_stdout.readline.side_effect = TimeoutError()
 
         result = await protocol.send_heartbeat()
         assert result is False
@@ -465,21 +465,20 @@ class TestIPCHearbeatPongCheck:
         stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
         protocol = IPCProtocol(stream)
 
-        with patch.object(protocol, "send_chat", new_callable=AsyncMock):
-            with patch.object(
-                protocol._stream,
-                "receive",
-                new_callable=AsyncMock,
-                side_effect=[
-                    MagicMock(
-                        type=AgentToPlatformType.PROGRESS,
-                        content="working on task...",
-                        task_id="t1",
-                    ),
-                    asyncio.TimeoutError(),
-                ],
-            ):
-                result = await protocol.send_heartbeat()
+        with patch.object(protocol, "send_chat", new_callable=AsyncMock), patch.object(
+            protocol._stream,
+            "receive",
+            new_callable=AsyncMock,
+            side_effect=[
+                MagicMock(
+                    type=AgentToPlatformType.PROGRESS,
+                    content="working on task...",
+                    task_id="t1",
+                ),
+                TimeoutError(),
+            ],
+        ):
+            result = await protocol.send_heartbeat()
         assert result is False
         assert len(protocol._peek_buffer) >= 1
 
@@ -491,17 +490,16 @@ class TestIPCHearbeatPongCheck:
         stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
         protocol = IPCProtocol(stream)
 
-        with patch.object(protocol, "send_chat", new_callable=AsyncMock):
-            with patch.object(
-                protocol._stream,
-                "receive",
-                new_callable=AsyncMock,
-                return_value=MagicMock(
-                    type=AgentToPlatformType.PROGRESS,
-                    content="pong",
-                ),
-            ):
-                result = await protocol.send_heartbeat()
+        with patch.object(protocol, "send_chat", new_callable=AsyncMock), patch.object(
+            protocol._stream,
+            "receive",
+            new_callable=AsyncMock,
+            return_value=MagicMock(
+                type=AgentToPlatformType.PROGRESS,
+                content="pong",
+            ),
+        ):
+            result = await protocol.send_heartbeat()
         assert result is True
 
 
@@ -715,54 +713,38 @@ class TestIPCContentMaxLength:
     """IPC text fields are capped at 65536 characters to prevent memory issues."""
 
     def test_platform_to_agent_content_within_limit(self):
-        msg = PlatformToAgent(
-            type=PlatformToAgentType.CHAT, content="x" * 65536
-        )
+        msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="x" * 65536)
         assert len(msg.content) == 65536
 
     def test_platform_to_agent_content_exceeds_limit(self):
         with pytest.raises(ValidationError, match="at most 65536 characters"):
-            PlatformToAgent(
-                type=PlatformToAgentType.CHAT, content="x" * 65537
-            )
+            PlatformToAgent(type=PlatformToAgentType.CHAT, content="x" * 65537)
 
     def test_agent_to_platform_content_within_limit(self):
-        msg = AgentToPlatform(
-            type=AgentToPlatformType.RESULT, content="x" * 65536
-        )
+        msg = AgentToPlatform(type=AgentToPlatformType.RESULT, content="x" * 65536)
         assert len(msg.content) == 65536
 
     def test_agent_to_platform_content_exceeds_limit(self):
         with pytest.raises(ValidationError, match="at most 65536 characters"):
-            AgentToPlatform(
-                type=AgentToPlatformType.RESULT, content="x" * 65537
-            )
+            AgentToPlatform(type=AgentToPlatformType.RESULT, content="x" * 65537)
 
     def test_agent_to_platform_message_within_limit(self):
-        msg = AgentToPlatform(
-            type=AgentToPlatformType.PROGRESS, message="x" * 65536
-        )
+        msg = AgentToPlatform(type=AgentToPlatformType.PROGRESS, message="x" * 65536)
         assert msg.message is not None
         assert len(msg.message) == 65536
 
     def test_agent_to_platform_message_exceeds_limit(self):
         with pytest.raises(ValidationError, match="at most 65536 characters"):
-            AgentToPlatform(
-                type=AgentToPlatformType.PROGRESS, message="x" * 65537
-            )
+            AgentToPlatform(type=AgentToPlatformType.PROGRESS, message="x" * 65537)
 
     def test_agent_to_platform_error_within_limit(self):
-        msg = AgentToPlatform(
-            type=AgentToPlatformType.ERROR, error="x" * 65536
-        )
+        msg = AgentToPlatform(type=AgentToPlatformType.ERROR, error="x" * 65536)
         assert msg.error is not None
         assert len(msg.error) == 65536
 
     def test_agent_to_platform_error_exceeds_limit(self):
         with pytest.raises(ValidationError, match="at most 65536 characters"):
-            AgentToPlatform(
-                type=AgentToPlatformType.ERROR, error="x" * 65537
-            )
+            AgentToPlatform(type=AgentToPlatformType.ERROR, error="x" * 65537)
 
     def test_empty_content_still_valid(self):
         """Empty string is within the limit and remains valid."""
@@ -841,7 +823,7 @@ class TestIPCBufferEviction:
 
         max_size = protocol._MAX_PEEK_BUFFER_SIZE
 
-        old_msg = AgentToPlatform(
+        AgentToPlatform(
             type=AgentToPlatformType.RESULT,
             content="old message",
             task_id="t-old",
@@ -993,7 +975,7 @@ class TestIPCSendHeartbeatOuterException:
             protocol,
             "send_chat",
             new_callable=AsyncMock,
-            side_effect=asyncio.TimeoutError(),
+            side_effect=TimeoutError(),
         ):
             result = await protocol.send_heartbeat()
 
@@ -1071,9 +1053,7 @@ class TestIPCSendDrainRuntimeError:
         """RuntimeError('Transport is closing') during drain is wrapped as IPCConnectionError."""
         mock_stdin = MagicMock()
         mock_stdin.write = MagicMock()
-        mock_stdin.drain = AsyncMock(
-            side_effect=RuntimeError("Transport is closing")
-        )
+        mock_stdin.drain = AsyncMock(side_effect=RuntimeError("Transport is closing"))
         mock_stdout = MagicMock()
 
         stream = IPCStream(stdin=mock_stdin, stdout=mock_stdout)
@@ -1140,7 +1120,7 @@ class TestIPCTimeoutErrorChain:
 
     @pytest.mark.asyncio
     async def test_timeout_error_has_cause(self) -> None:
-        hanging_readline = AsyncMock(side_effect=asyncio.TimeoutError())
+        hanging_readline = AsyncMock(side_effect=TimeoutError())
         stream = IPCStream(
             stdin=MagicMock(),
             stdout=MagicMock(readline=hanging_readline),

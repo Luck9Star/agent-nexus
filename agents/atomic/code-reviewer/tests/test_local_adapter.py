@@ -15,7 +15,6 @@ import pytest
 from agent_code_reviewer.agent import CodeReviewerAgent
 from agent_code_reviewer.local_adapter import handle_message
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -49,9 +48,7 @@ def _write_file(dir_path: str, filename: str, content: str) -> str:
 class TestLocalAdapterAnalyze:
     """Tests for local adapter analyze method dispatch."""
 
-    def test_handle_analyze_success(
-        self, agent: CodeReviewerAgent, tmp_dir: str
-    ) -> None:
+    def test_handle_analyze_success(self, agent: CodeReviewerAgent, tmp_dir: str) -> None:
         path = _write_file(tmp_dir, "test.py", "x = 1\n")
         response = handle_message(
             agent,
@@ -70,9 +67,7 @@ class TestLocalAdapterAnalyze:
         assert "Missing" in response["error"]
         assert "file_path" in response["error"]
 
-    def test_handle_analyze_with_language(
-        self, agent: CodeReviewerAgent, tmp_dir: str
-    ) -> None:
+    def test_handle_analyze_with_language(self, agent: CodeReviewerAgent, tmp_dir: str) -> None:
         path = _write_file(tmp_dir, "code.txt", "fn main() {}")
         response = handle_message(
             agent,
@@ -167,7 +162,12 @@ class TestLocalAdapterReview:
             "metrics": {"lines_of_code": 10, "total_lines": 20},
         }
         patterns = [
-            {"pattern": "sql_injection", "line": 5, "severity": "critical", "description": "SQL injection"}
+            {
+                "pattern": "sql_injection",
+                "line": 5,
+                "severity": "critical",
+                "description": "SQL injection",
+            }
         ]
         response = handle_message(
             agent,
@@ -180,9 +180,7 @@ class TestLocalAdapterReview:
         analysis = {
             "file_path": "warn.py",
             "language": "python",
-            "issues": [
-                {"line": 1, "severity": "warning", "category": "bug", "rule_id": "PY001"}
-            ],
+            "issues": [{"line": 1, "severity": "warning", "category": "bug", "rule_id": "PY001"}],
             "metrics": {},
         }
         response = handle_message(
@@ -218,9 +216,7 @@ class TestLocalAdapterErrors:
 
     def test_handle_analyze_exception_caught(self, agent: CodeReviewerAgent) -> None:
         """Exceptions from agent.analyze should be caught and returned as errors."""
-        with patch.object(
-            agent, "analyze", side_effect=RuntimeError("test error")
-        ):
+        with patch.object(agent, "analyze", side_effect=RuntimeError("test error")):
             response = handle_message(
                 agent,
                 {"method": "analyze", "params": {"file_path": "/tmp/test.py"}},
@@ -231,9 +227,7 @@ class TestLocalAdapterErrors:
 
     def test_handle_check_exception_caught(self, agent: CodeReviewerAgent) -> None:
         """Exceptions from agent.check should be caught and returned as errors."""
-        with patch.object(
-            agent, "check", side_effect=ValueError("bad input")
-        ):
+        with patch.object(agent, "check", side_effect=ValueError("bad input")):
             response = handle_message(
                 agent,
                 {"method": "check", "params": {"code": "x = 1"}},

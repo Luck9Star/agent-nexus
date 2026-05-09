@@ -9,10 +9,10 @@ from agent_nexus.platform.agency.integrator import (
     Integrator,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def architecture_artifact() -> Artifact:
@@ -68,6 +68,7 @@ def security_artifact_conflict() -> Artifact:
 # Merge tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.timeout(30)
 class TestIntegratorMerge:
     """Integrator merges multiple expert artifacts into unified output."""
@@ -114,6 +115,7 @@ class TestIntegratorMerge:
 # ---------------------------------------------------------------------------
 # Conflict detection
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.timeout(30)
 class TestConflictDetection:
@@ -166,6 +168,7 @@ class TestConflictDetection:
 # ---------------------------------------------------------------------------
 # Integrated artifact structure
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.timeout(30)
 class TestIntegratedArtifact:

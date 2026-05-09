@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import toml
-import pytest
 
 from agent_nexus.platform.local.cli._shared import ConfigMigrator
 
@@ -41,9 +40,9 @@ class TestConfigMigratorMergeIfNeeded:
         cfg = tmp_path / "config.toml"
         cfg.write_text(
             'schema_version = "0.5"\n'
-            '[runtime]\n'
+            "[runtime]\n"
             'python_path = "/usr/bin/python3.12"\n'
-            '[models]\n'
+            "[models]\n"
             'default = "anthropic:claude-sonnet-4-20250514"\n'
         )
         result = ConfigMigrator.merge_if_needed(cfg)
@@ -61,7 +60,7 @@ class TestConfigMigratorMergeIfNeeded:
         cfg = tmp_path / "config.toml"
         cfg.write_text(
             'schema_version = "0.5"\n'
-            '[models.providers.my-custom]\n'
+            "[models.providers.my-custom]\n"
             'base_url = "https://custom.api/v1"\n'
             'api_key_env = "CUSTOM_KEY"\n'
             'api = "openai-compatible"\n'

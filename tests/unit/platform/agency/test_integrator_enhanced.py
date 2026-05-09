@@ -105,7 +105,9 @@ class TestOpenQuestions:
         expected_sections = ["context", "risks", "next_steps"]
         result = Integrator.merge([a1], expected_sections=expected_sections)
         assert len(result.open_questions) > 0
-        missing_names = [q for q in result.open_questions if "risks" in q.lower() or "next_steps" in q.lower()]
+        missing_names = [
+            q for q in result.open_questions if "risks" in q.lower() or "next_steps" in q.lower()
+        ]
         assert len(missing_names) > 0
 
     def test_no_open_questions_when_complete(self) -> None:

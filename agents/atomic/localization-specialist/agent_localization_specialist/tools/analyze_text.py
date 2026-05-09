@@ -11,42 +11,143 @@ import re
 from agent_localization_specialist.models import TextAnalysis
 
 # Formality indicators
-_FORMAL_KEYWORDS = frozenset({
-    "hereby", "therefore", "pursuant", "notwithstanding", "aforementioned",
-    "shall", "herein", "whereas", "forthwith", "therein", "accordance",
-    "hereafter", "witnesseth", "indemnify", "obligate", "consequently",
-    "尊敬的", "谨此", "兹", "特此", "根据", "鉴于", "如下",
-})
+_FORMAL_KEYWORDS = frozenset(
+    {
+        "hereby",
+        "therefore",
+        "pursuant",
+        "notwithstanding",
+        "aforementioned",
+        "shall",
+        "herein",
+        "whereas",
+        "forthwith",
+        "therein",
+        "accordance",
+        "hereafter",
+        "witnesseth",
+        "indemnify",
+        "obligate",
+        "consequently",
+        "尊敬的",
+        "谨此",
+        "兹",
+        "特此",
+        "根据",
+        "鉴于",
+        "如下",
+    }
+)
 
-_INFORMAL_KEYWORDS = frozenset({
-    "hey", "gonna", "wanna", "cool", "awesome", "lol", "btw", "fyi",
-    "omg", "ugh", "yep", "nope", "kinda", "sorta", "dunno",
-    "嗨", "哈", "嘛", "啊", "呢", "呀", "嗯", "随便", "搞定",
-})
+_INFORMAL_KEYWORDS = frozenset(
+    {
+        "hey",
+        "gonna",
+        "wanna",
+        "cool",
+        "awesome",
+        "lol",
+        "btw",
+        "fyi",
+        "omg",
+        "ugh",
+        "yep",
+        "nope",
+        "kinda",
+        "sorta",
+        "dunno",
+        "嗨",
+        "哈",
+        "嘛",
+        "啊",
+        "呢",
+        "呀",
+        "嗯",
+        "随便",
+        "搞定",
+    }
+)
 
 # Domain indicators
 _DOMAIN_KEYWORDS: dict[str, set[str]] = {
     "tech": {
-        "api", "framework", "deployment", "database", "server", "client",
-        "algorithm", "protocol", "interface", "endpoint", "microservice",
-        "container", "kubernetes", "docker", "repository", "pipeline",
-        "authentication", "authorization", "infrastructure", "frontend", "backend",
+        "api",
+        "framework",
+        "deployment",
+        "database",
+        "server",
+        "client",
+        "algorithm",
+        "protocol",
+        "interface",
+        "endpoint",
+        "microservice",
+        "container",
+        "kubernetes",
+        "docker",
+        "repository",
+        "pipeline",
+        "authentication",
+        "authorization",
+        "infrastructure",
+        "frontend",
+        "backend",
     },
     "legal": {
-        "plaintiff", "defendant", "jurisdiction", "liability", "statute",
-        "regulation", "compliance", "litigation", "arbitration", "contract",
-        "agreement", "indemnification", "warrant", "clause", "provision",
-        "原告", "被告", "管辖权", "责任", "法规",
+        "plaintiff",
+        "defendant",
+        "jurisdiction",
+        "liability",
+        "statute",
+        "regulation",
+        "compliance",
+        "litigation",
+        "arbitration",
+        "contract",
+        "agreement",
+        "indemnification",
+        "warrant",
+        "clause",
+        "provision",
+        "原告",
+        "被告",
+        "管辖权",
+        "责任",
+        "法规",
     },
     "medical": {
-        "diagnosis", "symptom", "prescription", "treatment", "patient",
-        "clinical", "therapy", "prognosis", "pathology", "pharmaceutical",
-        "诊断", "症状", "处方", "治疗", "患者",
+        "diagnosis",
+        "symptom",
+        "prescription",
+        "treatment",
+        "patient",
+        "clinical",
+        "therapy",
+        "prognosis",
+        "pathology",
+        "pharmaceutical",
+        "诊断",
+        "症状",
+        "处方",
+        "治疗",
+        "患者",
     },
     "business": {
-        "revenue", "stakeholder", "roi", "quarterly", "fiscal", "profit",
-        "margin", "acquisition", "merger", "valuation", "portfolio",
-        "revenue", "kpi", "benchmark", "strategy", "market",
+        "revenue",
+        "stakeholder",
+        "roi",
+        "quarterly",
+        "fiscal",
+        "profit",
+        "margin",
+        "acquisition",
+        "merger",
+        "valuation",
+        "portfolio",
+        "kpi",
+        "benchmark",
+        "strategy",
+        "market",
     },
 }
 
@@ -140,31 +241,32 @@ def _extract_key_terms(text: str, words: set[str], domain: str) -> list[str]:
     return sorted(terms)
 
 
-def _assess_complexity(text: str, key_terms: list[str], formality: str) -> str:
-    """Assess translation complexity."""
+def _compute_complexity_score(text: str, key_terms: list[str], formality: str) -> int:
+    """Compute a numeric complexity score from text properties."""
     score = 0
-
-    # Longer texts are more complex
     word_count = len(text.split())
     if word_count > 100:
         score += 2
     elif word_count > 30:
         score += 1
 
-    # More key terms = more complex
     if len(key_terms) > 10:
         score += 2
     elif len(key_terms) > 5:
         score += 1
 
-    # Formal formality adds complexity
     if formality == "formal":
         score += 1
 
-    # Mixed punctuation or complex sentence structure
     if text.count(";") + text.count(":") > 3:
         score += 1
 
+    return score
+
+
+def _assess_complexity(text: str, key_terms: list[str], formality: str) -> str:
+    """Assess translation complexity."""
+    score = _compute_complexity_score(text, key_terms, formality)
     if score >= 4:
         return "high"
     if score >= 2:

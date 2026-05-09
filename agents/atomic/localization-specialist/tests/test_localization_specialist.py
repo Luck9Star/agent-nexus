@@ -13,9 +13,9 @@ Covers:
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from agent_localization_specialist.agent import LocalizationSpecialistAgent
 from agent_localization_specialist.local_adapter import handle_message
@@ -26,15 +26,14 @@ from agent_localization_specialist.models import (
     TextAnalysis,
 )
 from agent_localization_specialist.tools.analyze_text import (
+    _assess_complexity,
     _detect_domain,
     _detect_register,
     _extract_key_terms,
-    _assess_complexity,
     analyze_text,
 )
 from agent_localization_specialist.tools.localize import localize
 from agent_localization_specialist.tools.manage_glossary import manage_glossary
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -82,7 +81,7 @@ class TestTermEntry:
 
     def test_frozen(self) -> None:
         t = TermEntry(source="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             t.source = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -109,12 +108,14 @@ class TestTextAnalysis:
         assert a.complexity == "medium"
 
     def test_with_values(self) -> None:
-        a = TextAnalysis(formality="formal", domain="legal", key_terms=["plaintiff"], complexity="high")
+        a = TextAnalysis(
+            formality="formal", domain="legal", key_terms=["plaintiff"], complexity="high"
+        )
         assert a.formality == "formal"
 
     def test_frozen(self) -> None:
         a = TextAnalysis()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             a.formality = "formal"  # type: ignore[misc]
 
 
@@ -137,7 +138,7 @@ class TestGlossary:
 
     def test_frozen(self) -> None:
         g = Glossary()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             g.source_lang = "fr"  # type: ignore[misc]
 
 
@@ -160,7 +161,7 @@ class TestLocalizationResult:
 
     def test_frozen(self) -> None:
         r = LocalizationResult(translated_text="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.translated_text = "other"  # type: ignore[misc]
 
 
@@ -324,9 +325,7 @@ class TestManageGlossary:
                 {"source": "endpoint", "target": "端点"},
             ],
         )
-        result = manage_glossary(
-            "search", entries=[{"source": "API"}], glossary=g
-        )
+        result = manage_glossary("search", entries=[{"source": "API"}], glossary=g)
         assert len(result.entries) == 1
         assert result.entries[0].source == "API"
 
@@ -338,9 +337,7 @@ class TestManageGlossary:
                 {"source": "endpoint", "target": "端点"},
             ],
         )
-        result = manage_glossary(
-            "delete", entries=[{"source": "API"}], glossary=g
-        )
+        result = manage_glossary("delete", entries=[{"source": "API"}], glossary=g)
         assert len(result.entries) == 1
         assert result.entries[0].source == "endpoint"
 
@@ -485,11 +482,14 @@ class TestLocalizationSpecialistAgent:
         assert len(analysis.key_terms) >= 1
 
         # Phase 2: build glossary
-        g = agent.manage_glossary("add", entries=[
-            {"source": "API", "target": "API", "domain": "tech"},
-            {"source": "endpoint", "target": "端点", "domain": "tech"},
-            {"source": "authentication", "target": "认证", "domain": "tech"},
-        ])
+        g = agent.manage_glossary(
+            "add",
+            entries=[
+                {"source": "API", "target": "API", "domain": "tech"},
+                {"source": "endpoint", "target": "端点", "domain": "tech"},
+                {"source": "authentication", "target": "认证", "domain": "tech"},
+            ],
+        )
         assert len(g.entries) >= 1
 
         # Phase 3: localize
@@ -544,9 +544,7 @@ class TestLocalAdapter:
         assert response["result"]["domain"] == "tech"
 
     def test_handle_analyze_missing_text(self, agent: LocalizationSpecialistAgent) -> None:
-        response = handle_message(
-            agent, {"method": "analyze", "params": {}}
-        )
+        response = handle_message(agent, {"method": "analyze", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
@@ -565,9 +563,7 @@ class TestLocalAdapter:
         assert len(response["result"]["entries"]) == 1
 
     def test_handle_glossary_missing_action(self, agent: LocalizationSpecialistAgent) -> None:
-        response = handle_message(
-            agent, {"method": "glossary", "params": {}}
-        )
+        response = handle_message(agent, {"method": "glossary", "params": {}})
         assert response["status"] == "error"
 
     def test_handle_localize(self, agent: LocalizationSpecialistAgent) -> None:

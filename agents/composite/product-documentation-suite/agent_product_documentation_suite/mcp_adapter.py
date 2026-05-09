@@ -29,7 +29,7 @@ def create_mcp_server() -> object:
         raise ImportError(
             "FastMCP is required for MCP mode. "
             "Install with: pip install agent-product-documentation-suite[full]"
-        )
+        ) from None
 
     mcp = FastMCP("product-documentation-suite")
     coordinator = DocumentationSuiteCoordinator()

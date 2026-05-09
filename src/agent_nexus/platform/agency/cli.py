@@ -18,6 +18,13 @@ from agent_nexus.platform.config.defaults import DEFAULT_LLM_CALL_TIMEOUT, DEFAU
 from .importer import AgencyImporter
 
 if TYPE_CHECKING:
+    from agent_nexus.models.capability import ModelCapabilityRegistry
+
+    from .executor import LLMExecutor, ProfileBasedExecutor
+    from .llm_client import LLMClient
+    from .llm_integrator import LLMIntegrator
+    from .llm_planner import LLMPlanner
+    from .llm_qa_gate import LLMQualityGate
     from .task_composer import TaskComposerResult
 from .planner import DynamicCompositePlanner, SubtaskDef
 from .qa_gate import QAGate, QAGateInput
@@ -297,53 +304,80 @@ def check_profiles(output_dir: str) -> None:
         click.echo("No profile files found.")
         return
 
+    schema = _load_profile_schema()
     errors: list[str] = []
     checked = 0
 
-    # Load JSON schema for validation if available
-    schema = None
-    try:
-        import jsonschema  # type: ignore[import-untyped]
-
-        if _SCHEMA_PATH.is_file():
-            schema = json.loads(_SCHEMA_PATH.read_text())
-    except ImportError:
-        pass
-
     for jf in json_files:
-        try:
-            with jf.open() as f:
-                profile = json.load(f)
-        except (json.JSONDecodeError, OSError) as exc:
-            errors.append(f"{jf.name}: failed to read — {exc}")
+        profile, read_err = _load_profile_json(jf)
+        if read_err is not None:
+            errors.append(read_err)
             continue
-
+        assert profile is not None  # when read_err is None, profile is not None
         checked += 1
+        errors.extend(_validate_profile(profile, jf.name, schema))
 
-        # Schema-based validation (preferred)
-        if schema is not None:
-            try:
-                jsonschema.validate(profile, schema)  # type: ignore[name-defined]
-            except jsonschema.ValidationError as exc:  # type: ignore[name-defined]
-                errors.append(f"{jf.name}: schema validation failed — {exc.message}")
-            continue
+    _report_profile_results(checked, errors)
 
-        # Fallback: manual key validation (when jsonschema not installed)
-        required_keys = {"id", "name", "capabilities", "permissions", "output_contract"}
-        missing = required_keys - set(profile.keys())
-        if missing:
-            errors.append(f"{jf.name}: missing keys {missing}")
 
-        # Validate capabilities is non-empty
-        caps = profile.get("capabilities", [])
-        if not isinstance(caps, list) or len(caps) == 0:
-            errors.append(f"{jf.name}: capabilities must be a non-empty list")
+def _load_profile_schema() -> object | None:
+    """Load JSON schema for profile validation if jsonschema is available."""
+    import importlib.util
 
-        # Validate permissions.mode
-        perm_mode = profile.get("permissions", {}).get("mode")
-        if perm_mode not in ("plan", "default", "full_auto"):
-            errors.append(f"{jf.name}: invalid permission mode '{perm_mode}'")
+    if importlib.util.find_spec("jsonschema") is None:
+        return None
+    if _SCHEMA_PATH.is_file():
+        return json.loads(_SCHEMA_PATH.read_text())
+    return None
 
+
+def _load_profile_json(path: Path) -> tuple[dict | None, str | None]:
+    """Load a single profile JSON file, returning (profile, None) or (None, error_msg)."""
+    try:
+        with path.open() as f:
+            return json.load(f), None
+    except (json.JSONDecodeError, OSError) as exc:
+        return None, f"{path.name}: failed to read — {exc}"
+
+
+def _validate_profile(profile: dict, name: str, schema: object | None) -> list[str]:
+    """Validate a single profile, returning list of error strings."""
+    if schema is not None:
+        return _validate_profile_schema(profile, name, schema)
+    return _validate_profile_manual(profile, name)
+
+
+def _validate_profile_schema(profile: dict, name: str, schema: object) -> list[str]:
+    """Validate profile against JSON schema."""
+    import jsonschema  # type: ignore[import-untyped]
+
+    try:
+        jsonschema.validate(profile, schema)  # type: ignore[arg-type]
+        return []
+    except jsonschema.ValidationError as exc:  # type: ignore[name-defined]
+        return [f"{name}: schema validation failed — {exc.message}"]
+
+
+def _validate_profile_manual(profile: dict, name: str) -> list[str]:
+    """Fallback manual validation when jsonschema is not installed."""
+    errors: list[str] = []
+    required_keys = {"id", "name", "capabilities", "permissions", "output_contract"}
+    missing = required_keys - set(profile.keys())
+    if missing:
+        errors.append(f"{name}: missing keys {missing}")
+
+    caps = profile.get("capabilities", [])
+    if not isinstance(caps, list) or len(caps) == 0:
+        errors.append(f"{name}: capabilities must be a non-empty list")
+
+    perm_mode = profile.get("permissions", {}).get("mode")
+    if perm_mode not in ("plan", "default", "full_auto"):
+        errors.append(f"{name}: invalid permission mode '{perm_mode}'")
+    return errors
+
+
+def _report_profile_results(checked: int, errors: list[str]) -> None:
+    """Print validation summary and exit with appropriate code."""
     if errors:
         click.echo(f"Checked {checked} profiles, found {len(errors)} issue(s):")
         for err in errors:
@@ -387,6 +421,103 @@ def _print_result(result: TaskComposerResult) -> None:
                 click.echo(line)
     else:
         click.echo("No artifacts produced — all experts failed.")
+
+
+def _setup_llm_components(
+    model: str | None,
+    config_dir: str | None,
+    temperature: float | None,
+    registry: ExpertRegistry,
+) -> tuple[
+    LLMPlanner | None,
+    LLMIntegrator | None,
+    LLMQualityGate | None,
+    LLMClient | None,
+    ModelCapabilityRegistry | None,
+]:
+    """Initialize LLM planner/integrator/QA-gate if config is available."""
+    shared_client = None
+    try:
+        from agent_nexus.models.capability import ModelCapabilityRegistry
+
+        from .llm_client import LLMClient
+        from .llm_integrator import LLMIntegrator
+        from .llm_planner import LLMPlanner
+        from .llm_qa_gate import LLMQualityGate
+
+        config_path = Path(config_dir) if config_dir else None
+        shared_registry = ModelCapabilityRegistry()
+        shared_client = LLMClient(
+            model_string=model,
+            stage="planning",
+            config_dir=config_path,
+            capability_registry=shared_registry,
+        )
+        llm_planner = LLMPlanner(
+            registry=registry,
+            client=shared_client,
+            temperature=temperature,
+        )
+        llm_integrator = LLMIntegrator(client=shared_client, temperature=temperature)
+        llm_qa_gate = LLMQualityGate(client=shared_client, temperature=temperature)
+        click.echo("LLM-powered planning, integration, and QA enabled")
+        return llm_planner, llm_integrator, llm_qa_gate, shared_client, shared_registry
+    except (ImportError, ValueError, KeyError, OSError) as exc:
+        if shared_client is not None:
+            shared_client.close()
+        click.echo(
+            f"LLM config unavailable ({exc}), falling back to profile-based executor",
+            err=True,
+        )
+        return None, None, None, None, None
+
+
+def _create_executor(
+    model: str | None,
+    config_dir: str | None,
+    temperature: float | None,
+    registry: ExpertRegistry,
+    shared_registry: ModelCapabilityRegistry | None,
+    shared_client: LLMClient | None,
+    effective_call_timeout: float,
+    reasoning_protocol: bool,
+) -> tuple[LLMExecutor | ProfileBasedExecutor, bool]:
+    """Create the executor, trying LLM first then falling back to profile-based."""
+    from .executor import LLMExecutor, ProfileBasedExecutor
+
+    try:
+        executor = LLMExecutor(
+            registry=registry,
+            model_string=model,
+            config_dir=Path(config_dir) if config_dir else None,
+            default_temperature=temperature,
+            capability_registry=shared_registry,
+            timeout=effective_call_timeout,
+            client=shared_client,
+            reasoning_protocol=reasoning_protocol,
+        )
+        click.echo(f"Using LLM executor (model: {executor.model_name})")
+        return executor, True
+    except Exception as exc:
+        click.echo(
+            f"LLM config unavailable ({exc}), falling back to profile-based executor",
+            err=True,
+        )
+        return ProfileBasedExecutor(registry=registry), False
+
+
+def _handle_output(composer_result: TaskComposerResult) -> None:
+    """Write the result to file or stdout based on output_target."""
+    _output_target = composer_result.output_target
+    if _output_target is not None:
+        if _output_target == "file":
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            _output_path = Path(f"composition-report-{ts}.md")
+        else:
+            _output_path = Path(_output_target)
+        _write_report(composer_result, _output_path)
+    else:
+        _print_result(composer_result)
 
 
 def _validate_output_path(path: Path) -> Path:
@@ -502,13 +633,19 @@ def _write_report(result: TaskComposerResult, path: Path) -> None:
     "--timeout",
     default=DEFAULT_PIPELINE_TIMEOUT,
     type=int,
-    help="Overall pipeline timeout in seconds (default: 300)",
+    help=f"Overall pipeline timeout in seconds (default: {DEFAULT_PIPELINE_TIMEOUT})",
 )
 @click.option(
     "--call-timeout",
     default=None,
     type=int,
     help=f"Per-LLM-call HTTP timeout in seconds (default: {DEFAULT_LLM_CALL_TIMEOUT})",
+)
+@click.option(
+    "--reasoning-protocol",
+    is_flag=True,
+    default=False,
+    help="Enable structured reasoning protocol for expert execution",
 )
 def run_composition(
     message: str,
@@ -522,6 +659,7 @@ def run_composition(
     temperature: float | None,
     timeout: int | None,
     call_timeout: int | None,
+    reasoning_protocol: bool,
 ) -> None:
     """Full pipeline: load experts, select, build DAG, execute, integrate, QA.
 
@@ -577,120 +715,77 @@ def run_composition(
         ep = pkg["expert_profile"]
         registry.add(ep["id"], ep, ep["capabilities"])
 
-    # Step 2-6: Delegate to TaskComposer (avoids duplicating pipeline logic)
-    from .task_composer import TaskComposer, TaskComposerInput
-
-    # Initialize LLM components if requested
-    llm_planner = None
-    llm_integrator = None
-    llm_qa_gate = None
-    shared_registry = None
-    planner_client = None
-    integrator_client = None
-    qa_client = None
+    # Step 2: Initialize LLM components if requested
     shared_client = None
+    shared_registry = None
 
     if use_llm:
-        try:
-            from agent_nexus.models.capability import ModelCapabilityRegistry
+        (
+            llm_planner,
+            llm_integrator,
+            llm_qa_gate,
+            shared_client,
+            shared_registry,
+        ) = _setup_llm_components(
+            model,
+            config_dir,
+            temperature,
+            registry,
+        )
+    else:
+        llm_planner = None
+        llm_integrator = None
+        llm_qa_gate = None
 
-            from .llm_client import LLMClient
-            from .llm_integrator import LLMIntegrator
-            from .llm_planner import LLMPlanner
-            from .llm_qa_gate import LLMQualityGate
-
-            config_path = Path(config_dir) if config_dir else None
-            shared_registry = ModelCapabilityRegistry()
-            # One shared client for all pipeline stages — SDK connection
-            # pools (openai.OpenAI / anthropic.Anthropic) are created once
-            # and reused, instead of 3 independent pools per stage.
-            shared_client = LLMClient(
-                model_string=model,
-                stage="planning",
-                config_dir=config_path,
-                capability_registry=shared_registry,
-            )
-            planner_client = shared_client
-            integrator_client = shared_client
-            qa_client = shared_client
-            llm_planner = LLMPlanner(
-                registry=registry,
-                client=planner_client,
-                temperature=temperature,
-            )
-            llm_integrator = LLMIntegrator(client=integrator_client, temperature=temperature)
-            llm_qa_gate = LLMQualityGate(client=qa_client, temperature=temperature)
-            click.echo("LLM-powered planning, integration, and QA enabled")
-        except (ImportError, ValueError, KeyError, OSError) as exc:
-            click.echo(
-                f"LLM config unavailable ({exc}), falling back to profile-based executor",
-                err=True,
-            )
-
-    # Create executor (LLM for experts if config available)
-    from .executor import LLMExecutor, ProfileBasedExecutor
-
+    # Step 3: Create executor
     effective_call_timeout = (
         float(call_timeout) if call_timeout else float(DEFAULT_LLM_CALL_TIMEOUT)
     )
+    executor, is_llm = _create_executor(
+        model,
+        config_dir,
+        temperature,
+        registry,
+        shared_registry,
+        shared_client,
+        effective_call_timeout,
+        reasoning_protocol,
+    )
 
-    try:
-        executor = LLMExecutor(
-            registry=registry,
-            model_string=model,
-            config_dir=Path(config_dir) if config_dir else None,
-            default_temperature=temperature,
-            capability_registry=shared_registry if use_llm else None,
-            timeout=effective_call_timeout,
-            client=shared_client,
-        )
-        click.echo(f"Using LLM executor (model: {executor.model_name})")
-    except Exception as exc:
-        click.echo(
-            f"LLM config unavailable ({exc}), falling back to profile-based executor",
-            err=True,
-        )
-        executor = ProfileBasedExecutor(registry=registry)
-
+    # Step 4: Execute pipeline
     from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
-    with TaskGraph(":memory:") as graph:
-        composer = TaskComposer(registry)
-        composer_input = TaskComposerInput(
-            task=message,
-            mode=mode,
-            max_parallel=max_parallel,
-            timeout_seconds=float(timeout or DEFAULT_PIPELINE_TIMEOUT),
-        )
-        try:
-            composer_result = composer.run(
-                composer_input,
-                expert_executor=executor,
-                task_graph=graph,
-                llm_planner=llm_planner,
-                llm_integrator=llm_integrator,
-                llm_qa_gate=llm_qa_gate,
-                concurrent=True,
-            )
-        finally:
-            if isinstance(executor, LLMExecutor):
-                executor.close()
-            if shared_client is not None:
-                shared_client.close()
+    from .task_composer import TaskComposer, TaskComposerInput
 
-    # Output results — consume pipeline-detected output intent
-    _output_target = composer_result.output_target
-    if _output_target is not None:
-        if _output_target == "file":
-            # Generic "output to file" intent — generate default filename
-            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-            _output_path = Path(f"composition-report-{ts}.md")
-        else:
-            # Specific path from task intent (e.g. "docs/review.md")
-            _output_path = Path(_output_target)
-        _write_report(composer_result, _output_path)
-    else:
-        _print_result(composer_result)
+    try:
+        with TaskGraph(":memory:") as graph:
+            composer = TaskComposer(registry)
+            composer_input = TaskComposerInput(
+                task=message,
+                mode=mode,
+                max_parallel=max_parallel,
+                timeout_seconds=float(timeout or DEFAULT_PIPELINE_TIMEOUT),
+                reasoning_protocol=reasoning_protocol,
+            )
+            try:
+                composer_result = composer.run(
+                    composer_input,
+                    expert_executor=executor,
+                    task_graph=graph,
+                    llm_planner=llm_planner,
+                    llm_integrator=llm_integrator,
+                    llm_qa_gate=llm_qa_gate,
+                    concurrent=True,
+                )
+            finally:
+                if is_llm:
+                    executor.close()
+    finally:
+        if shared_client is not None:
+            shared_client.close()
+
+    # Step 5: Output results
+    _handle_output(composer_result)
 
 
 if __name__ == "__main__":

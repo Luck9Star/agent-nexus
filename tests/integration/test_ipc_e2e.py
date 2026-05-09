@@ -9,7 +9,6 @@ real asyncio subprocess lifecycle, and real JSON-lines framing over stdin/stdout
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 
@@ -18,14 +17,10 @@ import pytest
 from agent_nexus.models.ipc import (
     AgentToPlatform,
     AgentToPlatformType,
-    PlatformToAgent,
-    PlatformToAgentType,
 )
 from agent_nexus.models.task import TaskItem, TaskState
 from agent_nexus.platform.orchestration.ipc import (
     IPCConnectionError,
-    IPCProtocol,
-    IPCStream,
     IPCTimeoutError,
 )
 from agent_nexus.platform.orchestration.process_manager import (
@@ -83,7 +78,9 @@ class TestProcessManagerRealSubprocess:
 
     @pytest.mark.asyncio
     async def test_start_agent_creates_live_process(
-        self, pm: ProcessManager, echo_agent: AgentHandle,
+        self,
+        pm: ProcessManager,
+        echo_agent: AgentHandle,
     ) -> None:
         """Verify the echo agent is alive after start."""
         assert echo_agent.is_alive
@@ -92,7 +89,9 @@ class TestProcessManagerRealSubprocess:
 
     @pytest.mark.asyncio
     async def test_start_agent_registers_in_manager(
-        self, pm: ProcessManager, echo_agent: AgentHandle,
+        self,
+        pm: ProcessManager,
+        echo_agent: AgentHandle,
     ) -> None:
         """Verify the agent is registered in ProcessManager._agents."""
         assert pm.get_agent("echo-test") is echo_agent
@@ -100,7 +99,9 @@ class TestProcessManagerRealSubprocess:
 
     @pytest.mark.asyncio
     async def test_duplicate_start_raises(
-        self, pm: ProcessManager, echo_agent: AgentHandle,
+        self,
+        pm: ProcessManager,
+        echo_agent: AgentHandle,
     ) -> None:
         """Starting an agent with the same name while alive raises ValueError."""
         with pytest.raises(ValueError, match="already running"):
@@ -108,14 +109,14 @@ class TestProcessManagerRealSubprocess:
 
     @pytest.mark.asyncio
     async def test_stop_agent_clean_exit(
-        self, pm: ProcessManager,
+        self,
+        pm: ProcessManager,
     ) -> None:
         """Stopping an agent results in clean process exit."""
         handle = await pm.start_agent(
             name="stop-test",
             command=_echo_command(),
         )
-        pid = handle.pid
         assert handle.is_alive
 
         await pm.stop_agent("stop-test", timeout=5.0)
@@ -128,7 +129,8 @@ class TestProcessManagerRealSubprocess:
 
     @pytest.mark.asyncio
     async def test_stop_all_terminates_agents(
-        self, pm: ProcessManager,
+        self,
+        pm: ProcessManager,
     ) -> None:
         """stop_all() terminates multiple running agents."""
         handles = []
@@ -151,7 +153,8 @@ class TestProcessManagerRealSubprocess:
 
     @pytest.mark.asyncio
     async def test_restart_agent_spawns_new_process(
-        self, pm: ProcessManager,
+        self,
+        pm: ProcessManager,
     ) -> None:
         """restart_agent() kills old process and creates new one."""
         h1 = await pm.start_agent(
@@ -182,7 +185,8 @@ class TestProcessManagerRealSubprocess:
 
     @pytest.mark.asyncio
     async def test_dead_process_cleanup(
-        self, pm: ProcessManager,
+        self,
+        pm: ProcessManager,
     ) -> None:
         """Killing a process externally triggers cleanup on next list_running."""
         handle = await pm.start_agent(
@@ -213,7 +217,8 @@ class TestIPCProtocolRealPipes:
 
     @pytest.mark.asyncio
     async def test_send_chat_receive_result(
-        self, echo_agent: AgentHandle,
+        self,
+        echo_agent: AgentHandle,
     ) -> None:
         """Send a chat message and receive an echoed result."""
         await echo_agent.ipc.send_chat("hello world")
@@ -225,7 +230,8 @@ class TestIPCProtocolRealPipes:
 
     @pytest.mark.asyncio
     async def test_send_task_receive_progress_then_result(
-        self, echo_agent: AgentHandle,
+        self,
+        echo_agent: AgentHandle,
     ) -> None:
         """Send a task and receive progress + result in order."""
         task = TaskItem(
@@ -251,7 +257,8 @@ class TestIPCProtocolRealPipes:
 
     @pytest.mark.asyncio
     async def test_receive_until_result_collects_progress(
-        self, echo_agent: AgentHandle,
+        self,
+        echo_agent: AgentHandle,
     ) -> None:
         """receive_until_result() collects intermediate progress messages."""
         progress_msgs: list[AgentToPlatform] = []
@@ -279,7 +286,8 @@ class TestIPCProtocolRealPipes:
 
     @pytest.mark.asyncio
     async def test_data_reference_acknowledged(
-        self, echo_agent: AgentHandle,
+        self,
+        echo_agent: AgentHandle,
     ) -> None:
         """Send a data reference and get acknowledgment."""
         await echo_agent.ipc.send_data_reference(
@@ -298,7 +306,8 @@ class TestIPCProtocolRealPipes:
 
     @pytest.mark.asyncio
     async def test_rapid_fire_messages(
-        self, echo_agent: AgentHandle,
+        self,
+        echo_agent: AgentHandle,
     ) -> None:
         """Send multiple messages rapidly and verify all responses received."""
         n = 10
@@ -328,7 +337,8 @@ class TestHeartbeatReal:
 
     @pytest.mark.asyncio
     async def test_heartbeat_pong_received(
-        self, echo_agent: AgentHandle,
+        self,
+        echo_agent: AgentHandle,
     ) -> None:
         """Heartbeat returns True for a responsive agent."""
         ok = await echo_agent.ipc.send_heartbeat()
@@ -336,7 +346,9 @@ class TestHeartbeatReal:
 
     @pytest.mark.asyncio
     async def test_health_check_returns_true(
-        self, pm: ProcessManager, echo_agent: AgentHandle,
+        self,
+        pm: ProcessManager,
+        echo_agent: AgentHandle,
     ) -> None:
         """ProcessManager.health_check returns True for responsive agent."""
         ok = await pm.health_check("echo-test")
@@ -344,7 +356,9 @@ class TestHeartbeatReal:
 
     @pytest.mark.asyncio
     async def test_health_check_updates_last_heartbeat(
-        self, pm: ProcessManager, echo_agent: AgentHandle,
+        self,
+        pm: ProcessManager,
+        echo_agent: AgentHandle,
     ) -> None:
         """Health check updates the handle's last_heartbeat timestamp."""
         before = echo_agent.last_heartbeat
@@ -354,7 +368,8 @@ class TestHeartbeatReal:
 
     @pytest.mark.asyncio
     async def test_health_check_dead_process_raises_key_error(
-        self, pm: ProcessManager,
+        self,
+        pm: ProcessManager,
     ) -> None:
         """Health check raises KeyError for a dead process (cleaned up by _cleanup_dead).
 
@@ -384,7 +399,8 @@ class TestIPCErrorPathsReal:
 
     @pytest.mark.asyncio
     async def test_receive_after_stop_raises_connection_error(
-        self, pm: ProcessManager,
+        self,
+        pm: ProcessManager,
     ) -> None:
         """Receiving from a stopped process raises IPCConnectionError."""
         handle = await pm.start_agent(
@@ -401,7 +417,8 @@ class TestIPCErrorPathsReal:
 
     @pytest.mark.asyncio
     async def test_receive_timeout_no_message(
-        self, echo_agent: AgentHandle,
+        self,
+        echo_agent: AgentHandle,
     ) -> None:
         """Receive times out when agent sends nothing."""
         # Don't send any message — the agent is waiting for input
@@ -410,7 +427,8 @@ class TestIPCErrorPathsReal:
 
     @pytest.mark.asyncio
     async def test_send_to_killed_process(
-        self, pm: ProcessManager,
+        self,
+        pm: ProcessManager,
     ) -> None:
         """Sending to a killed process raises IPCConnectionError."""
         handle = await pm.start_agent(
@@ -438,18 +456,21 @@ class TestTaskGraphProcessManagerIntegration:
 
     @pytest.mark.asyncio
     async def test_task_lifecycle_through_ipc(
-        self, pm: ProcessManager,
+        self,
+        pm: ProcessManager,
     ) -> None:
         """Full lifecycle: create task -> dispatch via IPC -> collect result."""
         from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
         # Set up task graph
         graph = TaskGraph(":memory:")
-        graph.add_task(TaskItem(
-            id="ipc-t1",
-            description="integration test task",
-            agent="echo-test",
-        ))
+        graph.add_task(
+            TaskItem(
+                id="ipc-t1",
+                description="integration test task",
+                agent="echo-test",
+            )
+        )
 
         # Start echo agent
         handle = await pm.start_agent(

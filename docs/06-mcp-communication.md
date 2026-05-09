@@ -2,9 +2,14 @@
 
 > Agent Nexus Design Doc — §8 MCP 暴露与通信：FastMCP 双模式、MCP Gateway、通信矩阵、Platform Router、SKILL.md 规范、数据流场景
 
-> **Status**: ✅ Implemented (core) | 🔧 Partial (Provider Adaptation, AnthropicNativeStrategy)
+> **Status**: ✅ Implemented (core) | ⚠️ Partial (Provider Adaptation, AnthropicNativeStrategy, Deferred Loading)
 > **Code**: `src/agent_nexus/platform/gateway/` (gateway.py, deferred_registry.py, tool_adapter.py), `src/agent_nexus/platform/router/` (router.py, workflow.py, subtask.py)
 > **Tests**: `tests/unit/test_gateway_tool_adapter.py`, `tests/unit/test_router_subtask.py`, `tests/unit/test_router_workflow.py`, `tests/unit/test_gateway_module.py`
+
+> ⚠️ **Note**: 以下功能标记为 "deferred" 或 "pending implementation"：
+> - §8.8.5 Provider Adaptation
+> - §8.9.2 Anthropic Native Strategy (defer_loading)
+> - 端到端 MCP 测试
 
 ## §8 MCP 暴露与通信
 

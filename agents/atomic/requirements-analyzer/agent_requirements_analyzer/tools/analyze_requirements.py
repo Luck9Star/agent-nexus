@@ -23,12 +23,8 @@ AMBIGUITY_PATTERNS = [
 
 # Patterns for gap detection -- things that are typically needed but missing
 GAP_INDICATORS = {
-    "missing_user_role": re.compile(
-        r"(?:用户|user)", re.IGNORECASE
-    ),
-    "missing_error_handling": re.compile(
-        r"(?:功能|feature|操作|operation)", re.IGNORECASE
-    ),
+    "missing_user_role": re.compile(r"(?:用户|user)", re.IGNORECASE),
+    "missing_error_handling": re.compile(r"(?:功能|feature|操作|operation)", re.IGNORECASE),
     "missing_performance": re.compile(
         r"(?:响应|response|处理|process|并发|concurrent)", re.IGNORECASE
     ),
@@ -66,17 +62,52 @@ _DATA_DETAIL_RE = re.compile(
 
 # Priority keywords
 HIGH_PRIORITY_KEYWORDS = [
-    "必须", "关键", "核心", "重要", "must", "critical", "essential",
-    "key", "important", "required", "登录", "注册", "支付", "安全",
-    "login", "register", "payment", "security", "auth",
+    "必须",
+    "关键",
+    "核心",
+    "重要",
+    "must",
+    "critical",
+    "essential",
+    "key",
+    "important",
+    "required",
+    "登录",
+    "注册",
+    "支付",
+    "安全",
+    "login",
+    "register",
+    "payment",
+    "security",
+    "auth",
 ]
 MEDIUM_PRIORITY_KEYWORDS = [
-    "应该", "需要", "支持", "should", "need", "support", "管理",
-    "manage", "查询", "search", "导出", "export",
+    "应该",
+    "需要",
+    "支持",
+    "should",
+    "need",
+    "support",
+    "管理",
+    "manage",
+    "查询",
+    "search",
+    "导出",
+    "export",
 ]
 LOW_PRIORITY_KEYWORDS = [
-    "可以", "建议", "最好", "nice.to.have", "could", "optional",
-    "如果可能", "未来", "future", "扩展", "enhancement",
+    "可以",
+    "建议",
+    "最好",
+    "nice.to.have",
+    "could",
+    "optional",
+    "如果可能",
+    "未来",
+    "future",
+    "扩展",
+    "enhancement",
 ]
 
 
@@ -90,39 +121,29 @@ def _detect_ambiguities(text: str) -> list[str]:
     return ambiguities
 
 
+# Gap definitions: (indicator regex, detail regex, gap message)
+_INDICATOR_GAPS: list[tuple[object, object, str]] = [
+    (GAP_INDICATORS["missing_user_role"], _ROLE_DETAIL_RE, "缺少用户角色定义"),
+    (GAP_INDICATORS["missing_error_handling"], _ERROR_DETAIL_RE, "缺少错误处理说明"),
+    (GAP_INDICATORS["missing_performance"], _PERF_DETAIL_RE, "缺少性能指标定义"),
+]
+_PRESENCE_GAPS: list[tuple[object, object, str]] = [
+    (_AUTH_RE, _AUTH_DETAIL_RE, "缺少认证方式详细说明"),
+    (_DATA_RE, _DATA_DETAIL_RE, "缺少数据模型定义"),
+]
+
+
 def _detect_gaps(text: str) -> list[str]:
     """Identify missing information based on requirement content."""
     gaps: list[str] = []
 
-    # Check for missing role/actor definition
-    if GAP_INDICATORS["missing_user_role"].search(text):
-        has_role = bool(_ROLE_DETAIL_RE.search(text))
-        if not has_role:
-            gaps.append("缺少用户角色定义")
+    for indicator_re, detail_re, message in _INDICATOR_GAPS:
+        if indicator_re.search(text) and not detail_re.search(text):
+            gaps.append(message)
 
-    # Check for missing error handling mention
-    if GAP_INDICATORS["missing_error_handling"].search(text):
-        has_error = bool(_ERROR_DETAIL_RE.search(text))
-        if not has_error:
-            gaps.append("缺少错误处理说明")
-
-    # Check for missing performance requirements
-    if GAP_INDICATORS["missing_performance"].search(text):
-        has_perf = bool(_PERF_DETAIL_RE.search(text))
-        if not has_perf:
-            gaps.append("缺少性能指标定义")
-
-    # Check for missing authentication/authorization
-    has_auth = bool(_AUTH_RE.search(text))
-    has_auth_detail = bool(_AUTH_DETAIL_RE.search(text))
-    if has_auth and not has_auth_detail:
-        gaps.append("缺少认证方式详细说明")
-
-    # Check for missing data model
-    has_data = bool(_DATA_RE.search(text))
-    has_data_detail = bool(_DATA_DETAIL_RE.search(text))
-    if has_data and not has_data_detail:
-        gaps.append("缺少数据模型定义")
+    for presence_re, detail_re, message in _PRESENCE_GAPS:
+        if presence_re.search(text) and not detail_re.search(text):
+            gaps.append(message)
 
     return gaps
 
@@ -132,8 +153,8 @@ def _extract_key_terms(text: str) -> list[str]:
     # Extract quoted terms
     quoted = re.findall(r'[""\u201c](.+?)[""\u201d]', text)
     # Extract technical terms (CamelCase, snake_case with 3+ chars)
-    technical = re.findall(r'\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b', text)
-    technical += re.findall(r'\b(\w{3,}(?:_\w{2,})+)\b', text)
+    technical = re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text)
+    technical += re.findall(r"\b(\w{3,}(?:_\w{2,})+)\b", text)
     # Deduplicate while preserving order
     seen: set[str] = set()
     terms: list[str] = []
@@ -149,7 +170,7 @@ def _categorize_priorities(text: str) -> dict[str, list[str]]:
     priorities: dict[str, list[str]] = {"high": [], "medium": [], "low": []}
 
     # Split into sentences
-    sentences = re.split(r'[。！？.!?\n]+', text)
+    sentences = re.split(r"[。！？.!?\n]+", text)
     sentences = [s.strip() for s in sentences if len(s.strip()) > 2]
 
     for sentence in sentences:
@@ -175,13 +196,15 @@ def _detect_contradictions(text: str) -> list[str]:
     contradictions: list[str] = []
 
     # Check for conflicting time requirements
-    if re.search(r"实时|real.?[Tt]ime", text, re.IGNORECASE) and \
-       re.search(r"批量|batch|异步|async", text, re.IGNORECASE):
+    if re.search(r"实时|real.?[Tt]ime", text, re.IGNORECASE) and re.search(
+        r"批量|batch|异步|async", text, re.IGNORECASE
+    ):
         contradictions.append("同时要求实时处理和批量/异步处理")
 
     # Check for conflicting access requirements
-    if re.search(r"公开|public|匿名|anonymous", text, re.IGNORECASE) and \
-       re.search(r"私密|private|仅限|restricted", text, re.IGNORECASE):
+    if re.search(r"公开|public|匿名|anonymous", text, re.IGNORECASE) and re.search(
+        r"私密|private|仅限|restricted", text, re.IGNORECASE
+    ):
         contradictions.append("同时要求公开访问和私密访问")
 
     return contradictions

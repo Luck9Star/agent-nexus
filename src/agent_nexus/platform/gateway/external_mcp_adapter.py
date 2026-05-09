@@ -93,6 +93,11 @@ class ExternalMcpAdapter:
             )
             # Clean up partial state
             await self._safe_disconnect()
+        except BaseException:
+            # CancelledError (or other BaseException) — clean up to prevent
+            # AsyncExitStack / stream resource leak, then re-raise.
+            await self._safe_disconnect()
+            raise
 
     async def disconnect(self) -> None:
         """Disconnect from the external MCP Server."""
@@ -127,7 +132,8 @@ class ExternalMcpAdapter:
             Concatenated text content from the tool result.
 
         Raises:
-            RuntimeError: If the adapter is not connected.
+            RuntimeError: If the adapter is not connected or the tool
+                returns an error response.
         """
         if self._session is None or not self.is_alive:
             raise RuntimeError(f"External MCP server '{self._config.name}' is not connected")
@@ -148,6 +154,10 @@ class ExternalMcpAdapter:
                 self._config.name,
                 tool_name,
                 output,
+            )
+            raise RuntimeError(
+                f"External MCP server '{self._config.name}' "
+                f"tool '{tool_name}' returned error: {output}"
             )
 
         return output
@@ -181,61 +191,75 @@ class ExternalMcpAdapter:
         """
         assert self._exit_stack is not None  # set in connect() before this is called
 
-        if self._config.transport == TransportType.STDIO:
-            if not self._config.command:
-                raise ValueError(
-                    f"STDIO transport requires 'command' for server '{self._config.name}'"
-                )
-            if any(c in self._config.command for c in ("|", ">", "<", "&", ";", "`", "$")):
-                raise ValueError(
-                    f"STDIO command contains disallowed shell characters for server "
-                    f"'{self._config.name}': {self._config.command!r}"
-                )
-            logger.info(
-                "STDIO transport for '%s': command=%s args=%s",
-                self._config.name,
-                self._config.command,
-                self._config.args,
-            )
-            server_params = StdioServerParameters(
-                command=self._config.command,
-                args=self._config.args,
-            )
-            read_stream, write_stream = await self._exit_stack.enter_async_context(
-                stdio_client(server_params)
-            )
-            return read_stream, write_stream
-
-        elif self._config.transport == TransportType.SSE:
-            if not self._config.url:
-                raise ValueError(f"SSE transport requires 'url' for server '{self._config.name}'")
-            read_stream, write_stream = await self._exit_stack.enter_async_context(
-                sse_client(
-                    url=self._config.url,
-                    headers=self._config.headers or None,
-                )
-            )
-            return read_stream, write_stream
-
-        elif self._config.transport == TransportType.HTTP_STREAM:
-            if not self._config.url:
-                raise ValueError(
-                    f"HTTP_STREAM transport requires 'url' for server '{self._config.name}'"
-                )
-            streams = await self._exit_stack.enter_async_context(
-                streamablehttp_client(
-                    url=self._config.url,
-                    headers=self._config.headers or None,
-                )
-            )
-            # streamablehttp_client yields (read, write, get_session_id)
-            read_stream, write_stream, _ = streams
-            return read_stream, write_stream
-
-        else:
+        handlers = {
+            TransportType.STDIO: self._open_stdio_transport,
+            TransportType.SSE: self._open_sse_transport,
+            TransportType.HTTP_STREAM: self._open_http_transport,
+        }
+        handler = handlers.get(self._config.transport)
+        if handler is None:
             raise ValueError(
                 f"Unsupported transport '{self._config.transport}' for server '{self._config.name}'"
             )
+        return await handler()
+
+    async def _open_stdio_transport(self) -> tuple[Any, Any]:
+        """Open STDIO transport with shell character validation."""
+        assert self._exit_stack is not None  # guarded by connect()
+        if not self._config.command:
+            raise ValueError(f"STDIO transport requires 'command' for server '{self._config.name}'")
+        _shell_chars = ("|", ">", "<", "&", ";", "`", "$")
+        if any(c in self._config.command for c in _shell_chars):
+            raise ValueError(
+                f"STDIO command contains disallowed shell characters for server "
+                f"'{self._config.name}': {self._config.command!r}"
+            )
+        for i, arg in enumerate(self._config.args or ()):
+            if any(c in arg for c in _shell_chars):
+                raise ValueError(
+                    f"STDIO args[{i}] contains disallowed shell characters for "
+                    f"server '{self._config.name}': {arg!r}"
+                )
+        logger.info(
+            "STDIO transport for '%s': command=%s args=%s",
+            self._config.name,
+            self._config.command,
+            self._config.args,
+        )
+        server_params = StdioServerParameters(
+            command=self._config.command,
+            args=self._config.args,
+        )
+        return await self._exit_stack.enter_async_context(stdio_client(server_params))
+
+    async def _open_sse_transport(self) -> tuple[Any, Any]:
+        """Open SSE transport."""
+        assert self._exit_stack is not None  # guarded by connect()
+        if not self._config.url:
+            raise ValueError(f"SSE transport requires 'url' for server '{self._config.name}'")
+        return await self._exit_stack.enter_async_context(
+            sse_client(
+                url=self._config.url,
+                headers=self._config.headers or None,
+            )
+        )
+
+    async def _open_http_transport(self) -> tuple[Any, Any]:
+        """Open HTTP Stream transport."""
+        assert self._exit_stack is not None  # guarded by connect()
+        if not self._config.url:
+            raise ValueError(
+                f"HTTP_STREAM transport requires 'url' for server '{self._config.name}'"
+            )
+        streams = await self._exit_stack.enter_async_context(
+            streamablehttp_client(
+                url=self._config.url,
+                headers=self._config.headers or None,
+            )
+        )
+        # streamablehttp_client yields (read, write, get_session_id)
+        read_stream, write_stream, _ = streams
+        return read_stream, write_stream
 
     async def _discover_tools(self) -> None:
         """Discover tools via ``tools/list`` and cache schemas."""

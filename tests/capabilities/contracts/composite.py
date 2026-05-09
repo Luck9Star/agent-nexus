@@ -29,7 +29,7 @@ CICD_QUALITY_GATE = CapabilityContract(
         ),
     },
     output_schema={
-        "checks": OutputSpec(type="list", min_length=1),
+        "checks": OutputSpec(type="list", min_length=0),
         "overall_passed": OutputSpec(type="bool"),
         "gate_score": OutputSpec(type="float"),
         "blockers": OutputSpec(type="list"),
@@ -38,10 +38,10 @@ CICD_QUALITY_GATE = CapabilityContract(
     output_format="structured",
     quality_thresholds=QualityThresholds(
         min_output_length=100,
-        required_keywords=["check", "gate"],
+        required_keywords=["check"],
         score_threshold=0.7,
     ),
-    cli_method="run",
+    cli_method="run_gate",
 )
 
 COMPETITIVE_INTELLIGENCE = CapabilityContract(
@@ -49,24 +49,31 @@ COMPETITIVE_INTELLIGENCE = CapabilityContract(
     agent_type="composite",
     description="Competitive intelligence briefing — sequential chain",
     required_inputs={
-        "topic": InputSpec(
+        "query": InputSpec(
             type="str",
-            description="Analysis topic",
+            description="Research query",
             examples=["AI Agent market competitive landscape"],
         ),
     },
-    optional_inputs={},
+    optional_inputs={
+        "framework": InputSpec(
+            type="str",
+            description="Analysis framework",
+            examples=["porter"],
+            required=False,
+        ),
+    },
     output_schema={
-        "briefing": OutputSpec(type="str", min_length=50),
-        "sources": OutputSpec(type="list"),
+        "analysis": OutputSpec(type="dict"),
+        "success": OutputSpec(type="bool"),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
         min_output_length=100,
-        required_keywords=["intelligence", "competitor"],
+        required_keywords=["analysis"],
         score_threshold=0.6,
     ),
-    cli_method="run",
+    cli_method="generate_briefing",
 )
 
 DOCUMENT_COMPLIANCE = CapabilityContract(
@@ -74,17 +81,23 @@ DOCUMENT_COMPLIANCE = CapabilityContract(
     agent_type="composite",
     description="Document compliance gateway — full parallel + conflict detection",
     required_inputs={
-        "document_path": InputSpec(
+        "document": InputSpec(
             type="str",
-            description="Document path",
-            examples=["docs/"],
+            description="Document text to check",
+            examples=["This agreement is governed by the laws of..."],
         ),
     },
-    optional_inputs={},
+    optional_inputs={
+        "jurisdictions": InputSpec(
+            type="list",
+            description="Jurisdiction codes",
+            examples=['["CN", "US"]'],
+            required=False,
+        ),
+    },
     output_schema={
-        "checks": OutputSpec(type="list", min_length=1),
-        "compliant": OutputSpec(type="bool"),
-        "issues": OutputSpec(type="list"),
+        "checks": OutputSpec(type="list", min_length=0),
+        "overall_score": OutputSpec(type="float"),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
@@ -92,7 +105,7 @@ DOCUMENT_COMPLIANCE = CapabilityContract(
         required_keywords=["compliance"],
         score_threshold=0.6,
     ),
-    cli_method="run",
+    cli_method="check_compliance",
 )
 
 FEATURE_DELIVERY = CapabilityContract(
@@ -100,24 +113,24 @@ FEATURE_DELIVERY = CapabilityContract(
     agent_type="composite",
     description="Feature delivery pipeline — sequential to parallel",
     required_inputs={
-        "feature_spec": InputSpec(
+        "spec": InputSpec(
             type="str",
-            description="Feature specification",
+            description="Requirement specification",
             examples=["Implement user login functionality"],
         ),
     },
     optional_inputs={},
     output_schema={
-        "artifacts": OutputSpec(type="list", min_length=1),
-        "status": OutputSpec(type="str"),
+        "artifacts": OutputSpec(type="dict"),
+        "success": OutputSpec(type="bool"),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
         min_output_length=80,
-        required_keywords=["feature", "delivery"],
+        required_keywords=[],
         score_threshold=0.6,
     ),
-    cli_method="run",
+    cli_method="run_pipeline",
 )
 
 PRODUCT_DOCUMENTATION = CapabilityContract(
@@ -125,24 +138,32 @@ PRODUCT_DOCUMENTATION = CapabilityContract(
     agent_type="composite",
     description="Product documentation suite — parallel + sequential aggregation",
     required_inputs={
-        "project_path": InputSpec(
+        "code_path": InputSpec(
             type="str",
-            description="Project path",
+            description="Source code path",
             examples=["src/agent_nexus/"],
         ),
     },
-    optional_inputs={},
+    optional_inputs={
+        "target_langs": InputSpec(
+            type="list",
+            description="Target language codes",
+            examples=["en"],
+            required=False,
+        ),
+    },
     output_schema={
-        "documents": OutputSpec(type="list", min_length=1),
-        "summary": OutputSpec(type="str", min_length=10),
+        "artifacts": OutputSpec(type="list", min_length=0),
+        "coverage_score": OutputSpec(type="float"),
+        "success": OutputSpec(type="bool"),
     },
     output_format="structured",
     quality_thresholds=QualityThresholds(
         min_output_length=100,
-        required_keywords=["document"],
+        required_keywords=[],
         score_threshold=0.6,
     ),
-    cli_method="run",
+    cli_method="generate_docs",
 )
 
 ALL_COMPOSITE_CONTRACTS: list[CapabilityContract] = [

@@ -15,9 +15,9 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from agent_security_scanner.agent import SecurityScannerAgent
 from agent_security_scanner.local_adapter import handle_message
@@ -39,7 +39,6 @@ from agent_security_scanner.tools.scan_code import (
     _severity_rank,
     scan_code,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -99,7 +98,7 @@ class TestSecurityFinding:
 
     def test_frozen(self) -> None:
         f = SecurityFinding(severity="low", category="info", location="a.py:1")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             f.severity = "high"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -109,7 +108,9 @@ class TestSecurityFinding:
         assert f == f2
 
     def test_json_serialization(self) -> None:
-        f = SecurityFinding(severity="high", category="injection", location="a.py:1", cwe_id="CWE-89")
+        f = SecurityFinding(
+            severity="high", category="injection", location="a.py:1", cwe_id="CWE-89"
+        )
         json_str = f.model_dump_json()
         data = json.loads(json_str)
         assert data["severity"] == "high"
@@ -132,7 +133,7 @@ class TestSecurityScanResult:
 
     def test_frozen(self) -> None:
         r = SecurityScanResult()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.findings = []  # type: ignore[misc]
 
 
@@ -146,7 +147,7 @@ class TestDependencyVulnerability:
 
     def test_frozen(self) -> None:
         v = DependencyVulnerability(package="flask", version="2.0.1")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             v.package = "django"  # type: ignore[misc]
 
 
@@ -181,7 +182,7 @@ class TestSecurityReport:
 
     def test_frozen(self) -> None:
         r = SecurityReport()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.critical_count = 99  # type: ignore[misc]
 
 
@@ -277,10 +278,7 @@ class TestScanCode:
         assert all(f.remediation for f in result.findings)
 
     def test_severity_ordering(self, tmp_dir: str) -> None:
-        code = (
-            'cursor.execute(f"SELECT * FROM t WHERE id={x}")\n'
-            'password = "secret_pass_123"\n'
-        )
+        code = 'cursor.execute(f"SELECT * FROM t WHERE id={x}")\npassword = "secret_pass_123"\n'
         path = _write_file(tmp_dir, "order.py", code)
         result = scan_code(path)
         if len(result.findings) >= 2:
@@ -541,9 +539,7 @@ class TestMCPAdapter:
 class TestLocalAdapter:
     """Tests for local adapter message handling."""
 
-    def test_handle_scan_code(
-        self, agent: SecurityScannerAgent, tmp_dir: str
-    ) -> None:
+    def test_handle_scan_code(self, agent: SecurityScannerAgent, tmp_dir: str) -> None:
         path = _write_file(tmp_dir, "test.py", "x = 1\n")
         response = handle_message(
             agent,
@@ -553,9 +549,7 @@ class TestLocalAdapter:
         assert "result" in response
 
     def test_handle_scan_code_missing_path(self, agent: SecurityScannerAgent) -> None:
-        response = handle_message(
-            agent, {"method": "scan_code", "params": {}}
-        )
+        response = handle_message(agent, {"method": "scan_code", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
@@ -568,9 +562,7 @@ class TestLocalAdapter:
         assert response["result"]["total_scanned"] == 1
 
     def test_handle_check_dependencies_missing(self, agent: SecurityScannerAgent) -> None:
-        response = handle_message(
-            agent, {"method": "check_dependencies", "params": {}}
-        )
+        response = handle_message(agent, {"method": "check_dependencies", "params": {}})
         assert response["status"] == "error"
 
     def test_handle_generate_report(self, agent: SecurityScannerAgent) -> None:
@@ -579,9 +571,7 @@ class TestLocalAdapter:
             {
                 "method": "generate_report",
                 "params": {
-                    "findings": [
-                        {"severity": "high", "category": "xss", "location": "a.py:1"}
-                    ]
+                    "findings": [{"severity": "high", "category": "xss", "location": "a.py:1"}]
                 },
             },
         )

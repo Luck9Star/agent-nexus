@@ -12,6 +12,7 @@ strings and prompts.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -43,6 +44,121 @@ class LLMResponse:
     model: str
     provider: str
     metadata: dict[str, object] = field(default_factory=dict)
+
+
+_EMPTY_CAPABILITY = ModelCapability(
+    model_id="",
+    provider="",
+    max_output_tokens=0,
+    context_window=0,
+    supports_vision=False,
+    supports_tool_use=False,
+    supports_temperature=False,
+    temperature_min=0.0,
+    temperature_max=0.0,
+    knowledge_cutoff="",
+)
+
+
+def _resolve_provider(
+    inst: LLMClient,
+    mgr: Any,
+    loader: Any,
+    platform_config: Any,
+    config_dir: Path | None,
+) -> None:
+    """Detect CLI providers and resolve API key or CLI backend."""
+    if (
+        inst._provider_name not in platform_config.models.providers
+        and inst._provider_name in loader.load_cli_backends()
+    ):
+        inst._provider_config = ProviderConfig(api=ProviderApiType.CLI)
+
+    if inst._provider_config.api == ProviderApiType.CLI:
+        inst._api_key = ""
+        inst._cli_backend = inst._init_cli_backend(config_dir)
+    else:
+        inst._api_key = mgr.resolve_api_key(inst._provider_name)
+
+        if not inst._api_key:
+            raise ValueError(
+                f"API key for provider '{inst._provider_name}' is empty. "
+                f"Set the environment variable referenced in config.toml."
+            )
+
+
+def _resolve_capability(
+    provider_config: ProviderConfig,
+    model_name: str,
+    provider_name: str,
+    registry: ModelCapabilityRegistry,
+) -> ModelCapability:
+    """Resolve model capability: CLI-no-model -> empty, else enriched/remote/built-in."""
+    is_cli_no_model = provider_config.api == ProviderApiType.CLI and not model_name
+
+    if is_cli_no_model:
+        return _EMPTY_CAPABILITY
+
+    if registry.is_enriched(model_name):
+        return registry.get(model_name)
+
+    from agent_nexus.platform.config.model_db import ModelDBClient
+
+    db_client = ModelDBClient()
+    try:
+        remote_data = db_client.fetch_model(model_name)
+    except Exception:
+        logger.debug(
+            "ModelDB fetch failed, using built-in capability data",
+            exc_info=True,
+        )
+        remote_data = None
+    finally:
+        db_client.close()
+
+    if remote_data is not None:
+        return _build_enriched_capability(remote_data, model_name, provider_name, registry)
+
+    return registry.get(model_name)
+
+
+def _build_enriched_capability(
+    remote_data: dict[str, Any],
+    model_name: str,
+    provider_name: str,
+    registry: ModelCapabilityRegistry,
+) -> ModelCapability:
+    """Merge remote ModelDB data with registry fallback to produce enriched capability."""
+    cap_fallback = registry.get(model_name) or registry.get_provider_default(provider_name)
+    if cap_fallback is None:
+        cap_fallback = ModelCapability(
+            model_id=model_name,
+            provider=provider_name,
+            max_output_tokens=4096,
+            context_window=8192,
+            supports_vision=False,
+            supports_tool_use=False,
+            supports_temperature=True,
+            temperature_min=0.0,
+            temperature_max=2.0,
+            knowledge_cutoff="2024-01",
+        )
+    enriched = ModelCapability(
+        model_id=remote_data.get("id", cap_fallback.model_id),
+        provider=remote_data.get("provider", cap_fallback.provider),
+        max_output_tokens=remote_data.get("max_output_tokens", cap_fallback.max_output_tokens),
+        context_window=remote_data.get("context_window", cap_fallback.context_window),
+        supports_vision=remote_data.get("supports_vision", cap_fallback.supports_vision),
+        supports_tool_use=remote_data.get("supports_tool_use", cap_fallback.supports_tool_use),
+        supports_temperature=remote_data.get(
+            "supports_temperature", cap_fallback.supports_temperature
+        ),
+        temperature_min=remote_data.get("temperature_min", cap_fallback.temperature_min),
+        temperature_max=remote_data.get("temperature_max", cap_fallback.temperature_max),
+        knowledge_cutoff=remote_data.get("knowledge_cutoff", cap_fallback.knowledge_cutoff),
+    )
+    registry.set_override(model_name, enriched)
+    return enriched
 
 
 class LLMClient:
@@ -150,54 +266,19 @@ class LLMClient:
         *,
         _instance: LLMClient | None = None,
     ) -> LLMClient:
-        """Create or initialise an LLMClient from config string.
-
-        Resolves all settings from ``config.toml``, detects the provider
-        type, fetches model capabilities, and resolves API keys.  This
-        is the preferred way to create an LLMClient when you have a
-        model string or stage name.
-
-        When ``_instance`` is provided (internal use by ``__init__``),
-        the resolved values are applied to that instance instead of
-        creating a new one.  This preserves backward compatibility with
-        the ``LLMClient(model_string=...)`` calling convention.
-
-        Parameters
-        ----------
-        model_string:
-            Explicit ``provider:model`` string.  Takes priority.
-        stage:
-            Pipeline stage name (e.g. ``"planning"``).  Resolved via
-            ``[models.stages]`` config, falls back to default.
-        config_dir:
-            Config directory override (default: ``~/.agent-nexus/``).
-        capability_registry:
-            Shared registry to avoid duplicate ModelDB fetches.
-        session_store:
-            Optional session store for conversation continuity.
-
-        Returns:
-            A fully initialised :class:`LLMClient`.
-        """
+        """Create or initialise an LLMClient from config string."""
         inst = _instance if _instance is not None else cls.__new__(cls)
 
-        # Ensure resource-holding attrs are pre-initialised when creating a
-        # fresh instance via from_config() (not via __init__ which already
-        # sets them).  When _instance is provided, these are already set.
         if _instance is None:
             inst._cli_backend = None
 
-        # Lazy imports to break circular import cycle:
-        #   config.loader -> config.config_templates -> agency -> agency.llm_client -> config.loader
         from agent_nexus.platform.config.loader import ConfigLoader
         from agent_nexus.platform.config.model_config import ModelConfigManager
-        from agent_nexus.platform.config.model_db import ModelDBClient
 
         loader = ConfigLoader(config_dir=config_dir)
         platform_config = loader.load_config()
         mgr = ModelConfigManager(platform_config)
 
-        # Resolve model string: explicit > stage config > default
         resolved = (
             model_string
             or (mgr.resolve_stage_model(stage) if stage else None)
@@ -212,111 +293,18 @@ class LLMClient:
 
         inst._provider_name, inst._model_name = mgr.parse_model_string(resolved)
         inst._provider_config = mgr.get_provider_config(inst._provider_name)
-
-        # Auto-detect CLI providers: if not in [models.providers.*], check [cli_backends.*]
-        if (
-            inst._provider_name not in platform_config.models.providers
-            and inst._provider_name in loader.load_cli_backends()
-        ):
-            inst._provider_config = ProviderConfig(api=ProviderApiType.CLI)
         inst._session_store = session_store
 
-        if inst._provider_config.api == ProviderApiType.CLI:
-            inst._api_key = ""
-            inst._cli_backend = inst._init_cli_backend(config_dir)
-        else:
-            inst._api_key = mgr.resolve_api_key(inst._provider_name)
+        _resolve_provider(inst, mgr, loader, platform_config, config_dir)
 
-            if not inst._api_key:
-                raise ValueError(
-                    f"API key for provider '{inst._provider_name}' is empty. "
-                    f"Set the environment variable referenced in config.toml."
-                )
+        inst._capability_registry = capability_registry or ModelCapabilityRegistry()
 
-        # CLI providers with no model name skip capability lookup -- the CLI
-        # itself decides which model to use, so registry/ModelDB lookups are
-        # unnecessary and just produce noisy warnings for empty model strings.
-        is_cli_no_model = inst._provider_config.api == ProviderApiType.CLI and not inst._model_name
-
-        if capability_registry is not None:
-            inst._capability_registry = capability_registry
-        else:
-            inst._capability_registry = ModelCapabilityRegistry()
-
-        if is_cli_no_model:
-            inst._capability = ModelCapability(
-                model_id="",
-                provider="",
-                max_output_tokens=0,
-                context_window=0,
-                supports_vision=False,
-                supports_tool_use=False,
-                supports_temperature=False,
-                temperature_min=0.0,
-                temperature_max=0.0,
-                knowledge_cutoff="",
-            )
-        else:
-            # Resolution order:
-            #   1. Already enriched in shared registry -> reuse (no warning).
-            #   2. ModelDB remote lookup -> build capability from remote data.
-            #   3. Built-in registry.get() -> may warn (appropriate: both sources failed).
-            if inst._capability_registry.is_enriched(inst._model_name):
-                inst._capability = inst._capability_registry.get(inst._model_name)
-            else:
-                db_client = ModelDBClient()
-                try:
-                    remote_data = db_client.fetch_model(inst._model_name)
-                except Exception:
-                    logger.debug(
-                        "ModelDB fetch failed, using built-in capability data",
-                        exc_info=True,
-                    )
-                    remote_data = None
-                finally:
-                    db_client.close()
-
-                if remote_data is not None:
-                    cap_fallback = inst._capability_registry.get(
-                        inst._model_name,
-                    ) or inst._capability_registry.get_provider_default(
-                        inst._provider_name,
-                    )
-                    enriched_cap = ModelCapability(
-                        model_id=remote_data.get("id", cap_fallback.model_id),
-                        provider=remote_data.get("provider", cap_fallback.provider),
-                        max_output_tokens=remote_data.get(
-                            "max_output_tokens", cap_fallback.max_output_tokens
-                        ),
-                        context_window=remote_data.get(
-                            "context_window", cap_fallback.context_window
-                        ),
-                        supports_vision=remote_data.get(
-                            "supports_vision", cap_fallback.supports_vision
-                        ),
-                        supports_tool_use=remote_data.get(
-                            "supports_tool_use", cap_fallback.supports_tool_use
-                        ),
-                        supports_temperature=remote_data.get(
-                            "supports_temperature", cap_fallback.supports_temperature
-                        ),
-                        temperature_min=remote_data.get(
-                            "temperature_min", cap_fallback.temperature_min
-                        ),
-                        temperature_max=remote_data.get(
-                            "temperature_max", cap_fallback.temperature_max
-                        ),
-                        knowledge_cutoff=remote_data.get(
-                            "knowledge_cutoff", cap_fallback.knowledge_cutoff
-                        ),
-                    )
-                    inst._capability_registry.set_override(
-                        inst._model_name,
-                        enriched_cap,
-                    )
-                    inst._capability = enriched_cap
-                else:
-                    inst._capability = inst._capability_registry.get(inst._model_name)
+        inst._capability = _resolve_capability(
+            inst._provider_config,
+            inst._model_name,
+            inst._provider_name,
+            inst._capability_registry,
+        )
 
         logger.info(
             "LLMClient initialized: provider=%s model=%s api=%s max_output_tokens=%d",
@@ -351,7 +339,12 @@ class LLMClient:
         return GenericCLIBackend(config)
 
     def close(self) -> None:
-        """Close the underlying resources."""
+        """Close the underlying resources.
+
+        For API providers the httpx connection pool is managed internally
+        by LiteLLM and is released when the process exits.  For CLI
+        backends there are no persistent resources to clean up.
+        """
         if self._cli_backend is not None:
             pass  # GenericCLIBackend has no resources to close
 
@@ -408,6 +401,25 @@ class LLMClient:
         litellm_provider = self._LITELLM_PROVIDER_MAP.get(provider, "openai")
         return f"{litellm_provider}/{model}"
 
+    def _apply_temperature(
+        self,
+        kwargs: dict[str, Any],
+        temperature: float | None,
+    ) -> None:
+        """Apply temperature to kwargs if supported by the model."""
+        if temperature is None:
+            return
+        if self._capability.supports_temperature:
+            kwargs["temperature"] = max(
+                self._capability.temperature_min,
+                min(self._capability.temperature_max, temperature),
+            )
+        else:
+            logger.warning(
+                "Model '%s' does not support temperature -- ignoring",
+                self._model_name,
+            )
+
     def _build_litellm_kwargs(
         self,
         ctx: CallContext,
@@ -423,34 +435,23 @@ class LLMClient:
         kwargs: dict[str, Any] = {
             "model": self._to_litellm_model(),
             "messages": messages,
-            "stream": self._capability.streaming_default
+            "stream": self._capability.streaming_default  # type: ignore[attr-defined]
             if hasattr(self._capability, "streaming_default")
             else False,
         }
 
-        effective_max_tokens = max_tokens or self._capability.max_output_tokens
+        effective_max_tokens = (
+            max_tokens if max_tokens is not None else self._capability.max_output_tokens
+        )
         if effective_max_tokens:
             kwargs["max_tokens"] = effective_max_tokens
 
-        if ctx.temperature is not None:
-            if self._capability.supports_temperature:
-                kwargs["temperature"] = max(
-                    self._capability.temperature_min,
-                    min(self._capability.temperature_max, ctx.temperature),
-                )
-            else:
-                logger.warning(
-                    "Model '%s' does not support temperature -- ignoring",
-                    self._model_name,
-                )
+        self._apply_temperature(kwargs, ctx.temperature)
 
         if top_p is not None:
             kwargs["top_p"] = max(0.0, min(1.0, top_p))
-
         if ctx.timeout is not None:
             kwargs["timeout"] = ctx.timeout
-
-        # API key + base_url: LiteLLM accepts these as parameters
         if self._api_key:
             kwargs["api_key"] = self._api_key
         base_url = self._provider_config.base_url or None
@@ -498,8 +499,6 @@ class LLMClient:
         -------
         LLMResponse
         """
-        import time
-
         ctx = CallContext(
             model=self._model_name,
             system_prompt=system_prompt,
@@ -532,7 +531,7 @@ class LLMClient:
                 )
 
                 response = litellm.completion(**kwargs)
-                text = response.choices[0].message.content or ""
+                text = response.choices[0].message.content or ""  # type: ignore[union-attr]
                 actual_model = response.model or self._model_name
 
             self._update_capability_from_response(actual_model)
@@ -560,7 +559,10 @@ class LLMClient:
                 provider=self._provider_name,
             )
         except Exception as e:
-            self._hooks.dispatch(HookEvent.ON_ERROR, ctx=ctx, error=e)
+            try:
+                self._hooks.dispatch(HookEvent.ON_ERROR, ctx=ctx, error=e)
+            except Exception:
+                logger.debug("Hook dispatch failed during error handling", exc_info=True)
             raise
 
     # ------------------------------------------------------------------

@@ -8,6 +8,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 import typer
 
@@ -48,79 +49,20 @@ def doctor() -> None:
     """Run diagnostic checks on the agent-nexus installation."""
     config_dir = _get_config_dir()
     config_path = config_dir / "config.toml"
-    checks: list[tuple[str, bool, str]] = []
 
     # Load .env before checking API keys so that keys stored in
     # ~/.agent-nexus/.env are visible to os.environ.get() below.
     _load_dot_env(config_dir)
 
-    # Check 1: config.toml exists and parses
-    try:
-        import toml
-
-        toml.loads(config_path.read_text(encoding="utf-8"))
-        checks.append(("config.toml exists and parses", True, "OK"))
-    except FileNotFoundError:
-        checks.append(("config.toml exists and parses", False, "not found"))
-    except Exception as exc:
-        checks.append(("config.toml exists and parses", False, str(exc)))
-
-    # Check 2: API key configured
-    # Read api_key_env from user's config.toml (may have custom providers)
-    config_key_envs: list[str] = []
-    try:
-        import toml
-
-        raw = toml.loads(config_path.read_text(encoding="utf-8"))
-        providers = raw.get("models", {}).get("providers", {})
-        config_key_envs = [
-            str(v["api_key_env"])
-            for v in providers.values()
-            if isinstance(v, dict) and "api_key_env" in v
-        ]
-    except Exception:
-        pass
-    # Fallback to built-in defaults if config has no providers
-    if not config_key_envs:
-        from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
-
-        config_key_envs = [
-            str(p["api_key_env"])
-            for p in DEFAULT_PROVIDERS.values()
-            if isinstance(p, dict) and "api_key_env" in p
-        ]
-    has_key = any(os.environ.get(k) for k in config_key_envs)
-    checks.append(("API key configured", has_key, "at least one set" if has_key else "none set"))
-
-    # Check 3: git on PATH
-    git_path = shutil.which("git")
-    checks.append(("git on PATH", git_path is not None, git_path or "not found"))
-
-    # Check 4: uv on PATH
-    uv_path = shutil.which("uv")
-    checks.append(("uv on PATH", uv_path is not None, uv_path or "not found"))
-
-    # Check 5: Python version
-    py_ok = sys.version_info >= (3, 11)
-    checks.append(("Python >= 3.11", py_ok, sys.version.split()[0]))
-
-    # Check 6: config directory writable (lockfile will be created here)
-    try:
-        config_dir.mkdir(parents=True, exist_ok=True)
-        writable = os.access(config_dir, os.W_OK)
-        checks.append(("config dir writable", writable, "OK" if writable else "not writable"))
-    except Exception as exc:
-        checks.append(("config dir writable", False, str(exc)))
-
-    # Check 7: Evolution DB accessible
-    try:
-        from agent_nexus.platform.evolution.store import EvolutionStore
-
-        store = EvolutionStore(Path(":memory:"))
-        store.close()
-        checks.append(("Evolution DB accessible", True, "OK"))
-    except Exception as exc:
-        checks.append(("Evolution DB accessible", False, str(exc)))
+    checks = [
+        _check_config_toml(config_path),
+        _check_api_keys(config_path),
+        _check_tool_on_path("git"),
+        _check_tool_on_path("uv"),
+        _check_python_version(),
+        _check_config_dir_writable(config_dir),
+        _check_evolution_db(),
+    ]
 
     # Output
     all_pass = True
@@ -136,6 +78,80 @@ def doctor() -> None:
 
     if not all_pass:
         raise typer.Exit(code=1)
+
+
+def _check_config_toml(config_path: Path) -> tuple[str, bool, str]:
+    """Check that config.toml exists and parses."""
+    try:
+        import toml
+
+        toml.loads(config_path.read_text(encoding="utf-8"))
+        return ("config.toml exists and parses", True, "OK")
+    except FileNotFoundError:
+        return ("config.toml exists and parses", False, "not found")
+    except Exception as exc:
+        return ("config.toml exists and parses", False, str(exc))
+
+
+def _check_api_keys(config_path: Path) -> tuple[str, bool, str]:
+    """Check that at least one API key is configured."""
+    config_key_envs: list[str] = []
+    try:
+        import toml
+
+        raw = toml.loads(config_path.read_text(encoding="utf-8"))
+        providers = raw.get("models", {}).get("providers", {})
+        config_key_envs = [
+            str(v["api_key_env"])
+            for v in providers.values()
+            if isinstance(v, dict) and "api_key_env" in v
+        ]
+    except (OSError, ValueError, KeyError):
+        pass  # config file missing or malformed; fall through to defaults
+    if not config_key_envs:
+        from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
+
+        config_key_envs = [
+            str(p["api_key_env"])
+            for p in DEFAULT_PROVIDERS.values()
+            if isinstance(p, dict) and "api_key_env" in p
+        ]
+    has_key = any(os.environ.get(k) for k in config_key_envs)
+    return ("API key configured", has_key, "at least one set" if has_key else "none set")
+
+
+def _check_tool_on_path(tool_name: str) -> tuple[str, bool, str]:
+    """Check that a CLI tool is on PATH."""
+    found = shutil.which(tool_name)
+    return (f"{tool_name} on PATH", found is not None, found or "not found")
+
+
+def _check_python_version() -> tuple[str, bool, str]:
+    """Check Python version >= 3.11."""
+    ok = sys.version_info >= (3, 11)
+    return ("Python >= 3.11", ok, sys.version.split()[0])
+
+
+def _check_config_dir_writable(config_dir: Path) -> tuple[str, bool, str]:
+    """Check that config directory is writable."""
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        writable = os.access(config_dir, os.W_OK)
+        return ("config dir writable", writable, "OK" if writable else "not writable")
+    except Exception as exc:
+        return ("config dir writable", False, str(exc))
+
+
+def _check_evolution_db() -> tuple[str, bool, str]:
+    """Check that Evolution DB is accessible."""
+    try:
+        from agent_nexus.platform.evolution.store import EvolutionStore
+
+        store = EvolutionStore(Path(":memory:"))
+        store.close()
+        return ("Evolution DB accessible", True, "OK")
+    except Exception as exc:
+        return ("Evolution DB accessible", False, str(exc))
 
 
 # =====================================================================
@@ -258,97 +274,30 @@ def env() -> None:
 # =====================================================================
 
 
-def _run_wizard(config_path: Path) -> None:
-    """Interactive setup wizard using questionary."""
-    try:
-        import questionary  # pyright: ignore[reportMissingImports]
-    except ImportError:
-        typer.echo("Install questionary for wizard mode: pip install questionary")
-        return
+_PRESET_MODELS: dict[str, tuple[str | None, str, str | None, str]] = {
+    "openai": ("OPENAI_API_KEY", "openai-compatible", None, "gpt-4o"),
+    "anthropic": ("ANTHROPIC_API_KEY", "anthropic-messages", None, "claude-sonnet-4-20250514"),
+    "deepseek": (
+        "DEEPSEEK_API_KEY",
+        "openai-compatible",
+        "https://api.deepseek.com/v1",
+        "deepseek-chat",
+    ),
+    "ollama": (None, "openai-compatible", DEFAULT_OLLAMA_BASE_URL, "llama3"),
+}
 
+
+def _write_provider_config(
+    config_path: Path,
+    provider: str,
+    model: str,
+    *,
+    base_url: str | None = None,
+    key_env: str | None = None,
+    api_type: str | None = None,
+) -> None:
+    """Write provider section into config.toml."""
     import toml
-
-    provider = questionary.select(
-        "Select default provider:",
-        choices=["openai", "anthropic", "deepseek", "ollama", "custom"],
-    ).ask()
-    if provider is None:
-        return
-
-    if provider == "custom":
-        custom_name = questionary.text(
-            "Provider name (lowercase, e.g. my-provider):",
-        ).ask()
-        if not custom_name:
-            return
-        provider = custom_name.strip().lower()
-
-        api_type = questionary.select(
-            "API type:",
-            choices=["openai-compatible", "anthropic-messages"],
-        ).ask()
-        if api_type is None:
-            return
-
-        base_url = questionary.text(
-            "Base URL (e.g. https://api.example.com/v1):",
-        ).ask()
-
-        key_env = questionary.text(
-            "API key environment variable name (e.g. MY_PROVIDER_API_KEY):",
-        ).ask()
-
-        model = questionary.text(
-            "Default model name (e.g. my-model-v1):",
-        ).ask()
-        if not model:
-            return
-
-        # Write custom provider config
-        try:
-            raw = toml.loads(config_path.read_text(encoding="utf-8"))
-        except Exception:
-            raw = {}
-        raw.setdefault("models", {})["default"] = f"{provider}:{model}"
-        prov_section = (
-            raw.setdefault("models", {}).setdefault("providers", {}).setdefault(provider, {})
-        )
-        if base_url:
-            prov_section["base_url"] = base_url
-        if key_env:
-            prov_section["api_key_env"] = key_env
-        if api_type:
-            prov_section["api"] = api_type
-        config_path.write_text(toml.dumps(raw), encoding="utf-8")
-        typer.echo(f"Config updated: default model = {provider}:{model}")
-        if key_env:
-            typer.echo(f"  Note: Add your API key to your shell profile: export {key_env}=...")
-        return
-
-    # Built-in providers: openai, anthropic, deepseek, ollama
-    _preset_models = {
-        "openai": ("OPENAI_API_KEY", "openai-compatible", None, "gpt-4o"),
-        "anthropic": ("ANTHROPIC_API_KEY", "anthropic-messages", None, "claude-sonnet-4-20250514"),
-        "deepseek": (
-            "DEEPSEEK_API_KEY",
-            "openai-compatible",
-            "https://api.deepseek.com/v1",
-            "deepseek-chat",
-        ),
-        "ollama": (None, "openai-compatible", DEFAULT_OLLAMA_BASE_URL, "llama3"),
-    }
-    key_env, api_type, base_url, default_model = _preset_models[provider]
-
-    api_key: str | None = None
-    if key_env:
-        api_key = questionary.password(
-            f"Enter {key_env} value (or leave blank to set via env later):",
-        ).ask()
-
-    model = questionary.text(
-        "Enter default model:",
-        default=default_model,
-    ).ask()
 
     try:
         raw = toml.loads(config_path.read_text(encoding="utf-8"))
@@ -360,18 +309,105 @@ def _run_wizard(config_path: Path) -> None:
         prov_section["base_url"] = base_url
     if key_env:
         prov_section["api_key_env"] = key_env
-    if api_key and key_env:
-        typer.echo(
-            f"  Note: API key stored. Add to shell profile: export {key_env}=****"
-        )
-    if api_type != "openai-compatible":
+    if api_type and api_type != "openai-compatible":
         prov_section["api"] = api_type
     config_path.write_text(toml.dumps(raw), encoding="utf-8")
     typer.echo(f"Config updated: default model = {provider}:{model}")
 
+
+def _run_custom_provider_wizard(questionary: Any, config_path: Path) -> None:
+    """Interactive wizard for setting up a custom provider."""
+    custom_name = questionary.text(
+        "Provider name (lowercase, e.g. my-provider):",
+    ).ask()
+    if not custom_name:
+        return
+
+    provider = custom_name.strip().lower()
+    api_type = questionary.select(
+        "API type:",
+        choices=["openai-compatible", "anthropic-messages"],
+    ).ask()
+    if api_type is None:
+        return
+
+    base_url = questionary.text(
+        "Base URL (e.g. https://api.example.com/v1):",
+    ).ask()
+    key_env = questionary.text(
+        "API key environment variable name (e.g. MY_PROVIDER_API_KEY):",
+    ).ask()
+    model = questionary.text(
+        "Default model name (e.g. my-model-v1):",
+    ).ask()
+    if not model:
+        return
+
+    _write_provider_config(
+        config_path,
+        provider,
+        model,
+        base_url=base_url,
+        key_env=key_env,
+        api_type=api_type,
+    )
+    if key_env:
+        typer.echo(f"  Note: Add your API key to your shell profile: export {key_env}=...")
+
+
+def _run_builtin_provider_wizard(
+    questionary: Any,
+    config_path: Path,
+    provider: str,
+) -> None:
+    """Interactive wizard for a built-in (preset) provider."""
+    key_env, api_type, base_url, default_model = _PRESET_MODELS[provider]
+
+    if key_env:
+        questionary.password(
+            f"Enter {key_env} value (or leave blank to set via env later):",
+        ).ask()
+
+    model = questionary.text(
+        "Enter default model:",
+        default=default_model,
+    ).ask()
+
+    _write_provider_config(
+        config_path,
+        provider,
+        model,
+        base_url=base_url,
+        key_env=key_env,
+        api_type=api_type,
+    )
+    if key_env:
+        typer.echo(f"  Note: API key stored. Add to shell profile: export {key_env}=****")
+
     verify = questionary.confirm("Test API connectivity?").ask()
     if verify:
         typer.echo("Connectivity test not yet implemented (placeholder).")
+
+
+def _run_wizard(config_path: Path) -> None:
+    """Interactive setup wizard using questionary."""
+    try:
+        import questionary  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        typer.echo("Install questionary for wizard mode: pip install questionary")
+        return
+
+    provider = questionary.select(
+        "Select default provider:",
+        choices=["openai", "anthropic", "deepseek", "ollama", "custom"],
+    ).ask()
+    if provider is None:
+        return
+
+    if provider == "custom":
+        _run_custom_provider_wizard(questionary, config_path)
+    else:
+        _run_builtin_provider_wizard(questionary, config_path, provider)
 
 
 def _default_config_template() -> str:

@@ -45,7 +45,6 @@ def main() -> None:
 def _run_cli() -> None:
     """Simple CLI interface for development and testing."""
     from agent_contract_analyzer.agent import ContractAnalyzerAgent
-    from agent_contract_analyzer.models import ClauseInfo
 
     parser = argparse.ArgumentParser(
         description="contract-analyzer — Contract clause analysis specialist"

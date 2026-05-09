@@ -10,10 +10,10 @@ from agent_nexus.platform.router.workflow import (
     WorkflowResult,
 )
 
-
 # ---------------------------------------------------------------------------
 # WorkflowPhase enum
 # ---------------------------------------------------------------------------
+
 
 class TestWorkflowPhase:
     def test_four_phases_exist(self):
@@ -21,8 +21,12 @@ class TestWorkflowPhase:
         assert names == {"research", "synthesis", "implementation", "verification"}
 
     def test_phase_order(self):
-        order = [WorkflowPhase.research, WorkflowPhase.synthesis,
-                 WorkflowPhase.implementation, WorkflowPhase.verification]
+        order = [
+            WorkflowPhase.research,
+            WorkflowPhase.synthesis,
+            WorkflowPhase.implementation,
+            WorkflowPhase.verification,
+        ]
         assert order == list(WorkflowPhase)
 
     def test_str_enum_comparison(self):
@@ -38,6 +42,7 @@ class TestWorkflowPhase:
 # ---------------------------------------------------------------------------
 # WorkflowContext
 # ---------------------------------------------------------------------------
+
 
 class TestWorkflowContext:
     def test_creation_sets_defaults(self):
@@ -65,6 +70,7 @@ class TestWorkflowContext:
 
     def test_close_sets_task_graph_none(self):
         from agent_nexus.platform.orchestration.task_graph import TaskGraph
+
         tg = TaskGraph(":memory:")  # pyright: ignore[reportArgumentType]
         ctx = WorkflowContext(
             conversation_id="cid-3",
@@ -79,6 +85,7 @@ class TestWorkflowContext:
     def test_close_releases_mem_conn(self):
         """Regression: close() must call task_graph.close() to release _mem_conn."""
         from agent_nexus.platform.orchestration.task_graph import TaskGraph
+
         tg = TaskGraph(":memory:")  # pyright: ignore[reportArgumentType]
         assert tg._mem_conn is not None
         ctx = WorkflowContext(
@@ -114,6 +121,7 @@ class TestWorkflowContext:
 # ---------------------------------------------------------------------------
 # WorkflowResult
 # ---------------------------------------------------------------------------
+
 
 class TestWorkflowResult:
     def test_success_result(self):

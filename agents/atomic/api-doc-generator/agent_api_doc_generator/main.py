@@ -36,8 +36,7 @@ def main() -> None:
         except ImportError as e:
             print(f"Error: {e}", file=sys.stderr)
             print(
-                "Install full dependencies with: "
-                "pip install agent-api-doc-generator[full]",
+                "Install full dependencies with: pip install agent-api-doc-generator[full]",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -48,9 +47,7 @@ def _run_cli() -> None:
     from agent_api_doc_generator.agent import APIDocGeneratorAgent
     from agent_api_doc_generator.models import EndpointInfo
 
-    parser = argparse.ArgumentParser(
-        description="api-doc-generator -- API 文档生成专家"
-    )
+    parser = argparse.ArgumentParser(description="api-doc-generator -- API 文档生成专家")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # extract command
@@ -63,9 +60,7 @@ def _run_cli() -> None:
 
     # generate command
     gen_parser = subparsers.add_parser("generate", help="Generate OpenAPI spec")
-    gen_parser.add_argument(
-        "--endpoints", required=True, help="JSON string of endpoints"
-    )
+    gen_parser.add_argument("--endpoints", required=True, help="JSON string of endpoints")
     gen_parser.add_argument("--title", default="API Documentation", help="API title")
     gen_parser.add_argument("--version", default="1.0.0", help="API version")
 
@@ -74,11 +69,13 @@ def _run_cli() -> None:
 
     if args.command == "extract":
         endpoints = agent.extract(args.file_path)
-        print(json.dumps(
-            {"endpoints": [e.model_dump() for e in endpoints]},
-            indent=2,
-            ensure_ascii=False,
-        ))
+        print(
+            json.dumps(
+                {"endpoints": [e.model_dump() for e in endpoints]},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
 
     elif args.command == "infer":
         schema = agent.infer(args.type_info)

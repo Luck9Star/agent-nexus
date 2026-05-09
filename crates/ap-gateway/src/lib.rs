@@ -2,5 +2,6 @@
 
 pub mod deferred_registry;
 pub mod gateway;
+pub mod provider_strategy;
 pub mod schema;
 pub mod tool_adapter;

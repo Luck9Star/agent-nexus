@@ -21,25 +21,25 @@ _EFFORT_MAP: dict[str, str] = {
 }
 
 
+# Keyword-to-category mapping for issue classification
+_CATEGORY_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
+    (("image", "alt", "img"), "images"),
+    (("form", "input", "label"), "forms"),
+    (("heading", "h1", "h2"), "headings"),
+    (("link",), "links"),
+    (("lang", "language"), "language"),
+    (("aria", "role", "tabindex"), "aria"),
+    (("table", "th"), "tables"),
+    (("keyboard", "focus"), "keyboard"),
+]
+
+
 def _categorize_issue(issue: AccessibilityIssue) -> str:
     """Categorize an issue for effort estimation."""
     desc = (issue.description + " " + issue.element).lower()
-    if "image" in desc or "alt" in desc or "img" in desc:
-        return "images"
-    if "form" in desc or "input" in desc or "label" in desc:
-        return "forms"
-    if "heading" in desc or "h1" in desc or "h2" in desc:
-        return "headings"
-    if "link" in desc:
-        return "links"
-    if "lang" in desc or "language" in desc:
-        return "language"
-    if "aria" in desc or "role" in desc or "tabindex" in desc:
-        return "aria"
-    if "table" in desc or "th" in desc:
-        return "tables"
-    if "keyboard" in desc or "focus" in desc:
-        return "keyboard"
+    for keywords, category in _CATEGORY_KEYWORDS:
+        if any(kw in desc for kw in keywords):
+            return category
     return "general"
 
 
@@ -67,9 +67,7 @@ def generate_remediation(issues: list) -> RemediationPlan:
 
     # Sort: Level A first (must fix for any conformance), then AA
     level_order = {"A": 0, "AA": 1, "AAA": 2}
-    sorted_issues = sorted(
-        normalized, key=lambda i: (level_order.get(i.level, 99), i.criterion)
-    )
+    sorted_issues = sorted(normalized, key=lambda i: (level_order.get(i.level, 99), i.criterion))
 
     # Build priority order (unique criteria in fix order)
     seen_criteria: set[str] = set()
@@ -103,28 +101,41 @@ def _estimate_effort(issues: list[AccessibilityIssue]) -> str:
 
     categories: set[str] = {_categorize_issue(i) for i in issues}
 
-    # Sum up effort ranges (simplified: take the max of ranges)
-    total_minutes_min = 0
-    total_minutes_max = 0
+    total_min = 0
+    total_max = 0
     for cat in categories:
         estimate = _EFFORT_MAP.get(cat, "1 hour")
-        parts = estimate.replace("minutes", "min").replace("hours", "hrs").split("-")
-        for part in parts:
-            part = part.strip()
-            if "min" in part:
-                val = int(part.replace("min", "").strip())
-                total_minutes_min += val
-                total_minutes_max += val
-            elif "hrs" in part:
-                val = int(part.replace("hrs", "").strip())
-                total_minutes_min += val * 60
-                total_minutes_max += val * 120
+        range_min, range_max = _parse_effort_to_minutes(estimate)
+        total_min += range_min
+        total_max += range_max
 
-    if total_minutes_min == total_minutes_max:
-        if total_minutes_max < 60:
-            return f"{total_minutes_max} minutes"
-        return f"{total_minutes_max // 60} hours"
+    return _format_effort_range(total_min, total_max)
 
-    if total_minutes_max < 60:
-        return f"{total_minutes_min}-{total_minutes_max} minutes"
-    return f"{total_minutes_min // 60}-{total_minutes_max // 60} hours"
+
+def _parse_effort_to_minutes(estimate: str) -> tuple[int, int]:
+    """Parse an effort estimate string into (min_minutes, max_minutes)."""
+    total_min = 0
+    total_max = 0
+    parts = estimate.replace("minutes", "min").replace("hours", "hrs").split("-")
+    for part in parts:
+        part = part.strip()
+        if "min" in part:
+            val = int(part.replace("min", "").strip())
+            total_min += val
+            total_max += val
+        elif "hrs" in part:
+            val = int(part.replace("hrs", "").strip())
+            total_min += val * 60
+            total_max += val * 120
+    return total_min, total_max
+
+
+def _format_effort_range(min_minutes: int, max_minutes: int) -> str:
+    """Format a minute range as a human-readable effort string."""
+    if min_minutes == max_minutes:
+        if max_minutes < 60:
+            return f"{max_minutes} minutes"
+        return f"{max_minutes // 60} hours"
+    if max_minutes < 60:
+        return f"{min_minutes}-{max_minutes} minutes"
+    return f"{min_minutes // 60}-{max_minutes // 60} hours"

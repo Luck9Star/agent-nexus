@@ -1,7 +1,6 @@
 """Unit tests for CLI backend data types."""
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 from agent_nexus.platform.agency.cli_backend.types import (
     BackendConfig,
@@ -86,9 +85,7 @@ class TestBackendConfig:
             system_prompt_flag="--system",
             session_flag="--session",
             output_format="text",
-            text_patterns=TextPatternConfig(
-                session_id=r"session[:\s]+([a-f0-9-]+)"
-            ),
+            text_patterns=TextPatternConfig(session_id=r"session[:\s]+([a-f0-9-]+)"),
         )
         assert config.output_format == "text"
         assert config.text_patterns.session_id is not None

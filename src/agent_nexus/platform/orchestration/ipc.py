@@ -14,8 +14,10 @@ and the Platform Router is the sole coordinator.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+import threading
 from collections import deque
 from typing import Any
 
@@ -163,15 +165,26 @@ class IPCStream:
         transport) FDs.  Suitable for calling from sync contexts
         (e.g. ``_cleanup_dead``) when the remote process is already
         gone and only local FD release matters.
+
+        Note:
+            Accessing ``StreamReader._transport`` is a CPython
+            implementation detail — there is no public API for releasing
+            the underlying FD from a ``StreamReader``.  If this breaks
+            on an alternative Python implementation, the ``getattr``
+            guard ensures a graceful no-op.
         """
         if not self._stdin.is_closing():
             self._stdin.close()
         # Release the stdout FD via its transport.  StreamReader has
         # no public close(), but the underlying transport owns the FD
         # and ``transport.close()`` releases it immediately.
-        transport = getattr(self._stdout, "_transport", None)
+        try:
+            transport = getattr(self._stdout, "_transport", None)
+        except AttributeError:
+            transport = None
         if transport is not None and not transport.is_closing():
-            transport.close()
+            with contextlib.suppress(Exception):
+                transport.close()
 
     async def close(self) -> None:
         """Close stdin (signals EOF to agent), drain stdout."""
@@ -407,6 +420,7 @@ _MAX_LOCK_REGISTRY_SIZE = 1000
 
 _ipc_lock_registry: dict[str, asyncio.Lock] = {}
 _ipc_lock_loop_id: int | None = None
+_ipc_lock_thread_guard = threading.Lock()
 
 
 def get_ipc_lock(agent_name: str) -> asyncio.Lock:
@@ -417,29 +431,29 @@ def get_ipc_lock(agent_name: str) -> asyncio.Lock:
     discarded and recreated to prevent ``attached to a different loop``
     errors.
 
-    Thread-safety: This function MUST only be called from the asyncio
-    event loop thread.  Under CPython's GIL, dict operations on the
-    event loop are atomic, but concurrent access from non-asyncio
-    threads (e.g. IPython worker threads) would be unsafe.
+    Thread-safety: A ``threading.Lock`` guards mutations of the
+    internal registry so that calls from non-asyncio threads (e.g.
+    IPython worker threads) cannot cause data races.
     """
     global _ipc_lock_registry, _ipc_lock_loop_id
 
-    # Check loop identity unconditionally to prevent "attached to a
-    # different loop" errors after asyncio.run() in tests.
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    current_loop_id = id(loop) if loop is not None else None
-    if current_loop_id != _ipc_lock_loop_id:
-        _ipc_lock_registry.clear()
-        _ipc_lock_loop_id = current_loop_id
+    with _ipc_lock_thread_guard:
+        # Check loop identity unconditionally to prevent "attached to a
+        # different loop" errors after asyncio.run() in tests.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        current_loop_id = id(loop) if loop is not None else None
+        if current_loop_id != _ipc_lock_loop_id:
+            _ipc_lock_registry.clear()
+            _ipc_lock_loop_id = current_loop_id
 
-    lock = _ipc_lock_registry.get(agent_name)
-    if lock is None:
-        # Bounded cache: evict oldest entry (FIFO) when at capacity.
-        if len(_ipc_lock_registry) >= _MAX_LOCK_REGISTRY_SIZE:
-            _ipc_lock_registry.pop(next(iter(_ipc_lock_registry)))
-        lock = asyncio.Lock()
-        _ipc_lock_registry[agent_name] = lock
-    return lock
+        lock = _ipc_lock_registry.get(agent_name)
+        if lock is None:
+            # Bounded cache: evict oldest entry (FIFO) when at capacity.
+            if len(_ipc_lock_registry) >= _MAX_LOCK_REGISTRY_SIZE:
+                _ipc_lock_registry.pop(next(iter(_ipc_lock_registry)))
+            lock = asyncio.Lock()
+            _ipc_lock_registry[agent_name] = lock
+        return lock

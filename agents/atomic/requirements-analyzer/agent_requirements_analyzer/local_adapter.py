@@ -62,11 +62,7 @@ def handle_message(agent: RequirementsAnalyzerAgent, message: dict) -> dict:
             if not answers:
                 return {"status": "error", "error": "Missing 'answers' parameter"}
             analysis_data = params.get("analysis")
-            analysis = (
-                RequirementAnalysis.model_validate(analysis_data)
-                if analysis_data
-                else None
-            )
+            analysis = RequirementAnalysis.model_validate(analysis_data) if analysis_data else None
             title = params.get("title", "需求说明书")
             result = agent.build(answers, analysis, title)
             return {"status": "ok", "result": result.model_dump()}

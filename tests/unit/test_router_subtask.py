@@ -8,10 +8,10 @@ import pytest
 
 from agent_nexus.platform.router.subtask import SubtaskConfig, SubtaskController
 
-
 # ---------------------------------------------------------------------------
 # SubtaskConfig
 # ---------------------------------------------------------------------------
+
 
 class TestSubtaskConfig:
     def test_defaults(self):
@@ -30,6 +30,7 @@ class TestSubtaskConfig:
 # ---------------------------------------------------------------------------
 # SubtaskController — run_with_timeout
 # ---------------------------------------------------------------------------
+
 
 class TestRunWithTimeout:
     @pytest.mark.asyncio
@@ -71,12 +72,14 @@ class TestRunWithTimeout:
     def _immediate(value):
         async def _coro():
             return value
+
         return _coro()
 
 
 # ---------------------------------------------------------------------------
 # SubtaskController — run_with_retry
 # ---------------------------------------------------------------------------
+
 
 class TestRunWithRetry:
     @pytest.mark.asyncio
@@ -137,12 +140,14 @@ class TestRunWithRetry:
     def _immediate(value):
         async def _coro():
             return value
+
         return _coro()
 
 
 # ---------------------------------------------------------------------------
 # SubtaskController — run_parallel
 # ---------------------------------------------------------------------------
+
 
 class TestRunParallel:
     @pytest.mark.asyncio
@@ -215,9 +220,7 @@ class TestRunParallel:
         async def ok():
             return "good"
 
-        results_future = asyncio.ensure_future(
-            ctrl.run_parallel([blocker(), fail(), ok()])
-        )
+        results_future = asyncio.ensure_future(ctrl.run_parallel([blocker(), fail(), ok()]))
         # Wait for blocker to start
         await started.wait()
         # fail() may or may not have run yet; give it a chance
@@ -275,9 +278,9 @@ class TestRunParallel:
             warnings.simplefilter("always")
             results = await ctrl.run_parallel([fail(), never_started()])
             runtime_warnings = [
-                w for w in caught
-                if issubclass(w.category, RuntimeWarning)
-                and "never awaited" in str(w.message)
+                w
+                for w in caught
+                if issubclass(w.category, RuntimeWarning) and "never awaited" in str(w.message)
             ]
         assert len(runtime_warnings) == 0, (
             f"Expected no 'never awaited' warnings, got: {runtime_warnings}"

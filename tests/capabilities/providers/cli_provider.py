@@ -58,12 +58,16 @@ class CLIProvider:
         start = time.monotonic()
         try:
             env = {**os.environ, "AGENT_MODE": "local"}
+            args: list[str] = ["uv", "run"]
+            # Composite agents import from agent_nexus which lives in the
+            # platform venv.  Point uv at the root project so it reuses
+            # the root .venv (which has agent_nexus on sys.path) rather
+            # than creating a per-agent venv.
+            if contract.agent_type == "composite":
+                args.extend(["--active", "--project", str(_REPO_ROOT)])
+            args.extend(["python", "-m", module_name])
             proc = await _subprocess_exec(
-                "uv",
-                "run",
-                "python",
-                "-m",
-                module_name,
+                *args,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from agent_good_skill.models import TaskInput, TaskResult
 
@@ -26,7 +27,7 @@ class TestTaskInput:
 
     def test_frozen(self) -> None:
         t = TaskInput(task="x")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             t.task = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -56,7 +57,7 @@ class TestTaskResult:
 
     def test_frozen(self) -> None:
         r = TaskResult(output="x")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.output = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:

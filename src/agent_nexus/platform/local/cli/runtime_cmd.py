@@ -33,7 +33,8 @@ def start(
     if all_agents:
         asyncio.run(_start_all())
     else:
-        asyncio.run(_start_one(name))  # type: ignore[arg-type]
+        assert name is not None  # guaranteed: not all_agents and earlier guard passed
+        asyncio.run(_start_one(name))
 
 
 @runtime_app.command()
@@ -49,7 +50,8 @@ def stop(
     if all_agents:
         asyncio.run(_stop_all())
     else:
-        asyncio.run(_stop_one(name))  # type: ignore[arg-type]
+        assert name is not None  # guaranteed: not all_agents and earlier guard passed
+        asyncio.run(_stop_one(name))
 
 
 @runtime_app.command()
@@ -158,6 +160,7 @@ async def _stop_one(name: str) -> None:
         typer.echo(f"Stopped {name}")
     else:
         typer.echo(f"Agent '{name}' is not running.", err=True)
+        raise typer.Exit(code=1)
 
 
 async def _stop_all() -> None:
@@ -179,14 +182,16 @@ async def _restart_agent(name: str) -> None:
 
     supervisor, config_dir, pm = await _make_supervisor()
 
-    ok = await supervisor.stop_agent(name)
-    if ok:
+    stop_ok = await supervisor.stop_agent(name)
+    if stop_ok:
         pid_file = config_dir / "agents" / f"{name}.pid"
         with contextlib.suppress(FileNotFoundError):
             pid_file.unlink()
+    else:
+        typer.echo(f"Agent '{name}' was not running, attempting fresh start.", err=True)
 
-    ok = await supervisor.start_agent(name)
-    if not ok:
+    start_ok = await supervisor.start_agent(name)
+    if not start_ok:
         typer.echo(f"Failed to restart agent '{name}'.", err=True)
         raise typer.Exit(code=1)
 

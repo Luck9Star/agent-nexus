@@ -12,29 +12,28 @@ Covers:
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
-from agent_feature_delivery_pipeline.coordinator import (
-    FeatureDeliveryCoordinator,
-    _simulate_agent_execution,
-)
 from agent_nexus.models.composition import (
     Composition,
     CompositionError,
     CompositionTask,
     _detect_cycles,
 )
+from pydantic import ValidationError
+
+from agent_feature_delivery_pipeline.coordinator import (
+    FeatureDeliveryCoordinator,
+    _simulate_agent_execution,
+)
 from agent_feature_delivery_pipeline.models import (
     PipelineResult,
     PipelineStage,
     StageStatus,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -215,7 +214,7 @@ class TestPipelineStage:
 
     def test_frozen(self) -> None:
         s = PipelineStage(name="x", agent="y")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             s.name = "changed"  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -257,7 +256,7 @@ class TestPipelineResult:
 
     def test_frozen(self) -> None:
         r = PipelineResult(spec="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             r.success = True  # type: ignore[misc]
 
     def test_serialization_roundtrip(self) -> None:
@@ -514,9 +513,7 @@ class TestFeatureDeliveryCoordinator:
         assert result.success is False
         assert result.stages == []
 
-    def test_pipeline_with_simulated_failure(
-        self, coordinator: FeatureDeliveryCoordinator
-    ) -> None:
+    def test_pipeline_with_simulated_failure(self, coordinator: FeatureDeliveryCoordinator) -> None:
         """Test that pipeline handles root task failure gracefully."""
         with patch(
             "agent_feature_delivery_pipeline.coordinator._simulate_agent_execution",
@@ -596,15 +593,11 @@ class TestLocalAdapter:
         assert response["result"]["success"] is True
 
     def test_missing_spec(self) -> None:
-        response = self._handle_local_message(
-            {"method": "run_pipeline", "params": {}}
-        )
+        response = self._handle_local_message({"method": "run_pipeline", "params": {}})
         assert response["status"] == "error"
         assert "Missing" in response["error"]
 
     def test_unknown_method(self) -> None:
-        response = self._handle_local_message(
-            {"method": "unknown", "params": {}}
-        )
+        response = self._handle_local_message({"method": "unknown", "params": {}})
         assert response["status"] == "error"
         assert "Unknown method" in response["error"]
