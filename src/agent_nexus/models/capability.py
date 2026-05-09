@@ -372,30 +372,26 @@ def _strip_trailing_numeric(model_id: str) -> str:
     return _TRAILING_NUMERIC_RE.sub("", model_id)
 
 
+_PROVIDER_PREFIX_MAP: list[tuple[tuple[str, ...], str]] = [
+    (("claude",), "anthropic"),
+    (("gpt", "o1", "o3"), "openai"),
+    (("deepseek",), "deepseek"),
+    (("qwen",), "qwen"),
+    (("minimax",), "minimax"),
+    (("ollama", "llama", "mistral", "mixtral", "gemma", "phi"), "ollama"),
+]
+
+
 def _extract_provider(model_id: str) -> str:
     """Heuristically determine the provider name from a model id string.
 
-    This is intentionally simple -- if the id starts with a known prefix
-    the provider is returned; otherwise we fall back to "openai" as a
-    reasonable default for unrecognised ids.
-
-    Returns one of: anthropic, openai, deepseek, qwen, minimax, ollama
+    Looks up known prefixes in ``_PROVIDER_PREFIX_MAP`` and falls back to
+    ``"openai"`` for unrecognised ids.
     """
     lower = model_id.lower()
-    if lower.startswith("claude"):
-        return "anthropic"
-    if lower.startswith("gpt") or lower.startswith("o1") or lower.startswith("o3"):
-        return "openai"
-    if lower.startswith("deepseek"):
-        return "deepseek"
-    if lower.startswith("qwen"):
-        return "qwen"
-    if lower.startswith("minimax"):
-        return "minimax"
-    _ollama_prefixes = ("ollama", "llama", "mistral", "mixtral", "gemma", "phi")
-    if lower.startswith(_ollama_prefixes):
-        return "ollama"
-    # generic unknown -- default to openai
+    for prefixes, provider in _PROVIDER_PREFIX_MAP:
+        if lower.startswith(prefixes):
+            return provider
     return "openai"
 
 
