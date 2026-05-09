@@ -1,275 +1,371 @@
-# Test Audit Report: Gap & Redundancy Analysis (Deep Audit v2)
+# Test Audit Report: Gap & Redundancy Analysis (Cycle 3)
 
-**Date**: 2026-05-09
+**Date**: 2026-05-10
 **Branch**: nf/serena-using-superpo-ff6f4b
-**Auditor**: Automated analysis via Serena LSP + Explore agents + grep/glob
-**Iteration**: 4 (深度审计 v2，修正 v1 的误判，新增冗余/同义反复分析)
+**Iteration**: 11 (Cycle 3 全量重分析，覆盖 v1/v2 发现的修复 + 新发现)
+**Total Tests**: 4,778 across 170 files
 
 ---
 
 ## 1. Overall Statistics
 
-| Metric | Count |
-|--------|-------|
-| Source modules (non-init) | 99 |
-| Public classes | 219 |
-| Public functions | 76 |
-| **Total public symbols** | **295** |
-| Test files (excl. conftest/__init__) | 167 |
-| Unit test files | 130 |
-| E2E test files | 21 |
-| Integration test files | 9 |
-| Capability test files | 6 |
-| **Total test functions** | **4,437** |
+| Metric | v2 (Iter 4) | Current (Cycle 3) | Delta |
+|--------|-------------|-------------------|-------|
+| Source modules (non-init) | 99 | 99 | 0 |
+| Total public symbols | 295 | ~651 | +356 (更精确计数) |
+| Test files (excl. conftest/__init__) | 167 | 170 | +3 |
+| Unit test files | 130 | 124 | -6 (删除+重分类) |
+| E2E test files | 21 | 20 | -1 |
+| Integration test files | 9 | 10 | +1 |
+| Capability test files | 6 | 16 | +10 |
+| **Total test functions** | **4,437** | **4,778** | **+341** |
 
 ---
 
 ## 2. Gap Analysis: Untested Public Symbols (P0-P2)
 
-### P0 — Critical Gaps (Zero test coverage for key public methods)
+### 总体覆盖率
+
+| Module Directory | Public Symbols | With Tests | Without | Coverage |
+|---|---|---|---|---|
+| `platform/hooks/` | 6 | 6 | 0 | 100% |
+| `platform/skills/` | 16 | 16 | 0 | 100% |
+| `platform/gateway/` | ~65 | ~60 | ~5 | 92% |
+| `platform/runtime/` | ~50 | ~48 | ~2 | 96% |
+| `platform/evolution/` | ~110 | ~100 | ~10 | 91% |
+| `platform/orchestration/` | ~75 | ~70 | ~5 | 93% |
+| `models/` | ~95 | ~90 | ~5 | 95% |
+| `platform/agency/` | ~120 | ~105 | ~15 | 88% |
+| `platform/config/` | 44 | 38 | 6 | 86% |
+| `platform/router/` | ~20 | ~18 | ~2 | 90% |
+| `platform/local/` | ~50 | ~42 | ~8 | 84% |
+| **TOTAL** | **~651** | **~593** | **~58** | **91%** |
+
+### P0 — 关键缺口（高风险路径零覆盖）
+
+> 注：v2 报告的 P0 缺口（ModelDBClient.close、_trigram_candidates、ProcessManager._force_kill_and_reap、HookExecutor.close、PermissionChecker.check_command、AgentSupervisor.auto_restart_dead）已在 iteration 7 通过新增 128 个测试全部修复。以下为残余和新发现缺口。
 
 | Module | Symbol | Risk | Notes |
 |--------|--------|------|-------|
-| `config/model_db.py` | `ModelDBClient.close()` | High | 资源泄漏风险：httpx.AsyncClient 未关闭 |
-| `config/model_db.py` | `ModelDBClient._trigram_candidates()` | Medium | 核心模糊搜索算法无任何单元测试 |
-| `config/model_db.py` | `ModelDBClient._build_search_index()` | Medium | 搜索索引构建无测试 |
-| `config/model_db.py` | `ModelDBClient._load_disk_index()` | Medium | 磁盘缓存损坏路径无测试 |
-| `hooks/executor.py` | `HookExecutor.close()` | High | async 资源清理无测试 |
-| `gateway/gateway.py` | `MCPGateway._setup_core_tools()` | High | MCP 核心工具注册的引导路径，失败会导致静默启动 |
-| `gateway/gateway.py` | `MCPGateway._check_agent_health()` | Medium | 健康检查无直接测试 |
-| `gateway/gateway.py` | `MCPGateway._is_stale_registration()` | Medium | 过期注册检测无测试 |
-| `orchestration/process_manager.py` | `ProcessManager._force_kill_and_reap()` | High | 僵尸进程清理，安全关键路径 |
-| `orchestration/process_manager.py` | `ProcessManager._cleanup_dead()` | High | 死亡 agent 回收 |
-| `local/supervisor.py` | `AgentSupervisor.auto_restart_dead()` | High | 自动重启逻辑 |
-| `local/supervisor.py` | `AgentSupervisor._find_dead_agents()` | Medium | 死亡 agent 检测 |
+| `evolution/store.py` | `EvolutionStore.get_metrics()` | High | Metrics 聚合被 HealthChecker 和 AgentPromoter 消费，无直接测试 |
+| `evolution/store.py` | `EvolutionStore.deactivate_skill()` | Medium | evolve_skill 内部使用，无独立断言 |
+| `evolution/health.py` | `HealthChecker.get_health_summary()` | Medium | 公开 API，被 EvolutionEngine.diagnose_all 消费 |
+| `local/installer.py` | `GitInstaller._run_git()` / `_run_git_capture()` | High | 核心 git 交互层，install/uninstall/update 依赖 |
+| `local/installer.py` | `GitInstaller._create_venv()` / `_run_uv()` | Medium | Agent 安装 venv 创建 |
+| `local/supervisor.py` | `AgentSupervisor._resolve_package_name()` 等 4 个方法 | Medium | Agent 启动时的包解析路径 |
 
-### P1 — Modules with Weak Boundary/Exception Testing
+### P1 — 中等优先级缺口
 
 | Module | Gap | Notes |
 |--------|-----|-------|
-| `config/loader.py` | `invalidate_cache()` | 缓存失效行为无测试 |
-| `config/model_db.py` | 网络超时 / DNS 失败 / SSL 错误 | `_do_get` 的 HTTP 5xx 路径无测试 |
-| `config/model_db.py` | 磁盘缓存损坏 (malformed JSON) | `_load_disk_index` 无异常路径测试 |
-| `config/model_db.py` | 磁盘缓存并发访问 | 多个 ModelDBClient 实例共享同一缓存路径 |
-| `evolution/store.py` | 并发 SQLite 写入竞争 | Store 跨线程共享，无竞争测试 |
-| `evolution/context_describer.py` | `_build_judgment_history` 深层边缘 | 空 judgments / 超长列表 / 缺字段 |
-| `orchestration/ipc.py` | `IPCStream.receive()` 超大消息 | `_MAX_MESSAGE_SIZE` 执行路径 |
-| `orchestration/task_graph.py` | `detect_cycles()` 复杂菱形依赖 | 仅简单循环有测试 |
-| `runtime/permission_checker.py` | `check_command()` shell 注入 | 危险命令模式无测试 |
-| `runtime/security_checker.py` | `clear_cache()` | 缓存失效未测试 |
-| `agency/dag_dispatcher.py` | `_dispatch_sequential()` | 顺序 vs 并行分发分支 |
-| `agency/llm_client.py` | `_call_cli()` 非零退出码 | CLI 后端失败处理 |
-| `skills/loader.py` | `load_agent_skills()` 权限拒绝 | EACCES OSError 路径 |
-| `gateway/gateway.py` | `_make_external_tool_func()` 错误传播 | 外部工具调用错误未验证 |
+| `config/loader.py` | `ConfigLoader.invalidate_cache()` | 缓存失效行为无测试 |
+| `config/loader.py` | `ConfigLoader.load_cli_routing()` | CLI 路由配置加载 |
+| `config/templates.py` | `load_routing_config()` | 路由配置模板 |
+| `config/model_db.py` | `ModelDBClient._do_get()` HTTP 5xx 路径 | 网络异常未覆盖 |
+| `agency/dag_dispatcher.py` | `_cleanup_stale_tasks` / `_fail_orphaned_pending` | 清理路径 |
+| `agency/task_composer.py` | `_check_deadline` | 超时强制逻辑 |
+| `evolution/store.py` | `get_skill_records_batch` / `get_children` | 批量查询路径 |
+| `evolution/compaction.py` | `should_alert` / `reset_consecutive_count` | CompactionGuard 边缘 |
+| `gateway/external_mcp_adapter.py` | `is_alive` 连接超时路径 | 外部 MCP 断连检测 |
+| `orchestration/task_graph.py` | `clear()` 数据清理 | 无直接测试 |
 
-### P2 — Nice-to-Have Coverage Improvements
+### P2 — 低优先级改进
 
 | Module | Gap |
 |--------|-----|
-| `platform/utils.py` | `resolve_composition_path()` 符号链接 |
-| `platform/utils.py` | `sqlite_connection()` WAL 模式 |
-| `models/_common.py` | `FrozenModel` 序列化边缘情况 |
-| `agency/json_parse.py` | `robust_json_parse()` 深度嵌套畸形 JSON |
-| `agency/prompt_loader.py` | `render()` 缺失模板变量 |
-| `agency/parser.py` | `parse_frontmatter()` BOM / 编码问题 |
+| `models/_common.py` | `FrozenModel` 序列化边缘 |
+| `agency/json_parse.py` | 深度嵌套畸形 JSON |
+| `agency/prompt_loader.py` | 缺失模板变量异常 |
+| `agency/parser.py` | BOM / 编码问题 |
 
-### v1 报告修正
+### v2 报告 P0 修复状态
 
-v1 报告中以下条目标记为"zero coverage"，经本次深度验证实际已有测试覆盖：
-
-| v1 条目 | 实际状态 |
-|---------|---------|
-| `ConfigLoader.load_cli_backends()` | **已有测试**: `test_cli_backend_config_loader.py` (4+ tests), `test_cli_backend_e2e.py` (3+ tests) |
-| `ConfigLoader.load_external_servers()` | **已有测试**: `config/test_loader.py` (5 tests), `test_external_mcp_adapter.py` (15+ tests) |
-| `ConfigLoader.load_cli_routing()` | **已有测试**: `test_cli_backend_config_loader.py` (1 test), `config/test_loader.py` (2 tests) |
-| `MCPGateway.run_stdio()` | **已有测试**: `test_gateway_module.py` (mock-based) |
-| `MCPGateway.run_sse()` | **已有测试**: `test_gateway_module.py` (mock-based) |
-| `MCPGateway.stop()` | **已有测试**: `test_gateway_module.py` |
+| v2 P0 条目 | 当前状态 |
+|---|---|
+| `ModelDBClient.close()` | **[FIXED]** — `test_model_db_unit.py` 22 tests |
+| `ModelDBClient._trigram_candidates()` | **[FIXED]** — `test_model_db_unit.py` |
+| `ModelDBClient._load_disk_index()` 损坏路径 | **[FIXED]** — `test_model_db_unit.py` |
+| `HookExecutor.close()` | **[FIXED]** — `test_executor_unit.py` + `test_hooks_lifecycle_e2e.py` |
+| `ProcessManager._force_kill_and_reap()` | **[FIXED]** — `test_process_manager_unit.py` |
+| `ProcessManager._cleanup_dead()` | **[FIXED]** — `test_process_manager_unit.py` |
+| `AgentSupervisor.auto_restart_dead()` | **[FIXED]** — `test_supervisor_unit.py` |
+| `PermissionChecker.check_command()` shell 注入 | **[FIXED]** — `test_permission_checker_unit.py` |
 
 ---
 
-## 3. Redundancy Analysis: Tautological / Duplicate / Low-Value Tests
+## 3. Redundancy Analysis
 
-### 3.1 同义反复测试（Tautological — Mock 返回值 == Mock 返回值）
+### 3.1 无断言测试 — 最大发现（NEW）
 
-测试仅验证 `mock.return_value` 通过被测方法原样返回，不验证任何项目逻辑。
+**176 个测试函数包含零 `assert` 语句且不使用 `pytest.raises`。** 它们设置场景、调用函数，但从不验证结果。这是本次审计最严重的冗余发现。
 
-| File | Test Count | Pattern | Action |
-|------|-----------|---------|--------|
-| `tests/unit/evolution/test_engine.py` | 29 | 每个测试替换 EvolutionEngine 所有组件为 MagicMock，断言 `result is mock.return_value` | **DELETE** — 零回归保护 |
-| `tests/unit/test_evolution_engine.py` | 16 | 同上，旧版测试，与 `evolution/test_engine.py` 完全重叠 | **DELETE** — 重复且同义反复 |
-| `tests/unit/test_token_counter_enhanced.py` | 3 | `_litellm_mod.token_counter.return_value = 42; assert result == 42` | **REWRITE** — 加入 litellm fallback 逻辑验证 |
-| `tests/unit/test_evolution_health.py::test_store_returns_underlying_store` | 1 | `assert checker.store is store` — 验证构造函数赋值 | **DELETE** — 零价值 |
+**Top 10 文件**：
 
-**小计: ~49 个同义反复测试**
+| File | Count | Nature |
+|------|-------|--------|
+| `test_process_manager.py` | 13 | 调用方法但未验证返回值 |
+| `cli/test_runtime_cmd.py` | 19 | CLI 集成测试仅隐式检查退出码 |
+| `integration/test_ipc_e2e.py` | 19 | IPC 调用无结果断言 |
+| `test_ipc.py` | 17 | IPC 传输无断言 |
+| `test_router_module.py` | 7 | Router 无断言 |
+| `integration/test_runtime_deep.py` | 11 | Runtime 深度测试无断言 |
+| `test_gateway_module.py` | 7 | Gateway 无断言 |
+| `cli/test_evolution_cmd.py` | 12 | CLI 命令无断言 |
+| `test_hook_executor.py` | 6 | Hook 解析无断言 |
+| `test_importer.py` | 8 | Importer 无断言 |
 
-### 3.2 重复测试文件（同一源类，多个测试文件）
+**典型案例**：
+- `test_process_manager.py:130` `test_start_agent_registers_handle` — 调用 `start_agent` 但从未验证 handle 是否注册
+- `test_ipc.py:93` `test_send_calls_drain` — 名为"测试 send 调用 drain"但从未验证 drain 被调用
+- `test_gateway_module.py:839` `test_run_stdio` — 未对 stdio 模式做任何断言
 
-| Files | Overlap | Source Module | Action |
-|-------|---------|---------------|--------|
-| `test_evolution_engine.py` (16) + `evolution/test_engine.py` (29) | 100% 重叠：evolve routing, check_health, diagnose_all, promote, should_compact | `EvolutionEngine` | **DELETE BOTH** — 都是同义反复 |
-| `test_task_composer.py` (2) + `platform/agency/test_task_composer.py` (21) | 100% 重叠：mock wiring vs 真实集成 | `TaskComposer` | **DELETE** `test_task_composer.py` (2 tests，完全被 21 tests 覆盖) |
-| `test_config.py` (45) + `test_config_loader.py` (28) | 部分重叠：都测试 `ConfigLoader.load_config()` | `ConfigLoader` | **MERGE** `test_config.py` 的 ConfigLoader 测试到 `test_config_loader.py` |
+**小计: ~176 个无断言测试（估计 ~120-150 个真正可删除，部分可能通过 caplog 等间接机制验证）**
 
-**小计: 3 对重复文件，~47 个重复/多余测试**
+### 3.2 同义反复测试（Mock 返回值 == Mock 返回值）
 
-### 3.3 Pydantic 框架测试（测试 Pydantic 行为，非项目代码）
+v2 的 49 个同义反复测试中，45 个已在 iteration 7 删除。剩余：
 
-| Pattern | Count | Files | Value |
-|---------|-------|-------|-------|
-| `test_frozen*` (验证 frozen model 不可变) | ~18 | test_agent_models, test_task_models, test_distribution_models, test_hooks_models, test_context_models | 测试 Pydantic `frozen=True` |
-| `test_construction`/`test_defaults`/`test_with_values`/`test_full_construction` | ~60 | 所有 model 测试文件 | 测试 Pydantic 字段赋值 |
-| `test_roundtrip`/`test_serialization` (model_dump → Model(**data)) | ~25 | 所有 model 测试文件 | 测试 Pydantic 序列化 |
+| File | Count | Pattern |
+|------|-------|---------|
+| `test_token_counter_enhanced.py` | 8 | `mock.return_value = 42; assert result == 42` |
+| `test_cli_module.py` | 4 | mock 命令构建后断言构建参数 |
+| `test_local_supervisor.py` | 1 | `sup.list_running() == ["a", "b"]` 来自 mock |
+| `test_evolution_health.py::test_store_returns_underlying_store` | 1 | `assert checker.store is store` |
 
-**注意**: 这些测试在重构 Pydantic model 时有轻微价值（变更检测），但不应计入有效测试覆盖。
+**小计: ~14 个同义反复测试**
 
-**小计: ~103 个 Pydantic 框架测试**
+### 3.3 重复测试文件对
 
-### 3.4 Enum 枚举值测试（测试 Python enum 行为）
+#### 3.3.1 Config 三重奏（最严重的重复）
 
-| Pattern | Count | Files |
-|---------|-------|-------|
-| `test_members` / `test_values` / `test_from_string` / `test_invalid_string_raises` | ~35 | test_agent_models, test_task_models, test_distribution_models, test_hooks_models, test_context_models, test_config_models, test_evolution_models, test_permission_models |
+| File | Tests | Overlap |
+|------|-------|---------|
+| `test_config.py` | 45 | ConfigLoader + model string + API key |
+| `test_config_loader.py` | 28 | ConfigLoader project/global merge |
+| `config/test_loader.py` | 58 | ConfigLoader caching/servers/stages |
 
-这些验证 `AgentType.ATOMIC == "atomic"` 等 enum 字面值。重构时 source 和 test 需同步修改，回归保护为零。
+**重叠行为被 3 次测试**：
+- 空/缺失配置 → 3 个文件各写 1 个测试
+- invalid_api_type 默认值 → 3 个文件各写 1 个测试
+- sources 解析 → ~7 + ~15 + ~7 = 29 个测试测同一逻辑
+- provider 合并 → 3 个文件各写 1 个测试
+- TOML 错误 → 3 个文件各写 1 个测试
 
-**小计: ~35 个 enum 测试**
+**建议**: 合并为单一 `config/test_loader.py`，`test_config.py` 仅保留 API key + model tier 逻辑。
 
-### 3.5 Stdlib 行为测试
+**估计冗余: ~15-20 tests**
 
-| File | Tests | What it tests |
-|------|-------|---------------|
-| `test_utils.py::TestAgentNameToPackage` | 7 | `str.replace("-", "_")` |
-| `test_utils.py::TestToClassName` | 7 | `str.split("-") + str.capitalize()` |
-| `test_config_model_config.py::TestParseModelString` | 3 | `str.split(":", 1)` |
-| `test_local_installer.py::TestUrlToSourceName` | 4 | `rsplit("/") + removesuffix(".git")` |
+#### 3.3.2 Permission Checker 重复
 
-**小计: ~21 个 stdlib 测试**
+| File | Tests | Focus |
+|------|-------|-------|
+| `test_permission_checker.py` | 75 | 宽泛：check_tool, check_path, check_command |
+| `test_permission_checker_unit.py` | 21 | 仅 check_command 深度测试 |
 
-### 3.6 冗余总计
+**9 个共享概念被两个文件重复测试**：empty_command, whitespace, default_mode, plan_mode, full_auto, substring_false_positive, denied_command 等。
+
+**估计冗余: ~15 tests（_unit 文件中的 15/21 是重复）**
+
+#### 3.3.3 Process Manager 重复
+
+| File | Tests | Focus |
+|------|-------|-------|
+| `test_process_manager.py` | 75 | 公开 API |
+| `test_process_manager_unit.py` | 19 | 内部方法 |
+
+约 10 个测试在两个文件中测试相同行为（cleanup_dead, force_kill, wait_for_exit 等），仅调用路径不同（公开 API vs 私有方法）。`_unit` 文件中 6 个 env-building 测试是唯一的。
+
+**估计冗余: ~10 tests**
+
+#### 3.3.4 其他重复对
+
+| Pair | Redundant | Nature |
+|------|-----------|--------|
+| `test_gateway_module.py` vs `test_gateway_tool_adapter.py` | ~5 | 同一 adapter 在不同层级测试 |
+| `test_evolution_health.py` vs `test_evolution_analyzer.py` | ~3-4 | dedup/healthy skill 逻辑重叠 |
+| `test_llm_planner.py` vs `test_llm_planner_structured.py` | ~5-7 | fallback/parse 路径重复 |
+
+**小计: ~13-16 tests**
+
+### 3.4 Pydantic/Enum/Stdlib 框架测试
+
+| Category | Count | Value |
+|----------|-------|-------|
+| Pydantic frozen/constructor/serialization 测试 | ~103 | 重构时轻微变更检测 |
+| Enum 值测试 | ~35 | 零回归保护 |
+| Stdlib 行为测试 (str.replace, str.split) | ~21 | 零项目价值 |
+
+**小计: ~159 个框架测试（不建议删除，但不应计入有效覆盖率）**
+
+### 3.5 冗余总计
 
 | Category | Count | Severity | Action |
 |----------|-------|----------|--------|
-| 同义反复测试 (mock==mock) | ~49 | **High** | 删除 |
-| 重复文件 | ~47 | **High** | 删除重复文件 |
-| Pydantic 框架测试 | ~103 | **Medium** | 保留但标记为低价值 |
-| Enum 枚举值测试 | ~35 | **Low** | 保留作为变更检测 |
-| Stdlib 行为测试 | ~21 | **Low** | 保留 |
-| **总计** | **~255** | | **~96 tests 可立即删除** |
+| **无断言测试** | **~176** | **Critical** | 逐个审查，修复或删除 |
+| 同义反复测试 (mock==mock) | ~14 | High | 删除或重写 |
+| 重复文件对 | ~53-61 | High | 合并重复 |
+| Pydantic/Enum/Stdlib 框架测试 | ~159 | Low | 标记为低价值 |
+| **可操作总计** | **~243-251** | | **~130-170 tests 可立即处理** |
 
 ---
 
-## 4. E2E Test Quality Assessment
+## 4. E2E Test Quality Assessment (Cycle 3)
 
-### 4.1 真正的 E2E 测试（测试真实流程）
+### 4.1 分类标准
 
-| Test File | What it Tests | Real E2E? |
-|-----------|--------------|-----------|
-| `test_runtime_e2e.py` | PythonRuntime execute/inject/retrieve 生命周期 | **YES** — 真实 IPython 内核 |
-| `test_runtime_security_e2e.py` | SecurityChecker + SecurityRule 集成 | **YES** — 真实 AST 检查 |
-| `test_task_graph_concurrent_e2e.py` | 并发 SQLite 写入 TaskGraph | **YES** — 真实并发 |
-| `test_task_graph_async_safety_e2e.py` | Async TaskGraph 包装器 | **YES** — 真实 async SQLite |
-| `test_ipc_real_subprocess_e2e.py` | 真实子进程 IPC (stdin/stdout) | **YES** — 真实进程 |
-| `test_ipc_async_safety_e2e.py` | IPC stream 并发访问 | **YES** — 真实 IPC |
-| `test_process_manager_async_safety_e2e.py` | ProcessManager 真实进程管理 | **YES** — 真实子进程 |
-| `test_process_manager_cancel_e2e.py` | 进程取消和清理 | **YES** — 真实信号处理 |
-| `test_ipc_mcp_contract_e2e.py` | IPC 消息序列化契约 | **YES** — 真实 Pydantic 验证 |
-| `test_evolution_lifecycle_e2e.py` | 完整进化生命周期 (SQLite) | **YES** — 真实 SQLite |
-| `test_evolution_async_safety_e2e.py` | 并发进化存储访问 | **YES** — 真实并发 |
-| `test_dsl_toml_e2e.py` | TOML 解析 roundtrip | **YES** — 真实文件 I/O |
-| `test_config_e2e.py` | Config 加载 + env vars + 缓存 | **YES** — 真实 TOML + 文件 I/O |
+- **TRUE_E2E**: 真实进程/文件/SQLite/网络，跨越多个子系统边界
+- **INTEGRATION**: 真实组件 + stub executor，测真实逻辑路径
+- **MISCLASSIFIED**: 应为 unit 测试
 
-### 4.2 Mock-Heavy 的"E2E"测试（应重新分类）
+### 4.2 分类结果
 
-| Test File | Mock 引用数 | Issue | Recommendation |
-|-----------|-----------|-------|----------------|
-| `test_agency_pipeline_e2e.py` | 64 | 所有 LLM 调用和 agent 执行均为 MagicMock | **降级为 integration** |
-| `test_dag_dispatcher_e2e.py` | 59 | executor 完全 mock | 部分有效 — DAG 逻辑真实，executor mock 应为 unit |
-| `test_gateway_e2e.py` | 12 | 3 个纯 Python 逻辑测试，其余为真实集成 | **删除 3 个同义反复测试** |
-| `test_cli_backend_e2e.py` | 11 | mock subprocess 但 config-to-response 管线真实 | 可接受 |
-| `test_agency_e2e.py` | 5 | importer/registry/selector 流程真实 | 可接受 |
+| Classification | Count | Files |
+|---|---|---|
+| **TRUE_E2E** | **14** (70%) | hooks_lifecycle, config, dsl_toml, evolution(×3), ipc_real_subprocess, ipc_async_safety, process_manager(×2), runtime(×2), task_graph(×2) |
+| **INTEGRATION** | **3** (15%) | agency_pipeline, dag_dispatcher, agency |
+| **MISCLASSIFIED** | **3** (15%) | gateway, cli_backend, ipc_mcp_contract |
 
-### 4.3 需要新增的 E2E 场景
+### 4.3 逐文件分析
 
-1. **Gateway 完整工具调用流** (P0): 注册 agent → 启动子进程 → 发现 tools → MCP 调用 → 获取结果 → 清理
-2. **Router composite 4-phase 流** (P0): 加载 DSL → 创建 TaskGraph → 用 echo agent 执行 → 聚合结果
-3. **Evolution 完整周期** (P1): 种子 skills → 分析 → 进化 → 推广 → 验证推广后 agent 可用
-4. **External MCP adapter 真实连接** (P1): 连接 stdio MCP server → 发现 tools → 调用 → 断开
-5. **CLI init + install + run 流** (P2): agent-nexus init → install → run 完整流程
+#### TRUE_E2E (14 files) — 零 mock，真实资源
+
+| File | Asserts | Real Resources |
+|------|---------|---------------|
+| `test_hooks_lifecycle_e2e.py` | 32 | 真实子进程 (echo/false), 真实 HTTP 客户端 |
+| `test_config_e2e.py` | 30 | 真实 TOML 文件 I/O + 缓存失效 |
+| `test_dsl_toml_e2e.py` | 22 | 真实 TOML 解析 + SQLite TaskGraph |
+| `test_evolution_e2e.py` | 11 | 真实 SQLite |
+| `test_evolution_lifecycle_e2e.py` | 37 | 真实 SQLite + EvolutionEngine 生命周期 |
+| `test_evolution_async_safety_e2e.py` | 13 | 真实并发 SQLite |
+| `test_ipc_real_subprocess_e2e.py` | 14 | 真实 OS 进程 + pipe IPC |
+| `test_ipc_async_safety_e2e.py` | 18 | 真实进程 + 并发 pipe |
+| `test_process_manager_async_safety_e2e.py` | 34 | 真实子进程 + SIGTERM |
+| `test_process_manager_cancel_e2e.py` | 118 | 真实进程 + 信号处理 + 取消传播 |
+| `test_runtime_e2e.py` | 9 | 真实 Python 执行 (IPythonExecutor) |
+| `test_runtime_security_e2e.py` | 72 | 真实 AST 分析 + 安全绕过尝试 |
+| `test_task_graph_async_safety_e2e.py` | 32 | 真实并发 SQLite |
+| `test_task_graph_concurrent_e2e.py` | 24 | 真实 batch + DAG + cycle 检测 |
+
+#### INTEGRATION (3 files) — 真实组件 + stub executor
+
+| File | Mocks (strict) | Asserts | Notes |
+|------|---------------|---------|-------|
+| `test_agency_pipeline_e2e.py` | 0 | 131 | v2 报告 64 mocks 已不准确，当前 0 个 strict mocks |
+| `test_dag_dispatcher_e2e.py` | 0 | 29 | v2 报告 59 mocks 已不准确，当前 0 个 strict mocks |
+| `test_agency_e2e.py` | 0 | 106 | 真实 DAGDispatcher + TaskGraph + Importer |
+
+> v2 报告中 `test_agency_pipeline_e2e.py` (64 mocks) 和 `test_dag_dispatcher_e2e.py` (59 mocks) 的计数对当前代码已不准确。两个文件均已清理，仅使用 deterministic stub function 替代 LLM executor，无 MagicMock/AsyncMock/patch。
+
+#### MISCLASSIFIED (3 files) — 应降级为 unit/integration
+
+| File | Strict Mocks | Asserts | Issue | Recommendation |
+|------|-------------|---------|-------|----------------|
+| `test_gateway_e2e.py` | 9 | 25 | 16/17 测试为纯 unit 测试 | **降级为 unit**，仅保留 adapter 错误传播测试 |
+| `test_cli_backend_e2e.py` | 52 | 16 | @patch subprocess, 52 mock refs | **降级为 integration** |
+| `test_ipc_mcp_contract_e2e.py` | 3 | 57 | 纯 Pydantic 序列化测试 | **降级为 unit** |
+
+**test_gateway_e2e.py 详细问题**：
+- `TestDeferredRegistryE2E` (7 tests): 使用 MagicMock ProcessManager，测试 dict 查询
+- `TestDeferredRegistryToolLifecycle` (4 tests): mock 注入，测试 tool 注册/移除
+- `TestMcpToolAdapterContract` (6 tests): 纯 string formatting + dict 结构测试
+- 仅 `test_execute_on_dead_process_returns_error` 有集成特征
+
+**test_ipc_mcp_contract_e2e.py 详细问题**：
+- 33 个测试全部验证 Pydantic model 序列化/字段验证
+- 无真实进程、数据库或网络连接
+- 应重命名为 `test_ipc_models_contract.py` 移至 unit/
+
+### 4.4 需要新增的 E2E 场景
+
+| Priority | Scenario | Description |
+|----------|----------|-------------|
+| **P0** | Gateway 完整工具调用流 | 注册 agent → 启动子进程 → 发现 tools → MCP 调用 → 获取结果 → 清理 |
+| **P0** | Router composite 4-phase 流 | 加载 DSL → 创建 TaskGraph → 用 echo agent 执行 → 聚合结果 |
+| **P1** | External MCP adapter 真实连接 | 连接 stdio MCP server → 发现 tools → 调用 → 断开 |
+| **P1** | CLI init + install + run 流 | agent-nexus init → install → run 完整流程 |
+| **P2** | Evolution 完整周期 | 种子 skills → 分析 → 进化 → 推广 → 验证推广后可用 |
 
 ---
 
 ## 5. Module-by-Module Coverage Summary
 
-| Module | Public Methods | With Tests | Without Tests | Coverage | Priority |
-|--------|---------------|------------|---------------|----------|----------|
-| **config/** | 42 | 36 (86%) | 6 | Good，但 model_db 异常路径缺失 | **P0** |
-| **gateway/** | 66 | 66 (100%) | 0 (但有 3 个私有方法无直接测试) | Strong | **P1** |
-| **hooks/** | 22 | 15 (68%) | 7 | Good，lifecycle gaps | **P1** |
-| **evolution/** | 118 | 118 (100%) | 0 | Excellent | **P2** |
-| **skills/** | 18 | 16 (89%) | 2 | Excellent | **P2** |
-| **orchestration/** | ~40 | 35 (88%) | 5 | Good | **P0** |
-| **runtime/** | ~25 | 22 (88%) | 3 | Good | **P1** |
-| **agency/** | ~120 | 115 (96%) | 5 | Strong | **P1** |
-| **local/** | ~30 | 25 (83%) | 5 | Moderate | **P1** |
-| **router/** | ~15 | 12 (80%) | 3 | Moderate | **P1** |
-| **models/** | ~40 | 40 (100%) | 0 | Strong (但多数是 Pydantic 框架测试) | **P2** |
+| Module | Public Symbols | Covered | Gaps | Coverage | Priority |
+|--------|---------------|---------|------|----------|----------|
+| **hooks/** | 6 | 6 | 0 | 100% | Done |
+| **skills/** | 16 | 16 | 0 | 100% | Done |
+| **runtime/** | ~50 | ~48 | 2 | 96% | P2 |
+| **models/** | ~95 | ~90 | 5 | 95% | P2 |
+| **orchestration/** | ~75 | ~70 | 5 | 93% | P1 |
+| **gateway/** | ~65 | ~60 | 5 | 92% | P1 |
+| **evolution/** | ~110 | ~100 | 10 | 91% | P1 |
+| **router/** | ~20 | ~18 | 2 | 90% | P1 |
+| **agency/** | ~120 | ~105 | 15 | 88% | P1 |
+| **config/** | 44 | 38 | 6 | 86% | P0 |
+| **local/** | ~50 | ~42 | 8 | 84% | P0 |
 
 ---
 
-## 6. Immediate Actions (Priority Queue)
+## 6. Priority Actions (Cycle 3)
 
-### P0 — 立即删除/修复（零回归风险）
+### P0 — 立即行动（零/低回归风险）
 
-| # | Action | Impact | Savings |
-|---|--------|--------|---------|
-| 1 | 删除 `tests/unit/evolution/test_engine.py` | 29 同义反复测试 | 311 行 |
-| 2 | 删除 `tests/unit/test_evolution_engine.py` | 16 重复+同义反复测试 | ~280 行 |
-| 3 | 删除 `tests/unit/test_task_composer.py` | 2 被完全覆盖的测试 | ~80 行 |
-| 4 | 删除 `test_gateway_e2e.py` 中 3 个同义反复测试 | 纯 Python 逻辑测试 | ~40 行 |
-| **合计** | **4 个操作** | **~50 tests, ~711 lines** | |
+| # | Action | Impact | Est. Savings |
+|---|--------|--------|-------------|
+| 1 | 审查 176 个无断言测试：添加断言或删除 | 最大单笔冗余清理 | ~120-150 tests |
+| 2 | 删除 14 个同义反复测试 | mock==mock 清理 | ~14 tests |
+| 3 | 降级 test_gateway_e2e.py 为 unit | 准确分类 | 17 tests 重分类 |
+| 4 | 降级 test_ipc_mcp_contract_e2e.py 为 unit | 准确分类 | 33 tests 重分类 |
 
-### P1 — 新增关键测试
+### P1 — 中等优先级
 
-| # | Test | Module | Risk Addressed |
-|---|------|--------|----------------|
-| 1 | `ModelDBClient.close()` 资源清理 | config/model_db | 资源泄漏 |
-| 2 | `ModelDBClient._trigram_candidates()` 算法正确性 | config/model_db | 搜索质量 |
-| 3 | `ModelDBClient._load_disk_index()` 损坏 JSON | config/model_db | 生产稳定性 |
-| 4 | `HookExecutor.close()` async 清理 | hooks/executor | 资源泄漏 |
-| 5 | `ProcessManager._force_kill_and_reap()` | orchestration | 僵尸进程 |
-| 6 | `ProcessManager._cleanup_dead()` | orchestration | agent 泄漏 |
-| 7 | `MCPGateway._setup_core_tools()` 引导失败 | gateway | MCP 服务启动 |
-| 8 | `PermissionChecker.check_command()` shell 注入 | runtime | 安全 |
-| 9 | `AgentSupervisor.auto_restart_dead()` | local/supervisor | 生产可靠性 |
+| # | Action | Impact |
+|---|--------|--------|
+| 1 | 合并 config 三重奏为单一文件 | ~15-20 tests 冗余消除 |
+| 2 | 去重 test_permission_checker_unit.py 与 test_permission_checker.py | ~15 tests 合并 |
+| 3 | 去重 test_process_manager_unit.py 与 test_process_manager.py | ~10 tests 合并 |
+| 4 | 新增 EvolutionStore.get_metrics/deactivate_skill 测试 | 关键路径覆盖 |
+| 5 | 新增 GitInstaller._run_git/_create_venv 测试 | 安装可靠性 |
+| 6 | 降级 test_cli_backend_e2e.py 为 integration | 准确分类 |
 
 ### P2 — 长期改进
 
 | # | Action |
 |---|--------|
-| 1 | 合并 `test_config.py` ConfigLoader 测试到 `config/test_loader.py` |
-| 2 | 创建 1-2 个真正的 E2E 测试（gateway + router + echo agent） |
+| 1 | 标记 159 个 Pydantic/Enum/Stdlib 测试为 `@pytest.mark.low_value` |
+| 2 | 创建 1-2 个真正的 Gateway + Router E2E 测试 |
 | 3 | 添加 evolution 并发写入竞争测试 |
-| 4 | 标记 Pydantic/Enum 框架测试为 `@pytest.mark.low_value` |
+| 4 | 合并 test_llm_planner.py + test_llm_planner_structured.py |
 
 ---
 
 ## 7. Risk Assessment
 
-### High-Risk Untested Paths
+### High-Risk Untested Paths (残余)
 
-1. **ModelDB 资源泄漏** — `close()` 从未被调用，httpx.AsyncClient 可能泄漏
-2. **Gateway 引导失败** — `_setup_core_tools()` 失败后 gateway 静默启动，无 core tools
-3. **僵尸进程** — `_force_kill_and_reap()` 未测试，生产可靠性风险
-4. **搜索质量** — `_trigram_candidates()` 核心算法无测试，模糊搜索可能静默退化
+1. **EvolutionStore.get_metrics** — 聚合逻辑被 HealthChecker/Promoter 消费，错误聚合会导致进化决策偏差
+2. **GitInstaller._run_git** — 核心 git 交互，install/uninstall/update 的唯一路径
+3. **AgentSupervisor 包解析** — 4 个无测试方法决定 agent 能否启动
 
-### Medium-Risk Areas
+### No-Assertion Tests (新发现最高风险)
 
-5. **IPC 消息大小限制** — `_MAX_MESSAGE_SIZE` 执行路径无测试
-6. **Config 缓存失效** — `invalidate_cache()` 行为未验证
-7. **Hook 资源清理** — `close()` async 清理无测试
-8. **Config 磁盘缓存损坏** — malformed JSON 路径无测试
+176 个无断言测试意味着 **~3.7% 的测试套件不验证任何行为**。这些测试：
+- 在 CI 中永远通过（green-washing）
+- 掩盖潜在回归（代码变更不会导致测试失败）
+- 给人虚假的安全感
+
+最严重的文件是 `test_process_manager.py`（13 个）和 `cli/test_runtime_cmd.py`（19 个），因为它们涉及进程安全和 CLI 关键路径。
 
 ---
 
-*Report generated by Serena LSP + 3 parallel Explore agents + grep/glob verification. All findings cross-verified against actual test file contents. v1 misclassifications corrected.*
+## 8. Iteration History
+
+| Iteration | Action | Tests Affected |
+|-----------|--------|---------------|
+| v1 (Iter 1) | 初始覆盖分析 | Baseline: 4,437 tests |
+| v2 (Iter 4) | 深度审计：修正误判、冗余分类 | Identified ~96 removable |
+| Iter 7 | 删除 47 冗余测试 + 新增 128 P0 测试 | +71 net (4,437→4,508→4,778) |
+| Cycle 3 (Iter 11) | 全量重分析：无断言测试、E2E 真实度、API 覆盖 | Identified ~243-251 actionable |
+
+---
+
+*Report generated by Serena LSP + 3 parallel Explore agents. All findings cross-verified against current codebase state (post iteration 7-10 changes). E2E mock counts re-verified from source.*
