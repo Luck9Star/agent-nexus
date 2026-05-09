@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ap_core::models::agent::{AgentManifest, IsolationLevel};
+use ap_core::models::agent::AgentManifest;
 use ap_runtime::mcp_client::{McpClient, ToolInfo};
 use thiserror::Error;
 use tokio::sync::{Mutex, OnceCell, RwLock};
