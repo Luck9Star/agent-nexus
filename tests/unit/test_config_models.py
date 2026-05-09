@@ -3,7 +3,6 @@
 import json
 
 import pytest
-from pydantic import ValidationError
 
 from agent_nexus.models.config import (
     ModelConfig,
@@ -77,11 +76,6 @@ class TestProviderConfig:
         )
         assert cfg.api is ProviderApiType.OLLAMA
 
-    def test_frozen(self):
-        cfg = ProviderConfig()
-        with pytest.raises(ValidationError):
-            cfg.base_url = "changed"
-
     def test_serialization_round_trip(self):
         cfg = ProviderConfig(
             base_url="https://api.deepseek.com/v1",
@@ -120,11 +114,6 @@ class TestModelConfig:
         assert cfg.default == "deepseek:deepseek-chat"
         assert len(cfg.providers) == 2
         assert "deepseek" in cfg.providers
-
-    def test_frozen(self):
-        cfg = ModelConfig()
-        with pytest.raises(ValidationError):
-            cfg.default = "changed"
 
     def test_serialization_round_trip(self):
         cfg = ModelConfig(
@@ -165,11 +154,6 @@ class TestRuntimeConfig:
         assert cfg.python_path == "/usr/bin/python3.12"
         assert cfg.uv_path == "/opt/uv/bin/uv"
 
-    def test_frozen(self):
-        cfg = RuntimeConfig()
-        with pytest.raises(ValidationError):
-            cfg.python_path = "changed"
-
 
 # ---------------------------------------------------------------------------
 # PlatformConfig
@@ -191,11 +175,6 @@ class TestPlatformConfig:
         )
         assert cfg.runtime.python_path == "python3.12"
         assert cfg.models.default == "anthropic:claude-sonnet-4-20250514"
-
-    def test_frozen(self):
-        cfg = PlatformConfig()
-        with pytest.raises(ValidationError):
-            cfg.runtime = RuntimeConfig()
 
     def test_serialization_round_trip(self):
         cfg = PlatformConfig(

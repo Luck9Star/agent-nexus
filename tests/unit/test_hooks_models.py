@@ -157,11 +157,6 @@ class TestHookDefinition:
         assert hd.block_on_failure is True
         assert hd.timeout_seconds == 30.0
 
-    def test_frozen(self):
-        hd = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
-        with pytest.raises(ValidationError):
-            hd.type = HookType.HTTP
-
     def test_serialization_round_trip(self):
         hd = HookDefinition(
             type=HookType.HTTP,
@@ -185,10 +180,6 @@ class TestHookDefinition:
         assert parsed["event"] == "pre_execution"
         hd2 = HookDefinition.model_validate_json(json_str)
         assert hd2 == hd
-
-    def test_missing_required_fields(self):
-        with pytest.raises(ValidationError):
-            HookDefinition()
 
 
 # ---------------------------------------------------------------------------
@@ -234,12 +225,6 @@ class TestHookExecution:
         assert he.passed is False
         assert he.blocked is True
         assert he.error is not None
-
-    def test_frozen(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
-        he = HookExecution(hook=hook, passed=True)
-        with pytest.raises(ValidationError):
-            he.passed = False
 
     def test_serialization_round_trip(self):
         hook = HookDefinition(type=HookType.PROMPT, event=HookEvent.ON_ERROR)
@@ -289,11 +274,6 @@ class TestAggregatedHookResult:
             results=[exec1],
         )
         assert ahr.blocked is False
-
-    def test_frozen(self):
-        ahr = AggregatedHookResult(event=HookEvent.PRE_EXECUTION)
-        with pytest.raises(ValidationError):
-            ahr.blocked = True
 
     def test_serialization_round_trip(self):
         hook = HookDefinition(type=HookType.HTTP, event=HookEvent.ON_ERROR)

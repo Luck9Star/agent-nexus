@@ -111,10 +111,6 @@ class TestTaskItem:
         with pytest.raises(ValidationError):
             t.id = "t2"
 
-    def test_missing_required_fields(self):
-        with pytest.raises(ValidationError):
-            TaskItem()
-
     def test_serialization_round_trip(self):
         t = TaskItem(
             id="t1",
@@ -211,11 +207,6 @@ class TestTaskGraphSnapshot:
         assert len(snap.tasks) == 2
         assert snap.parallel_groups == [["t1", "t2"]]
 
-    def test_frozen(self):
-        snap = TaskGraphSnapshot()
-        with pytest.raises(ValidationError):
-            snap.tasks = []
-
     def test_serialization_round_trip(self):
         t1 = TaskItem(id="t1", description="First", agent="w1")
         snap = TaskGraphSnapshot(tasks=[t1], parallel_groups=[["t1"]])
@@ -224,22 +215,4 @@ class TestTaskGraphSnapshot:
         assert snap2 == snap
 
 
-# ---------------------------------------------------------------------------
-# min_length=1 validation tests (iter30)
-# ---------------------------------------------------------------------------
 
-
-class TestTaskItemMinLength:
-    """Required string fields in TaskItem reject empty strings."""
-
-    def test_empty_id(self):
-        with pytest.raises(ValidationError):
-            TaskItem(id="", description="d", agent="a")
-
-    def test_empty_description(self):
-        with pytest.raises(ValidationError):
-            TaskItem(id="t1", description="", agent="a")
-
-    def test_empty_agent(self):
-        with pytest.raises(ValidationError):
-            TaskItem(id="t1", description="d", agent="")

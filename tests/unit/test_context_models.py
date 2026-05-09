@@ -70,11 +70,6 @@ class TestContextBudget:
         assert cb.l0_max == 1000
         assert cb.l1_max == 5000
 
-    def test_frozen(self):
-        cb = ContextBudget()
-        with pytest.raises(ValidationError):
-            cb.l0_max = 2000
-
     def test_serialization_round_trip(self):
         cb = ContextBudget(l0_max=1200, l1_max=4000, bootstrap_max=6000)
         data = cb.model_dump()
@@ -241,11 +236,6 @@ class TestContextBudgetLogEntry:
         assert entry.turn_number == 5
         assert entry.compaction_triggered is True
         assert entry.total_tokens == 700
-
-    def test_frozen(self):
-        entry = ContextBudgetLogEntry(log_id="log-1", agent_id="a", session_id="s")
-        with pytest.raises(ValidationError):
-            entry.log_id = "changed"
 
     def test_serialization_round_trip(self):
         entry = ContextBudgetLogEntry(

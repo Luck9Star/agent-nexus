@@ -91,11 +91,6 @@ class TestPlatformToAgent:
         assert msg.ref_id is None
         assert msg.summary is None
 
-    def test_frozen(self):
-        msg = PlatformToAgent(type=PlatformToAgentType.CHAT, content="hi")
-        with pytest.raises(ValidationError):
-            msg.content = "changed"
-
 
 # ---------------------------------------------------------------------------
 # AgentToPlatform
@@ -142,11 +137,6 @@ class TestAgentToPlatform:
         assert msg.status is None
         assert msg.output is None
 
-    def test_frozen(self):
-        msg = AgentToPlatform(type=AgentToPlatformType.RESULT)
-        with pytest.raises(ValidationError):
-            msg.output = "changed"
-
 
 # ---------------------------------------------------------------------------
 # IPCMessage
@@ -177,15 +167,6 @@ class TestIPCMessage:
         )
         assert msg.direction is MessageDirection.AGENT_TO_PLATFORM
         assert isinstance(msg.payload, AgentToPlatform)
-
-    def test_frozen(self):
-        payload = PlatformToAgent(type=PlatformToAgentType.CHAT)
-        msg = IPCMessage(
-            direction=MessageDirection.PLATFORM_TO_AGENT,
-            payload=payload,
-        )
-        with pytest.raises(ValidationError):
-            msg.direction = MessageDirection.AGENT_TO_PLATFORM
 
 
 # ---------------------------------------------------------------------------

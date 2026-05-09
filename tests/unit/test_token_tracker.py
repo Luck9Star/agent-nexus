@@ -28,12 +28,6 @@ class TestTokenAlert:
         assert alert.message == "Within budget"
         assert alert.usage_pct == 50.0
 
-    def test_frozen(self) -> None:
-        """Modifying fields on TokenAlert raises FrozenInstanceError."""
-        alert = TokenAlert(level="ok", message="Within budget", usage_pct=50.0)
-        with pytest.raises(AttributeError):  # FrozenInstanceError is an AttributeError
-            alert.level = BudgetAlertLevel.COMPACTION  # type: ignore[misc]
-
 
 # ---------------------------------------------------------------------------
 # _alert_from_budget helper

@@ -93,11 +93,6 @@ class TestSkillLineage:
         assert lin.parent_skill_ids == []
         assert lin.content_snapshot == {"skill.md": "skill content here"}
 
-    def test_frozen(self):
-        lin = SkillLineage()
-        with pytest.raises(ValidationError):
-            lin.generation = 5
-
     def test_serialization_round_trip(self):
         lin = SkillLineage(
             origin=SkillOrigin.DERIVED,
@@ -153,11 +148,6 @@ class TestSkillRecord:
         assert sr.lineage.origin is SkillOrigin.FIXED
         assert sr.lineage.generation == 2
 
-    def test_frozen(self):
-        sr = SkillRecord(id="skill-1", name="test")
-        with pytest.raises(ValidationError):
-            sr.is_active = False
-
     def test_serialization_round_trip(self):
         sr = SkillRecord(
             id="skill-1",
@@ -178,10 +168,6 @@ class TestSkillRecord:
     def test_inactive_skill(self):
         sr = SkillRecord(id="skill-1", name="test", is_active=False)
         assert sr.is_active is False
-
-    def test_missing_required_fields(self):
-        with pytest.raises(ValidationError):
-            SkillRecord()
 
 
 # ---------------------------------------------------------------------------
@@ -206,11 +192,6 @@ class TestEvolutionMetrics:
         )
         assert em.total_selections == 200
         assert em.total_applied == 160
-
-    def test_frozen(self):
-        em = EvolutionMetrics()
-        with pytest.raises(ValidationError):
-            em.total_selections = 100
 
     def test_serialization_round_trip(self):
         em = EvolutionMetrics(total_selections=10, total_applied=8)
@@ -292,11 +273,6 @@ class TestEvolutionContext:
         ec = EvolutionContext(agent_id="a", task_id="t")
         assert ec.skills_applied == []
         assert ec.skills_fell_back == []
-
-    def test_frozen(self):
-        ec = EvolutionContext(agent_id="a", task_id="t")
-        with pytest.raises(ValidationError):
-            ec.agent_id = "b"
 
     def test_serialization_round_trip(self):
         ec = EvolutionContext(

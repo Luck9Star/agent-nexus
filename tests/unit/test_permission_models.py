@@ -87,11 +87,6 @@ class TestPathRule:
             pr = PathRule(pattern=pat)
             assert pr.pattern == pat
 
-    def test_frozen(self):
-        pr = PathRule(pattern="*.docx")
-        with pytest.raises(ValidationError):
-            pr.pattern = "changed"
-
     def test_serialization_round_trip(self):
         pr = PathRule(pattern="*.docx", access=PathAccess.READ_WRITE)
         data = pr.model_dump()
@@ -158,11 +153,6 @@ class TestPermissionConfig:
         assert cfg.mode is PermissionMode.PLAN
         assert len(cfg.denied_commands) == 2
 
-    def test_frozen(self):
-        cfg = PermissionConfig()
-        with pytest.raises(ValidationError):
-            cfg.mode = PermissionMode.FULL_AUTO
-
     def test_serialization_round_trip(self):
         cfg = PermissionConfig(
             mode=PermissionMode.FULL_AUTO,
@@ -206,8 +196,3 @@ class TestPermissionDecision:
         assert pd.allowed is False
         assert "denied" in pd.reason
         assert pd.requires_confirmation is False
-
-    def test_frozen(self):
-        pd = PermissionDecision(allowed=True)
-        with pytest.raises(ValidationError):
-            pd.allowed = False

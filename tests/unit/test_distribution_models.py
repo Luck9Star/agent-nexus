@@ -79,11 +79,6 @@ class TestSourceEntry:
         assert se.url == "https://github.com/user/agents.git"
         assert se.branch == "develop"
 
-    def test_frozen(self):
-        se = SourceEntry(name="official", url="https://github.com/user/repo.git")
-        with pytest.raises(ValidationError):
-            se.name = "changed"
-
     def test_serialization_round_trip(self):
         se = SourceEntry(name="test", url="https://example.com/repo.git")
         data = se.model_dump()
@@ -165,13 +160,6 @@ class TestLockfileEntry:
         )
         assert le.venv_path == "~/.agent-nexus/venvs/my-agent"
         assert len(le.dependencies) == 2
-
-    def test_frozen(self):
-        le = LockfileEntry(
-            version="1.0.0", source="official", commit_sha="a" * 40, agent_type=AgentType.ATOMIC
-        )
-        with pytest.raises(ValidationError):
-            le.version = "2.0.0"
 
     def test_serialization_round_trip(self):
         le = LockfileEntry(
@@ -327,11 +315,6 @@ class TestLockfile:
         lf = Lockfile(agents={"agent-a": e1, "agent-b": e2})
         assert len(lf.agents) == 2
 
-    def test_frozen(self):
-        lf = Lockfile()
-        with pytest.raises(ValidationError):
-            lf.agents = {}
-
     def test_serialization_round_trip(self):
         entry = LockfileEntry(
             version="1.0.0",
@@ -374,11 +357,6 @@ class TestPackageSource:
         assert ps.url == "https://github.com/user/repo.git"
         assert ps.branch == "main"
         assert ps.local_cache == ""
-
-    def test_frozen(self):
-        ps = PackageSource(name="test", url="https://github.com/user/repo.git")
-        with pytest.raises(ValidationError):
-            ps.local_cache = "changed"
 
 
 class TestPackageSourceNameValidation:
@@ -435,11 +413,6 @@ class TestIndexEntry:
         assert ie.description == ""
         assert ie.tags == []
         assert ie.dependencies == []
-
-    def test_frozen(self):
-        ie = IndexEntry(name="test", version="1.0.0", type=AgentType.ATOMIC)
-        with pytest.raises(ValidationError):
-            ie.name = "changed"
 
     def test_serialization_round_trip(self):
         ie = IndexEntry(

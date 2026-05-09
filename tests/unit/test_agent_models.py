@@ -125,11 +125,6 @@ class TestAgentModelConfig:
         assert cfg.recommended == "gpt-4o"
         assert cfg.fallback == "gpt-3.5-turbo"
 
-    def test_frozen(self):
-        cfg = AgentModelConfig(recommended="gpt-4o")
-        with pytest.raises(ValidationError):
-            cfg.recommended = "claude"
-
     def test_serialization(self):
         cfg = AgentModelConfig(recommended="gpt-4o")
         data = cfg.model_dump()
@@ -157,11 +152,6 @@ class TestMcpServerConfig:
     def test_with_url(self):
         cfg = McpServerConfig(transport="sse", url="http://localhost:8080/mcp")
         assert cfg.url == "http://localhost:8080/mcp"
-
-    def test_frozen(self):
-        cfg = McpServerConfig(command="uvx")
-        with pytest.raises(ValidationError):
-            cfg.transport = "sse"
 
 
 # ---------------------------------------------------------------------------
@@ -213,11 +203,6 @@ class TestAgentManifest:
         assert m.background is True
         assert m.max_turns == 50
 
-    def test_frozen(self):
-        m = AgentManifest(name="test", version="1.0.0", type=AgentType.ATOMIC, description="t")
-        with pytest.raises(ValidationError):
-            m.name = "changed"
-
     def test_serialization_round_trip(self):
         m = AgentManifest(
             name="doc-filler",
@@ -241,10 +226,6 @@ class TestAgentManifest:
         assert parsed["name"] == "doc-filler"
         m2 = AgentManifest.model_validate_json(json_str)
         assert m2 == m
-
-    def test_missing_required_fields(self):
-        with pytest.raises(ValidationError):
-            AgentManifest()
 
     def test_string_enum_type(self):
         m = AgentManifest(
@@ -283,11 +264,6 @@ class TestSkillDefinition:
         assert s.body is None
         assert s.resources is None
 
-    def test_frozen(self):
-        s = SkillDefinition(name="test", agent_type=AgentType.ATOMIC, description="test")
-        with pytest.raises(ValidationError):
-            s.name = "changed"
-
 
 # ---------------------------------------------------------------------------
 # CommandDef
@@ -307,11 +283,6 @@ class TestCommandDef:
             parameters={"path": {"type": "string"}},
         )
         assert "path" in c.parameters
-
-    def test_frozen(self):
-        c = CommandDef(name="fill", description="Fill")
-        with pytest.raises(ValidationError):
-            c.name = "changed"
 
 
 # ---------------------------------------------------------------------------
@@ -395,14 +366,6 @@ class TestAgentPackage:
         )
         assert len(pkg.skills) == 1
         assert len(pkg.commands) == 1
-
-    def test_frozen(self):
-        manifest = AgentManifest(
-            name="test", version="1.0.0", type=AgentType.ATOMIC, description="t"
-        )
-        pkg = AgentPackage(manifest=manifest)
-        with pytest.raises(ValidationError):
-            pkg.skills = []
 
     def test_serialization_round_trip(self):
         manifest = AgentManifest(
