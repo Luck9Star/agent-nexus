@@ -228,14 +228,161 @@ The codebase is **well-structured and defensively programmed**. No P0 (critical)
 | Same-level overlap | 1 | Two integrator tests detecting same conflict type |
 | **Total** | **138** | |
 
+## Cycle 4 — Full Re-Audit + TSN Deep Analysis (2026-05-10)
+
+**Focus**: Verify all previous fixes intact, find new issues since Cycle 3, deep test_signal_to_noise analysis
+**Method**: Serena MCP symbol-level + parallel Explore agents (3 agents covering 8 modules)
+**Fix verification**: 19/19 fixes from Cycles 1-3 confirmed INTACT, zero regressions
+
+### Fix Verification Results
+
+| Cycle | Fix | Status |
+|-------|-----|--------|
+| C1 | DAGDispatcher __enter__/__exit__ | INTACT |
+| C1 | SecurityChecker LRU cache (OrderedDict) | INTACT |
+| C1 | _register_single_tool: McpToolAdapter | INTACT |
+| C1 | _should_fail_orphan: TaskItem | INTACT |
+| C2 | router.py:771 except Exception broadening | INTACT |
+| C2 | hooks/executor.py BaseException subprocess cleanup | INTACT |
+| C2 | dag_dispatcher.py exception detail preservation | INTACT |
+| C2 | HookExecutor __aenter__/__aexit__ | INTACT |
+| C2 | EvolutionStore __enter__/__exit__ | INTACT |
+| C2 | ModelDBClient __enter__/__exit__ | INTACT |
+| C2 | CLISessionStore __enter__/__exit__ | INTACT |
+| C2 | LLMExecutor __enter__/__exit__ | INTACT |
+| C3 | gateway.py null default type safety | INTACT |
+| C3 | tool_adapter.py _normalize_input_schema | INTACT |
+| C3 | deferred_registry.py inputSchema validation | INTACT |
+| C3 | schema_transformer.py $ref cache key fix | INTACT |
+| C3 | schema_transformer.py _resolve_all_of refactored | INTACT |
+| C3 | llm_client.py _call_cli refactored | INTACT |
+| C3 | external_mcp_adapter.py non-text content | INTACT |
+
+### Cycle 4 New Findings
+
+#### P1 (High) — 2 New Issues
+
+| ID | Module | File:Line | Description | Recommendation |
+|----|--------|-----------|-------------|----------------|
+| C4-01 | agency | `reflector.py:120-122` | LLM failure in `reflect()` defaults to `sufficient=True`, bypassing quality gate. If reflection LLM fails (network error, rate limit), bad outputs pass through to users. | Change fallback to `sufficient=False` (fail-closed). |
+| C4-02 | orchestration | `process_manager.py:362` | `contextlib.suppress(asyncio.CancelledError)` in `_cancel_drain` silently swallows task cancellation, breaking cancellation propagation chain. | Remove suppress, add explicit CancelledError handler with re-raise. |
+
+#### P2 (Medium) — 10 New Issues
+
+| ID | Module | File:Line | Description |
+|----|--------|-----------|-------------|
+| C4-03 | gateway | `deferred_registry.py:292-300` | Tool discovery failure silently falls back to generic chat tool — masks IPC errors |
+| C4-04 | gateway | `gateway.py:303-308` | Tool registration failure silently drops tools — schema mismatch invisible |
+| C4-05 | gateway | `gateway.py:406-430` | Monkey-patched `__signature__`/`__annotations__` to fool FastMCP — fragile coupling |
+| C4-06 | agency | `llm_client.py:65-67,198,218,227,243,321` | 7 bare `Any` annotations in LLMClient — types available in same package |
+| C4-07 | agency | `llm_planner.py:190-194` | LLM failure silently falls back to keyword strategy — no degradation signal |
+| C4-08 | agency | `reflector.py:173-174` | Rule evaluation failures silently skipped in loop — bugs hidden |
+| C4-09 | orchestration | `task_graph.py:385+` | All `conn` parameters typed as `Any` instead of `sqlite3.Connection` |
+| C4-10 | evolution | `skill_store.py:900-906` | `_rows_to_records` silently skips corrupt rows — DB corruption hidden from callers |
+| C4-11 | config | `model_db.py:273,292,332` | 3 bare `except Exception:` blocks swallow disk cache errors without logging |
+| C4-12 | runtime | `security_checker.py:248` | Security rule exception swallowed — bugs in rules impossible to debug |
+
+#### P3 (Low) — 8 Notable New Issues
+
+| ID | Module | File:Line | Description |
+|----|--------|-----------|-------------|
+| C4-13 | gateway | `tool_adapter.py:53-63` | `remove_lock()` is misleading named no-op |
+| C4-14 | agency | `llm_client.py:349` | `if self._cli_backend is not None: pass` — dead code |
+| C4-15 | agency | `dag_dispatcher.py:488-490,518-519` | Future exceptions caught but not typed (concurrent.futures pattern) |
+| C4-16 | orchestration | `process_manager.py:50-57` | `_build_spawn_env` extra dict can inject any env var |
+| C4-17 | orchestration | `process_manager.py:648` | `except Exception: pass` in `__del__` — no logging |
+| C4-18 | config | `loader.py:287` | `load_cli_routing()` returns `Any` — should be typed |
+| C4-19 | runtime | `executor.py:279,301` | Broad `except Exception` in transform/execute may swallow `SystemExit` |
+| C4-20 | router | `router.py:321` | Cleanup failure in `finally` block silently dropped |
+
+### Cross-Cutting Patterns
+
+**Pattern: Silent degradation in agency LLM components**
+Four agency files (`llm_planner.py`, `llm_integrator.py`, `llm_qa_gate.py`, `reflector.py`) catch `Exception` on LLM call failures and silently degrade. No metric, counter, or structured log signals degraded mode. The `_fallback_count` class variable partially addresses this in `llm_planner.py` only. Recommendation: add a shared `_degradation_tracker` or structured log field across all four files.
+
+**Pattern: Bare `except Exception:` without variable name**
+12 instances across gateway, config, runtime, and agency modules. While most are in cleanup paths (acceptable), 4 are in functional code paths where errors should be logged with detail. These make debugging harder because the exception type and message are lost.
+
+### Test Signal-to-Noise Deep Analysis (Cycle 4)
+
+**Scope**: Full test suite under `tests/`
+**Total tests**: ~4700+
+**Analysis method**: Pattern search for tautological/framework/duplicate tests
+
+#### High-Impact Cleanup Candidates (~207 tests)
+
+| Category | Count | Value Density | Recommendation |
+|----------|:-----:|:-------------:|----------------|
+| Serialization round-trip tests | ~53 | Zero | Replace with single parametrized test per module |
+| Defaults/construction tautologies | ~50 | Zero | Remove — Pydantic tests its own field assignment |
+| min_length/gt/ge constraint tests | ~40 | Zero | Remove — Pydantic validator behavior |
+| Duplicate counter invariant tests | ~12 | Low | Consolidate 5 classes → 1 parametrized (~6 tests) |
+| Overlapping test files | ~30 | Low | Merge `test_gateway_e2e_reclassified.py` → `test_gateway_module.py` |
+| Enum coercion tests | ~7 | Zero | Remove — Pydantic StrEnum coercion behavior |
+| Frozen dataclass tests | ~10 | Zero | Remove — stdlib/Pydantic behavior |
+| Constant value tests | ~5 | Low | Remove — code review catches constant changes |
+
+#### Specific Duplicate Files
+
+| File Pair | Overlap | Recommendation |
+|-----------|---------|----------------|
+| `test_check_cmd.py` vs `cli/test_check_cmd.py` | CLI integration vs helper unit tests — overlapping scenarios | Keep CLI-level tests, remove helper tests that duplicate same scenarios |
+| `test_evolution_store.py` vs `evolution/test_store_p0_unit.py` | Both test `get_metrics`, `deactivate_skill`, `get_skill_records_batch`, `get_children` | Merge unique tests from `_p0_unit` into main file |
+| `test_gateway_e2e_reclassified.py` vs `test_gateway_module.py` | Both test DeferredAgentRegistry registration/search/lifecycle | Consolidate into `test_gateway_module.py` |
+
+#### test_evolution_models.py Counter Invariant Over-Testing
+
+Same validation logic (`applied <= selections`, `completions + fallbacks <= applied`) tested ~22 times across 5 test classes:
+- `TestSkillRecordCounterValidation` (7 tests)
+- `TestSkillRecordCounterInvariant` (8 tests)
+- `TestSkillRecordCompletionsFallbacksInvariant` (2 tests)
+- `TestEvolutionMetrics` counter tests (4 tests)
+- `TestEvolutionMetricsCounterInvariant` (5 tests)
+
+A single parametrized class with ~6 cases would cover all invariants.
+
+### Module Diagnostic Summary (Cycle 4)
+
+| Module | Files | P0 | P1 | P2 | P3 | TODO/HACK | Assessment |
+|--------|:-----:|:--:|:--:|:--:|:--:|:---------:|:----------:|
+| gateway | 6 | 0 | 0 | 3 | 1 | 0 | Good |
+| agency | 32 | 0 | 1 | 5 | 3 | 0 | Good |
+| orchestration | 5 | 0 | 1 | 2 | 4 | 0 | Good |
+| evolution | 14 | 0 | 0 | 2 | 8 | 0 | Good |
+| config | 6 | 0 | 0 | 3 | 2 | 0 | Good |
+| runtime | 8 | 0 | 0 | 3 | 4 | 0 | Good |
+| models | 16 | 0 | 0 | 2 | 2 | 0 | Excellent |
+| router | 4 | 0 | 0 | 2 | 3 | 0 | Good |
+| **Total** | **91** | **0** | **2** | **22** | **27** | **0** | **Good** |
+
+### Cumulative Audit Metrics (4 Cycles)
+
+| Metric | Cycle 1 | Cycle 2 | Cycle 3 | Cycle 4 |
+|--------|:--------:|:--------:|:--------:|:--------:|
+| P0 issues | 0 | 0 | 0 | 0 |
+| P1 issues (new) | 2 | 4 | 3 | 2 |
+| P1 issues (fixed) | 2 | 4 | 3 | — |
+| P2 issues (new) | 4 | 3 | 4 | 10 |
+| P2 issues (fixed) | 2 | 3 | 4 | — |
+| Total fixes applied | 7 | 10 | 19 | 19 (verified) |
+| Test count | 4460 | 4728 | 4784 | ~4700 |
+| Tests removed (cumulative) | 20 | 67 | 138 | 138 |
+| Low-value tests identified | 96 | 176→1 | 138 removed | ~207 remaining |
+| CC refactoring ops | 5 | 12 | 18 | 18 (verified) |
+| C-grade functions | 3→0 | 0 | 0 | 0 |
+
+---
+
 ## Methodology
 
 - **Tool**: Serena MCP (LSP-backed semantic analysis)
-- **Files audited**: 60+ Python source files across 8 core modules
+- **Files audited**: 91 Python source files across 8 core modules (Cycle 4)
 - **Checks performed**:
   - Symbol overview (depth=1) for all public classes/methods
   - ty diagnostics (severity >= Hint) for all files
   - Regex search for: TODO/FIXME/HACK, bare except, pass, eval/exec, CancelledError, Any, hardcoded keys, shell=True, asyncio patterns, threading patterns
   - Deep body reads of critical methods (CancelledError handlers, resource cleanup, security checks)
-- **Lines of code reviewed**: ~5000+ (symbol bodies + context)
+  - Fix verification: grep/read all 19 previously fixed code locations
+  - Test signal-to-noise: pattern analysis for tautological, framework, duplicate tests
+- **Lines of code reviewed**: ~8000+ (symbol bodies + context across 4 cycles)
 - **False positive rate**: Low — each finding verified against actual code context
