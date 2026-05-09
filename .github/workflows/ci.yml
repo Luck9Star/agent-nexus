@@ -54,7 +54,7 @@ jobs:
         run: uv sync --extra dev --group dev
 
       - name: Run unit tests
-        run: uv run pytest tests/ -x -m "unit" --timeout=60 -q
+        run: uv run pytest tests/ -m "unit" --timeout=60 -q
 
   # ── Python Integration Tests ─────────────────────────────
   python-integration:
@@ -75,7 +75,7 @@ jobs:
         run: uv sync --extra dev --group dev
 
       - name: Run integration tests
-        run: uv run pytest tests/ -x -m "integration" --timeout=120 -q
+        run: uv run pytest tests/ -m "integration" --timeout=120 -q
 
   # ── Python Type Check ────────────────────────────────────
   python-typecheck:
