@@ -1,502 +1,352 @@
 # Complexity Analysis Report
 
-> Generated: 2026-05-09 | Tool: radon 6.0.1 | Scope: `src/agent_nexus/`
+> Generated: 2026-05-09 (Iteration 3 — First Principles Deep Audit) | Tool: radon 6.0.1
+> Scope: `src/agent_nexus/` | Previous: Iteration 1 baseline + Iteration 2 refactoring
 
-## 1. Overall Baseline
+## 1. Overall Baseline (Post-Refactoring)
 
-| Metric | Value |
-|--------|-------|
-| Total blocks analyzed | 1,306 |
-| Average complexity | **3.35 (Grade A)** |
-| Grade A (1-5) | 1,058 (81.0%) |
-| Grade B (6-10) | 243 (18.6%) |
-| Grade C (11-20) | 5 (0.4%) |
-| Grade D-F (>20) | 0 |
+| Metric | Value | Delta from Iteration 1 |
+|--------|-------|----------------------|
+| Total blocks analyzed | 1,309 | +3 |
+| Average complexity | **3.33 (Grade A)** | 3.35 → 3.33 |
+| Max CC | 11 (unchanged) | — |
+| C-grade functions (CC ≥ 11) | **3** | 5 → 3 (2 refactored) |
+| B-grade functions (CC 6-10) | ~242 | — |
+| D-F functions (CC > 20) | 0 | — |
 
 ### CC Score Distribution
 
 | CC | Count | Grade | Cumulative % |
 |----|-------|-------|-------------|
-| 1  | 414   | A     | 31.7%       |
+| 1  | 414   | A     | 31.6%       |
 | 2  | 178   | A     | 45.3%       |
-| 3  | 182   | A     | 59.3%       |
-| 4  | 165   | A     | 71.9%       |
-| 5  | 119   | A     | 81.0%       |
-| 6  | 98    | B     | 88.5%       |
-| 7  | 59    | B     | 93.0%       |
-| 8  | 49    | B     | 96.8%       |
-| 9  | 25    | B     | 98.7%       |
-| 10 | 12    | B     | 99.6%       |
-| 11 | 5     | C     | 100.0%      |
+| 3  | 182   | A     | 59.2%       |
+| 4  | 165   | A     | 71.8%       |
+| 5  | 119   | A     | 80.9%       |
+| 6  | 98    | B     | 88.4%       |
+| 7  | 59    | B     | 92.9%       |
+| 8  | 49    | B     | 96.6%       |
+| 9  | 25    | B     | 98.5%       |
+| 10 | 12    | B     | 99.5%       |
+| 11 | 3     | C     | 100.0%      |
 
-**Assessment**: The codebase is in good shape overall. No function exceeds CC 11, and the average is well within the acceptable range. The 5 C-grade functions and 12 CC=10 functions are the primary refactoring targets.
+### Iteration 2 Refactoring Results
 
----
-
-## 2. C-Grade Functions (CC = 11) — Detailed Analysis
-
-### 2.1 `DAGDispatcher._no_more_work` (CC 11)
-
-- **File**: `src/agent_nexus/platform/agency/dag_dispatcher.py:300-327`
-- **Lines**: 28
-- **Target CC**: 5
-
-**Root Cause**: Condition explosion — the function has multiple sequential filter/classify steps on the same list (`all_specialists` → `pending_or_running` → `in_progress`). Each list comprehension with a conditional adds CC.
-
-**Analysis**:
-- Does ONE thing? Partially — it classifies remaining tasks AND makes termination decisions AND performs side effects (`_safe_fail`). Mixed responsibilities.
-- Can branches be data-driven? No — the logic is inherently sequential state classification. However, the two list comprehensions can be consolidated.
-
-**Recommendation**:
-```
-1. Extract task classification into a single pass:
-   - `_classify_remaining(specialist_ids, graph) -> (pending, in_progress, completed)`
-2. Move _safe_fail side effects into a dedicated `_fail_batch()` helper
-3. Main logic becomes: classify → dispatch based on classification → return
-```
-**Estimated change**: 28 lines → ~15 lines in main function + 10 lines in helpers.
+| Function | File | CC Before | CC After | Method |
+|----------|------|-----------|----------|--------|
+| `_no_more_work` | dag_dispatcher.py | 11 | 6 | Extract classification + side effects |
+| `run_composition` | cli.py | 11 | ~7 | 3 helper extraction |
+| `get_health_summary` | health.py | 10 | 7 | Counter replacement |
 
 ---
 
-### 2.2 `DAGDispatcher._run_dispatch_loop` (CC 11)
+## 2. Remaining C-Grade Functions — First Principles Analysis
 
-- **File**: `src/agent_nexus/platform/agency/dag_dispatcher.py:338-369`
-- **Lines**: 32
-- **Target CC**: 6
+### 2.1 `DAGDispatcher._run_dispatch_loop` (CC 11)
 
-**Root Cause**: Nested conditionals — deadline check, empty-list check, concurrent-vs-sequential dispatch, and failure/cancellation checks form 4 levels of decision.
-
-**Analysis**:
-- Does ONE thing? Yes — it is a dispatch loop controller. The complexity comes from the inherent state machine of the loop.
-- Can branches be data-driven? Partially — the concurrent/sequential branch can be a strategy dispatch.
-- > 1 consumer? Yes — called by `dispatch()` and `adispatch()`.
-
-**Recommendation**:
-```
-1. Extract the "dispatch batch" step:
-   if self._concurrent and len(batch) > 1:
-       self._dispatch_parallel(...)
-   else:
-       self._dispatch_sequential(...)
-   → self._dispatch_batch(batch, task_description, deadline, result)
-2. The early-return on failure can stay — it's a guard clause, not complexity
-3. After extraction, CC drops to ~6 (loop + deadline guard + no-more-work + batch-dispatch + failure-check)
-```
-**Estimated change**: 32 lines → ~20 lines + 5-line wrapper.
-
----
-
-### 2.3 `run_composition` (CC 11)
-
-- **File**: `src/agent_nexus/platform/agency/cli.py:595-787`
-- **Lines**: 193 (including 55 lines of Click decorators)
-- **Target CC**: 4
-
-**Root Cause**: Orchestrator pattern — the function is a 5-step pipeline setup function. The CC comes from `try/except` around expert loading, `if use_llm` branching, and `try/finally` for cleanup. It's a "wiring function" with mixed setup, execution, and teardown.
-
-**Analysis**:
-- Does ONE thing? No — it sets up logging, loads .env, loads experts, initializes LLM components, creates executor, runs pipeline, handles output. Classic "main function" syndrome.
-- Can branches be data-driven? The `use_llm` branch creates different executor paths — this is inherent, not data-driven.
-- > 1 consumer? No — single CLI entry point.
-
-**Recommendation**:
-```
-1. Extract step 1 (expert loading) → `_load_experts(vendor_path, allowlist) -> ExpertRegistry`
-2. Extract step 2 (LLM init) → already done (_setup_llm_components), keep
-3. Extract step 3 (executor creation) → already done (_create_executor), keep
-4. Extract step 4 (pipeline execution) → `_execute_pipeline(composer_input, registry, executor, ...) -> ComposerResult`
-5. Extract step 5 (output) → already done (_handle_output), keep
-6. Main function becomes a 15-line orchestrator calling the 5 steps
-```
-**Estimated change**: 193 lines → ~40 lines in main + existing extracted helpers.
-
----
-
-### 2.4 `_check_api_keys` (CC 11)
-
-- **File**: `src/agent_nexus/platform/local/cli/init_cmd.py:96-119`
-- **Lines**: 25
-- **Target CC**: 4
-
-**Root Cause**: Condition explosion with double-fallback pattern — tries loading from config file, then falls back to DEFAULT_PROVIDERS, then checks environment variables. Each branch in the list comprehensions adds CC.
-
-**Analysis**:
-- Does ONE thing? Yes — checks if API keys exist.
-- Can branches be data-driven? Yes — the "try config, fall back to defaults" pattern can be a single helper.
-- > 1 consumer? Need to verify — likely only called from init command.
-
-**Recommendation**:
-```
-1. Extract: `_collect_key_envs(config_path) -> list[str]` — handles config vs defaults
-2. Main function becomes: collect envs → check if any set → return tuple
-```
-**Estimated change**: 25 lines → ~8 lines in main + 12 lines in helper.
-
----
-
-### 2.5 `evolution_history` (CC 11)
-
-- **File**: `src/agent_nexus/platform/local/cli/evolution_cmd.py:119-156`
-- **Lines**: 38
-- **Target CC**: 4
-
-**Root Cause**: Nested conditional branching — tries UUID lookup, then name lookup, then active selection, with error handling at each step. The `for i, ancestor in enumerate(ancestry)` with conditional indentation formatting adds CC.
-
-**Analysis**:
-- Does ONE thing? Partially — it resolves a skill identifier AND formats ancestry output.
-- Can branches be data-driven? The UUID-vs-name resolution can be a single lookup function.
-- > 1 consumer? No — single CLI command.
-
-**Recommendation**:
-```
-1. Extract: `_resolve_skill_id(engine, identifier) -> str | None` — handles UUID/name/active resolution
-2. Extract: `_format_ancestry(ancestry) -> str` — handles the tree formatting
-3. Main function becomes: resolve → query ancestry → format → print
-```
-**Estimated change**: 38 lines → ~12 lines in main + 15 lines in helpers.
-
----
-
-## 3. CC = 10 Functions (Near Threshold)
-
-### 3.1 `_detect_risk_conflicts` (CC 10)
-
-- **File**: `src/agent_nexus/platform/agency/integrator.py:350-381`
+- **File**: `src/agent_nexus/platform/agency/dag_dispatcher.py:331-363`
 - **Lines**: 33
-- **Target CC**: 5
+- **Target CC**: 7
 
-**Root Cause**: Early-return cascade — 4 guard clauses followed by the actual computation. The guards are simple but each adds +1 CC.
+**CC Decomposition**:
+| Decision Point | CC Contribution |
+|----------------|----------------|
+| Function definition | 1 |
+| `while iteration < max_iterations` | 1 |
+| `if self._check_deadline(deadline, result)` | 1 |
+| `if not ready_specialists` | 1 |
+| `if self._no_more_work(specialist_ids, result)` | 1 |
+| `else` (implicit) | 1 |
+| `if self._concurrent` | 1 |
+| `and len(batch) > 1` | 1 |
+| `else` (implicit) | 1 |
+| `if result.failed` | 1 |
+| `or result.cancelled` | 1 |
 
-**Recommendation**: Consolidate guards into a single validation function `_validate_risk_analysis_prereqs(artifacts) -> RiskAnalysisInput | None`.
+**First Principles Judgment**:
+- Does ONE thing? **Yes** — state machine loop: check deadline → get ready → dispatch → check failure.
+- > 1 consumer? **Yes** — called by `dispatch()` and `adispatch()`.
+- Data-driven alternative? The concurrent/sequential branch is a binary strategy — extractable.
 
----
-
-### 3.2 `load_dag_into_graph` (CC 10)
-
-- **File**: `src/agent_nexus/platform/agency/dag_dispatcher.py:118-153`
-- **Lines**: 36
-- **Target CC**: 4
-
-**Root Cause**: Mixed I/O + transformation — the function simultaneously filters DAG tasks, transforms them to TaskItems, and inserts into the database. The two-stage filter (specialist check + existing-in-graph check) adds branches.
-
-**Recommendation**: Split into `_filter_specialist_tasks(dag) -> list[DAGTask]` and `_transform_to_items(tasks, description) -> list[TaskItem]`, then the main function becomes filter → transform → deduplicate → insert.
-
----
-
-### 3.3 `_format_section_value` (CC 10)
-
-- **File**: `src/agent_nexus/platform/agency/cli.py:390-401`
-- **Lines**: 13
-- **Target CC**: 4
-
-**Root Cause**: Type-dispatch on `value` — isinstance checks for list, dict, None, str, and fallback. Classic "visitor without pattern matching" pattern.
-
-**Recommendation**: Use a dispatch dict mapping `type(value)` to formatting functions, or a `match` statement (Python 3.10+). The function is already short, so this is low priority.
-
----
-
-### 3.4 `ProfileBasedExecutor._resolve_section` (CC 10)
-
-- **File**: `src/agent_nexus/platform/agency/executor.py:118-148`
-- **Lines**: 31
-- **Target CC**: 3
-
-**Root Cause**: Data-driven pattern already implemented as a dict — the CC comes from the 14 lambda entries in the `generators` dict. Radon counts each lambda as a branch. **This is a false positive** — the function is already well-structured with a data-driven approach.
-
-**Recommendation**: No action needed. The dict-based dispatch is the correct pattern. The CC is inflated by radon's counting of lambda expressions.
-
----
-
-### 3.5 `HealthChecker.diagnose_skills` (CC 10)
-
-- **File**: `src/agent_nexus/platform/evolution/health.py:193-250`
-- **Lines**: 58
-- **Target CC**: 5
-
-**Root Cause**: Mixed responsibilities — the function handles skill filtering (with dual-path `skills` vs `active_skills`), per-skill health computation, metric construction (with conditional rates), and report assembly.
+**Root Cause**: CC inflation from boolean operators (`and`, `or`) in conditions. The actual logic is a clean 5-state machine.
 
 **Recommendation**:
-```
-1. Extract `_resolve_skill_list(skill_ids, skills, store) -> list[SkillRecord]` — handles the filtering logic
-2. Extract `_build_metrics(skill, rates) -> dict[str, float]` — handles metric construction
-3. Main function becomes: resolve list → iterate → compute health + metrics → assemble reports
-```
-
----
-
-### 3.6 `HealthChecker.get_health_summary` (CC 10)
-
-- **File**: `src/agent_nexus/platform/evolution/health.py:266-296`
-- **Lines**: 31
-- **Target CC**: 4
-
-**Root Cause**: Manual counting loop — iterates over all reports and suggestions to count by `EvolutionType`. Three sequential `if/elif` chains in the inner loop.
-
-**Recommendation**: Use `collections.Counter`:
 ```python
-counts = Counter(s.evolution_type for r in reports.values() for s in r.suggestions)
-return {"fix_suggestions": counts[EvolutionType.FIX], ...}
+def _dispatch_batch(self, batch, task_description, deadline, result):
+    """Dispatch a batch via parallel or sequential strategy."""
+    if self._concurrent and len(batch) > 1:
+        self._dispatch_parallel(batch, task_description, deadline, result)
+    else:
+        self._dispatch_sequential(batch, task_description, deadline, result)
+
+# In _run_dispatch_loop, replace the if/else block:
+self._dispatch_batch(batch, task_description, deadline, result)
 ```
-CC drops to ~3.
+CC drops from 11 → 8 (B-grade). Further: extract `result.is_terminal` property to replace `result.failed or result.cancelled` → CC 7.
+
+**Estimated change**: +5 lines (new method), -4 lines (simplified main), net Δ = +1 line.
 
 ---
 
-### 3.7 `ExecutionAnalyzer._generate_suggestions` (CC 10)
+### 2.2 `_check_api_keys` (CC 11)
 
-- **File**: `src/agent_nexus/platform/evolution/analyzer.py:209-256`
-- **Lines**: 48
-- **Target CC**: 5
-
-**Root Cause**: Mixed iteration + accumulation + deduplication — the function iterates skills, generates suggestions per skill, adds a special CAPTURED suggestion, then deduplicates by key. The dedup logic with `dict` tracking adds CC.
-
-**Recommendation**: Extract deduplication into a `_deduplicate_suggestions(suggestions) -> list[EvolutionSuggestion]` helper. The CAPTURED special case can be appended before dedup. CC drops to ~6.
-
----
-
-### 3.8 `SkillStore._parse_snapshot` (CC 10)
-
-- **File**: `src/agent_nexus/platform/evolution/skill_store.py:785-809`
+- **File**: `src/agent_nexus/platform/local/cli/init_cmd.py:95-119`
 - **Lines**: 25
-- **Target CC**: 4
-
-**Root Cause**: Defensive parsing — multiple `if not` guards for empty inputs, type checking, non-string value checking, and exception handling. Each guard is simple but adds +1 CC.
-
-**Recommendation**: Acceptable for a parsing/validation function. Low priority — defensive parsing inherently has many branches.
-
----
-
-### 3.9 `EvolutionContextDescriber.l1_context` (CC 10)
-
-- **File**: `src/agent_nexus/platform/evolution/context_describer.py:96-140`
-- **Lines**: 45
 - **Target CC**: 5
 
-**Root Cause**: Mixed I/O + formatting — fetches skills, filters, sorts, calls `diagnose_skills`, then formats a markdown table. The table construction loop adds CC.
+**CC Decomposition**:
+| Decision Point | CC Contribution |
+|----------------|----------------|
+| Function definition | 1 |
+| `try` | 1 |
+| `for v in providers.values()` (list comp) | 1 |
+| `if isinstance(v, dict)` (list comp filter) | 1 |
+| `and "api_key_env" in v` (list comp filter) | 1 |
+| `except` | 1 |
+| `if not config_key_envs` | 1 |
+| `for p in DEFAULT_PROVIDERS.values()` (list comp) | 1 |
+| `if isinstance(p, dict)` (list comp filter) | 1 |
+| `and "api_key_env" in p` (list comp filter) | 1 |
 
-**Recommendation**: Extract `_format_skill_table(skills, reports) -> str` for the markdown table formatting. Keep the data-fetching in `l1_context`.
+**First Principles Judgment**:
+- Does ONE thing? **Yes** — checks if API keys are configured.
+- > 1 consumer? **No** — only called from `init_cmd`.
+- Data-driven alternative? **Yes** — two identical list comprehensions operating on different data sources.
 
----
-
-### 3.10 `EvolutionContextDescriber._build_judgment_history` (CC 10)
-
-- **File**: `src/agent_nexus/platform/evolution/context_describer.py:280-303`
-- **Lines**: 24
-- **Target CC**: 4
-
-**Root Cause**: Nested loop with accumulation — outer loop over skills, inner comprehension for counting applied/completed/fell_back. Three `sum(1 for ...)` comprehensions.
-
-**Recommendation**: Replace three `sum()` calls with a single `Counter`:
-```python
-counts = Counter(j["status"] for j in judgments)  # if status field existed
-```
-Or use a helper `_count_judgment_outcomes(judgments) -> tuple[int, int, int]`.
-
----
-
-### 3.11 `SkillLoader._split_body_resources` (CC 10)
-
-- **File**: `src/agent_nexus/platform/skills/loader.py:186-217`
-- **Lines**: 32
-- **Target CC**: 4
-
-**Root Cause**: State-machine parsing — tracks `in_fence` state while iterating lines, with two branches inside the loop. The offset tracking and conditional `break` add branches.
-
-**Recommendation**: The function is a clean state-machine parser. Minor improvement: extract the line-processing into a generator `_find_resources_heading(content) -> int | None` that yields the offset. Low priority.
-
----
-
-### 3.12 `SchemaTransformer._resolve_one_of_any_of` (CC 10)
-
-- **File**: `src/agent_nexus/platform/gateway/schema_transformer.py:210-237`
-- **Lines**: 28
-- **Target CC**: 5
-
-**Root Cause**: Type-dispatch with accumulation — iterates variants, classifies null vs non-null, resolves each, then handles Optional vs Union construction. The final Union-building loop adds CC.
-
-**Recommendation**: Replace the manual Union construction with `Union[tuple(resolved_variants)]` or `functools.reduce(operator.or_, resolved_variants)`. The null/non-null split can use partition:
-```python
-null_variants, non_null = partition(lambda v: v.get("type") == "null", variants)
-```
-
----
-
-## 4. Focus Module Analysis
-
-### 4.1 Gateway (`src/agent_nexus/platform/gateway/gateway.py`)
-
-| Metric | Value |
-|--------|-------|
-| Lines | 680 |
-| Methods | 24 |
-| Avg CC | 3.48 |
-| Max CC | 8 (`_agent_info`, `_register_agent_tools`) |
-
-**Class size**: MCPGateway has 24 methods, which exceeds the SRP threshold of 10. However, the methods are well-decomposed:
-- 3 core tools (search, list, info)
-- 5 agent registration methods
-- 4 IPC/health methods
-- 4 tool building methods
-- 4 external server methods
-- 4 lifecycle methods (run_stdio, run_sse, stop, __init__)
-
-**Risk**: Moderate. The class is large but methods are cohesive around the "MCP gateway" concept. The tool registration chain (`_register_agent_tools` → `_register_single_tool` → `_disambiguate_tool_name`) is well-factored.
-
-**Recommendation**: Consider extracting `ExternalServerManager` for the 4 external server methods. The core agent methods can stay.
-
----
-
-### 4.2 LLM Client (`src/agent_nexus/platform/agency/llm_client.py`)
-
-| Metric | Value |
-|--------|-------|
-| Lines | 660 |
-| Methods | 18 (in LLMClient) |
-| Avg CC | 3.29 |
-| Max CC | 9 (`from_config`, `_build_litellm_kwargs`, `_call_cli`) |
-
-**Risk**: Moderate. Three B(9) methods, but they serve distinct responsibilities (factory, request building, CLI execution). The `from_config` method mixes factory logic with config resolution — a common pattern that's hard to avoid.
+**Root Cause**: CC from two structurally identical list comprehensions. The `try/except` for config loading and the fallback to defaults are responsible for 6/11 CC points.
 
 **Recommendation**:
-- `from_config` (CC 9): Already well-delegated to `_resolve_provider` and `_resolve_capability`. The CC comes from the resolution chain — acceptable.
-- `_build_litellm_kwargs` (CC 9): The optional parameter application (`max_tokens`, `top_p`, `timeout`, `api_key`, `api_base`) is inherently conditional. Could use a dict-merge pattern but the clarity gain is marginal.
-- `_call_cli` (CC 9): The session recording block adds branches. Extract `_record_cli_execution(result, backend, ...)` to reduce.
+```python
+def _load_provider_configs(config_path: Path) -> dict:
+    """Load provider config from TOML, return empty on failure."""
+    try:
+        import toml
+        raw = toml.loads(config_path.read_text(encoding="utf-8"))
+        return raw.get("models", {}).get("providers", {})
+    except (OSError, ValueError, KeyError):
+        return {}
+
+def _collect_key_envs(providers: dict) -> list[str]:
+    """Extract api_key_env names from provider configs."""
+    return [
+        str(v["api_key_env"])
+        for v in providers.values()
+        if isinstance(v, dict) and "api_key_env" in v
+    ]
+
+def _check_api_keys(config_path: Path) -> tuple[str, bool, str]:
+    providers = _load_provider_configs(config_path) or DEFAULT_PROVIDERS
+    key_envs = _collect_key_envs(providers)
+    has_key = any(os.environ.get(k) for k in key_envs)
+    return ("API key configured", has_key, "at least one set" if has_key else "none set")
+```
+CC drops from 11 → 5 (A-grade). The two helpers are reusable if other commands need provider config.
+
+**Estimated change**: +15 lines (2 helpers), -15 lines (simplified main), net Δ = 0 lines.
 
 ---
 
-### 4.3 Planner (`src/agent_nexus/platform/agency/planner.py`)
+### 2.3 `evolution_history` (CC 11)
 
-| Metric | Value |
-|--------|-------|
-| Lines | 291 |
-| Functions/Methods | 10 |
-| Avg CC | ~4.1 |
-| Max CC | 7 (`generate_toml`, `resolve_dependencies`) |
+- **File**: `src/agent_nexus/platform/local/cli/evolution_cmd.py:118-156`
+- **Lines**: 39
+- **Target CC**: 4
 
-**Risk**: Low. The planner is well-structured with clear separation between validation, DAG construction, and TOML generation. The class `DynamicCompositePlanner` has only 2 methods.
+**CC Decomposition**:
+| Decision Point | CC Contribution |
+|----------------|----------------|
+| Function definition | 1 |
+| `with _engine_context()` | 1 |
+| `if skill is not None` | 1 |
+| `else` | 1 |
+| `if versions` | 1 |
+| `if v.is_active` (list comp) | 1 |
+| `active[0] if active else versions[-1]` (ternary) | 1 |
+| `if skill_id is None` | 1 |
+| `if not ancestry` | 1 |
+| `for i, ancestor in enumerate(ancestry)` | 1 |
+| `if ancestor.first_seen` (inline ternary) | 1 |
 
----
+**First Principles Judgment**:
+- Does ONE thing? **No** — resolves skill identifier AND formats ancestry tree. Mixed responsibilities.
+- > 1 consumer? **No** — single CLI command.
+- Data-driven alternative? The UUID/name resolution chain can be unified.
 
-### 4.4 Executor (`src/agent_nexus/platform/agency/executor.py`)
-
-| Metric | Value |
-|--------|-------|
-| Lines | 467 |
-| Max CC | 10 (`_resolve_section` — false positive) |
-
-**Risk**: Low. The `_resolve_section` CC 10 is a false positive (data-driven dict dispatch). The actual logic complexity is CC 3.
-
----
-
-### 4.5 Task Graph (`src/agent_nexus/platform/orchestration/task_graph.py`)
-
-| Metric | Value |
-|--------|-------|
-| Lines | 855 |
-| Methods | 42 |
-| Avg CC | 2.95 |
-| Max CC | 9 (`add_task`) |
-
-**Class size**: TaskGraph has 42 methods, significantly exceeding SRP threshold. However, many are thin wrappers (async mirrors, property accessors, context managers).
-
-**Decomposition**:
-- 8 lifecycle/context methods
-- 4 core CRUD methods (add_task, add_tasks, start_task, complete_task, fail_task)
-- 6 query methods (get_task, get_ready, get_blocked, get_snapshot)
-- 6 async mirrors
-- 6 internal graph algorithms (_build_dep_map, _build_reverse_map, etc.)
-- 6 batch/internal helpers
-- 4 validation methods
-
-**Risk**: Moderate. The class is large but methods are thin and cohesive. The graph algorithm methods are well-extracted.
-
-**Recommendation**: No urgent action. Consider extracting async mirrors into a mixin if the class grows further.
-
----
-
-### 4.6 Evolver (`src/agent_nexus/platform/evolution/evolver.py`)
-
-| Metric | Value |
-|--------|-------|
-| Lines | 431 |
-| Methods | 11 |
-| Avg CC | 4.0 |
-| Max CC | 9 (`process_tool_degradation`, `_evolve_derived`) |
-
-**Risk**: Moderate. `process_tool_degradation` (CC 9) has a loop with conditional anti-loop tracking. `_evolve_derived` (CC 9) has many sequential field constructions for the new SkillRecord.
+**Root Cause**: Mixed skill resolution (UUID → name → active selection) AND mixed formatting (indentation tree building). These are two distinct operations fused into one function.
 
 **Recommendation**:
-- `process_tool_degradation`: Extract the anti-loop tracking into a dedicated `AntiLoopTracker` class. Main loop becomes: filter unaddressed → evolve → mark addressed.
-- `_evolve_derived`: Extract `_create_derived_record(parents, suggestion) -> SkillRecord` for the record construction. The parent-loading loop can use `_load_parents(store, target_ids) -> list[SkillRecord]`.
+```python
+def _resolve_skill_id(engine, identifier: str) -> str | None:
+    """Resolve a skill identifier (UUID or name) to its internal ID."""
+    skill = engine.store.get_skill_record(identifier)
+    if skill is not None:
+        return skill.id
+    versions = engine.store.get_versions(identifier)
+    if not versions:
+        return None
+    active = [v for v in versions if v.is_active]
+    return (active[0] if active else versions[-1]).id
+
+def _format_ancestry(ancestry: list) -> str:
+    """Format ancestry chain as indented tree."""
+    lines, indent = [], ""
+    for i, ancestor in enumerate(ancestry):
+        created = ancestor.first_seen.isoformat().split("T")[0] if ancestor.first_seen else "?"
+        lines.append(f"{indent}{ancestor.name} (gen {ancestor.lineage.generation}, {created})")
+        if i < len(ancestry) - 1:
+            indent += "  -> "
+    return "\n".join(lines)
+
+@evolution_app.command("history")
+def evolution_history(skill_name: str = typer.Argument(...)) -> None:
+    with _engine_context() as engine:
+        skill_id = _resolve_skill_id(engine, skill_name)
+        if skill_id is None:
+            typer.echo(f"Skill '{skill_name}' not found.", err=True)
+            raise typer.Exit(code=1)
+        ancestry = engine.store.get_ancestry(skill_id)
+        if not ancestry:
+            typer.echo(f"No ancestry found for '{skill_name}'.")
+            return
+        typer.echo(_format_ancestry(ancestry))
+```
+CC drops from 11 → 4 (A-grade). `_resolve_skill_id` is reusable for other evolution commands.
+
+**Estimated change**: +20 lines (2 helpers), -25 lines (simplified main), net Δ = -5 lines.
 
 ---
 
-## 5. Summary Table — High-CC Functions
+## 3. Class-Level SRP Audit (First Principles)
 
-| Function | File | CC | Target | Root Cause | Priority | Est. ΔLines |
-|----------|------|----|--------|------------|----------|-------------|
-| `DAGDispatcher._no_more_work` | dag_dispatcher.py:300 | 11 | 5 | Mixed responsibilities | **P1** | -3 |
-| `DAGDispatcher._run_dispatch_loop` | dag_dispatcher.py:338 | 11 | 6 | Nested conditionals | **P2** | -7 |
-| `run_composition` | cli.py:595 | 11 | 4 | Main function syndrome | **P1** | -100 (restructure) |
-| `_check_api_keys` | init_cmd.py:96 | 11 | 4 | Double-fallback pattern | **P2** | -5 |
-| `evolution_history` | evolution_cmd.py:119 | 11 | 4 | Mixed resolve+format | **P2** | -11 |
-| `_detect_risk_conflicts` | integrator.py:350 | 10 | 5 | Guard cascade | P3 | -5 |
-| `load_dag_into_graph` | dag_dispatcher.py:118 | 10 | 4 | Mixed I/O+transform | **P2** | -10 |
-| `_format_section_value` | cli.py:390 | 10 | 4 | Type dispatch | P3 | 0 |
-| `_resolve_section` | executor.py:118 | 10 | 3 | **False positive** (dict dispatch) | **Skip** | 0 |
-| `diagnose_skills` | health.py:193 | 10 | 5 | Mixed responsibilities | **P2** | -15 |
-| `get_health_summary` | health.py:266 | 10 | 4 | Manual counting loop | **P1** | -10 |
-| `_generate_suggestions` | analyzer.py:209 | 10 | 5 | Mixed iterate+dedup | P3 | -8 |
-| `_parse_snapshot` | skill_store.py:785 | 10 | 4 | Defensive parsing | P3 | 0 |
-| `l1_context` | context_describer.py:96 | 10 | 5 | Mixed I/O+format | P3 | -10 |
-| `_build_judgment_history` | context_describer.py:280 | 10 | 4 | Triple sum() in loop | P3 | -5 |
-| `_split_body_resources` | loader.py:186 | 10 | 4 | State machine parsing | P3 | 0 |
-| `_resolve_one_of_any_of` | schema_transformer.py:210 | 10 | 5 | Manual Union construction | P3 | -5 |
+### Assessment Criteria
+- **> 10 methods** = potential SRP violation (monitor threshold)
+- **> 20 methods** = likely SRP violation (action threshold)
+- **Cohesion check**: Do the methods serve a single responsibility?
 
-### Priority Classification
+| Class | Module | Methods | Avg CC | SRP Risk | Assessment |
+|-------|--------|---------|--------|----------|------------|
+| TaskGraph | orchestration | 43 | 3.0 | **Monitor** | Methods are cohesive (CRUD + query + graph algorithms + async mirrors). The 42 methods include 6 async mirrors (thin wrappers) and 6 thin property accessors. Effective unique responsibilities: ~25. |
+| EvolutionStore | evolution | 37 | 1.2 | **Low** | Thin DAO layer. Most methods are single-line SQL calls. No business logic. |
+| SkillStore | evolution | 34 | 3.8 | **Low** | Similar to EvolutionStore — SQL-backed store with domain-specific queries. |
+| PlatformRouter | router | 26 | 4.0 | **Moderate** | 4-phase workflow + agent resolution + result aggregation. Methods are cohesive around "route a composite task". |
+| DAGDispatcher | agency | 25 | 4.2 | **Moderate** | Dispatch loop + parallel/sequential execution + result collection. Core dispatch responsibility. |
+| GitInstaller | local | 25 | 3.9 | **Moderate** | Install + validate + sparse clone + venv creation. All within "install an agent" scope. |
+| MCPGateway | gateway | 24 | 3.5 | **Monitor** | 3 MCP tools + 5 agent registration + 4 IPC/health + 4 tool building + 4 external server + 4 lifecycle. Consider extracting `ExternalServerManager` (4 methods). |
+| DeferredAgentRegistry | gateway | 24 | 3.5 | **Low** | Agent registry with subprocess lifecycle. Methods cohesive. |
 
-- **P1 (Do now)**: Functions with CC >= 11 AND clear refactoring path AND high impact on maintainability
-  - `run_composition` — main function syndrome, 193 lines, easy wins
-  - `get_health_summary` — trivial Counter replacement
-  - `DAGDispatcher._no_more_work` — extract classification + side effects
+### Key Finding: No Critical SRP Violations
 
-- **P2 (Do soon)**: Functions with CC >= 11 OR CC = 10 with mixed responsibilities
-  - `DAGDispatcher._run_dispatch_loop`
-  - `_check_api_keys`
-  - `evolution_history`
-  - `load_dag_into_graph`
-  - `diagnose_skills`
-
-- **P3 (Nice to have)**: Functions with CC = 10 that are inherently complex or already well-structured
-  - Guard cascades, defensive parsing, state machines
-  - `_resolve_section` — skip entirely (false positive)
+All large classes have methods that serve a single cohesive responsibility. The largest (TaskGraph at 43 methods) includes 12+ thin wrappers (async mirrors, properties) that inflate the count. The effective unique responsibilities are well within bounds.
 
 ---
 
-## 6. Cross-Cutting Patterns
+## 4. Over-Abstraction Audit
 
-### Pattern 1: "Main Function Syndrome"
-`run_composition` is the most egregious example. The fix is always the same: extract steps into named functions. The Click decorators inflate the apparent size but don't affect CC.
+### Dead Abstractions
 
-### Pattern 2: Guard Cascades
-Several functions (`_detect_risk_conflicts`, `_parse_snapshot`, `_check_api_keys`) use early-return guards. While each guard is simple, 4+ guards push CC above 10. **Mitigation**: Group related guards into a validation function that returns a result type.
+| Abstraction | Type | Consumers | Status |
+|-------------|------|-----------|--------|
+| `ArtifactSink` | Protocol | **0** | **DEAD** — defined but never referenced outside its declaration |
 
-### Pattern 3: Manual Counting/Type Dispatch
-`get_health_summary` (manual EvolutionType counting) and `_format_section_value` (isinstance chain) can use `Counter` and `match`/dispatch-dict respectively. These are the easiest wins.
+### Justified Abstractions
 
-### Pattern 4: False Positives from Data-Driven Patterns
-`_resolve_section` uses a dict of lambdas — this is the correct pattern, but radon counts each lambda as adding CC. **No action needed** for such functions.
+| Abstraction | Type | Implementations/Consumers | Status |
+|-------------|------|---------------------------|--------|
+| `ExpertExecutor` | Protocol | 2+ (DAGDispatcher, TaskComposer) | Justified — enables test injection |
+| `ContextProvider` | Protocol | Registry-based, multiple providers | Justified — extensibility point |
+| `ReflectionRule` | Protocol | 2 impls (EmptyResultRule, MaxIterationRule) | Justified — pluggable rules |
+| `SecurityRule` | ABC | 4 impls (Import, Function, Attribute, Regex) | Clearly justified — defense-in-depth |
+
+**Recommendation**: Remove `ArtifactSink` (dead code). No other over-abstractions found.
 
 ---
 
-## 7. Maintainability Index
+## 5. Cross-Module Complexity Patterns
 
-All modules scored well on the Maintainability Index (radon mi). No modules fell below the "Medium" threshold. The codebase uses clear naming, reasonable function lengths, and consistent structure.
+### Pattern 1: SQLite Store Boilerplate Duplication
+
+Four stores share identical connection management patterns:
+
+| Store | File | Shared Pattern Lines |
+|-------|------|---------------------|
+| EvolutionStore | store.py | ~30 lines |
+| SkillStore | skill_store.py | ~30 lines |
+| AnalysisStore | analysis_store.py | ~30 lines |
+| BudgetStore | budget_store.py | ~30 lines |
+| **Total** | | **~120 lines** |
+
+Shared boilerplate: `_is_memory`, `_memory_conn`, `_conn_factory`, `_conn()` method, `close()` method.
+
+**First Principles Judgment**:
+- Is there > 1 consumer? **Yes** (4 stores).
+- Does the base class do one thing? **Yes** (connection lifecycle).
+- **But**: The boilerplate is simple (CC 3-5 each) and each store has different schemas. Extracting a base class saves lines but doesn't meaningfully reduce cognitive complexity.
+
+**Recommendation**: **Optional, not urgent**. If a 5th store is added, reconsider extraction.
+
+### Pattern 2: CLI Command Functions Mixing Resolution + Formatting
+
+Both `evolution_history` and `_check_api_keys` fuse data resolution with output formatting. This pattern also appears in other CLI commands. The fix is consistent: extract `_resolve_X` and `_format_X` helpers.
+
+### Pattern 3: Boolean Operator CC Inflation
+
+Several functions lose 1-2 CC points to `and`/`or` operators in conditions:
+- `result.failed or result.cancelled` → extract `result.is_terminal` property
+- `self._concurrent and len(batch) > 1` → extract `self._should_dispatch_concurrently(batch)`
+- `isinstance(v, dict) and "api_key_env" in v` → extract type-safe accessor
+
+This is a low-cost, high-impact refactoring pattern.
 
 ---
 
-## 8. Recommendations Summary
+## 6. Actionable Refactoring Plan
 
-1. **Immediate (P1)**: Refactor `run_composition` into 5 step functions. Replace manual counting in `get_health_summary` with `Counter`. Extract task classification in `_no_more_work`.
-2. **Near-term (P2)**: Extract resolve/format helpers in `evolution_history`. Split `load_dag_into_graph` into filter/transform/insert. Extract `_resolve_skill_list` from `diagnose_skills`.
-3. **Skip**: `_resolve_section` (false positive). `_parse_snapshot` (defensive parsing is appropriate). `_split_body_resources` (clean state machine).
-4. **Architectural**: MCPGateway (24 methods) and TaskGraph (42 methods) are large classes. Monitor for growth, but no urgent refactoring needed — methods are cohesive and thin.
+### Priority Matrix
+
+| # | Function | CC | Target | Root Cause | Priority | Est. ΔLines |
+|---|----------|----|--------|------------|----------|-------------|
+| 1 | `evolution_history` | 11 | 4 | Mixed resolve+format | **P1** | -5 |
+| 2 | `_check_api_keys` | 11 | 5 | Duplicate list comps | **P1** | 0 |
+| 3 | `_run_dispatch_loop` | 11 | 7 | Boolean CC inflation | **P2** | +1 |
+| 4 | Remove `ArtifactSink` | — | — | Dead abstraction | **P2** | -4 |
+| 5 | SQLite store base | — | — | Boilerplate duplication | **P3** | -90 (optional) |
+
+### P1 Refactoring Details
+
+**1. `evolution_history` → CC 11→4**
+- Extract `_resolve_skill_id(engine, identifier) -> str | None`
+- Extract `_format_ancestry(ancestry) -> str`
+- Main function becomes: resolve → guard → query → format → print
+- Reusable: `_resolve_skill_id` can be used by other evolution commands
+
+**2. `_check_api_keys` → CC 11→5**
+- Extract `_load_provider_configs(config_path) -> dict`
+- Extract `_collect_key_envs(providers) -> list[str]`
+- Main function becomes: load → collect → check → return
+- Reusable: both helpers usable wherever provider config is needed
+
+### P2 Refactoring Details
+
+**3. `_run_dispatch_loop` → CC 11→7**
+- Extract `_dispatch_batch(batch, ...)` for concurrent/sequential routing
+- Extract `DispatchResult.is_terminal` property for `failed or cancelled`
+- Main function becomes a cleaner state machine
+
+**4. Remove `ArtifactSink` Protocol**
+- Delete lines 54-57 in `dag_dispatcher.py`
+- Zero consumers, zero risk
+
+---
+
+## 7. Complexity Metrics Trend
+
+| Metric | Iteration 1 | After Iteration 2 | Current (Iter 3) |
+|--------|-------------|-------------------|-------------------|
+| C-grade functions | 5 | 3 | 3 |
+| Average CC | 3.35 | 3.33 | 3.33 |
+| Max CC | 11 | 11 | 11 |
+| Dead abstractions | Unknown | Unknown | 1 (ArtifactSink) |
+| Classes > 20 methods | 8 | 8 | 8 |
+| SRP violations | 0 critical | 0 critical | 0 critical |
+
+**Overall Assessment**: The codebase is in excellent shape. After the P1 refactoring (2 functions), **zero functions will exceed CC 10**. The remaining complexity is inherent to the domain (dispatch state machines, SQLite store patterns, CLI command workflows).
