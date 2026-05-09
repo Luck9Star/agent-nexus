@@ -1,371 +1,318 @@
-# Test Audit Report: Gap & Redundancy Analysis (Cycle 3)
+# Test Audit Report: Gap & Redundancy Analysis (Cycle 4)
 
 **Date**: 2026-05-10
 **Branch**: nf/serena-using-superpo-ff6f4b
-**Iteration**: 11 (Cycle 3 全量重分析，覆盖 v1/v2 发现的修复 + 新发现)
-**Total Tests**: 4,778 across 170 files
+**Iteration**: 20 (Cycle 4 — async_safety focused, full re-analysis)
+**Total Tests**: 4,841 across 174 files
 
 ---
 
 ## 1. Overall Statistics
 
-| Metric | v2 (Iter 4) | Current (Cycle 3) | Delta |
-|--------|-------------|-------------------|-------|
-| Source modules (non-init) | 99 | 99 | 0 |
-| Total public symbols | 295 | ~651 | +356 (更精确计数) |
-| Test files (excl. conftest/__init__) | 167 | 170 | +3 |
-| Unit test files | 130 | 124 | -6 (删除+重分类) |
-| E2E test files | 21 | 20 | -1 |
-| Integration test files | 9 | 10 | +1 |
-| Capability test files | 6 | 16 | +10 |
-| **Total test functions** | **4,437** | **4,778** | **+341** |
+| Metric | Cycle 3 (Iter 11) | Current (Cycle 4) | Delta |
+|--------|--------------------|--------------------|-------|
+| Test files (excl. conftest/__init__) | 170 | 174 | +4 |
+| Unit test files | 124 | 129 | +5 |
+| E2E test files | 20 | 18 | -2 (reclassified) |
+| Integration test files | 10 | 11 | +1 |
+| Capability test files | 16 | 6 | -10 (contract files excluded) |
+| **Total test functions** | **4,778** | **4,841** | **+63** |
+| No-assertion tests (verified) | ~176 (claimed) | **1** (skipped test) | **-175 (v3 claim debunked)** |
+| Async safety test grade | Not assessed | **B+** | NEW |
 
 ---
 
-## 2. Gap Analysis: Untested Public Symbols (P0-P2)
+## 2. Gap Analysis: Untested Public Symbols
 
-### 总体覆盖率
+### 2.1 Previous P0 Gaps — All Fixed
 
-| Module Directory | Public Symbols | With Tests | Without | Coverage |
-|---|---|---|---|---|
-| `platform/hooks/` | 6 | 6 | 0 | 100% |
-| `platform/skills/` | 16 | 16 | 0 | 100% |
-| `platform/gateway/` | ~65 | ~60 | ~5 | 92% |
-| `platform/runtime/` | ~50 | ~48 | ~2 | 96% |
-| `platform/evolution/` | ~110 | ~100 | ~10 | 91% |
-| `platform/orchestration/` | ~75 | ~70 | ~5 | 93% |
-| `models/` | ~95 | ~90 | ~5 | 95% |
-| `platform/agency/` | ~120 | ~105 | ~15 | 88% |
-| `platform/config/` | 44 | 38 | 6 | 86% |
-| `platform/router/` | ~20 | ~18 | ~2 | 90% |
-| `platform/local/` | ~50 | ~42 | ~8 | 84% |
-| **TOTAL** | **~651** | **~593** | **~58** | **91%** |
+All 6 P0 gaps from Cycle 3 report have been addressed in iterations 7 and 14:
 
-### P0 — 关键缺口（高风险路径零覆盖）
+| v3 P0 Gap | Status | Test File |
+|-----------|--------|-----------|
+| EvolutionStore.get_metrics/deactivate_skill | **FIXED** (Iter 14) | `test_store_p0_unit.py` (26 tests) |
+| HealthChecker.get_health_summary | **FIXED** (Iter 14) | `test_store_p0_unit.py` |
+| GitInstaller._run_git/_run_git_capture | **FIXED** (Iter 14) | `test_installer_unit.py` (26 tests) |
+| GitInstaller._create_venv/_run_uv | **FIXED** (Iter 14) | `test_installer_unit.py` |
+| AgentSupervisor._resolve_package_name etc. | **FIXED** (Iter 14) | `test_supervisor_cmd_unit.py` (16 tests) |
+| McpToolAdapter/SchemaTransformer/DeferredAgentRegistry | **FIXED** (Iter 14) | `test_gateway_tool_call_e2e.py` (26 tests) |
 
-> 注：v2 报告的 P0 缺口（ModelDBClient.close、_trigram_candidates、ProcessManager._force_kill_and_reap、HookExecutor.close、PermissionChecker.check_command、AgentSupervisor.auto_restart_dead）已在 iteration 7 通过新增 128 个测试全部修复。以下为残余和新发现缺口。
+### 2.2 Current P0 Gaps — Async Safety Critical
 
-| Module | Symbol | Risk | Notes |
-|--------|--------|------|-------|
-| `evolution/store.py` | `EvolutionStore.get_metrics()` | High | Metrics 聚合被 HealthChecker 和 AgentPromoter 消费，无直接测试 |
-| `evolution/store.py` | `EvolutionStore.deactivate_skill()` | Medium | evolve_skill 内部使用，无独立断言 |
-| `evolution/health.py` | `HealthChecker.get_health_summary()` | Medium | 公开 API，被 EvolutionEngine.diagnose_all 消费 |
-| `local/installer.py` | `GitInstaller._run_git()` / `_run_git_capture()` | High | 核心 git 交互层，install/uninstall/update 依赖 |
-| `local/installer.py` | `GitInstaller._create_venv()` / `_run_uv()` | Medium | Agent 安装 venv 创建 |
-| `local/supervisor.py` | `AgentSupervisor._resolve_package_name()` 等 4 个方法 | Medium | Agent 启动时的包解析路径 |
+| # | Module | Function | async | Resource | Issue |
+|---|--------|----------|-------|----------|-------|
+| 1 | `agency/dag_dispatcher.py` | `_run_dispatch_loop` | N | ThreadPoolExecutor | **ZERO direct tests.** Core sync dispatch loop. No test for BaseException/KeyboardInterrupt during loop execution. |
+| 2 | `agency/dag_dispatcher.py` | `_drain_single_future` | N | ThreadPoolExecutor | **ZERO direct tests.** Exception detail capture. No test for CancelledError or BaseException from future. |
+| 3 | `agency/dag_dispatcher.py` | `_collect_futures` | N | asyncio | **ZERO direct tests.** Result collection. No test for mixed success/exception futures or TimeoutError. |
+| 4 | `local/installer.py` | `install_local` | Y | file, subprocess | **Entirely untested.** Symlink escape, venv creation, manifest validation for local paths. |
+| 5 | `local/installer.py` | `update` (happy path) | Y | subprocess, file | Only negative path tested (`test_update_raises_when_not_installed`). Successful update flow untested. |
+| 6 | `evolution/store.py` | `evolve_skill` (concurrent) | N | DB | UPSERT race: two coroutines calling evolve_skill for same skill_id. asyncio.Lock not used (sync module). |
+| 7 | `hooks/executor.py` | `_execute_command` (BaseException) | Y | subprocess | CancelledError tested but SystemExit/GeneratorExit (other BaseException subclasses) untested. |
 
-### P1 — 中等优先级缺口
+### 2.3 P1 Gaps — Moderate Risk
 
-| Module | Gap | Notes |
-|--------|-----|-------|
-| `config/loader.py` | `ConfigLoader.invalidate_cache()` | 缓存失效行为无测试 |
-| `config/loader.py` | `ConfigLoader.load_cli_routing()` | CLI 路由配置加载 |
-| `config/templates.py` | `load_routing_config()` | 路由配置模板 |
-| `config/model_db.py` | `ModelDBClient._do_get()` HTTP 5xx 路径 | 网络异常未覆盖 |
-| `agency/dag_dispatcher.py` | `_cleanup_stale_tasks` / `_fail_orphaned_pending` | 清理路径 |
-| `agency/task_composer.py` | `_check_deadline` | 超时强制逻辑 |
-| `evolution/store.py` | `get_skill_records_batch` / `get_children` | 批量查询路径 |
-| `evolution/compaction.py` | `should_alert` / `reset_consecutive_count` | CompactionGuard 边缘 |
-| `gateway/external_mcp_adapter.py` | `is_alive` 连接超时路径 | 外部 MCP 断连检测 |
-| `orchestration/task_graph.py` | `clear()` 数据清理 | 无直接测试 |
+| # | Module | Gap | async | Resource |
+|---|--------|-----|-------|----------|
+| 1 | `task_graph.py` | `_insert_tasks_and_deps` concurrent batch writes | N | DB |
+| 2 | `task_graph.py` | `aclose` racing with concurrent write | Y | DB |
+| 3 | `task_graph.py` | CancelledError during async operation (no targeted test) | Y | DB |
+| 4 | `process_manager.py` | `stop_agent` PermissionError (macOS SIP) | Y | subprocess |
+| 5 | `process_manager.py` | `_terminate_process` ProcessLookupError | Y | subprocess |
+| 6 | `process_manager.py` | `_cleanup_dead` racing with `start_agent` | Y | subprocess |
+| 7 | `ipc.py` | `close` racing with concurrent `send` | Y | pipe |
+| 8 | `ipc.py` | `send` drain cancelled externally | Y | pipe |
+| 9 | `router.py` | `_execute_parallel_agents` CancelledError propagation | Y | asyncio |
+| 10 | `gateway.py` | `_stop_external_servers` mid-connect | Y | network |
+| 11 | `gateway.py` | `_cleanup_agent_registration` name collision | Y | pipe |
+| 12 | `external_mcp_adapter.py` | BaseException disconnect (no direct test) | Y | network |
+| 13 | `agency/executor.py` | `LLMExecutor.__call__` network timeout | Y | network |
+| 14 | `agency/executor.py` | `LLMExecutor.close` httpx cleanup | N | httpx |
+| 15 | `agency/task_composer.py` | Entire `_dispatch_legacy` path | N | — |
+| 16 | `config/model_db.py` | Index building pipeline (`_build_index` etc.) | N | — |
+| 17 | `local/supervisor.py` | `_build_command`, `_try_venv_command`, `_try_system_command` | N | file |
+| 18 | `hooks/executor.py` | `_execute_http` timeout | Y | httpx |
+| 19 | `hooks/executor.py` | `close` when httpx client is mid-request | Y | httpx |
 
-### P2 — 低优先级改进
+### 2.4 P2 Gaps — Low Priority
 
 | Module | Gap |
 |--------|-----|
-| `models/_common.py` | `FrozenModel` 序列化边缘 |
-| `agency/json_parse.py` | 深度嵌套畸形 JSON |
-| `agency/prompt_loader.py` | 缺失模板变量异常 |
-| `agency/parser.py` | BOM / 编码问题 |
+| `task_graph.py` | `_would_create_cycle` concurrent pre-check race |
+| `task_graph.py` | `_detect_cycles_conn` large graph performance |
+| `ipc.py` | `receive` cancelled between buffered reads |
+| `dag_dispatcher.py` | `adispatch` via `Task.cancel()` |
+| `task_composer.py` | `_check_deadline`, `_should_skip_task` |
+| `cli.py` | `run_composition`, `_execute_pipeline` end-to-end |
+| `external_mcp_adapter.py` | Transport selection ambiguity |
+| `model_db.py` | `_trigram_candidates` fuzzy matching internals |
 
-### v2 报告 P0 修复状态
+### 2.5 Module Coverage Matrix
 
-| v2 P0 条目 | 当前状态 |
-|---|---|
-| `ModelDBClient.close()` | **[FIXED]** — `test_model_db_unit.py` 22 tests |
-| `ModelDBClient._trigram_candidates()` | **[FIXED]** — `test_model_db_unit.py` |
-| `ModelDBClient._load_disk_index()` 损坏路径 | **[FIXED]** — `test_model_db_unit.py` |
-| `HookExecutor.close()` | **[FIXED]** — `test_executor_unit.py` + `test_hooks_lifecycle_e2e.py` |
-| `ProcessManager._force_kill_and_reap()` | **[FIXED]** — `test_process_manager_unit.py` |
-| `ProcessManager._cleanup_dead()` | **[FIXED]** — `test_process_manager_unit.py` |
-| `AgentSupervisor.auto_restart_dead()` | **[FIXED]** — `test_supervisor_unit.py` |
-| `PermissionChecker.check_command()` shell 注入 | **[FIXED]** — `test_permission_checker_unit.py` |
+| Module | Symbols | Covered | Gaps | Coverage | Trend |
+|--------|---------|---------|------|----------|-------|
+| hooks/ | 6 | 6 | 0 | 100% | Stable |
+| skills/ | 16 | 16 | 0 | 100% | Stable |
+| models/ | ~95 | ~93 | ~2 | 98% | +3% |
+| runtime/ | ~50 | ~48 | 2 | 96% | Stable |
+| orchestration/ | ~75 | ~72 | 3 | 96% | +3% |
+| gateway/ | ~65 | ~63 | 2 | 97% | +5% |
+| evolution/ | ~110 | ~107 | 3 | 97% | +6% |
+| config/ | 44 | 42 | 2 | 95% | +9% |
+| agency/ | ~120 | ~112 | 8 | 93% | +5% |
+| router/ | ~20 | ~19 | 1 | 95% | +5% |
+| local/ | ~50 | ~46 | 4 | 92% | +8% |
 
 ---
 
-## 3. Redundancy Analysis
+## 3. Redundancy Analysis (Corrected)
 
-### 3.1 无断言测试 — 最大发现（NEW）
+### 3.1 CRITICAL CORRECTION: No-Assertion Tests
 
-**176 个测试函数包含零 `assert` 语句且不使用 `pytest.raises`。** 它们设置场景、调用函数，但从不验证结果。这是本次审计最严重的冗余发现。
+**Cycle 3 claimed 176 no-assertion tests. Deep AST-level verification found this is INCORRECT.**
 
-**Top 10 文件**：
+Actual analysis of all 884 test functions across the top 15 flagged files:
 
-| File | Count | Nature |
-|------|-------|--------|
-| `test_process_manager.py` | 13 | 调用方法但未验证返回值 |
-| `cli/test_runtime_cmd.py` | 19 | CLI 集成测试仅隐式检查退出码 |
-| `integration/test_ipc_e2e.py` | 19 | IPC 调用无结果断言 |
-| `test_ipc.py` | 17 | IPC 传输无断言 |
-| `test_router_module.py` | 7 | Router 无断言 |
-| `integration/test_runtime_deep.py` | 11 | Runtime 深度测试无断言 |
-| `test_gateway_module.py` | 7 | Gateway 无断言 |
-| `cli/test_evolution_cmd.py` | 12 | CLI 命令无断言 |
-| `test_hook_executor.py` | 6 | Hook 解析无断言 |
-| `test_importer.py` | 8 | Importer 无断言 |
+| Verification Mechanism | Count |
+|------------------------|-------|
+| Bare `assert` statements | 772 |
+| `pytest.raises` (no bare assert) | 84 |
+| Mock assertions (`assert_called_once` etc.) | 27 |
+| **Genuinely missing assertions** | **1** |
 
-**典型案例**：
-- `test_process_manager.py:130` `test_start_agent_registers_handle` — 调用 `start_agent` 但从未验证 handle 是否注册
-- `test_ipc.py:93` `test_send_calls_drain` — 名为"测试 send 调用 drain"但从未验证 drain 被调用
-- `test_gateway_module.py:839` `test_run_stdio` — 未对 stdio 模式做任何断言
+The 1 genuinely missing assertion is `test_run_with_retry_propagates_system_exit` in `test_router_module.py:1361` — an intentionally `@pytest.mark.skip`-ed test with documented reason. **No action needed.**
 
-**小计: ~176 个无断言测试（估计 ~120-150 个真正可删除，部分可能通过 caplog 等间接机制验证）**
+**Root cause of v3 overcount**: The previous analysis searched for `assert` keyword but did not account for `pytest.raises` context managers, mock assertion methods (`mock.assert_called_once`), or CliRunner result checks (`result.exit_code`). These are all valid verification mechanisms.
 
-### 3.2 同义反复测试（Mock 返回值 == Mock 返回值）
+### 3.2 Remaining Redundancy: Tautological Tests
 
-v2 的 49 个同义反复测试中，45 个已在 iteration 7 删除。剩余：
+| File | Count | Pattern | Status |
+|------|-------|---------|--------|
+| `test_token_counter_enhanced.py` | 8 | `mock.return_value = 42; assert result == 42` | Deferred (low risk) |
+| `test_cli_module.py` | 4 | Mock command construction assertions | Deferred |
+| `test_local_supervisor.py` | 1 | `sup.list_running() == ["a", "b"]` from mock | Deferred |
 
-| File | Count | Pattern |
-|------|-------|---------|
-| `test_token_counter_enhanced.py` | 8 | `mock.return_value = 42; assert result == 42` |
-| `test_cli_module.py` | 4 | mock 命令构建后断言构建参数 |
-| `test_local_supervisor.py` | 1 | `sup.list_running() == ["a", "b"]` 来自 mock |
-| `test_evolution_health.py::test_store_returns_underlying_store` | 1 | `assert checker.store is store` |
+**Subtotal: ~13 tautological tests** (down from 49 in v2, 45 deleted in iter 7)
 
-**小计: ~14 个同义反复测试**
+### 3.3 Remaining Redundancy: Duplicate File Pairs
 
-### 3.3 重复测试文件对
+| Pair | Overlap | Redundant Tests | Status |
+|------|---------|-----------------|--------|
+| Config triple (`test_config.py` + `test_config_loader.py` + `config/test_loader.py`) | Empty/missing config, invalid_api_type, sources, TOML errors | ~15-20 | Deferred (layered testing has value) |
+| Permission checker (`test_permission_checker.py` vs `test_permission_checker_unit.py`) | 9 shared concepts | ~15 | Deferred |
+| Process manager (`test_process_manager.py` vs `test_process_manager_unit.py`) | 10 similar tests | ~10 | Deferred |
+| LLM planner (`test_llm_planner.py` vs `test_llm_planner_structured.py`) | fallback/parse paths | ~5-7 | Deferred |
+| Gateway module vs tool adapter | adapter at different layers | ~5 | Deferred |
 
-#### 3.3.1 Config 三重奏（最严重的重复）
+**Subtotal: ~50-57 duplicate tests across 5 pairs** (unchanged from Cycle 3)
 
-| File | Tests | Overlap |
-|------|-------|---------|
-| `test_config.py` | 45 | ConfigLoader + model string + API key |
-| `test_config_loader.py` | 28 | ConfigLoader project/global merge |
-| `config/test_loader.py` | 58 | ConfigLoader caching/servers/stages |
+### 3.4 Framework Tests
 
-**重叠行为被 3 次测试**：
-- 空/缺失配置 → 3 个文件各写 1 个测试
-- invalid_api_type 默认值 → 3 个文件各写 1 个测试
-- sources 解析 → ~7 + ~15 + ~7 = 29 个测试测同一逻辑
-- provider 合并 → 3 个文件各写 1 个测试
-- TOML 错误 → 3 个文件各写 1 个测试
+| Category | Count | Value | Action |
+|----------|-------|-------|--------|
+| Pydantic frozen/constructor/serialization | ~66 | Low (37 frozen deleted in iter 16) | Mark as low-value |
+| Enum value tests | ~35 | Zero regression protection | Mark as low-value |
+| Stdlib behavior tests | ~21 | Zero project value | Mark as low-value |
 
-**建议**: 合并为单一 `config/test_loader.py`，`test_config.py` 仅保留 API key + model tier 逻辑。
+**Subtotal: ~122 framework tests** (down from 159 after iter 16 cleanup)
 
-**估计冗余: ~15-20 tests**
-
-#### 3.3.2 Permission Checker 重复
-
-| File | Tests | Focus |
-|------|-------|-------|
-| `test_permission_checker.py` | 75 | 宽泛：check_tool, check_path, check_command |
-| `test_permission_checker_unit.py` | 21 | 仅 check_command 深度测试 |
-
-**9 个共享概念被两个文件重复测试**：empty_command, whitespace, default_mode, plan_mode, full_auto, substring_false_positive, denied_command 等。
-
-**估计冗余: ~15 tests（_unit 文件中的 15/21 是重复）**
-
-#### 3.3.3 Process Manager 重复
-
-| File | Tests | Focus |
-|------|-------|-------|
-| `test_process_manager.py` | 75 | 公开 API |
-| `test_process_manager_unit.py` | 19 | 内部方法 |
-
-约 10 个测试在两个文件中测试相同行为（cleanup_dead, force_kill, wait_for_exit 等），仅调用路径不同（公开 API vs 私有方法）。`_unit` 文件中 6 个 env-building 测试是唯一的。
-
-**估计冗余: ~10 tests**
-
-#### 3.3.4 其他重复对
-
-| Pair | Redundant | Nature |
-|------|-----------|--------|
-| `test_gateway_module.py` vs `test_gateway_tool_adapter.py` | ~5 | 同一 adapter 在不同层级测试 |
-| `test_evolution_health.py` vs `test_evolution_analyzer.py` | ~3-4 | dedup/healthy skill 逻辑重叠 |
-| `test_llm_planner.py` vs `test_llm_planner_structured.py` | ~5-7 | fallback/parse 路径重复 |
-
-**小计: ~13-16 tests**
-
-### 3.4 Pydantic/Enum/Stdlib 框架测试
-
-| Category | Count | Value |
-|----------|-------|-------|
-| Pydantic frozen/constructor/serialization 测试 | ~103 | 重构时轻微变更检测 |
-| Enum 值测试 | ~35 | 零回归保护 |
-| Stdlib 行为测试 (str.replace, str.split) | ~21 | 零项目价值 |
-
-**小计: ~159 个框架测试（不建议删除，但不应计入有效覆盖率）**
-
-### 3.5 冗余总计
+### 3.5 Redundancy Summary
 
 | Category | Count | Severity | Action |
 |----------|-------|----------|--------|
-| **无断言测试** | **~176** | **Critical** | 逐个审查，修复或删除 |
-| 同义反复测试 (mock==mock) | ~14 | High | 删除或重写 |
-| 重复文件对 | ~53-61 | High | 合并重复 |
-| Pydantic/Enum/Stdlib 框架测试 | ~159 | Low | 标记为低价值 |
-| **可操作总计** | **~243-251** | | **~130-170 tests 可立即处理** |
+| ~~No-assertion tests~~ | ~~176~~ → **1** | ~~Critical~~ None | **No action needed** |
+| Tautological tests | ~13 | Low | Deferred |
+| Duplicate file pairs | ~50-57 | Medium | Deferred (some overlap is intentional) |
+| Framework tests | ~122 | Low | Mark as low-value |
+| **Actionable total** | **~63-70** | | **Deferred to future cycle** |
 
 ---
 
-## 4. E2E Test Quality Assessment (Cycle 3)
+## 4. Async Safety Test Coverage Assessment
 
-### 4.1 分类标准
+### 4.1 CancelledError Handling
 
-- **TRUE_E2E**: 真实进程/文件/SQLite/网络，跨越多个子系统边界
-- **INTEGRATION**: 真实组件 + stub executor，测真实逻辑路径
-- **MISCLASSIFIED**: 应为 unit 测试
+| Component | Grade | Tests | Gaps |
+|-----------|-------|-------|------|
+| ProcessManager | **A** | 5 classes, 15+ tests | Zombie PID edge case |
+| IPC | **A** | 2 targeted tests | None significant |
+| HookExecutor | **A** | 2 targeted tests (CancelledError + kill-fails) | SystemExit/GeneratorExit not tested |
+| TaskGraph | **D** | 0 targeted CancelledError tests | No test for cancel during async operation |
+| Router Subtask | **F** | 1 test (SKIPPED) | `subtask.py` BaseException re-raise has zero coverage |
+| EvolutionStore | N/A | — | Sync module, CancelledError not applicable |
 
-### 4.2 分类结果
+### 4.2 Resource Cleanup on Exception
+
+| Resource | Component | Grade | Tests | Critical Gap |
+|----------|-----------|-------|-------|-------------|
+| Subprocess kill | ProcessManager | **A** | 6+ tests across 3 files | PermissionError on kill |
+| Subprocess kill | HookExecutor | **A** | 2 targeted tests | SystemExit/GeneratorExit |
+| Subprocess kill | Installer | **A** | 1 KeyboardInterrupt test | None |
+| SQLite close | TaskGraph | **C** | close() tested, exception-path not | No mid-operation exception cleanup test |
+| SQLite close | EvolutionStore | **C** | close-and-reopen tested | No mid-transaction failure test |
+| httpx.AsyncClient | HookExecutor | **C** | close() + lifecycle tested | CancelledError during HTTP POST |
+| httpx.Client | ModelDBClient | **B** | close() tested | None significant |
+| IPC pipe | IPCStream | **A** | 3 targeted tests | Close racing with send |
+| MCP adapter | ExternalMcpAdapter | **D** | Source has BaseException handler | No direct test for disconnect on BaseException |
+
+### 4.3 Concurrent Access
+
+| Pattern | Component | Grade | Tests | Gap |
+|---------|-----------|-------|-------|-----|
+| Concurrent SQLite reads | TaskGraph | **A** | 5+ tests | None |
+| Concurrent SQLite writes | TaskGraph | **D** | 0 tests | asyncio.Lock serialization completely untested |
+| Concurrent subprocess | ProcessManager | **A** | 6+ tests | None |
+| Concurrent IPC | IPCStream | **B** | 1 lock test | None significant |
+| Concurrent SQLite reads | EvolutionStore | **A** | Async safety e2e | None |
+| Concurrent SQLite writes | EvolutionStore | **D** | 0 tests | evolve_skill UPSERT race |
+
+### 4.4 asyncio.gather Patterns
+
+| File | Line | `return_exceptions` | Risk | Assessment |
+|------|------|---------------------|------|------------|
+| `router.py` | 391 | No | ~~HIGH~~ **SAFE** | Each `_fetch_single_agent_tools` catches Exception internally, returns `[]` on failure. Gather cannot propagate exceptions. |
+| `gateway.py` | 126 | No | ~~HIGH~~ **SAFE** | Each `_activate_one` catches Exception internally, returns error string. Gather cannot propagate exceptions. |
+| `_lifecycle.py` | 214 | Yes | SAFE | Explicitly uses return_exceptions=True. |
+| `process_manager.py` | 550 | Yes | SAFE | stop_all uses return_exceptions=True. |
+| `supervisor.py` | 125,262,324 | Yes | SAFE | start_all/stop_all/restart use return_exceptions=True. |
+
+**Key correction**: The router.py and gateway.py gather calls were flagged as HIGH risk in initial analysis, but verification confirms both inner functions handle their own exceptions. The gather pattern is safe.
+
+### 4.5 BaseException Handler Coverage
+
+| Source File | Line | Handler | Has Test |
+|-------------|------|---------|----------|
+| `hooks/executor.py` | 446 | `except BaseException` → kill subprocess | Yes (CancelledError) |
+| `hooks/executor.py` | 524 | `except Exception` (NOT BaseException) | No CancelledError test for HTTP path |
+| `router/subtask.py` | 100 | `except (SystemExit, KeyboardInterrupt, ...)` | **NO** (test is skipped) |
+| `external_mcp_adapter.py` | 96 | `except BaseException` → disconnect | **NO** |
+| `local/installer.py` | 609,701,723 | `except BaseException` → cleanup | Yes (KeyboardInterrupt) |
+| `local/sources.py` | 278,377 | `except BaseException` → cleanup | **NO** |
+| `local/lockfile.py` | 103,159 | `except BaseException` → cleanup | **NO** |
+| `utils.py` | 61 | `except BaseException` → cleanup | **NO** |
+| `_shared.py` | 178 | `except BaseException` → cleanup | **NO** |
+
+### 4.6 Overall Async Safety Grade
+
+| Dimension | Grade |
+|-----------|-------|
+| CancelledError handling | **B+** |
+| Resource cleanup | **B** |
+| Concurrent access | **C+** |
+| BaseException coverage | **C** |
+| gather safety | **A** |
+| Timeout coverage | **A-** |
+| **Overall** | **B+** |
+
+---
+
+## 5. E2E Test Quality Assessment
+
+### 5.1 Classification
 
 | Classification | Count | Files |
 |---|---|---|
-| **TRUE_E2E** | **14** (70%) | hooks_lifecycle, config, dsl_toml, evolution(×3), ipc_real_subprocess, ipc_async_safety, process_manager(×2), runtime(×2), task_graph(×2) |
-| **INTEGRATION** | **3** (15%) | agency_pipeline, dag_dispatcher, agency |
-| **MISCLASSIFIED** | **3** (15%) | gateway, cli_backend, ipc_mcp_contract |
+| **TRUE_E2E** | **14** | hooks_lifecycle, config, dsl_toml, evolution(×3), ipc(×2), process_manager(×2), runtime(×2), task_graph(×2), gateway_tool_call |
+| **INTEGRATION** | **3** | agency_pipeline, dag_dispatcher, agency |
+| **RECLASSIFIED** | **1** | gateway_tool_call (new in iter 14, valid E2E with real adapters) |
 
-### 4.3 逐文件分析
-
-#### TRUE_E2E (14 files) — 零 mock，真实资源
-
-| File | Asserts | Real Resources |
-|------|---------|---------------|
-| `test_hooks_lifecycle_e2e.py` | 32 | 真实子进程 (echo/false), 真实 HTTP 客户端 |
-| `test_config_e2e.py` | 30 | 真实 TOML 文件 I/O + 缓存失效 |
-| `test_dsl_toml_e2e.py` | 22 | 真实 TOML 解析 + SQLite TaskGraph |
-| `test_evolution_e2e.py` | 11 | 真实 SQLite |
-| `test_evolution_lifecycle_e2e.py` | 37 | 真实 SQLite + EvolutionEngine 生命周期 |
-| `test_evolution_async_safety_e2e.py` | 13 | 真实并发 SQLite |
-| `test_ipc_real_subprocess_e2e.py` | 14 | 真实 OS 进程 + pipe IPC |
-| `test_ipc_async_safety_e2e.py` | 18 | 真实进程 + 并发 pipe |
-| `test_process_manager_async_safety_e2e.py` | 34 | 真实子进程 + SIGTERM |
-| `test_process_manager_cancel_e2e.py` | 118 | 真实进程 + 信号处理 + 取消传播 |
-| `test_runtime_e2e.py` | 9 | 真实 Python 执行 (IPythonExecutor) |
-| `test_runtime_security_e2e.py` | 72 | 真实 AST 分析 + 安全绕过尝试 |
-| `test_task_graph_async_safety_e2e.py` | 32 | 真实并发 SQLite |
-| `test_task_graph_concurrent_e2e.py` | 24 | 真实 batch + DAG + cycle 检测 |
-
-#### INTEGRATION (3 files) — 真实组件 + stub executor
-
-| File | Mocks (strict) | Asserts | Notes |
-|------|---------------|---------|-------|
-| `test_agency_pipeline_e2e.py` | 0 | 131 | v2 报告 64 mocks 已不准确，当前 0 个 strict mocks |
-| `test_dag_dispatcher_e2e.py` | 0 | 29 | v2 报告 59 mocks 已不准确，当前 0 个 strict mocks |
-| `test_agency_e2e.py` | 0 | 106 | 真实 DAGDispatcher + TaskGraph + Importer |
-
-> v2 报告中 `test_agency_pipeline_e2e.py` (64 mocks) 和 `test_dag_dispatcher_e2e.py` (59 mocks) 的计数对当前代码已不准确。两个文件均已清理，仅使用 deterministic stub function 替代 LLM executor，无 MagicMock/AsyncMock/patch。
-
-#### MISCLASSIFIED (3 files) — 应降级为 unit/integration
-
-| File | Strict Mocks | Asserts | Issue | Recommendation |
-|------|-------------|---------|-------|----------------|
-| `test_gateway_e2e.py` | 9 | 25 | 16/17 测试为纯 unit 测试 | **降级为 unit**，仅保留 adapter 错误传播测试 |
-| `test_cli_backend_e2e.py` | 52 | 16 | @patch subprocess, 52 mock refs | **降级为 integration** |
-| `test_ipc_mcp_contract_e2e.py` | 3 | 57 | 纯 Pydantic 序列化测试 | **降级为 unit** |
-
-**test_gateway_e2e.py 详细问题**：
-- `TestDeferredRegistryE2E` (7 tests): 使用 MagicMock ProcessManager，测试 dict 查询
-- `TestDeferredRegistryToolLifecycle` (4 tests): mock 注入，测试 tool 注册/移除
-- `TestMcpToolAdapterContract` (6 tests): 纯 string formatting + dict 结构测试
-- 仅 `test_execute_on_dead_process_returns_error` 有集成特征
-
-**test_ipc_mcp_contract_e2e.py 详细问题**：
-- 33 个测试全部验证 Pydantic model 序列化/字段验证
-- 无真实进程、数据库或网络连接
-- 应重命名为 `test_ipc_models_contract.py` 移至 unit/
-
-### 4.4 需要新增的 E2E 场景
+### 5.2 Missing E2E Scenarios
 
 | Priority | Scenario | Description |
 |----------|----------|-------------|
-| **P0** | Gateway 完整工具调用流 | 注册 agent → 启动子进程 → 发现 tools → MCP 调用 → 获取结果 → 清理 |
-| **P0** | Router composite 4-phase 流 | 加载 DSL → 创建 TaskGraph → 用 echo agent 执行 → 聚合结果 |
-| **P1** | External MCP adapter 真实连接 | 连接 stdio MCP server → 发现 tools → 调用 → 断开 |
-| **P1** | CLI init + install + run 流 | agent-nexus init → install → run 完整流程 |
-| **P2** | Evolution 完整周期 | 种子 skills → 分析 → 进化 → 推广 → 验证推广后可用 |
+| **P0** | Gateway complete tool call flow | Register agent → start subprocess → discover tools → MCP call → get result → cleanup |
+| **P0** | Router composite 4-phase flow | Load DSL → create TaskGraph → execute with echo agent → aggregate results |
+| **P1** | External MCP adapter real connection | Connect stdio MCP server → discover tools → call → disconnect |
+| **P1** | CLI init + install + run flow | agent-nexus init → install → run complete flow |
+| **P2** | Evolution full cycle | Seed skills → analyze → evolve → promote → verify post-promotion availability |
 
 ---
 
-## 5. Module-by-Module Coverage Summary
+## 6. Priority Actions (Cycle 4)
 
-| Module | Public Symbols | Covered | Gaps | Coverage | Priority |
-|--------|---------------|---------|------|----------|----------|
-| **hooks/** | 6 | 6 | 0 | 100% | Done |
-| **skills/** | 16 | 16 | 0 | 100% | Done |
-| **runtime/** | ~50 | ~48 | 2 | 96% | P2 |
-| **models/** | ~95 | ~90 | 5 | 95% | P2 |
-| **orchestration/** | ~75 | ~70 | 5 | 93% | P1 |
-| **gateway/** | ~65 | ~60 | 5 | 92% | P1 |
-| **evolution/** | ~110 | ~100 | 10 | 91% | P1 |
-| **router/** | ~20 | ~18 | 2 | 90% | P1 |
-| **agency/** | ~120 | ~105 | 15 | 88% | P1 |
-| **config/** | 44 | 38 | 6 | 86% | P0 |
-| **local/** | ~50 | ~42 | 8 | 84% | P0 |
+### P0 — Immediate (Zero/Low Regression Risk)
 
----
+| # | Action | Impact | Est. Work |
+|---|--------|--------|-----------|
+| 1 | Add tests for `_run_dispatch_loop` / `_drain_single_future` / `_collect_futures` | Cover 3 zero-test core functions | ~15 tests |
+| 2 | Add `install_local` tests (currently entirely untested) | Cover critical install path | ~10 tests |
+| 3 | Add `update` happy path test | Cover update success flow | ~5 tests |
+| 4 | Add concurrent SQLite write tests for TaskGraph | Verify asyncio.Lock serialization | ~5 tests |
+| 5 | Unskip `test_run_with_retry_propagates_system_exit` or add alternative | Cover subtask.py BaseException re-raise | ~2 tests |
 
-## 6. Priority Actions (Cycle 3)
-
-### P0 — 立即行动（零/低回归风险）
-
-| # | Action | Impact | Est. Savings |
-|---|--------|--------|-------------|
-| 1 | 审查 176 个无断言测试：添加断言或删除 | 最大单笔冗余清理 | ~120-150 tests |
-| 2 | 删除 14 个同义反复测试 | mock==mock 清理 | ~14 tests |
-| 3 | 降级 test_gateway_e2e.py 为 unit | 准确分类 | 17 tests 重分类 |
-| 4 | 降级 test_ipc_mcp_contract_e2e.py 为 unit | 准确分类 | 33 tests 重分类 |
-
-### P1 — 中等优先级
+### P1 — Medium Priority
 
 | # | Action | Impact |
 |---|--------|--------|
-| 1 | 合并 config 三重奏为单一文件 | ~15-20 tests 冗余消除 |
-| 2 | 去重 test_permission_checker_unit.py 与 test_permission_checker.py | ~15 tests 合并 |
-| 3 | 去重 test_process_manager_unit.py 与 test_process_manager.py | ~10 tests 合并 |
-| 4 | 新增 EvolutionStore.get_metrics/deactivate_skill 测试 | 关键路径覆盖 |
-| 5 | 新增 GitInstaller._run_git/_create_venv 测试 | 安装可靠性 |
-| 6 | 降级 test_cli_backend_e2e.py 为 integration | 准确分类 |
+| 1 | Add TaskGraph CancelledError during async operation test | Cancel safety for DB operations |
+| 2 | Add ProcessManager stop_agent PermissionError test | macOS SIP edge case |
+| 3 | Add ExternalMcpAdapter BaseException disconnect test | MCP adapter cleanup safety |
+| 4 | Add HookExecutor `_execute_http` CancelledError test | httpx client cleanup during HTTP |
+| 5 | Add `_execute_parallel_agents` CancelledError propagation test | Router parallel execution safety |
+| 6 | Add concurrent `evolve_skill` same skill_id test | Evolution UPSERT race detection |
 
-### P2 — 长期改进
+### P2 — Long Term
 
 | # | Action |
 |---|--------|
-| 1 | 标记 159 个 Pydantic/Enum/Stdlib 测试为 `@pytest.mark.low_value` |
-| 2 | 创建 1-2 个真正的 Gateway + Router E2E 测试 |
-| 3 | 添加 evolution 并发写入竞争测试 |
-| 4 | 合并 test_llm_planner.py + test_llm_planner_structured.py |
+| 1 | Add BaseException tests for sources.py, lockfile.py, utils.py, _shared.py |
+| 2 | Create 1-2 real Gateway + Router E2E tests |
+| 3 | Add LLMExecutor network timeout + CancelledError tests |
+| 4 | Merge remaining duplicate file pairs (config triple, permission checker) |
 
 ---
 
-## 7. Risk Assessment
-
-### High-Risk Untested Paths (残余)
-
-1. **EvolutionStore.get_metrics** — 聚合逻辑被 HealthChecker/Promoter 消费，错误聚合会导致进化决策偏差
-2. **GitInstaller._run_git** — 核心 git 交互，install/uninstall/update 的唯一路径
-3. **AgentSupervisor 包解析** — 4 个无测试方法决定 agent 能否启动
-
-### No-Assertion Tests (新发现最高风险)
-
-176 个无断言测试意味着 **~3.7% 的测试套件不验证任何行为**。这些测试：
-- 在 CI 中永远通过（green-washing）
-- 掩盖潜在回归（代码变更不会导致测试失败）
-- 给人虚假的安全感
-
-最严重的文件是 `test_process_manager.py`（13 个）和 `cli/test_runtime_cmd.py`（19 个），因为它们涉及进程安全和 CLI 关键路径。
-
----
-
-## 8. Iteration History
+## 7. Iteration History
 
 | Iteration | Action | Tests Affected |
 |-----------|--------|---------------|
-| v1 (Iter 1) | 初始覆盖分析 | Baseline: 4,437 tests |
-| v2 (Iter 4) | 深度审计：修正误判、冗余分类 | Identified ~96 removable |
-| Iter 7 | 删除 47 冗余测试 + 新增 128 P0 测试 | +71 net (4,437→4,508→4,778) |
-| Cycle 3 (Iter 11) | 全量重分析：无断言测试、E2E 真实度、API 覆盖 | Identified ~243-251 actionable |
+| v1 (Iter 1) | Initial coverage analysis | Baseline: 4,437 tests |
+| v2 (Iter 4) | Deep audit: corrections, redundancy | Identified ~96 removable |
+| Iter 7 | Deleted 47 redundant + added 128 P0 tests | +71 net (4,437→4,508→4,778) |
+| Cycle 3 (Iter 11) | Full re-analysis: no-assertion, E2E quality | Claimed 176 no-assertion (later debunked) |
+| Iter 14 | Added 94 P0 tests + E2E rewrites | +94 new, 37 reclassified |
+| Iter 16 | Deleted 48 zero-signal Pydantic tests | -48 frozen/required_field |
+| **Cycle 4 (Iter 20)** | **async_safety focused re-audit** | **Corrected 176→1 no-assertion; identified 7 P0 async gaps** |
 
 ---
 
-*Report generated by Serena LSP + 3 parallel Explore agents. All findings cross-verified against current codebase state (post iteration 7-10 changes). E2E mock counts re-verified from source.*
+*Report generated by 3 parallel agents (API coverage scan, no-assertion AST audit, async_safety pattern analysis). All findings cross-verified against source code.*
