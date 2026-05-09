@@ -17,7 +17,7 @@ The codebase is **well-structured and defensively programmed**. No P0 (critical)
 - Minimal environment variable propagation to agent subprocesses
 - Proper try/finally resource cleanup in critical paths (route_composite, stop_agent, _execute_phases)
 
-**Issues found**: 2 P1, 4 P2, 4 P3 — detailed below.
+**Issues found**: 2 P1 (1 fixed, 1 resolved), 4 P2 (2 fixed, 1 stale, 1 deferred), 4 P3 (3 fixed, 1 accepted) — detailed below.
 
 ---
 
@@ -56,7 +56,7 @@ The codebase is **well-structured and defensively programmed**. No P0 (critical)
 | O-01 | — | `task_graph.py` | Clean. 30+ methods with comprehensive SQLite-backed task management. Cycle detection, parallel group computation, batch operations. | — |
 | O-02 | — | `ipc.py:130-168` | `_drain_stderr` properly re-raises CancelledError, catches all other exceptions with logging. | — |
 | O-03 | P3 | `ipc.py:160-186` | `close_sync` uses `self._stdout._transport` (CPython private attribute). Already documented with explanation and `getattr` guard. | Acceptable; no action needed. |
-| O-04 | P2 | `ipc.py:321` | `progress_callback: Any or None` — should be `Callable[[AgentToPlatform], Awaitable[None]] or None`. | Tighten type annotation. |
+| O-04 | P2 | `ipc.py:322` | ~~`progress_callback: Any or None`~~ **[FIXED]** Changed to `Callable[[AgentToPlatform], Awaitable[None]] or None`. Removed unused `Any` import, added `Awaitable, Callable` from `collections.abc`. | — |
 | O-05 | — | `process_manager.py` | Excellent defence-in-depth shutdown: IPC EOF then wait then SIGTERM then SIGKILL. `stop_all` properly uses `return_exceptions=True` and handles CancelledError with force-kill fallback. | — |
 | O-06 | — | `dsl.py` | Clean TOML DSL parser with comprehensive validation (agent refs, blocked_by refs, self-blocks, cycles, unused agents). | — |
 
@@ -162,13 +162,13 @@ The codebase is **well-structured and defensively programmed**. No P0 (critical)
 ### Short-term (P2 — should fix within sprint)
 
 3. **G-03**: ~~Add `return_exceptions=True` to `_fetch_tools_from_running_agents` gather~~ **[STALE]** Function no longer exists in current codebase.
-4. **O-04**: Tighten `progress_callback` type annotation — deferred (requires broader IPC type refactor)
+4. **O-04**: ~~Tighten `progress_callback` type annotation~~ **[FIXED]** Changed `Any | None` → `Callable[[AgentToPlatform], Awaitable[None]] | None` in `ipc.py:322`. Removed unused `Any` import, added `Awaitable, Callable` from `collections.abc`.
 5. **R-02**: ~~Convert SecurityChecker cache from FIFO to LRU eviction~~ **[FIXED]** Replaced `dict` with `OrderedDict`, added `move_to_end()` on cache hit, `popitem(last=False)` on eviction.
 6. **A-02**: Replace `Any` fields in LLMClient with proper types or Protocols — deferred (requires lazy-injection architecture change)
 
 ### Backlog (P3 — nice to have)
 
-7. **G-01**: Suppress `__signature__` type error — deferred (cosmetic, no functional impact)
+7. **G-01**: ~~Suppress `__signature__` type error~~ **[ALREADY SUPPRESSED]** `# type: ignore[attr-defined]` already present at `gateway.py:427`.
 8. **G-02**: ~~Type `_register_single_tool` adapter parameter~~ **[FIXED]** Changed `adapter: Any` → `adapter: McpToolAdapter`.
 9. **A-03**: ~~Type `_should_fail_orphan` task parameter~~ **[FIXED]** Changed `task: Any` → `task: TaskItem`.
 10. **A-05**: ~~Document class-level `_fallback_count` scope~~ **[FIXED]** Added comment explaining class-level scope for all 3 classes (Planner, Integrator, QAGate).

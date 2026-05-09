@@ -19,7 +19,7 @@ import json
 import logging
 import threading
 from collections import deque
-from typing import Any
+from collections.abc import Awaitable, Callable
 
 from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.models.ipc import (
@@ -319,7 +319,7 @@ class IPCProtocol:
         self,
         task_id: str | None = None,
         timeout: float = DEFAULT_PIPELINE_TIMEOUT,
-        progress_callback: Any | None = None,
+        progress_callback: Callable[[AgentToPlatform], Awaitable[None]] | None = None,
     ) -> AgentToPlatform:
         """Receive messages until a final result or error arrives.
 
