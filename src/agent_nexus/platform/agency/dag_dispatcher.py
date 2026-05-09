@@ -508,8 +508,8 @@ class DAGDispatcher:
         if _f.done() and not _f.cancelled():
             try:
                 artifact, error = _f.result()
-            except Exception:
-                artifact, error = None, "executor error"
+            except Exception as exc:
+                artifact, error = None, f"executor error: {exc}"
             if error is None and artifact is not None:
                 self._graph.complete_task(ti.id)
                 result.artifacts[ti.id] = artifact

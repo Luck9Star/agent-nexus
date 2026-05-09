@@ -768,7 +768,7 @@ async def _fetch_single_agent_tools(pm: ProcessManager, name: str) -> list[dict]
             )
             return []
         return _parse_tool_response(response.content, name)
-    except (TimeoutError, IPCError, OSError, RuntimeError) as exc:
+    except Exception as exc:
         logger.warning("Failed to get tools from agent '%s': %s", name, exc)
         return []
 

@@ -158,20 +158,24 @@ The codebase is **well-structured and defensively programmed**. No P0 (critical)
 
 1. **A-01**: ~~Implement `LLMClient.close()` or document that it is intentionally a no-op~~ **[RESOLVED — DOCUMENTED]** Docstring already explains: API providers use LiteLLM-managed pools; CLI backends have no persistent resources.
 2. **A-04**: ~~Add `close()` method + context manager protocol to `DAGDispatcher`~~ **[FIXED]** Added `__enter__`/`__exit__` protocol; existing `close(wait=True)` preserved; `__del__` now delegates to `close()`.
+3. **ASYNC-01**: ~~`_fetch_single_agent_tools` exception handling too narrow, `asyncio.gather` propagates unexpected exceptions to abort all agent tool discovery~~ **[FIXED]** Changed `except (TimeoutError, IPCError, OSError, RuntimeError)` → `except Exception` in `router.py:771` so any unexpected exception from one agent doesn't prevent discovering tools from all other agents.
 
 ### Short-term (P2 — should fix within sprint)
 
-3. **G-03**: ~~Add `return_exceptions=True` to `_fetch_tools_from_running_agents` gather~~ **[STALE]** Function no longer exists in current codebase.
-4. **O-04**: ~~Tighten `progress_callback` type annotation~~ **[FIXED]** Changed `Any | None` → `Callable[[AgentToPlatform], Awaitable[None]] | None` in `ipc.py:322`. Removed unused `Any` import, added `Awaitable, Callable` from `collections.abc`.
-5. **R-02**: ~~Convert SecurityChecker cache from FIFO to LRU eviction~~ **[FIXED]** Replaced `dict` with `OrderedDict`, added `move_to_end()` on cache hit, `popitem(last=False)` on eviction.
-6. **A-02**: Replace `Any` fields in LLMClient with proper types or Protocols — deferred (requires lazy-injection architecture change)
+4. **G-03**: ~~Add `return_exceptions=True` to `_fetch_tools_from_running_agents` gather~~ **[STALE]** Function no longer exists in current codebase.
+5. **O-04**: ~~Tighten `progress_callback` type annotation~~ **[FIXED]** Changed `Any | None` → `Callable[[AgentToPlatform], Awaitable[None]] | None` in `ipc.py:322`. Removed unused `Any` import, added `Awaitable, Callable` from `collections.abc`.
+6. **R-02**: ~~Convert SecurityChecker cache from FIFO to LRU eviction~~ **[FIXED]** Replaced `dict` with `OrderedDict`, added `move_to_end()` on cache hit, `popitem(last=False)` on eviction.
+7. **A-V2-01**: ~~`_drain_single_future` swallows exception detail with generic "executor error" string~~ **[FIXED]** Changed to `f"executor error: {exc}"` in `dag_dispatcher.py:512` to preserve diagnostic information.
+8. **ASYNC-02**: ~~`_execute_command` subprocess cleanup missing `finally` block; `SystemExit`/`GeneratorExit` orphans subprocess~~ **[FIXED]** Added `except BaseException` block in `hooks/executor.py:452` that kills subprocess and re-raises.
+9. **ASYNC-03**: ~~`HookExecutor` httpx.AsyncClient lazy-init without context manager protocol~~ **[FIXED]** Added `__aenter__`/`__aexit__` protocol to `HookExecutor` in `hooks/executor.py:547-553`, ensuring `close()` is called on context exit.
+10. **A-02**: Replace `Any` fields in LLMClient with proper types or Protocols — deferred (requires lazy-injection architecture change)
 
 ### Backlog (P3 — nice to have)
 
-7. **G-01**: ~~Suppress `__signature__` type error~~ **[ALREADY SUPPRESSED]** `# type: ignore[attr-defined]` already present at `gateway.py:427`.
-8. **G-02**: ~~Type `_register_single_tool` adapter parameter~~ **[FIXED]** Changed `adapter: Any` → `adapter: McpToolAdapter`.
-9. **A-03**: ~~Type `_should_fail_orphan` task parameter~~ **[FIXED]** Changed `task: Any` → `task: TaskItem`.
-10. **A-05**: ~~Document class-level `_fallback_count` scope~~ **[FIXED]** Added comment explaining class-level scope for all 3 classes (Planner, Integrator, QAGate).
+11. **G-01**: ~~Suppress `__signature__` type error~~ **[ALREADY SUPPRESSED]** `# type: ignore[attr-defined]` already present at `gateway.py:427`.
+12. **G-02**: ~~Type `_register_single_tool` adapter parameter~~ **[FIXED]** Changed `adapter: Any` → `adapter: McpToolAdapter`.
+13. **A-03**: ~~Type `_should_fail_orphan` task parameter~~ **[FIXED]** Changed `task: Any` → `task: TaskItem`.
+14. **A-05**: ~~Document class-level `_fallback_count` scope~~ **[FIXED]** Added comment explaining class-level scope for all 3 classes (Planner, Integrator, QAGate).
 11. **O-03**: Acceptable; document the CPython `_transport` dependency
 
 ---

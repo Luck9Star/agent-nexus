@@ -448,6 +448,11 @@ class HookExecutor:
                 error_type=type(exc).__name__,
             )
 
+        except BaseException:
+            if proc is not None:
+                await self._kill_subprocess(proc)
+            raise
+
     @staticmethod
     def _validate_http_url(hook: HookDefinition) -> HookExecution | None:
         """Validate HTTP hook URL. Returns error result on failure, None on success."""
@@ -535,6 +540,12 @@ class HookExecutor:
         """Shut down the persistent HTTP client (if any)."""
         if self._http_client is not None and not self._http_client.is_closed:
             await self._http_client.aclose()
+
+    async def __aenter__(self) -> HookExecutor:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        await self.close()
 
     async def _execute_prompt(
         self,

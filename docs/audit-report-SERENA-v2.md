@@ -168,4 +168,13 @@ All `pass` statements are legitimate (exception handler skip, optional import fa
 | O-03 | P3 | **ACCEPTED** | CPython _transport dependency |
 | **H-V2-01** | **P3** | **NEW** | POC placeholder hook types |
 
-**Active items requiring action**: 1 (A-V2-01 — exception detail preservation)
+**Active items requiring action**: 0 (all cycle 2 findings resolved)
+
+### Cycle 3 Fixes (Iteration 12)
+
+| ID | Severity | Status | Fix |
+|----|----------|--------|-----|
+| ASYNC-01 | P1 | **FIXED** | `_fetch_single_agent_tools` except widened from 4 specific types to `Exception` — prevents one agent's failure from aborting all tool discovery |
+| ASYNC-02 | P2 | **FIXED** | `_execute_command` added `except BaseException` block — ensures subprocess cleanup on SystemExit/GeneratorExit |
+| ASYNC-03 | P2 | **FIXED** | `HookExecutor` added `__aenter__`/`__aexit__` — httpx.AsyncClient guaranteed cleanup via context manager |
+| A-V2-01 | P2 | **FIXED** | `_drain_single_future` preserves exception detail: `"executor error"` → `f"executor error: {exc}"` |
