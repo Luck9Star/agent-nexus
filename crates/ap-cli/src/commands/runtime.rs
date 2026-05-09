@@ -280,6 +280,10 @@ pub fn run_stop(agent: Option<&str>, all: bool, output: &OutputFormatter) -> Res
 
     let agents_dir = root.join(".agents");
     let pid_files: Vec<(String, std::path::PathBuf)> = if all {
+        if !agents_dir.exists() {
+            output.info("No agents directory found — nothing to stop.");
+            return Ok(());
+        }
         std::fs::read_dir(&agents_dir)?
             .filter_map(std::result::Result::ok)
             .filter(|e| {
