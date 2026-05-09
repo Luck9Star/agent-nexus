@@ -158,6 +158,12 @@ class ModelDBClient:
         if self._http_client is not None and not self._http_client.is_closed:
             self._http_client.close()
 
+    def __enter__(self) -> ModelDBClient:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
     # ------------------------------------------------------------------
     # Index management
     # ------------------------------------------------------------------

@@ -85,8 +85,13 @@ class EvolutionStore:
                 logger.warning("Failed to close evolution store connection", exc_info=True)
             self._memory_conn = None
 
+    def __enter__(self) -> EvolutionStore:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
     def __del__(self) -> None:
-        # Safety net: close connection if close() was never called.
         with suppress(Exception):
             self.close()
 

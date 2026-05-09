@@ -112,6 +112,12 @@ class CLISessionStore:
     def close(self) -> None:
         self._conn.close()
 
+    def __enter__(self) -> CLISessionStore:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
     # -- Schema inspection helpers (for testing) --
 
     def _list_tables(self) -> list[str]:

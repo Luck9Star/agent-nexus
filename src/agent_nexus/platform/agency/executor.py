@@ -221,6 +221,12 @@ class LLMExecutor:
         if self._owns_default_client:
             self._default_client.close()
 
+    def __enter__(self) -> LLMExecutor:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
     def __call__(
         self,
         profile_id: str,

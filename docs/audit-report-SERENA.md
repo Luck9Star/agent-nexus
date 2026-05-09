@@ -159,6 +159,10 @@ The codebase is **well-structured and defensively programmed**. No P0 (critical)
 1. **A-01**: ~~Implement `LLMClient.close()` or document that it is intentionally a no-op~~ **[RESOLVED — DOCUMENTED]** Docstring already explains: API providers use LiteLLM-managed pools; CLI backends have no persistent resources.
 2. **A-04**: ~~Add `close()` method + context manager protocol to `DAGDispatcher`~~ **[FIXED]** Added `__enter__`/`__exit__` protocol; existing `close(wait=True)` preserved; `__del__` now delegates to `close()`.
 3. **ASYNC-01**: ~~`_fetch_single_agent_tools` exception handling too narrow, `asyncio.gather` propagates unexpected exceptions to abort all agent tool discovery~~ **[FIXED]** Changed `except (TimeoutError, IPCError, OSError, RuntimeError)` → `except Exception` in `router.py:771` so any unexpected exception from one agent doesn't prevent discovering tools from all other agents.
+4. **RES-01**: ~~`EvolutionStore` has `close()` but no context manager protocol~~ **[FIXED Cycle 2]** Added `__enter__`/`__exit__` to `EvolutionStore` in `evolution/store.py`. SQLite memory connection now guaranteed cleanup via `with` statement.
+5. **RES-02**: ~~`ModelDBClient` has `close()` but no context manager protocol~~ **[FIXED Cycle 2]** Added `__enter__`/`__exit__` to `ModelDBClient` in `config/model_db.py`. httpx.Client now guaranteed cleanup via `with` statement.
+6. **RES-03**: ~~`CLISessionStore` has `close()` but no context manager protocol~~ **[FIXED Cycle 2]** Added `__enter__`/`__exit__` to `CLISessionStore` in `cli_backend/session_store.py`. SQLite file connection now guaranteed cleanup via `with` statement.
+7. **RES-04**: ~~`LLMExecutor` has `close()` but no context manager protocol~~ **[FIXED Cycle 2]** Added `__enter__`/`__exit__` to `LLMExecutor` in `agency/executor.py`. Per-expert LLMClient cache now guaranteed cleanup via `with` statement.
 
 ### Short-term (P2 — should fix within sprint)
 
