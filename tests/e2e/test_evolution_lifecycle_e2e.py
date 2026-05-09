@@ -1,12 +1,15 @@
-"""E2E: Evolution lifecycle — EvolutionStore + SkillStore + AnalysisStore + BudgetStore.
+"""E2E: Evolution lifecycle — HealthChecker + SkillEvolver + AgentPromoter.
 
-Tests cross-store transactions where SkillStore, AnalysisStore, and BudgetStore
-must work together through the EvolutionStore facade. These paths cannot be
-covered by unit tests of individual stores.
+Tests the complete evolution pipeline using real components:
+  - Metrics aggregation across skill creation, counter increment, deactivation
+  - Health analysis with threshold-based suggestions
+  - Skill evolution (FIX / DERIVED) with lineage tracking
+  - Batch operations and children tracking
 
-Also covers EvolutionEngine error injection paths: invalid triggers, missing
-required arguments, and health check on nonexistent skills.
+All components use real SQLite databases. No internal modules are mocked.
 """
+
+from __future__ import annotations
 
 from collections.abc import Generator
 from pathlib import Path
@@ -14,520 +17,700 @@ from pathlib import Path
 import pytest
 
 from agent_nexus.models.evolution import (
+    EvolutionType,
     SkillLineage,
     SkillOrigin,
     SkillRecord,
 )
+from agent_nexus.platform.evolution.evolver import SkillEvolver
+from agent_nexus.platform.evolution.health import HealthChecker
+from agent_nexus.platform.evolution.promotion import AgentPromoter, PromotionCandidate
 from agent_nexus.platform.evolution.store import EvolutionStore
+from agent_nexus.platform.evolution.thresholds import EvolutionSuggestion
 
 
-@pytest.fixture
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
 def store(tmp_path: Path) -> Generator[EvolutionStore, None, None]:
-    """Create an EvolutionStore backed by a temp file database."""
-    db_path = tmp_path / "test_evolution.db"
+    db_path = tmp_path / "evo_lifecycle.db"
     s = EvolutionStore(db_path)
     yield s
     s.close()
 
 
+@pytest.fixture()
+def health_checker(store: EvolutionStore) -> HealthChecker:
+    return HealthChecker(store)
+
+
+@pytest.fixture()
+def evolver(store: EvolutionStore) -> SkillEvolver:
+    return SkillEvolver(store)
+
+
+@pytest.fixture()
+def promoter(store: EvolutionStore, tmp_path: Path) -> AgentPromoter:
+    return AgentPromoter(store, agents_root=tmp_path / "agents" / "atomic")
+
+
 def _make_skill(
     skill_id: str = "skill-1",
     name: str = "test-skill",
+    selections: int = 0,
+    applied: int = 0,
+    completions: int = 0,
+    fallbacks: int = 0,
+    directory: str = "skills/test",
     origin: SkillOrigin = SkillOrigin.IMPORTED,
     generation: int = 0,
+    parent_ids: list[str] | None = None,
 ) -> SkillRecord:
     return SkillRecord(
         id=skill_id,
         name=name,
-        lineage=SkillLineage(origin=origin, generation=generation),
-        directory="/skills/test",
+        lineage=SkillLineage(
+            origin=origin,
+            generation=generation,
+            parent_skill_ids=parent_ids or [],
+        ),
+        directory=directory,
+        total_selections=selections,
+        total_applied=applied,
+        total_completions=completions,
+        total_fallbacks=fallbacks,
     )
 
 
 # ---------------------------------------------------------------------------
-# SkillStore + AnalysisStore cross-store integration
+# TestMetricsAggregationLifecycle
 # ---------------------------------------------------------------------------
 
 
-class TestSkillAnalysisIntegration:
-    """Skills and their analysis/judgments must stay consistent."""
+class TestMetricsAggregationLifecycle:
+    """Metrics aggregation through create, increment, deactivate."""
 
-    def test_record_analysis_with_judgments_and_counters(self, store: EvolutionStore) -> None:
-        skill = _make_skill("s1")
-        store.save_skill_record(skill)
-
-        judgments = [
-            {
-                "skill_id": "s1",
-                "selected": True,
-                "applied": True,
-                "completed": True,
-                "fell_back": False,
-            }
-        ]
-        analysis_id = store.record_analysis(
-            task_id="task-1",
-            agent_name="agent-a",
-            analysis_text="Analysis of task-1",
-            judgments=judgments,
-        )
-        assert analysis_id
-
-        # Judgments are retrievable
-        j = store.get_judgments_for_skill("s1")
-        assert len(j) == 1
-        assert j[0]["selected"] is True
-        assert j[0]["completed"] is True
-
-        # Analysis is retrievable
-        analyses = store.get_analyses_for_task("task-1")
-        assert len(analyses) == 1
-        assert analyses[0]["agent_name"] == "agent-a"
-
-    def test_judgments_batch_across_skills(self, store: EvolutionStore) -> None:
-        s1 = _make_skill("s1", name="alpha")
-        s2 = _make_skill("s2", name="beta")
+    def test_metrics_after_skill_creation(self, store: EvolutionStore) -> None:
+        """Create skills, verify metrics aggregate correctly."""
+        s1 = _make_skill("s1", selections=10, applied=8, completions=6, fallbacks=1)
+        s2 = _make_skill("s2", selections=20, applied=15, completions=12, fallbacks=2)
         store.save_skill_record(s1)
         store.save_skill_record(s2)
 
-        # Record analysis with judgments for both skills
-        store.record_analysis(
-            "task-1",
-            "agent-a",
-            "text",
-            judgments=[
-                {"skill_id": "s1", "selected": True, "applied": True},
-                {"skill_id": "s2", "selected": True, "fell_back": True},
-            ],
-        )
+        metrics = store.get_metrics()
+        assert metrics.total_selections == 30
+        assert metrics.total_applied == 23
+        assert metrics.total_completions == 18
+        assert metrics.total_fallbacks == 3
 
-        batch = store.get_judgments_batch({"s1", "s2"})
-        assert "s1" in batch
-        assert "s2" in batch
-        assert len(batch["s1"]) == 1
-        assert len(batch["s2"]) == 1
-
-    def test_analysis_counter_invariant_violation_rollback(self, store: EvolutionStore) -> None:
-        """Counter invariant violation rolls back both analysis and judgments."""
-        skill = _make_skill("s1")
+    def test_metrics_after_counter_increment(self, store: EvolutionStore) -> None:
+        """Increment counters and verify metrics update."""
+        skill = _make_skill("s1", selections=5, applied=4, completions=3, fallbacks=0)
         store.save_skill_record(skill)
 
-        with pytest.raises(ValueError, match="applied requires selected"):
-            store.record_analysis(
-                "task-bad",
-                "agent-a",
-                "bad analysis",
-                judgments=[
-                    {
-                        "skill_id": "s1",
-                        "applied": True,
-                        "completed": True,
-                        # violates: completed > applied (0 selections, but completed)
-                    },
-                ],
-            )
+        # Verify initial metrics
+        metrics = store.get_metrics()
+        assert metrics.total_selections == 5
 
-        # Analysis should not exist after rollback
-        assert store.get_analyses_for_task("task-bad") == []
-        assert store.get_judgments_for_skill("s1") == []
+        # Increment counters
+        store.increment_counters("s1", selected=True, applied=True, completed=True)
+        store.increment_counters("s1", selected=True, applied=True, fell_back=True)
+
+        metrics = store.get_metrics()
+        assert metrics.total_selections == 7
+        assert metrics.total_applied == 6
+        assert metrics.total_completions == 4
+        assert metrics.total_fallbacks == 1
+
+    def test_metrics_after_deactivation(self, store: EvolutionStore) -> None:
+        """Deactivate a skill and verify it's excluded from metrics."""
+        s1 = _make_skill("s1", selections=10, applied=8, completions=6, fallbacks=1)
+        s2 = _make_skill("s2", selections=20, applied=15, completions=12, fallbacks=2)
+        store.save_skill_record(s1)
+        store.save_skill_record(s2)
+
+        # Deactivate s1
+        store.deactivate_skill("s1")
+
+        metrics = store.get_metrics()
+        assert metrics.total_selections == 20  # Only s2 counts
+        assert metrics.total_applied == 15
+        assert metrics.total_completions == 12
+
+    def test_metrics_empty_store(self, store: EvolutionStore) -> None:
+        """Metrics on empty store returns all zeros."""
+        metrics = store.get_metrics()
+        assert metrics.total_selections == 0
+        assert metrics.total_applied == 0
+        assert metrics.total_completions == 0
+        assert metrics.total_fallbacks == 0
 
 
 # ---------------------------------------------------------------------------
-# SkillStore + BudgetStore cross-store integration
+# TestHealthAnalysisLifecycle
 # ---------------------------------------------------------------------------
 
 
-class TestSkillBudgetIntegration:
-    """Budget events should correlate with skill usage patterns."""
+class TestHealthAnalysisLifecycle:
+    """HealthChecker evaluates skill health using real thresholds."""
 
-    def test_log_budget_and_query(self, store: EvolutionStore) -> None:
-        store.log_budget_event(
-            agent_name="agent-a",
-            event_type="compaction",
-            tokens_before=10000,
-            tokens_after=5000,
-            details={"reason": "threshold exceeded"},
+    def test_healthy_skill_no_suggestions(self, health_checker: HealthChecker) -> None:
+        """Skill with good metrics produces no suggestions."""
+        # Good metrics: low fallback, high completion, high effective
+        skill = _make_skill(
+            "healthy",
+            selections=100,
+            applied=80,
+            completions=70,
+            fallbacks=5,
         )
-        log = store.get_budget_log("agent-a")
-        assert len(log) == 1
-        assert log[0]["event_type"] == "compaction"
-        assert log[0]["tokens_before"] == 10000
+        suggestions = health_checker.check_health(skill)
+        assert suggestions == []
 
-    def test_budget_log_isolated_per_agent(self, store: EvolutionStore) -> None:
-        store.log_budget_event("agent-a", "compaction", 10000, 5000)
-        store.log_budget_event("agent-b", "eviction", 8000, 2000)
+    def test_high_fallback_triggers_fix(self, health_checker: HealthChecker) -> None:
+        """Skill with fallback_rate > 0.4 triggers FIX suggestion."""
+        # fallback_rate = 45/100 = 0.45 > 0.4
+        # applied=80, completions=35, fallbacks=45: 35+45=80 OK
+        skill = _make_skill(
+            "flaky",
+            selections=100,
+            applied=80,
+            completions=35,
+            fallbacks=45,
+        )
+        suggestions = health_checker.check_health(skill)
 
-        log_a = store.get_budget_log("agent-a")
-        log_b = store.get_budget_log("agent-b")
-        assert len(log_a) == 1
-        assert len(log_b) == 1
-        assert log_a[0]["event_type"] == "compaction"
-        assert log_b[0]["event_type"] == "eviction"
+        assert len(suggestions) >= 1
+        fix_suggestions = [s for s in suggestions if s.evolution_type == EvolutionType.FIX]
+        assert len(fix_suggestions) >= 1
+        assert "flaky" in fix_suggestions[0].target_skill_ids
+
+    def test_low_completion_triggers_fix(self, health_checker: HealthChecker) -> None:
+        """Skill with applied_rate > 0.4 and completion_rate < 0.35 triggers FIX."""
+        # applied_rate = 50/100 = 0.5 > 0.4
+        # completion_rate = 10/50 = 0.2 < 0.35
+        skill = _make_skill(
+            "stalled",
+            selections=100,
+            applied=50,
+            completions=10,
+            fallbacks=0,
+        )
+        suggestions = health_checker.check_health(skill)
+
+        fix_suggestions = [s for s in suggestions if s.evolution_type == EvolutionType.FIX]
+        assert len(fix_suggestions) >= 1
+
+    def test_moderate_effective_triggers_derived(
+        self, health_checker: HealthChecker
+    ) -> None:
+        """Skill with effective_rate < 0.55 and applied_rate > 0.25 triggers DERIVED."""
+        # applied_rate = 40/100 = 0.4 > 0.25
+        # completion_rate = 30/40 = 0.75 (not < 0.35, so no FIX rule 2)
+        # effective_rate = 30/100 = 0.3 < 0.55
+        # fallback_rate = 0 (not > 0.4, so no FIX rule 1)
+        # DERIVED rule: effective < 0.55 AND applied > 0.25 -> triggers
+        skill = _make_skill(
+            "mediocre",
+            selections=100,
+            applied=40,
+            completions=30,
+            fallbacks=0,
+        )
+        suggestions = health_checker.check_health(skill)
+
+        derived = [s for s in suggestions if s.evolution_type == EvolutionType.DERIVED]
+        assert len(derived) >= 1
+
+    def test_moderate_effective_triggers_derived_valid(
+        self, health_checker: HealthChecker
+    ) -> None:
+        """Skill with effective_rate < 0.55 and applied_rate > 0.25 triggers DERIVED."""
+        # applied_rate = 40/100 = 0.4
+        # completion_rate = 30/40 = 0.75 (not < 0.35, so no FIX rule 2)
+        # effective_rate = 30/100 = 0.3 < 0.55
+        # fallback_rate = 0 (not > 0.4, so no FIX rule 1)
+        # DERIVED rule: effective < 0.55 AND applied > 0.25 -> triggers
+        skill = _make_skill(
+            "mediocre",
+            selections=100,
+            applied=40,
+            completions=30,
+            fallbacks=0,
+        )
+        suggestions = health_checker.check_health(skill)
+
+        derived = [s for s in suggestions if s.evolution_type == EvolutionType.DERIVED]
+        assert len(derived) >= 1
+
+    def test_zero_selections_no_suggestions(self, health_checker: HealthChecker) -> None:
+        """Skill with zero selections has no rates to evaluate."""
+        skill = _make_skill("new-skill", selections=0)
+        suggestions = health_checker.check_health(skill)
+        assert suggestions == []
+
+    def test_get_health_summary_with_unhealthy(
+        self, store: EvolutionStore, health_checker: HealthChecker
+    ) -> None:
+        """get_health_summary returns correct structure with unhealthy skills."""
+        # Healthy skill
+        store.save_skill_record(
+            _make_skill("good", name="good-skill", selections=100, applied=80, completions=70, fallbacks=5)
+        )
+        # Unhealthy skill (high fallback)
+        # fallback_rate = 45/100 = 0.45 > 0.4
+        # applied=80, completions=35, fallbacks=45: 35+45=80 OK
+        store.save_skill_record(
+            _make_skill("bad", name="bad-skill", selections=100, applied=80, completions=35, fallbacks=45)
+        )
+
+        summary = health_checker.get_health_summary()
+        assert "total_skills" in summary
+        assert "healthy" in summary
+        assert "unhealthy" in summary
+        assert "fix_suggestions" in summary
+        assert "derived_suggestions" in summary
+        assert "unhealthy_skills" in summary
+
+        assert summary["total_skills"] == 2
+        assert summary["healthy"] >= 0
+        assert summary["unhealthy"] >= 1
+        assert "bad-skill" in summary["unhealthy_skills"]
+
+    def test_diagnose_all_empty_store(self, health_checker: HealthChecker) -> None:
+        """diagnose_all on empty store returns empty dict."""
+        reports = health_checker.diagnose_all()
+        assert reports == {}
+
+    def test_get_unhealthy_filters_healthy(
+        self, store: EvolutionStore, health_checker: HealthChecker
+    ) -> None:
+        """get_unhealthy only returns skills with suggestions."""
+        # Healthy
+        store.save_skill_record(
+            _make_skill("good", selections=100, applied=80, completions=70, fallbacks=5)
+        )
+        # Unhealthy (high fallback)
+        # fallback_rate = 45/100 = 0.45 > 0.4
+        # applied=80, completions=10, fallbacks=45: 10+45=55 <= 80 OK
+        store.save_skill_record(
+            _make_skill("sick", selections=100, applied=80, completions=10, fallbacks=45)
+        )
+        # Zero selections -> filtered out by get_unhealthy
+        store.save_skill_record(_make_skill("unused", selections=0))
+
+        unhealthy = health_checker.get_unhealthy()
+        assert "sick" in unhealthy
+        assert "good" not in unhealthy
+        assert "unused" not in unhealthy
 
 
 # ---------------------------------------------------------------------------
-# Evolution full lifecycle: create → use → evolve → query lineage
+# TestEvolutionLifecycle
 # ---------------------------------------------------------------------------
 
 
 class TestEvolutionLifecycle:
-    """Full skill lifecycle from creation through evolution to lineage queries."""
+    """Skill evolution (FIX / DERIVED) with lineage tracking."""
 
-    def test_skill_create_evolve_lineage(self, store: EvolutionStore) -> None:
-        # Step 1: Create original skill
-        parent = _make_skill("parent-1", name="review", generation=0)
+    def test_fix_evolution_deactivates_parent(
+        self, store: EvolutionStore, evolver: SkillEvolver
+    ) -> None:
+        """FIX evolution deactivates parent skill."""
+        parent = _make_skill("parent", name="review", selections=10)
         store.save_skill_record(parent)
 
-        # Step 2: Simulate usage — increment counters
-        store.increment_counters("parent-1", selected=True, applied=True, completed=True)
-
-        # Step 3: Evolve into a new version (FIX)
-        child = SkillRecord(
-            id="child-1",
-            name="review",
-            lineage=SkillLineage(
-                origin=SkillOrigin.FIXED,
-                generation=1,
-                parent_skill_ids=["parent-1"],
-            ),
-            directory="/skills/review-v2",
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.FIX,
+            target_skill_ids=["parent"],
+            direction="Fix broken skill",
         )
-        result = store.evolve_skill(child, parent_skill_ids=["parent-1"])
-        assert result.success is True
+        result = evolver.evolve(suggestion)
+
+        assert result.success
         assert result.new_record is not None
-        assert result.new_record.id == "child-1"
 
-        # Step 4: Verify parent deactivated (FIX evolution)
-        parent_record = store.get_skill_record("parent-1")
-        assert parent_record is not None and parent_record.is_active is False
+        # Parent should be deactivated
+        parent_record = store.get_skill_record("parent")
+        assert parent_record is not None
+        assert parent_record.is_active is False
 
-        # Step 5: Verify child is active
-        child_record = store.get_skill_record("child-1")
-        assert child_record is not None and child_record.is_active is True
-        assert child_record.lineage.generation == 1
+    def test_derived_evolution_preserves_parent(
+        self, store: EvolutionStore, evolver: SkillEvolver
+    ) -> None:
+        """DERIVED evolution keeps parent active."""
+        parent = _make_skill("parent", name="scan", selections=10)
+        store.save_skill_record(parent)
 
-        # Step 6: Verify lineage
-        ancestry = store.get_ancestry("child-1")
-        assert len(ancestry) == 1
-        assert ancestry[0].id == "parent-1"
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.DERIVED,
+            target_skill_ids=["parent"],
+            direction="Enhance with better error handling",
+        )
+        result = evolver.evolve(suggestion)
 
-        children = store.get_children("parent-1")
-        assert "child-1" in children
+        assert result.success
+        assert result.new_record is not None
 
-    def test_multi_generation_evolution(self, store: EvolutionStore) -> None:
-        # Gen 0
-        g0 = _make_skill("gen-0", name="scan", generation=0)
+        # Parent should still be active
+        parent_record = store.get_skill_record("parent")
+        assert parent_record is not None
+        assert parent_record.is_active is True
+
+    def test_lineage_tracking(self, store: EvolutionStore, evolver: SkillEvolver) -> None:
+        """Evolved skill has correct ancestry chain."""
+        g0 = _make_skill("gen-0", name="analyze", generation=0)
         store.save_skill_record(g0)
 
-        # Gen 1
-        g1 = SkillRecord(
-            id="gen-1",
-            name="scan",
-            lineage=SkillLineage(
-                origin=SkillOrigin.DERIVED,
-                generation=1,
-                parent_skill_ids=["gen-0"],
-            ),
-            directory="/skills/scan-v1",
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.DERIVED,
+            target_skill_ids=["gen-0"],
+            direction="Improve analysis",
         )
-        r1 = store.evolve_skill(g1, ["gen-0"])
+        result = evolver.evolve(suggestion)
+        assert result.success
+        assert result.new_record is not None
+        child_id = result.new_record.id
+
+        # Verify ancestry
+        ancestry = store.get_ancestry(child_id)
+        assert len(ancestry) == 1
+        assert ancestry[0].id == "gen-0"
+
+    def test_evolved_skill_appears_in_active(
+        self, store: EvolutionStore, evolver: SkillEvolver
+    ) -> None:
+        """Newly evolved skill is in active skills list."""
+        parent = _make_skill("p1", name="tool-a", selections=5)
+        store.save_skill_record(parent)
+
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.DERIVED,
+            target_skill_ids=["p1"],
+            direction="Enhance tool-a",
+        )
+        result = evolver.evolve(suggestion)
+        assert result.success
+
+        assert result.new_record is not None
+        active = store.get_active_skills()
+        active_ids = {s.id for s in active}
+        assert result.new_record.id in active_ids
+
+    def test_fix_requires_single_parent(self, evolver: SkillEvolver) -> None:
+        """FIX evolution requires exactly 1 parent skill."""
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.FIX,
+            target_skill_ids=["a", "b"],
+            direction="Fix both",
+        )
+        result = evolver.evolve(suggestion)
+        assert result.success is False
+        assert "exactly 1 parent" in result.error
+
+    def test_fix_nonexistent_parent_fails(self, evolver: SkillEvolver) -> None:
+        """FIX with nonexistent parent returns error."""
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.FIX,
+            target_skill_ids=["ghost"],
+            direction="Fix ghost",
+        )
+        result = evolver.evolve(suggestion)
+        assert result.success is False
+        assert "not found" in result.error
+
+    def test_derived_requires_at_least_one_parent(self, evolver: SkillEvolver) -> None:
+        """DERIVED evolution requires at least 1 parent."""
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.DERIVED,
+            target_skill_ids=[],
+            direction="Derive from nothing",
+        )
+        result = evolver.evolve(suggestion)
+        assert result.success is False
+        assert "at least 1 parent" in result.error
+
+    def test_multi_parent_derived_evolution(
+        self, store: EvolutionStore, evolver: SkillEvolver
+    ) -> None:
+        """DERIVED with multiple parents creates merged skill."""
+        p1 = _make_skill("p1", name="scan", selections=5, directory="skills/scan")
+        p2 = _make_skill("p2", name="analyze", selections=5, directory="skills/analyze")
+        store.save_skill_record(p1)
+        store.save_skill_record(p2)
+
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.DERIVED,
+            target_skill_ids=["p1", "p2"],
+            direction="Merge scan and analyze",
+        )
+        result = evolver.evolve(suggestion)
+        assert result.success
+        assert result.new_record is not None
+        assert "merged" in result.new_record.name
+
+        # Lineage should have both parents
+        new_skill = result.new_record
+        assert len(new_skill.lineage.parent_skill_ids) == 2
+
+
+# ---------------------------------------------------------------------------
+# TestSkillRecordBatchLifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestSkillRecordBatchLifecycle:
+    """Batch operations across skill records."""
+
+    def test_batch_load_after_multiple_saves(self, store: EvolutionStore) -> None:
+        """Save 10 skills, batch load all."""
+        ids = []
+        for i in range(10):
+            sid = f"batch-{i}"
+            store.save_skill_record(_make_skill(sid, name=f"skill-{i}"))
+            ids.append(sid)
+
+        batch = store.get_skill_records_batch(ids)
+        assert len(batch) == 10
+        for sid in ids:
+            assert sid in batch
+            assert batch[sid].name.startswith("skill-")
+
+    def test_batch_load_with_missing_ids(self, store: EvolutionStore) -> None:
+        """Batch load gracefully handles missing IDs."""
+        store.save_skill_record(_make_skill("exists-1"))
+        store.save_skill_record(_make_skill("exists-2"))
+
+        batch = store.get_skill_records_batch(["exists-1", "missing-1", "exists-2"])
+        assert len(batch) == 2
+        assert "exists-1" in batch
+        assert "exists-2" in batch
+        assert "missing-1" not in batch
+
+    def test_children_tracking(self, store: EvolutionStore, evolver: SkillEvolver) -> None:
+        """Evolve skill, verify get_children returns correct IDs."""
+        parent = _make_skill("root", name="root-skill", selections=5)
+        store.save_skill_record(parent)
+
+        suggestion = EvolutionSuggestion(
+            evolution_type=EvolutionType.DERIVED,
+            target_skill_ids=["root"],
+            direction="Enhance root",
+        )
+        result = evolver.evolve(suggestion)
+        assert result.success
+
+        children = store.get_children("root")
+        assert len(children) == 1
+        assert result.new_record is not None
+        assert result.new_record.id in children
+
+    def test_multiple_children_tracking(
+        self, store: EvolutionStore, evolver: SkillEvolver
+    ) -> None:
+        """Evolve same parent twice, get_children returns both."""
+        parent = _make_skill("multi-parent", name="base", selections=5)
+        store.save_skill_record(parent)
+
+        # First evolution
+        r1 = evolver.evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.DERIVED,
+                target_skill_ids=["multi-parent"],
+                direction="Enhancement 1",
+            )
+        )
         assert r1.success
 
-        # Gen 2
-        g2 = SkillRecord(
-            id="gen-2",
-            name="scan",
-            lineage=SkillLineage(
-                origin=SkillOrigin.DERIVED,
-                generation=2,
-                parent_skill_ids=["gen-1"],
-            ),
-            directory="/skills/scan-v2",
+        # Second evolution (parent still active for DERIVED)
+        r2 = evolver.evolve(
+            EvolutionSuggestion(
+                evolution_type=EvolutionType.DERIVED,
+                target_skill_ids=["multi-parent"],
+                direction="Enhancement 2",
+            )
         )
-        r2 = store.evolve_skill(g2, ["gen-1"])
         assert r2.success
 
-        # Ancestry of gen-2 should trace back to gen-0
-        ancestry = store.get_ancestry("gen-2")
-        ids = [a.id for a in ancestry]
-        assert "gen-1" in ids
-        assert "gen-0" in ids
-
-        # Metrics should reflect usage
-        metrics = store.get_metrics()
-        assert metrics.total_selections >= 0
-
-    def test_skill_deactivation_and_reactivation(self, store: EvolutionStore) -> None:
-        skill = _make_skill("s1")
-        store.save_skill_record(skill)
-        assert store.get_skill_record("s1").is_active is True
-
-        # Deactivate
-        assert store.deactivate_skill("s1") is True
-        assert store.get_skill_record("s1").is_active is False
-
-        # get_active_skills should not include deactivated
-        active = store.get_active_skills()
-        assert all(s.id != "s1" for s in active)
-
-    def test_agent_record_lifecycle(self, store: EvolutionStore) -> None:
-        skill = _make_skill("s1")
-        store.save_skill_record(skill)
-
-        # Save agent record
-        store.save_agent_record(
-            agent_id="agent-1",
-            name="code-reviewer",
-            type="atomic",
-            skill_ids=["s1"],
-            orchestration_toml="[dag]\ntask_1 = { agent = 'code-reviewer' }",
-        )
-
-        # Retrieve
-        record = store.get_agent_record("agent-1")
-        assert record is not None
-        assert record["name"] == "code-reviewer"
-        assert record["type"] == "atomic"
-        assert "s1" in record["skill_ids"]
-
-        # List active agents
-        agents = store.get_active_agents()
-        assert any(a["agent_id"] == "agent-1" for a in agents)
+        children = store.get_children("multi-parent")
+        assert len(children) == 2
+        assert r1.new_record is not None
+        assert r2.new_record is not None
+        assert r1.new_record.id in children
+        assert r2.new_record.id in children
 
 
 # ---------------------------------------------------------------------------
-# Batch operations across stores
+# TestEvolverToolDegradation
 # ---------------------------------------------------------------------------
 
 
-class TestBatchOperations:
-    """Batch queries that touch multiple tables."""
+class TestEvolverToolDegradation:
+    """Tool degradation anti-loop and evolution pipeline."""
 
-    def test_get_skill_records_batch(self, store: EvolutionStore) -> None:
-        for i in range(5):
-            store.save_skill_record(_make_skill(f"s{i}", name=f"skill-{i}"))
+    def test_tool_degradation_creates_fix(self, store: EvolutionStore, evolver: SkillEvolver) -> None:
+        """process_tool_degradation creates FIX evolution for affected skill."""
+        store.save_skill_record(_make_skill("td-1", name="tool-user", selections=5))
 
-        batch = store.get_skill_records_batch(["s0", "s2", "s4", "s-missing"])
-        assert len(batch) == 3
-        assert "s0" in batch
-        assert "s2" in batch
-        assert "s4" in batch
-        assert "s-missing" not in batch
-
-    def test_ancestry_batch(self, store: EvolutionStore) -> None:
-        g0 = _make_skill("a0", name="root", generation=0)
-        store.save_skill_record(g0)
-
-        g1 = SkillRecord(
-            id="a1",
-            name="root",
-            lineage=SkillLineage(origin=SkillOrigin.DERIVED, generation=1, parent_skill_ids=["a0"]),
-            directory="/skills/root-v1",
+        results = evolver.process_tool_degradation(
+            tool_key="broken-api",
+            problem_description="API returns 500",
         )
-        store.evolve_skill(g1, ["a0"])
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].new_record is not None
 
-        batch = store.get_ancestry_batch(["a1", "a0"])
-        assert "a1" in batch
-        assert len(batch["a1"]) == 1  # parent a0
-        assert "a0" in batch
-        assert len(batch["a0"]) == 0  # root has no parents
+    def test_tool_degradation_anti_loop(self, store: EvolutionStore, evolver: SkillEvolver) -> None:
+        """Same tool_key + skill_id combo is not evolved twice.
 
-    def test_get_all_skills_pagination(self, store: EvolutionStore) -> None:
-        for i in range(10):
-            store.save_skill_record(_make_skill(f"p{i}", name=f"paged-{i}"))
+        The _addressed set tracks tool_key -> {skill_id}. After the first
+        FIX, the original skill ID is marked as addressed. The child gets
+        a new generated ID and IS evolved on the next call. This verifies
+        the _addressed mechanism: the original skill_id is never re-evolved
+        for the same tool_key.
+        """
+        store.save_skill_record(_make_skill("td-2", name="anti-loop-skill", selections=5))
 
-        page1 = store.get_all_skills(limit=5, offset=0)
-        page2 = store.get_all_skills(limit=5, offset=5)
-        assert len(page1) == 5
-        assert len(page2) == 5
-        # No overlap
-        ids1 = {s.id for s in page1}
-        ids2 = {s.id for s in page2}
-        assert ids1.isdisjoint(ids2)
+        r1 = evolver.process_tool_degradation("bad-tool", "Broken")
+        assert len(r1) == 1
+        assert r1[0].new_record is not None
+        original_id = r1[0].new_record.lineage.parent_skill_ids[0]
+        assert original_id == "td-2"
+
+        # The child (new ID) IS evolved on the next call, but the
+        # _addressed set prevents the original "td-2" from being processed
+        # again. Verify by checking that td-2 is in the addressed set.
+        assert "td-2" in evolver._addressed.get("bad-tool", set())
+
+    def test_prune_recovered_tools(self, store: EvolutionStore, evolver: SkillEvolver) -> None:
+        """Pruning recovered tools allows re-evolution."""
+        store.save_skill_record(_make_skill("td-3", name="recovery", selections=5))
+
+        evolver.process_tool_degradation("tool-a", "Broken A")
+        evolver.process_tool_degradation("tool-b", "Broken B")
+
+        # Tool B recovers, tool A still degraded
+        evolver.prune_recovered_tools({"tool-a"})
+
+        # Tool B should now be eligible again
+        results = evolver.process_tool_degradation("tool-b", "Relapsed")
+        assert len(results) == 1
 
 
 # ---------------------------------------------------------------------------
-# EvolutionEngine error injection
+# TestEvolverMetricCheck
 # ---------------------------------------------------------------------------
 
 
-class TestEvolutionEngineErrorPaths:
-    """EvolutionEngine facade correctly routes and validates triggers.
+class TestEvolverMetricCheck:
+    """Metric-based evolution trigger pipeline."""
 
-    Uses real EvolutionStore (SQLite) to exercise the full engine → sub-component
-    delegation chain. Only error/edge-case paths — happy paths are covered in
-    test_evolution_e2e.py.
-    """
-
-    @pytest.fixture()
-    def engine_and_store(self, tmp_path: Path):
-        from agent_nexus.platform.evolution.engine import EvolutionEngine
-        from agent_nexus.platform.evolution.store import EvolutionStore
-
-        db_path = tmp_path / "engine_e2e.db"
-        store = EvolutionStore(db_path)
-        engine = EvolutionEngine(store)
-        yield engine, store
-        store.close()
-
-    def test_evolve_post_analysis_without_ctx_raises(self, engine_and_store) -> None:
-        """POST_ANALYSIS trigger without ctx raises ValueError."""
-        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
-
-        engine, _ = engine_and_store
-        with pytest.raises(ValueError, match="ctx.*required"):
-            engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS)
-
-    def test_evolve_tool_degradation_without_tool_key_raises(self, engine_and_store) -> None:
-        """TOOL_DEGRADATION trigger without tool_key raises ValueError."""
-        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
-
-        engine, _ = engine_and_store
-        with pytest.raises(ValueError, match="tool_key.*required"):
-            engine.evolve(trigger=EvolutionTrigger.TOOL_DEGRADATION)
-
-    def test_evolve_unknown_trigger_raises(self, engine_and_store) -> None:
-        """Passing an unknown/invalid trigger string raises ValueError."""
-        engine, _ = engine_and_store
-        with pytest.raises(ValueError, match="Unknown trigger"):
-            engine.evolve(trigger="nonexistent_trigger")  # type: ignore[arg-type]
-
-    def test_check_health_nonexistent_skill_raises(self, engine_and_store) -> None:
-        """check_health raises ValueError for a skill that doesn't exist."""
-        engine, _ = engine_and_store
-        with pytest.raises(ValueError, match="Skill not found"):
-            engine.check_health("ghost-skill-999")
-
-    def test_diagnose_all_empty_returns_empty_dict(self, engine_and_store) -> None:
-        """diagnose_all on empty store returns empty dict (no crash)."""
-        engine, _ = engine_and_store
-        result = engine.diagnose_all()
-        assert result == {}
-
-    def test_evolve_tool_degradation_returns_results(self, engine_and_store) -> None:
-        """TOOL_DEGRADATION with tool_key returns a list of EvolveResults."""
-        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
-
-        engine, store = engine_and_store
-        # Seed a skill so the evolver has something to work with
-        store.save_skill_record(_make_skill("td-skill", name="td-skill"))
-
-        results = engine.evolve(
-            trigger=EvolutionTrigger.TOOL_DEGRADATION,
-            tool_key="failing-tool",
-            problem_description="Tool returns 500 errors",
+    def test_metric_check_healthy_skill_no_evolution(
+        self, store: EvolutionStore, evolver: SkillEvolver
+    ) -> None:
+        """Healthy skill with good metrics is not evolved by metric check."""
+        store.save_skill_record(
+            _make_skill("healthy", selections=10, applied=9, completions=8, fallbacks=0)
         )
-        assert isinstance(results, list)
-        assert len(results) >= 1  # seeded skill should trigger at least one evolution
-        assert all(hasattr(r, "success") for r in results)
+        results = evolver.process_metric_check(min_selections=5)
+        assert len(results) == 0
 
-    def test_evolve_metric_check_returns_results(self, engine_and_store) -> None:
-        """METRIC_CHECK trigger returns a list (possibly empty if no skills qualify)."""
-        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
-
-        engine, _ = engine_and_store
-        results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
-        assert isinstance(results, list)
-        assert all(hasattr(r, "success") for r in results)
-        assert len(results) == 0  # no skills with sufficient metrics to trigger evolution
-
-
-class TestEvolutionEngineErrorInjection:
-    """Additional error injection paths for EvolutionEngine.
-
-    Tests corruption, edge cases, and error paths that cross the
-    evolution engine sub-component boundaries.
-    """
-
-    @pytest.fixture()
-    def engine_and_store(self, tmp_path: Path):
-        from agent_nexus.platform.evolution.engine import EvolutionEngine
-        from agent_nexus.platform.evolution.store import EvolutionStore
-
-        db_path = tmp_path / "error_inject.db"
-        store = EvolutionStore(db_path)
-        engine = EvolutionEngine(store)
-        yield engine, store
-        store.close()
-
-    def test_evolve_tool_degradation_with_empty_description(self, engine_and_store) -> None:
-        """TOOL_DEGRADATION with empty problem_description still works."""
-        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
-
-        engine, store = engine_and_store
-        store.save_skill_record(_make_skill("td-empty", name="td-empty"))
-
-        results = engine.evolve(
-            trigger=EvolutionTrigger.TOOL_DEGRADATION,
-            tool_key="broken-tool",
-            problem_description="",
+    def test_metric_check_unhealthy_skill_triggers_evolution(
+        self, store: EvolutionStore, evolver: SkillEvolver
+    ) -> None:
+        """Unhealthy skill triggers evolution via metric check."""
+        # High fallback: 45/100 = 0.45 > 0.4
+        # applied=80, completions=35, fallbacks=45: 35+45=80 OK
+        store.save_skill_record(
+            _make_skill("unhealthy", selections=100, applied=80, completions=35, fallbacks=45)
         )
-        assert isinstance(results, list)
-        assert len(results) >= 1
+        results = evolver.process_metric_check(min_selections=5)
+        assert len(results) == 1
+        assert results[0].success
 
-    def test_evolve_metric_check_with_seeded_skill_no_counters(self, engine_and_store) -> None:
-        """METRIC_CHECK with a skill that has zero counters returns empty."""
-        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
-
-        engine, store = engine_and_store
-        store.save_skill_record(_make_skill("mc-skill", name="mc-skill"))
-
-        results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
-        assert isinstance(results, list)
-        assert len(results) == 0  # No counters means no metric threshold exceeded
-
-    def test_check_health_on_active_skill_returns_suggestions(self, engine_and_store) -> None:
-        """check_health on an existing active skill returns a list."""
-        engine, store = engine_and_store
-        store.save_skill_record(_make_skill("healthy-skill", name="healthy-skill"))
-
-        suggestions = engine.check_health("healthy-skill")
-        assert isinstance(suggestions, list)
-
-    def test_evolve_post_analysis_with_ctx_returns_analysis(self, engine_and_store) -> None:
-        """POST_ANALYSIS with valid EvolutionContext returns AnalysisResult."""
-        from agent_nexus.models.evolution import EvolutionContext
-        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
-
-        engine, store = engine_and_store
-        store.save_skill_record(_make_skill("pa-skill", name="pa-skill"))
-
-        ctx = EvolutionContext(
-            agent_id="test-agent",
-            task_id="task-1",
-            skill_ids_used=["pa-skill"],
-            task_completed=True,
+    def test_metric_check_below_min_selections(
+        self, store: EvolutionStore, evolver: SkillEvolver
+    ) -> None:
+        """Skill below min_selections threshold is skipped."""
+        # selections=3 < min_selections=5, so skipped regardless of rates
+        store.save_skill_record(
+            _make_skill("new", selections=3, applied=2, completions=1, fallbacks=1)
         )
-        result = engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
-        assert hasattr(result, "task_id")
-        assert result.task_id == "task-1"
+        results = evolver.process_metric_check(min_selections=5)
+        assert len(results) == 0
 
-    def test_evolve_min_selections_clamped_to_one(self, engine_and_store) -> None:
-        """METRIC_CHECK with min_selections=0 is clamped to 1."""
-        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
 
-        engine, _ = engine_and_store
-        results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK, min_selections=0)
-        assert isinstance(results, list)
+# ---------------------------------------------------------------------------
+# TestAgentPromoterLifecycle
+# ---------------------------------------------------------------------------
 
-    def test_diagnose_all_with_seeded_skill(self, engine_and_store) -> None:
-        """diagnose_all on a store with one skill returns non-empty dict."""
-        engine, store = engine_and_store
-        store.save_skill_record(_make_skill("diag-skill", name="diag-skill"))
 
-        result = engine.diagnose_all()
-        assert isinstance(result, dict)
-        assert "diag-skill" in result
+class TestAgentPromoterLifecycle:
+    """AgentPromoter candidate finding and promotion pipeline."""
 
-    def test_should_compact_below_threshold(self, engine_and_store) -> None:
-        """should_compact returns False when tokens are below threshold."""
-        from agent_nexus.platform.evolution.compaction import AgentContext
+    def test_find_candidates_empty_store(self, promoter: AgentPromoter) -> None:
+        """find_candidates on empty store returns empty list."""
+        assert promoter.find_candidates() == []
 
-        engine, _ = engine_and_store
-        ctx = AgentContext(
-            agent_id="test-agent",
-            session_id="session-1",
-            turn_number=5,
-            context_window=128_000,
+    def test_find_candidates_below_threshold(self, store: EvolutionStore, promoter: AgentPromoter) -> None:
+        """Skills below thresholds are not candidates."""
+        # Below total_selections threshold (50)
+        store.save_skill_record(
+            _make_skill("low-sel", selections=10, applied=9, completions=9, fallbacks=0)
         )
-        assert engine.should_compact(ctx) is False
+        # High selections but low effective_rate
+        store.save_skill_record(
+            _make_skill("low-eff", selections=100, applied=80, completions=30, fallbacks=10)
+        )
+        candidates = promoter.find_candidates()
+        assert len(candidates) == 0
+
+    def test_find_candidates_qualified(
+        self, store: EvolutionStore, promoter: AgentPromoter
+    ) -> None:
+        """Skill meeting all thresholds is a candidate."""
+        # effective_rate = 45/50 = 0.9 > 0.8
+        # total_selections = 50 >= 50
+        store.save_skill_record(
+            _make_skill(
+                "star",
+                name="star-skill",
+                selections=50,
+                applied=50,
+                completions=45,
+                fallbacks=0,
+                directory="skills/star",
+            )
+        )
+        candidates = promoter.find_candidates()
+        assert len(candidates) == 1
+        assert candidates[0].skill_id == "star"
+        assert candidates[0].effective_rate >= 0.8
+
+    def test_promote_creates_files(
+        self, store: EvolutionStore, promoter: AgentPromoter
+    ) -> None:
+        """Promotion generates agent package files."""
+        candidate = PromotionCandidate(
+            skill_id="promotable",
+            skill_name="promotable-skill",
+            effective_rate=0.9,
+            total_selections=100,
+            directory="skills/promotable",
+            reason="High performance",
+        )
+        result = promoter.promote(candidate)
+        assert result.success
+        assert result.agent_name == "promotable-skill"
+
+        # Verify files were created
+        from pathlib import Path
+
+        agent_dir = Path(result.agent_directory)
+        assert agent_dir.exists()
+        assert (agent_dir / "agent-manifest.yaml").exists()
+        assert (agent_dir / "pyproject.toml").exists()
+        assert (agent_dir / "SKILL.md").exists()

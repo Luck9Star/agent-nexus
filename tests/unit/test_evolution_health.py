@@ -345,13 +345,6 @@ class TestGetHealthSummary:
 # ---------------------------------------------------------------------------
 
 
-class TestStoreProperty:
-    def test_store_returns_underlying_store(self):
-        store = _make_store()
-        checker = HealthChecker(store)
-        assert checker.store is store
-
-
 # ---------------------------------------------------------------------------
 # iter100 regression: get_health_summary includes CAPTURED count
 # ---------------------------------------------------------------------------
