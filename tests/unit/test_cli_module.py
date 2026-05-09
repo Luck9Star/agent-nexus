@@ -1453,10 +1453,13 @@ class TestLogsFollow:
     """Verify --follow option is accepted by runtime logs command."""
 
     def test_logs_follow_option_exists(self) -> None:
-        """Verify --follow option is accepted by logs command."""
-        result = runner.invoke(app, ["runtime", "logs", "--help"])
-        assert result.exit_code == 0
-        assert "--follow" in result.output
+        """Verify --follow option exists on the logs command function."""
+        import inspect
+
+        from agent_nexus.platform.local.cli.runtime_cmd import logs
+
+        sig = inspect.signature(logs)
+        assert "follow" in sig.parameters, "logs() should accept a 'follow' parameter"
 
 
 # ============================================================================

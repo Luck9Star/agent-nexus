@@ -435,7 +435,7 @@ class LLMClient:
         kwargs: dict[str, Any] = {
             "model": self._to_litellm_model(),
             "messages": messages,
-            "stream": self._capability.streaming_default
+            "stream": self._capability.streaming_default  # type: ignore[attr-defined]
             if hasattr(self._capability, "streaming_default")
             else False,
         }
@@ -531,7 +531,7 @@ class LLMClient:
                 )
 
                 response = litellm.completion(**kwargs)
-                text = response.choices[0].message.content or ""
+                text = response.choices[0].message.content or ""  # type: ignore[union-attr]
                 actual_model = response.model or self._model_name
 
             self._update_capability_from_response(actual_model)

@@ -352,7 +352,7 @@ def _validate_profile_schema(profile: dict, name: str, schema: object) -> list[s
     import jsonschema  # type: ignore[import-untyped]
 
     try:
-        jsonschema.validate(profile, schema)
+        jsonschema.validate(profile, schema)  # type: ignore[arg-type]
         return []
     except jsonschema.ValidationError as exc:  # type: ignore[name-defined]
         return [f"{name}: schema validation failed — {exc.message}"]

@@ -424,7 +424,7 @@ class MCPGateway:
         # ParsedFunction.from_function() sees explicit typed parameters
         # instead of **kwargs (which it rejects with ValueError).
         params, annotations = self._build_params(adapter)
-        _invoke.__signature__ = inspect.Signature(  # ty: ignore[unresolved-attribute]
+        _invoke.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             parameters=params,
             return_annotation=str,
         )

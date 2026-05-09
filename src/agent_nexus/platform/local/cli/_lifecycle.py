@@ -183,7 +183,7 @@ def _report_update_results(agents_to_update: list[str], results: Sequence[object
             else:
                 typer.echo(f"Error updating {agent_name}: {result}", err=True)
         elif result:
-            entry: LockfileEntry = result  # ty: ignore[invalid-assignment]
+            entry: LockfileEntry = result  # type: ignore[assignment]
             typer.echo(f"Updated {agent_name}@{entry.version}")
             updated_count += 1
         else:
