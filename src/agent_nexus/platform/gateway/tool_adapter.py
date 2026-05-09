@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import uuid
+from typing import Any
 
 import agent_nexus.platform.orchestration.ipc as _ipc_mod
 from agent_nexus.models.ipc import AgentToPlatformType
@@ -99,7 +100,22 @@ class McpToolAdapter:
         self._original_tool_name = raw_name  # unsanitized for IPC
         self.full_name = f"mcp__{self.server_name}__{self.tool_name}"
         self.description = tool_schema.get("description", "")
-        self._input_schema = tool_schema.get("inputSchema", {})
+        self._input_schema = self._normalize_input_schema(tool_schema.get("inputSchema"))
+
+    # -- Schema normalization ----------------------------------------------
+
+    @staticmethod
+    def _normalize_input_schema(raw: Any) -> dict:
+        """Normalize inputSchema to a valid MCP object-typed JSON Schema.
+
+        MCP spec requires inputSchema to be a JSON Schema with ``type: "object"``.
+        Invalid or missing schemas are replaced with an empty object schema.
+        """
+        if not isinstance(raw, dict):
+            return {"type": "object", "properties": {}}
+        if raw.get("type") != "object" and "properties" not in raw:
+            return {"type": "object", "properties": {}}
+        return raw
 
     # -- Execution ---------------------------------------------------------
 

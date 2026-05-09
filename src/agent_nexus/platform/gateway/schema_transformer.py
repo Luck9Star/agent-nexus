@@ -165,9 +165,13 @@ class SchemaTransformer:
         parts = ref[2:].split("/")
         ref_name = parts[-1]
 
+        # Use full ref path as cache key to prevent collisions between
+        # e.g. #/$defs/Address and #/components/schemas/Address
+        cache_key = ref
+
         # Check cache first (breaks circular refs)
-        if ref_name in self._model_cache:
-            return self._model_cache[ref_name]
+        if cache_key in self._model_cache:
+            return self._model_cache[cache_key]
 
         resolved_schema = self._navigate_ref(self._full_schema, parts)
         if not isinstance(resolved_schema, dict) or not resolved_schema:
@@ -175,19 +179,20 @@ class SchemaTransformer:
 
         # Insert a placeholder *before* recursing to handle circular refs
         placeholder: type[BaseModel] = create_model(ref_name)  # type: ignore[call-overload]
-        self._model_cache[ref_name] = placeholder
+        self._model_cache[cache_key] = placeholder
 
         actual = self._resolve_any(resolved_schema, ref_name)
 
         # If recursion produced the same placeholder, keep it
         if actual is not placeholder and isinstance(actual, type) and issubclass(actual, BaseModel):
-            self._model_cache[ref_name] = actual
+            self._model_cache[cache_key] = actual
 
-        return self._model_cache[ref_name]
+        return self._model_cache[cache_key]
 
     def _resolve_all_of(self, sub_schemas: list[dict[str, Any]], name: str) -> type[BaseModel]:
         """Merge all ``allOf`` sub-schemas into a single BaseModel."""
         merged_props: dict[str, Any] = {}
+        merged_required: set[str] = set()
 
         for sub in sub_schemas:
             if "$ref" in sub:
@@ -201,9 +206,20 @@ class SchemaTransformer:
             elif "properties" in sub:
                 self._merge_properties(sub, merged_props)
             elif sub:
-                # Inline constraint-only schemas (e.g. {"type": "string"})
-                # are valid JSON Schema but have no fields to merge — skip.
-                pass
+                # Constraint-only schemas (e.g. {"required": ["extra"]})
+                # contribute required constraints but no properties.
+                merged_required.update(sub.get("required", []))
+
+        # Promote optional fields to required if constraint-only sub-schemas
+        # declared them required
+        for field_name in merged_required:
+            if field_name in merged_props:
+                annotation, default = merged_props[field_name]
+                if default is not ... and default is not None:
+                    # Has explicit default — keep it, but mark as required
+                    merged_props[field_name] = (annotation, ...)
+                elif default is None:
+                    merged_props[field_name] = (annotation, ...)
 
         return create_model(name, **merged_props)  # type: ignore[call-overload]
 
@@ -304,7 +320,10 @@ class SchemaTransformer:
                 target[prop_name] = (prop_type, ...)
             else:
                 default = prop_def.get("default", ...)
-                target[prop_name] = (prop_type, default)
+                if default is not ...:
+                    target[prop_name] = (prop_type, Field(default=default))
+                else:
+                    target[prop_name] = (prop_type, None)
 
 
 def _capitalize(name: str) -> str:

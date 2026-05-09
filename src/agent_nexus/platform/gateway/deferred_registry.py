@@ -353,9 +353,16 @@ class DeferredAgentRegistry:
             if not name or not isinstance(name, str):
                 logger.warning("Skipping tool schema with missing/invalid name")
                 continue
-            if "inputSchema" not in schema:
+            input_schema = schema.get("inputSchema")
+            if not isinstance(input_schema, dict):
                 logger.warning(
-                    "Tool schema '%s' missing inputSchema, injecting default",
+                    "Tool schema '%s' missing or invalid inputSchema, injecting default",
+                    name,
+                )
+                schema["inputSchema"] = {"type": "object", "properties": {}}
+            elif input_schema.get("type") != "object" and "properties" not in input_schema:
+                logger.warning(
+                    "Tool schema '%s' inputSchema is not object-typed, normalizing",
                     name,
                 )
                 schema["inputSchema"] = {"type": "object", "properties": {}}

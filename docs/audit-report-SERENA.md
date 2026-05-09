@@ -163,6 +163,9 @@ The codebase is **well-structured and defensively programmed**. No P0 (critical)
 5. **RES-02**: ~~`ModelDBClient` has `close()` but no context manager protocol~~ **[FIXED Cycle 2]** Added `__enter__`/`__exit__` to `ModelDBClient` in `config/model_db.py`. httpx.Client now guaranteed cleanup via `with` statement.
 6. **RES-03**: ~~`CLISessionStore` has `close()` but no context manager protocol~~ **[FIXED Cycle 2]** Added `__enter__`/`__exit__` to `CLISessionStore` in `cli_backend/session_store.py`. SQLite file connection now guaranteed cleanup via `with` statement.
 7. **RES-04**: ~~`LLMExecutor` has `close()` but no context manager protocol~~ **[FIXED Cycle 2]** Added `__enter__`/`__exit__` to `LLMExecutor` in `agency/executor.py`. Per-expert LLMClient cache now guaranteed cleanup via `with` statement.
+8. **MCP-01**: ~~`_build_params_from_schema` crashes on `null` default values — `inspect.Parameter(default=None)` with non-nullable annotation causes Pydantic validation failure~~ **[FIXED Cycle 3]** When `"default": null` in JSON Schema, now adds `| None` to type annotation so `None` is valid at validation time. `gateway.py:485-498`.
+9. **MCP-02**: ~~No validation that `inputSchema` from external MCP servers or IPC agents has `"type": "object"` — invalid schemas propagate to FastMCP tool registration~~ **[FIXED Cycle 3]** Added `_normalize_input_schema()` in `tool_adapter.py`, validation in `deferred_registry._validate_tool_schemas`, and normalization in `ExternalMcpAdapter._discover_tools`. All three entry points now enforce MCP contract: `inputSchema` must be a dict with `type: "object"` or `properties` key.
+10. **MCP-03**: ~~`tool.inputSchema` may not be a plain dict (Pydantic model risk from MCP SDK deserialization)~~ **[FIXED Cycle 3]** Added `isinstance(raw_schema, dict)` check with `dict()` fallback conversion in `ExternalMcpAdapter._discover_tools`.
 
 ### Short-term (P2 — should fix within sprint)
 
@@ -173,6 +176,10 @@ The codebase is **well-structured and defensively programmed**. No P0 (critical)
 8. **ASYNC-02**: ~~`_execute_command` subprocess cleanup missing `finally` block; `SystemExit`/`GeneratorExit` orphans subprocess~~ **[FIXED]** Added `except BaseException` block in `hooks/executor.py:452` that kills subprocess and re-raises.
 9. **ASYNC-03**: ~~`HookExecutor` httpx.AsyncClient lazy-init without context manager protocol~~ **[FIXED]** Added `__aenter__`/`__aexit__` protocol to `HookExecutor` in `hooks/executor.py:547-553`, ensuring `close()` is called on context exit.
 10. **A-02**: Replace `Any` fields in LLMClient with proper types or Protocols — deferred (requires lazy-injection architecture change)
+11. **MCP-04**: ~~`_merge_properties` uses `...` sentinel for optional fields, making them required in Pydantic~~ **[FIXED Cycle 3]** Aligned with `_build_object_model` pattern: uses `Field(default=...)` for explicit defaults and `None` for implicit optional. `schema_transformer.py:305-310`.
+12. **MCP-05**: ~~`$ref` cache uses only last path segment, causing collisions between `#/$defs/X` and `#/components/schemas/X`~~ **[FIXED Cycle 3]** Changed cache key from `ref_name` to full `ref` path string. `schema_transformer.py:159-186`.
+13. **MCP-06**: ~~`_resolve_all_of` silently drops constraint-only sub-schemas (e.g. `{"required": ["extra"]}`)~~ **[FIXED Cycle 3]** Added `merged_required` set that collects required arrays from constraint-only sub-schemas, then promotes matching optional fields to required. `schema_transformer.py:188-225`.
+14. **MCP-07**: ~~`ExternalMcpAdapter.call_tool` silently drops non-TextContent blocks (images, embedded resources)~~ **[FIXED Cycle 3]** Added placeholder `[type content omitted]` for non-text blocks so callers know content was present. `external_mcp_adapter.py:147-150`.
 
 ### Backlog (P3 — nice to have)
 

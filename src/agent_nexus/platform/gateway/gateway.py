@@ -485,6 +485,8 @@ class MCPGateway:
                 has_default = "default" in prop_def
                 if has_default:
                     default = prop_def["default"]
+                    if default is None:
+                        py_type = py_type | None  # type: ignore[assignment]
                 else:
                     default = None
                     py_type = py_type | None  # type: ignore[assignment]

@@ -140,11 +140,14 @@ class ExternalMcpAdapter:
 
         result = await self._session.call_tool(tool_name, arguments)
 
-        # Extract text from content blocks
+        # Extract text from content blocks; non-text blocks are represented
+        # as placeholders so callers know content was present but omitted.
         text_parts: list[str] = []
         for block in result.content:
             if isinstance(block, TextContent):
                 text_parts.append(block.text)
+            else:
+                text_parts.append(f"[{block.type} content omitted]")
 
         output = "\n".join(text_parts) if text_parts else ""
 
@@ -273,8 +276,11 @@ class ExternalMcpAdapter:
                 "name": tool.name,
                 "description": tool.description or "",
             }
-            if tool.inputSchema:
-                schema["inputSchema"] = tool.inputSchema
-            else:
-                schema["inputSchema"] = {"type": "object", "properties": {}}
+            # Normalize inputSchema: must be a dict with type=object
+            raw_schema = tool.inputSchema
+            if not isinstance(raw_schema, dict):
+                raw_schema = dict(raw_schema) if hasattr(raw_schema, "__iter__") else {}
+            if raw_schema.get("type") != "object" and "properties" not in raw_schema:
+                raw_schema = {"type": "object", "properties": {}}
+            schema["inputSchema"] = raw_schema
             self._tool_schemas.append(schema)
