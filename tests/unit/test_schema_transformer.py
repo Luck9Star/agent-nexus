@@ -465,6 +465,55 @@ class TestAllOfInlineSchema:
         model = t.resolve({"allOf": [{"type": "string"}, {"type": "integer"}]})
         assert issubclass(model, BaseModel)
 
+    def test_all_of_constraint_only_promotes_optional_to_required(self):
+        """Constraint-only sub-schema with 'required' promotes optional fields."""
+        t = _make_transformer()
+        model = t.resolve(
+            {
+                "allOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "email": {"type": "string"},
+                        },
+                        # Only 'name' is required in the base schema
+                        "required": ["name"],
+                    },
+                    # Constraint-only: makes 'email' required too
+                    {"required": ["email"]},
+                ],
+            }
+        )
+        # Both fields should now be required (no default)
+        assert "name" in model.model_fields
+        assert "email" in model.model_fields
+        # Must provide both — would raise ValidationError if either is missing
+        instance = model(name="test", email="a@b.com")
+        assert instance.name == "test"  # type: ignore[attr-defined]
+        assert instance.email == "a@b.com"  # type: ignore[attr-defined]
+        # Omitting email should fail
+        with pytest.raises(Exception):
+            model(name="test")
+
+    def test_all_of_constraint_only_ignores_unknown_required(self):
+        """Constraint-only 'required' for non-existent fields is silently ignored."""
+        t = _make_transformer()
+        model = t.resolve(
+            {
+                "allOf": [
+                    {
+                        "type": "object",
+                        "properties": {"id": {"type": "integer"}},
+                    },
+                    {"required": ["nonexistent"]},
+                ],
+            }
+        )
+        assert issubclass(model, BaseModel)
+        instance = model(id=1)
+        assert instance.id == 1  # type: ignore[attr-defined]
+
 
 class TestExternalRefWarning:
     """Verify that _resolve_ref logs a warning on external $ref."""

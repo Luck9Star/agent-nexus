@@ -569,6 +569,32 @@ class LLMClient:
     # CLI Backend (preserved unchanged)
     # ------------------------------------------------------------------
 
+    def _record_cli_session(self, backend: Any, result: Any, status: str) -> None:
+        """Record CLI execution metrics and session data if a session store is configured."""
+        if self._session_store is None:
+            return
+        from agent_nexus.platform.agency.cli_backend.types import CLISessionRecord
+
+        self._session_store.record_execution(
+            task_id="",
+            backend_type="cli",
+            backend_name=backend.name,
+            model=result.model or self._model_name,
+            session_id=result.session_id,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            duration_ms=result.duration_ms,
+            status=status,
+        )
+        if result.session_id:
+            self._session_store.save_session(
+                CLISessionRecord(
+                    session_id=result.session_id,
+                    backend_name=backend.name,
+                    model=result.model or self._model_name,
+                )
+            )
+
     def _call_cli(
         self,
         system_prompt: str,
@@ -595,29 +621,7 @@ class LLMClient:
             )
 
         status = "success" if result.text else "empty_response"
-
-        if self._session_store is not None:
-            from agent_nexus.platform.agency.cli_backend.types import CLISessionRecord
-
-            self._session_store.record_execution(
-                task_id="",
-                backend_type="cli",
-                backend_name=backend.name,
-                model=result.model or self._model_name,
-                session_id=result.session_id,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
-                duration_ms=result.duration_ms,
-                status=status,
-            )
-            if result.session_id:
-                self._session_store.save_session(
-                    CLISessionRecord(
-                        session_id=result.session_id,
-                        backend_name=backend.name,
-                        model=result.model or self._model_name,
-                    )
-                )
+        self._record_cli_session(backend, result, status)
 
         return LLMResponse(
             text=result.text,

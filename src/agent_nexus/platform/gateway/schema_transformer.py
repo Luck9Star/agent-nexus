@@ -189,6 +189,29 @@ class SchemaTransformer:
 
         return self._model_cache[cache_key]
 
+    @staticmethod
+    def _collect_ref_fields(ref_type: Any) -> dict[str, tuple[Any, Any]]:
+        """Extract field definitions from a $ref-resolved BaseModel."""
+        if not (isinstance(ref_type, type) and issubclass(ref_type, BaseModel)):
+            return {}
+        return {
+            name: (info.annotation, info.default)
+            for name, info in ref_type.model_fields.items()
+        }
+
+    @staticmethod
+    def _promote_required_fields(
+        merged_props: dict[str, Any],
+        merged_required: set[str],
+    ) -> None:
+        """Promote optional fields to required based on constraint-only sub-schemas."""
+        for field_name in merged_required:
+            if field_name not in merged_props:
+                continue
+            annotation, default = merged_props[field_name]
+            if default is not ...:
+                merged_props[field_name] = (annotation, ...)
+
     def _resolve_all_of(self, sub_schemas: list[dict[str, Any]], name: str) -> type[BaseModel]:
         """Merge all ``allOf`` sub-schemas into a single BaseModel."""
         merged_props: dict[str, Any] = {}
@@ -197,29 +220,13 @@ class SchemaTransformer:
         for sub in sub_schemas:
             if "$ref" in sub:
                 ref_type = self._resolve_ref(sub["$ref"], name)
-                if isinstance(ref_type, type) and issubclass(ref_type, BaseModel):
-                    for field_name, field_info in ref_type.model_fields.items():
-                        merged_props[field_name] = (
-                            field_info.annotation,
-                            field_info.default,
-                        )
+                merged_props.update(self._collect_ref_fields(ref_type))
             elif "properties" in sub:
                 self._merge_properties(sub, merged_props)
             elif sub:
-                # Constraint-only schemas (e.g. {"required": ["extra"]})
-                # contribute required constraints but no properties.
                 merged_required.update(sub.get("required", []))
 
-        # Promote optional fields to required if constraint-only sub-schemas
-        # declared them required
-        for field_name in merged_required:
-            if field_name in merged_props:
-                annotation, default = merged_props[field_name]
-                if default is not ... and default is not None:
-                    # Has explicit default — keep it, but mark as required
-                    merged_props[field_name] = (annotation, ...)
-                elif default is None:
-                    merged_props[field_name] = (annotation, ...)
+        self._promote_required_fields(merged_props, merged_required)
 
         return create_model(name, **merged_props)  # type: ignore[call-overload]
 

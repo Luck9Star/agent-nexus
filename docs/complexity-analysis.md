@@ -1,6 +1,6 @@
 # Complexity Analysis Report
 
-> Generated: 2026-05-10 (Iteration 26 — Cycle 3 Complexity + Test Signal-to-Noise Audit)
+> Generated: 2026-05-10 (Iteration 29 — Cycle 3 Complexity + Test Signal-to-Noise Audit)
 > Scope: `src/agent_nexus/` | Baseline: radon 6.0.1
 
 ## 1. Overall Baseline
@@ -50,6 +50,8 @@
 | 13 | `_execute_command` | executor.py | 11 → 9 | Merge CancelledError into BaseException |
 | 22 | `_parse_snapshot` | skill_store.py | 10 → 4 | Extract `_validate_snapshot_dict` |
 | 22 | `_detect_risk_conflicts` | integrator.py | 10 → 7 | Extract `_has_valid_risk_data` (CC 4) |
+| 29 | `_resolve_all_of` | schema_transformer.py | 13 → 5 | Extract `_collect_ref_fields` (CC 4) + `_promote_required_fields` (CC 4) |
+| 29 | `_call_cli` | llm_client.py | 9 → 5 | Extract `_record_cli_session` (CC 5) — separate I/O from business logic |
 
 ---
 
@@ -381,19 +383,19 @@ All 100+ source files pass MI > 20 (maintainable). `radon mi -nc` returned zero 
 
 ## 11. Complexity Metrics Trend
 
-| Metric | Iter 1 | After Iter 6 | Iter 13 | Iter 17 | Iter 22 | **Iter 26 (Current)** |
-|--------|--------|-------------|---------|---------|---------|----------------------|
-| Total blocks | 1,306 | 1,313 | ~1,325 | 1,319 | ~1,321 | **1,329** |
-| Average CC | 3.35 | ~3.30 | < 3.3 | 3.30 | ~3.28 | **3.28** |
-| Max CC | 11 | 10 | 10 | 10 | 10 | **10** |
-| C-grade functions | 5 | 0 | 0 | 0 | 0 | **0** |
-| CC=10 boundary | — | 11 | ~6 | 6 | 4 | **4** |
-| Dead abstractions | Unknown | 0 | 0 | 0 | 0 | **0** |
-| MI issues | — | 0 | 0 | 0 | 0 | **0** |
-| Classes > 20 methods | 8 | 8 | 8 | 14 | 14 | **14** |
-| SRP violations | 0 critical | 0 critical | 0 critical | 0 critical | 0 critical | **0 critical** |
-| Total tests | 4,460 | ~4,460 | ~4,660 | ~4,728 | ~4,795 | **4,739** |
-| Redundant tests removed | 0 | ~20 | ~47 | ~47 | ~95 | **~233** |
+| Metric | Iter 1 | After Iter 6 | Iter 13 | Iter 17 | Iter 22 | Iter 26 | **Iter 29 (Current)** |
+|--------|--------|-------------|---------|---------|---------|---------|----------------------|
+| Total blocks | 1,306 | 1,313 | ~1,325 | 1,319 | ~1,321 | 1,329 | **~1,333** |
+| Average CC | 3.35 | ~3.30 | < 3.3 | 3.30 | ~3.28 | 3.28 | **< 3.28** |
+| Max CC | 11 | 10 | 10 | 10 | 10 | 10 | **10** |
+| C-grade functions | 5 | 0 | 0 | 0 | 0 | 0 | **0** |
+| CC=10 boundary | — | 11 | ~6 | 6 | 4 | 4 | **4** |
+| Dead abstractions | Unknown | 0 | 0 | 0 | 0 | 0 | **0** |
+| MI issues | — | 0 | 0 | 0 | 0 | 0 | **0** |
+| Classes > 20 methods | 8 | 8 | 8 | 14 | 14 | 14 | **14** |
+| SRP violations | 0 critical | 0 critical | 0 critical | 0 critical | 0 critical | 0 critical | **0 critical** |
+| Total tests | 4,460 | ~4,460 | ~4,660 | ~4,728 | ~4,795 | 4,739 | **4,691** |
+| Redundant tests removed | 0 | ~20 | ~47 | ~47 | ~95 | ~233 | **~233** |
 
 ---
 
@@ -401,14 +403,14 @@ All 100+ source files pass MI > 20 (maintainable). `radon mi -nc` returned zero 
 
 The codebase complexity is **well-managed and stable**:
 
-1. **Zero C-grade functions** (CC ≥ 11) — stable across 20+ iterations
-2. **4 CC=10 boundary functions** — down from 11 original after 16 successful refactoring operations; all 4 remaining are domain-inherent or pseudo-positive
+1. **Zero C-grade functions** (CC ≥ 11) — stable across 29 iterations (Iter 28 briefly introduced `_resolve_all_of` CC 13, fixed in Iter 29)
+2. **4 CC=10 boundary functions** — down from 11 original after 18 successful refactoring operations; all 4 remaining are domain-inherent or pseudo-positive
 3. **No maintainability issues** — all files MI > 20
 4. **No SRP violations** — all 14 large classes (>20 methods) have cohesive method sets
 5. **No dead abstractions** — all 4 Protocol/ABC definitions have consumers
-6. **Average CC ~3.28 (Grade A)** — well below industry average (~6-8)
+6. **Average CC < 3.28 (Grade A)** — well below industry average (~6-8)
 
-The remaining complexity is **proportional to domain requirements** (dispatch state machines, JSON Schema resolution, multi-provider LLM adaptation, markdown parsing) rather than accidental (poor structure, missing abstractions). The 16 successful CC refactoring operations have exhausted all high-ROI refactoring targets.
+The remaining complexity is **proportional to domain requirements** (dispatch state machines, JSON Schema resolution, multi-provider LLM adaptation, markdown parsing) rather than accidental (poor structure, missing abstractions). The 18 successful CC refactoring operations have exhausted all high-ROI refactoring targets.
 
 ---
 
