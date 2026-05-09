@@ -11,6 +11,7 @@ Rule-engine pre-filter, LLM does final confirmation (in SkillEvolver).
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -274,25 +275,17 @@ class HealthChecker:
         healthy = sum(1 for r in reports.values() if r.is_healthy)
         unhealthy = total - healthy
 
-        fix_count = 0
-        derived_count = 0
-        captured_count = 0
-        for r in reports.values():
-            for s in r.suggestions:
-                if s.evolution_type == EvolutionType.FIX:
-                    fix_count += 1
-                elif s.evolution_type == EvolutionType.DERIVED:
-                    derived_count += 1
-                elif s.evolution_type == EvolutionType.CAPTURED:
-                    captured_count += 1
+        suggestion_counts = Counter(
+            s.evolution_type for r in reports.values() for s in r.suggestions
+        )
 
         return {
             "total_skills": total,
             "healthy": healthy,
             "unhealthy": unhealthy,
-            "fix_suggestions": fix_count,
-            "derived_suggestions": derived_count,
-            "captured_suggestions": captured_count,
+            "fix_suggestions": suggestion_counts[EvolutionType.FIX],
+            "derived_suggestions": suggestion_counts[EvolutionType.DERIVED],
+            "captured_suggestions": suggestion_counts[EvolutionType.CAPTURED],
             "unhealthy_skills": [r.skill_name for r in reports.values() if not r.is_healthy],
         }
 

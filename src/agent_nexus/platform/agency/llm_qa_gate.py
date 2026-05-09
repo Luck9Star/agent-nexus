@@ -36,6 +36,7 @@ class LLMQualityGate:
     Falls back to structural-only when no LLM client is available.
     """
 
+    # Class-level: tracks fallbacks across ALL instances for monitoring/reset via tests.
     _fallback_count = 0
     _fallback_lock = threading.Lock()
 

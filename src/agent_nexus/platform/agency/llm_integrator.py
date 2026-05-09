@@ -37,6 +37,7 @@ class LLMIntegrator:
     available or the LLM call fails.
     """
 
+    # Class-level: tracks fallbacks across ALL instances for monitoring/reset via tests.
     _fallback_count = 0
     _fallback_lock = threading.Lock()
 

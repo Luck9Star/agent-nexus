@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import logging
+from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
@@ -160,7 +161,7 @@ class SecurityChecker:
         else:
             self._rules = list(self.DEFAULT_RULES)
         self._classify_rules()
-        self._cache: dict[str, tuple[SecurityViolation, ...]] = {}
+        self._cache: OrderedDict[str, tuple[SecurityViolation, ...]] = OrderedDict()
         self._cache_max = 128
 
     def add_rule(self, rule: SecurityRule) -> None:
@@ -284,6 +285,7 @@ class SecurityChecker:
 
         cached = self._cache.get(cache_key)
         if cached is not None:
+            self._cache.move_to_end(cache_key)
             return cached
 
         if tree is None:
@@ -313,7 +315,7 @@ class SecurityChecker:
         result = tuple(violations)
 
         if len(self._cache) >= self._cache_max:
-            self._cache.pop(next(iter(self._cache)))
+            self._cache.popitem(last=False)
         self._cache[cache_key] = result
         return result
 

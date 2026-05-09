@@ -423,6 +423,89 @@ def _print_result(result: TaskComposerResult) -> None:
         click.echo("No artifacts produced — all experts failed.")
 
 
+def _configure_logging(config_dir: str | None) -> None:
+    """Configure logging from config.toml [runtime].log_level and load .env."""
+    from agent_nexus.platform.config.loader import ConfigLoader
+
+    _cfg_dir = Path(config_dir) if config_dir else None
+    _log_level = ConfigLoader(_cfg_dir).load_config().runtime.log_level
+    logging.basicConfig(
+        level=getattr(logging, _log_level.upper(), logging.INFO),
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    _env_dir = config_dir or "~/.agent-nexus"
+    _env_path = Path(_env_dir).expanduser() / ".env"
+    if _env_path.is_file():
+        from dotenv import load_dotenv
+
+        load_dotenv(_env_path)
+
+
+def _load_experts(vendor_path: str, allowlist: str) -> ExpertRegistry:
+    """Load expert profiles via AgencyImporter and populate the registry."""
+    tmpdir = tempfile.mkdtemp(prefix="agency-run-")
+    importer = AgencyImporter(
+        vendor_path=vendor_path,
+        allowlist_path=allowlist,
+        output_dir=tmpdir,
+    )
+    try:
+        profiles = importer.dry_run()
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    registry = ExpertRegistry()
+    for pkg in profiles:
+        ep = pkg["expert_profile"]
+        registry.add(ep["id"], ep, ep["capabilities"])
+    return registry
+
+
+def _execute_pipeline(
+    message: str,
+    mode: str,
+    max_parallel: int,
+    timeout: int | None,
+    reasoning_protocol: bool,
+    registry: ExpertRegistry,
+    executor: LLMExecutor | ProfileBasedExecutor,
+    is_llm: bool,
+    llm_planner: LLMPlanner | None,
+    llm_integrator: LLMIntegrator | None,
+    llm_qa_gate: LLMQualityGate | None,
+) -> TaskComposerResult:
+    """Run the TaskComposer pipeline with proper resource cleanup."""
+    from agent_nexus.platform.orchestration.task_graph import TaskGraph
+
+    from .task_composer import TaskComposer, TaskComposerInput
+
+    with TaskGraph(":memory:") as graph:
+        composer = TaskComposer(registry)
+        composer_input = TaskComposerInput(
+            task=message,
+            mode=mode,
+            max_parallel=max_parallel,
+            timeout_seconds=float(timeout or DEFAULT_PIPELINE_TIMEOUT),
+            reasoning_protocol=reasoning_protocol,
+        )
+        try:
+            composer_result = composer.run(
+                composer_input,
+                expert_executor=executor,
+                task_graph=graph,
+                llm_planner=llm_planner,
+                llm_integrator=llm_integrator,
+                llm_qa_gate=llm_qa_gate,
+                concurrent=True,
+            )
+        finally:
+            if is_llm:
+                executor.close()
+    return composer_result
+
+
 def _setup_llm_components(
     model: str | None,
     config_dir: str | None,
@@ -675,49 +758,22 @@ def run_composition(
     # Resolve vendor_path / allowlist to repo defaults
     vendor_path, allowlist = _resolve_defaults(vendor_path, allowlist)
 
-    # Configure logging from config.toml [runtime].log_level
-    from agent_nexus.platform.config.loader import ConfigLoader
+    # Step 1: Configure logging and load .env
+    _configure_logging(config_dir)
 
-    _cfg_dir = Path(config_dir) if config_dir else None
-    _log_level = ConfigLoader(_cfg_dir).load_config().runtime.log_level
-    logging.basicConfig(
-        level=getattr(logging, _log_level.upper(), logging.INFO),
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
-        datefmt="%H:%M:%S",
-    )
-
-    # Load .env from config dir so API keys are available
-    _env_dir = config_dir or "~/.agent-nexus"
-    _env_path = Path(_env_dir).expanduser() / ".env"
-    if _env_path.is_file():
-        from dotenv import load_dotenv
-
-        load_dotenv(_env_path)
-
+    # Step 2: Load experts
     try:
-        # Step 1: Load experts
-        tmpdir = tempfile.mkdtemp(prefix="agency-run-")
-        importer = AgencyImporter(
-            vendor_path=vendor_path,
-            allowlist_path=allowlist,
-            output_dir=tmpdir,
-        )
-        try:
-            profiles = importer.dry_run()
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
+        registry = _load_experts(vendor_path, allowlist)
     except Exception as exc:
         click.echo(f"Error loading experts: {exc}", err=True)
         sys.exit(1)
 
-    registry = ExpertRegistry()
-    for pkg in profiles:
-        ep = pkg["expert_profile"]
-        registry.add(ep["id"], ep, ep["capabilities"])
-
-    # Step 2: Initialize LLM components if requested
+    # Step 3: Initialize LLM components if requested
     shared_client = None
     shared_registry = None
+    llm_planner = None
+    llm_integrator = None
+    llm_qa_gate = None
 
     if use_llm:
         (
@@ -732,12 +788,8 @@ def run_composition(
             temperature,
             registry,
         )
-    else:
-        llm_planner = None
-        llm_integrator = None
-        llm_qa_gate = None
 
-    # Step 3: Create executor
+    # Step 4: Create executor
     effective_call_timeout = (
         float(call_timeout) if call_timeout else float(DEFAULT_LLM_CALL_TIMEOUT)
     )
@@ -752,39 +804,26 @@ def run_composition(
         reasoning_protocol,
     )
 
-    # Step 4: Execute pipeline
-    from agent_nexus.platform.orchestration.task_graph import TaskGraph
-
-    from .task_composer import TaskComposer, TaskComposerInput
-
+    # Step 5: Execute pipeline
     try:
-        with TaskGraph(":memory:") as graph:
-            composer = TaskComposer(registry)
-            composer_input = TaskComposerInput(
-                task=message,
-                mode=mode,
-                max_parallel=max_parallel,
-                timeout_seconds=float(timeout or DEFAULT_PIPELINE_TIMEOUT),
-                reasoning_protocol=reasoning_protocol,
-            )
-            try:
-                composer_result = composer.run(
-                    composer_input,
-                    expert_executor=executor,
-                    task_graph=graph,
-                    llm_planner=llm_planner,
-                    llm_integrator=llm_integrator,
-                    llm_qa_gate=llm_qa_gate,
-                    concurrent=True,
-                )
-            finally:
-                if is_llm:
-                    executor.close()
+        composer_result = _execute_pipeline(
+            message=message,
+            mode=mode,
+            max_parallel=max_parallel,
+            timeout=timeout,
+            reasoning_protocol=reasoning_protocol,
+            registry=registry,
+            executor=executor,
+            is_llm=is_llm,
+            llm_planner=llm_planner,
+            llm_integrator=llm_integrator,
+            llm_qa_gate=llm_qa_gate,
+        )
     finally:
         if shared_client is not None:
             shared_client.close()
 
-    # Step 5: Output results
+    # Step 6: Output results
     _handle_output(composer_result)
 
 

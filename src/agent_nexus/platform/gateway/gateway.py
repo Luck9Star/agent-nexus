@@ -290,7 +290,7 @@ class MCPGateway:
         )
         return True
 
-    def _register_single_tool(self, adapter: Any, agent_name: str) -> None:
+    def _register_single_tool(self, adapter: McpToolAdapter, agent_name: str) -> None:
         """Register a single tool adapter, handling name collisions."""
         full_name = adapter.full_name
         if full_name in self._registered_tool_names:

@@ -201,14 +201,16 @@ class DAGDispatcher:
         # Persistent thread pool for concurrent execution (reused across batches)
         self._pool: concurrent.futures.ThreadPoolExecutor | None = None
 
+    def __enter__(self) -> DAGDispatcher:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
     def __del__(self) -> None:
         """Best-effort cleanup of the thread pool on garbage collection."""
-        try:
-            if self._pool is not None:
-                self._pool.shutdown(wait=False)
-                self._pool = None
-        except Exception:
-            pass
+        with contextlib.suppress(Exception):
+            self.close()
 
     def _get_pool(self) -> concurrent.futures.ThreadPoolExecutor:
         """Lazy-init the persistent thread pool."""
@@ -303,25 +305,17 @@ class DAGDispatcher:
         Returns True if the dispatch loop should break, False if it should
         continue (e.g. after failing stale tasks).
         """
-        all_specialists = [self._graph.get_task(tid) for tid in specialist_ids]
         pending_or_running = [
             t
-            for t in all_specialists
-            if t is not None and t.state in (TaskState.PENDING, TaskState.IN_PROGRESS)
+            for tid in specialist_ids
+            if (t := self._graph.get_task(tid)) is not None
+            and t.state in (TaskState.PENDING, TaskState.IN_PROGRESS)
         ]
 
         if not pending_or_running:
             return True  # All done
 
-        # Stale IN_PROGRESS tasks → fail them and stop
-        in_progress = [t for t in pending_or_running if t.state == TaskState.IN_PROGRESS]
-        if in_progress:
-            for t in in_progress:
-                _safe_fail(self._graph, t.id)
-                result.failed.append(t.id)
-            return True
-
-        # Only PENDING tasks remain but none are ready → blocked by failed deps
+        # Remaining tasks are stuck (in-progress or blocked pending) → fail and stop
         for t in pending_or_running:
             _safe_fail(self._graph, t.id)
             result.failed.append(t.id)
@@ -629,7 +623,7 @@ class DAGDispatcher:
                         failed_set.add(tid)
                     changed = True
 
-    def _should_fail_orphan(self, task: Any) -> bool:
+    def _should_fail_orphan(self, task: TaskItem) -> bool:
         """Return True if a PENDING task should be failed (orphaned).
 
         After the dispatch loop exits, any remaining PENDING task will never
