@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from unittest.mock import patch
 
 from agent_nexus.platform.router.subtask import SubtaskConfig, SubtaskController
 
@@ -346,3 +347,50 @@ class TestSubtaskConfigValidation:
         assert cfg.timeout_seconds == 60.0
         assert cfg.max_retries == 2
         assert cfg.max_parallel == 3
+
+
+# ---------------------------------------------------------------------------
+# iter110d: SystemExit / GeneratorExit propagate immediately, not retried
+# ---------------------------------------------------------------------------
+
+
+class TestSubtaskSystemExit:
+    """SystemExit and GeneratorExit propagate immediately in run_with_retry."""
+
+    @pytest.mark.asyncio
+    async def test_run_with_retry_propagates_system_exit(self) -> None:
+        """SystemExit in run_with_retry is propagated immediately."""
+        ctrl = SubtaskController(SubtaskConfig(max_retries=3))
+        attempts = {"n": 0}
+
+        async def raise_system_exit():
+            attempts["n"] += 1
+            raise SystemExit(42)
+
+        async def _bypass_wait_for(coro, timeout=None):
+            return await coro
+
+        with patch.object(ctrl, "run_with_timeout", _bypass_wait_for):
+            with pytest.raises(SystemExit):
+                await ctrl.run_with_retry(raise_system_exit)
+
+        assert attempts["n"] == 1  # no retries
+
+    @pytest.mark.asyncio
+    async def test_run_with_retry_propagates_generator_exit(self) -> None:
+        """GeneratorExit in run_with_retry is propagated immediately."""
+        ctrl = SubtaskController(SubtaskConfig(max_retries=3))
+        attempts = {"n": 0}
+
+        async def raise_generator_exit():
+            attempts["n"] += 1
+            raise GeneratorExit()
+
+        async def _bypass_wait_for(coro, timeout=None):
+            return await coro
+
+        with patch.object(ctrl, "run_with_timeout", _bypass_wait_for):
+            with pytest.raises(GeneratorExit):
+                await ctrl.run_with_retry(raise_generator_exit)
+
+        assert attempts["n"] == 1  # no retries

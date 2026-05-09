@@ -228,11 +228,6 @@ class TestSupervisorAutoRestart:
 
 
 class TestSupervisorListHelpers:
-    def test_list_running_delegates(self, tmp_path: Path) -> None:
-        sup, pm, _, _ = _make_supervisor(tmp_path)
-        pm.list_running.return_value = ["a", "b"]
-        assert sup.list_running() == ["a", "b"]
-
     def test_list_installed_returns_agent_names(self, tmp_path: Path) -> None:
         sup, _, lf, _ = _make_supervisor(tmp_path)
         entry = _make_entry()

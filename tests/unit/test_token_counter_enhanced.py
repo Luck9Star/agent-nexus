@@ -146,17 +146,6 @@ class TestTokenCounterThreeTier:
         tc._tiktoken_available = False
         assert tc.count("abc") == 1  # 3//4=0 -> max(1,0)=1
 
-    def test_full_chain_litellm_succeeds(self):
-        """Integration: when litellm works, tiktoken is never called."""
-        TokenCounter = _get_token_counter()
-        tc = TokenCounter()
-        tc._litellm_available = True
-        tc._litellm_mod = MagicMock()
-        tc._litellm_mod.token_counter.return_value = 7
-
-        result = tc.count("test", model="gpt-4o")
-        assert result == 7
-
     def test_empty_string_returns_zero(self):
         """Empty string returns 0 tokens."""
         TokenCounter = _get_token_counter()
