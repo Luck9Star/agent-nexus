@@ -77,13 +77,13 @@ class SchemaTransformer:
     # Internal dispatch
     # ------------------------------------------------------------------
 
-    def _resolve_any(self, schema: dict[str, Any], name: str = "Anonymous") -> type:  # noqa: PLR0911
+    def _resolve_any(self, schema: dict[str, Any], name: str = "Anonymous") -> Any:  # noqa: PLR0911
         """Dispatch based on schema keywords."""
         # 1. ``$ref`` — highest priority
         if "$ref" in schema:
             resolved = self._resolve_ref(schema["$ref"], name)
             nullable = schema.get("nullable", False)
-            return resolved | None if nullable else resolved  # type: ignore[return-value]
+            return resolved | None if nullable else resolved
 
         # 2. ``allOf`` — merge all sub-schemas into one model
         if "allOf" in schema:
@@ -110,24 +110,24 @@ class SchemaTransformer:
         type_str: str | list[str],
         schema: dict[str, Any],
         name: str,
-    ) -> type:
+    ) -> Any:
         """Resolve a schema that has an explicit ``type`` field."""
         if isinstance(type_str, list):
             # OpenAPI 3.1 style: ["string", "null"]
             non_null = [t for t in type_str if t != "null"]
             has_null = "null" in type_str
             inner_type = self._resolve_typed(non_null[0], schema, name) if non_null else str
-            return inner_type | None if has_null else inner_type  # type: ignore[return-value]
+            return inner_type | None if has_null else inner_type
 
         nullable = schema.get("nullable", False)
         inner = self._resolve_typed(type_str, schema, name)
-        return inner | None if nullable else inner  # type: ignore[return-value]
+        return inner | None if nullable else inner
 
     # ------------------------------------------------------------------
     # Type-specific resolvers
     # ------------------------------------------------------------------
 
-    def _resolve_typed(self, type_str: str, schema: dict[str, Any], name: str) -> type:
+    def _resolve_typed(self, type_str: str, schema: dict[str, Any], name: str) -> Any:
         """Resolve a schema with an explicit ``type`` field."""
         if type_str in _PRIMITIVE_MAP:
             fmt = schema.get("format")
@@ -137,8 +137,8 @@ class SchemaTransformer:
 
         if type_str == "array":
             items = schema.get("items", {})
-            item_type = self._resolve_any(items, f"{name}Item") if isinstance(items, dict) else Any  # type: ignore[assignment]
-            return list[item_type]  # type: ignore[valid-type]
+            item_type = self._resolve_any(items, f"{name}Item") if isinstance(items, dict) else Any
+            return list[item_type]
 
         if type_str == "object":
             return self._build_object_model(schema, name)
@@ -207,12 +207,12 @@ class SchemaTransformer:
 
         return create_model(name, **merged_props)  # type: ignore[call-overload]
 
-    def _resolve_one_of_any_of(self, variants: list[dict[str, Any]], name: str) -> type:
+    def _resolve_one_of_any_of(self, variants: list[dict[str, Any]], name: str) -> Any:
         """Resolve ``oneOf`` / ``anyOf`` into ``Union[...]`` or ``X | None``."""
         if not variants:
             return str
 
-        resolved_variants: list[type] = []
+        resolved_variants: list[Any] = []
         has_null = False
 
         for variant in variants:
@@ -229,13 +229,13 @@ class SchemaTransformer:
 
         # Single non-null variant + null → Optional
         if len(resolved_variants) == 1:
-            return resolved_variants[0] | None if has_null else resolved_variants[0]  # type: ignore[return-value]
+            return resolved_variants[0] | None if has_null else resolved_variants[0]
 
         # Multiple non-null variants — build Union[X, Y, ...]
         union = resolved_variants[0]
         for v in resolved_variants[1:]:
-            union = union | v  # type: ignore[assignment]
-        return union | None if has_null else union  # type: ignore[return-value]
+            union = union | v
+        return union | None if has_null else union
 
     # ------------------------------------------------------------------
     # Object model builder

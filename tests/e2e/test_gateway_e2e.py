@@ -20,7 +20,10 @@ def _make_manifest(
     agent_type: AgentType = AgentType.ATOMIC,
 ) -> AgentManifest:
     return AgentManifest(
-        name=name, version=version, type=agent_type, description=description,
+        name=name,
+        version=version,
+        type=agent_type,
+        description=description,
     )
 
 
@@ -87,10 +90,12 @@ class TestDeferredRegistryE2E:
     def test_register_core_and_deferred(self, registry) -> None:
         """Register agents in both tiers."""
         registry.register_agent(
-            _make_manifest(name="core-agent"), deferred=False,
+            _make_manifest(name="core-agent"),
+            deferred=False,
         )
         registry.register_agent(
-            _make_manifest(name="deferred-agent"), deferred=True,
+            _make_manifest(name="deferred-agent"),
+            deferred=True,
         )
 
         core = registry.list_core_agents()
@@ -120,7 +125,8 @@ class TestDeferredRegistryE2E:
     def test_get_agent_info(self, registry) -> None:
         """get_agent_info returns registered agent data."""
         registry.register_agent(
-            _make_manifest(name="info-agent"), deferred=False,
+            _make_manifest(name="info-agent"),
+            deferred=False,
         )
         info = registry.get_agent_info("info-agent")
         assert info is not None
@@ -150,7 +156,8 @@ class TestDeferredRegistryE2E:
         """build_manifest includes all registered agents."""
         for i in range(3):
             registry.register_agent(
-                _make_manifest(name=f"agent-{i}"), deferred=False,
+                _make_manifest(name=f"agent-{i}"),
+                deferred=False,
             )
         manifest = registry.build_manifest()
         assert len(manifest) >= 3
@@ -177,10 +184,12 @@ class TestDeferredRegistryToolLifecycle:
     def test_deferred_agent_tools_not_in_get_tools_for_llm(self, registry) -> None:
         """Deferred agents are excluded from get_tools_for_llm until activated."""
         registry.register_agent(
-            _make_manifest(name="lazy-agent"), deferred=True,
+            _make_manifest(name="lazy-agent"),
+            deferred=True,
         )
         registry.register_agent(
-            _make_manifest(name="eager-agent"), deferred=False,
+            _make_manifest(name="eager-agent"),
+            deferred=False,
         )
 
         # Only core agent tools should be available
@@ -205,7 +214,8 @@ class TestDeferredRegistryToolLifecycle:
         for i in range(20):
             tier = i % 2 == 0
             registry.register_agent(
-                _make_manifest(name=f"batch-{i}"), deferred=not tier,
+                _make_manifest(name=f"batch-{i}"),
+                deferred=not tier,
             )
 
         all_agents = registry.list_all_agents()
@@ -224,3 +234,99 @@ class TestDeferredRegistryToolLifecycle:
 
         results = registry.search_agents("completely unrelated quantum physics")
         assert results == []
+
+
+# ---------------------------------------------------------------------------
+# MCP tool adapter contract: naming, schema, and execution boundary
+# ---------------------------------------------------------------------------
+
+
+class TestMcpToolAdapterContract:
+    """Verify McpToolAdapter produces correct MCP tool definitions.
+
+    The adapter converts agent tool schemas into MCP-compatible format:
+      full_name = mcp__{server_name}__{tool_name}
+      get_tool_definition() returns {name, description, inputSchema}
+
+    This contract must match what the Rust gateway (ap-gateway) produces.
+    """
+
+    def test_tool_name_sanitization(self) -> None:
+        """Non-alphanumeric characters in server/tool names are replaced with _."""
+        from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
+
+        adapter = McpToolAdapter(
+            server_name="code-reviewer-v2",
+            tool_schema={"name": "review PR", "description": "Review a PR"},
+        )
+        assert adapter.full_name == "mcp__code_reviewer_v2__review_PR"
+
+    def test_tool_definition_schema(self) -> None:
+        """get_tool_definition returns MCP-compatible schema dict."""
+        from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
+
+        adapter = McpToolAdapter(
+            server_name="doc-filler",
+            tool_schema={
+                "name": "fill_template",
+                "description": "Fill a document template",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"template": {"type": "string"}},
+                    "required": ["template"],
+                },
+            },
+        )
+        defn = adapter.get_tool_definition()
+        assert defn["name"] == "mcp__doc_filler__fill_template"
+        assert defn["description"] == "Fill a document template"
+        assert defn["inputSchema"]["type"] == "object"
+        assert "template" in defn["inputSchema"]["properties"]
+
+    def test_tool_definition_default_schema(self) -> None:
+        """Missing inputSchema defaults to empty object schema."""
+        from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
+
+        adapter = McpToolAdapter(
+            server_name="minimal",
+            tool_schema={"name": "noop"},
+        )
+        defn = adapter.get_tool_definition()
+        assert defn["inputSchema"] == {"type": "object", "properties": {}}
+
+    def test_tool_schema_missing_name_raises(self) -> None:
+        """Tool schema without 'name' raises ValueError."""
+        from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
+
+        with pytest.raises(ValueError, match="name"):
+            McpToolAdapter(server_name="test", tool_schema={"description": "no name"})
+
+    def test_mcp_triple_underscore_separator(self) -> None:
+        """MCP tool names use mcp__ prefix with double-underscore separator."""
+        from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
+
+        adapter = McpToolAdapter(
+            server_name="agent",
+            tool_schema={"name": "tool"},
+        )
+        assert adapter.full_name == "mcp__agent__tool"
+        assert adapter.full_name.count("__") == 2  # mcp__agent__tool
+
+    @pytest.mark.asyncio
+    async def test_execute_on_dead_process_returns_error(self) -> None:
+        """Executing a tool on a dead agent handle returns error dict."""
+        from unittest.mock import MagicMock
+
+        from agent_nexus.platform.gateway.tool_adapter import McpToolAdapter
+
+        adapter = McpToolAdapter(
+            server_name="dead-agent",
+            tool_schema={"name": "tool", "description": "A tool"},
+        )
+        dead_handle = MagicMock()
+        dead_handle.is_alive = False
+
+        result = await adapter.execute(dead_handle, {"arg": "value"})
+
+        assert result["success"] is False
+        assert "not alive" in result["error"].lower()

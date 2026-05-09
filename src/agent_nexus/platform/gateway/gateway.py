@@ -424,7 +424,7 @@ class MCPGateway:
         # ParsedFunction.from_function() sees explicit typed parameters
         # instead of **kwargs (which it rejects with ValueError).
         params, annotations = self._build_params(adapter)
-        _invoke.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+        _invoke.__signature__ = inspect.Signature(  # ty: ignore[unresolved-attribute]
             parameters=params,
             return_annotation=str,
         )
@@ -560,7 +560,7 @@ class MCPGateway:
 
             # Build signature from inputSchema so FastMCP can parse parameters
             params, annotations = self._build_params_from_schema(input_schema)
-            _invoke.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+            _invoke.__signature__ = inspect.Signature(
                 parameters=params,
                 return_annotation=str,
             )

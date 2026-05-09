@@ -395,6 +395,7 @@ class HookExecutor:
         args, validation_err = self._validate_command_args(hook)
         if validation_err is not None:
             return validation_err
+        assert args is not None  # guaranteed when validation_err is None
 
         allowlist_err = self._check_command_allowlist(hook, args[0])
         if allowlist_err is not None:
@@ -419,7 +420,7 @@ class HookExecutor:
             duration_ms = (time.monotonic() - start) * 1000
             return self._build_command_result(
                 hook,
-                proc.returncode,
+                proc.returncode if proc.returncode is not None else -1,
                 stdout_bytes,
                 stderr_bytes,
                 duration_ms,
@@ -503,6 +504,7 @@ class HookExecutor:
         url_err = self._validate_http_url(hook)
         if url_err is not None:
             return url_err
+        assert hook.url is not None  # guaranteed when _validate_http_url returns None
 
         payload = {"event": hook.event, "context": context, "hook_type": hook.type}
         import httpx

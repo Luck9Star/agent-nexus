@@ -430,3 +430,104 @@ class TestEvolutionEngineErrorPaths:
         assert isinstance(results, list)
         assert all(hasattr(r, "success") for r in results)
         assert len(results) == 0  # no skills with sufficient metrics to trigger evolution
+
+
+class TestEvolutionEngineErrorInjection:
+    """Additional error injection paths for EvolutionEngine.
+
+    Tests corruption, edge cases, and error paths that cross the
+    evolution engine sub-component boundaries.
+    """
+
+    @pytest.fixture()
+    def engine_and_store(self, tmp_path: Path):
+        from agent_nexus.platform.evolution.engine import EvolutionEngine
+        from agent_nexus.platform.evolution.store import EvolutionStore
+
+        db_path = tmp_path / "error_inject.db"
+        store = EvolutionStore(db_path)
+        engine = EvolutionEngine(store)
+        yield engine, store
+        store.close()
+
+    def test_evolve_tool_degradation_with_empty_description(self, engine_and_store) -> None:
+        """TOOL_DEGRADATION with empty problem_description still works."""
+        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
+
+        engine, store = engine_and_store
+        store.save_skill_record(_make_skill("td-empty", name="td-empty"))
+
+        results = engine.evolve(
+            trigger=EvolutionTrigger.TOOL_DEGRADATION,
+            tool_key="broken-tool",
+            problem_description="",
+        )
+        assert isinstance(results, list)
+        assert len(results) >= 1
+
+    def test_evolve_metric_check_with_seeded_skill_no_counters(self, engine_and_store) -> None:
+        """METRIC_CHECK with a skill that has zero counters returns empty."""
+        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
+
+        engine, store = engine_and_store
+        store.save_skill_record(_make_skill("mc-skill", name="mc-skill"))
+
+        results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK)
+        assert isinstance(results, list)
+        assert len(results) == 0  # No counters means no metric threshold exceeded
+
+    def test_check_health_on_active_skill_returns_suggestions(self, engine_and_store) -> None:
+        """check_health on an existing active skill returns a list."""
+        engine, store = engine_and_store
+        store.save_skill_record(_make_skill("healthy-skill", name="healthy-skill"))
+
+        suggestions = engine.check_health("healthy-skill")
+        assert isinstance(suggestions, list)
+
+    def test_evolve_post_analysis_with_ctx_returns_analysis(self, engine_and_store) -> None:
+        """POST_ANALYSIS with valid EvolutionContext returns AnalysisResult."""
+        from agent_nexus.models.evolution import EvolutionContext
+        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
+
+        engine, store = engine_and_store
+        store.save_skill_record(_make_skill("pa-skill", name="pa-skill"))
+
+        ctx = EvolutionContext(
+            agent_id="test-agent",
+            task_id="task-1",
+            skill_ids_used=["pa-skill"],
+            task_completed=True,
+        )
+        result = engine.evolve(trigger=EvolutionTrigger.POST_ANALYSIS, ctx=ctx)
+        assert hasattr(result, "task_id")
+        assert result.task_id == "task-1"
+
+    def test_evolve_min_selections_clamped_to_one(self, engine_and_store) -> None:
+        """METRIC_CHECK with min_selections=0 is clamped to 1."""
+        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
+
+        engine, _ = engine_and_store
+        results = engine.evolve(trigger=EvolutionTrigger.METRIC_CHECK, min_selections=0)
+        assert isinstance(results, list)
+
+    def test_diagnose_all_with_seeded_skill(self, engine_and_store) -> None:
+        """diagnose_all on a store with one skill returns non-empty dict."""
+        engine, store = engine_and_store
+        store.save_skill_record(_make_skill("diag-skill", name="diag-skill"))
+
+        result = engine.diagnose_all()
+        assert isinstance(result, dict)
+        assert "diag-skill" in result
+
+    def test_should_compact_below_threshold(self, engine_and_store) -> None:
+        """should_compact returns False when tokens are below threshold."""
+        from agent_nexus.platform.evolution.compaction import AgentContext
+
+        engine, _ = engine_and_store
+        ctx = AgentContext(
+            agent_id="test-agent",
+            session_id="session-1",
+            turn_number=5,
+            context_window=128_000,
+        )
+        assert engine.should_compact(ctx) is False

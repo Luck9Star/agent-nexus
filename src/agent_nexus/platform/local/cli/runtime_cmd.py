@@ -33,7 +33,8 @@ def start(
     if all_agents:
         asyncio.run(_start_all())
     else:
-        asyncio.run(_start_one(name))  # type: ignore[arg-type]
+        assert name is not None  # guaranteed: not all_agents and earlier guard passed
+        asyncio.run(_start_one(name))
 
 
 @runtime_app.command()
@@ -49,7 +50,8 @@ def stop(
     if all_agents:
         asyncio.run(_stop_all())
     else:
-        asyncio.run(_stop_one(name))  # type: ignore[arg-type]
+        assert name is not None  # guaranteed: not all_agents and earlier guard passed
+        asyncio.run(_stop_one(name))
 
 
 @runtime_app.command()

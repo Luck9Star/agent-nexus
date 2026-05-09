@@ -8,6 +8,7 @@ and MCPGateway (core tools, agent registration, tool forwarding).
 from __future__ import annotations
 
 import asyncio
+import inspect
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -2326,3 +2327,271 @@ class TestInvokeCleanupExceptionSafety:
 
         # Error message must still be returned despite cleanup failure
         assert "Error" in result
+
+
+# ============================================================================
+# _build_params and _build_params_from_schema — static method unit tests
+# ============================================================================
+
+
+class TestBuildParams:
+    """Tests for MCPGateway._build_params static method.
+
+    _build_params reads adapter._input_schema and delegates to
+    _build_params_from_schema, returning ([], {"return": str}) for empty
+    or property-less schemas.
+    """
+
+    def test_adapter_no_schema_returns_empty(self) -> None:
+        """When adapter._input_schema is None, returns ([], {"return": str})."""
+        adapter = MagicMock(spec=McpToolAdapter)
+        adapter._input_schema = None
+        params, annotations = MCPGateway._build_params(adapter)
+        assert params == []
+        assert annotations == {"return": str}
+
+    def test_adapter_schema_without_properties_returns_empty(self) -> None:
+        """When schema has no 'properties' key, returns ([], {"return": str})."""
+        adapter = MagicMock(spec=McpToolAdapter)
+        adapter._input_schema = {"type": "object"}
+        params, annotations = MCPGateway._build_params(adapter)
+        assert params == []
+        assert annotations == {"return": str}
+
+    def test_adapter_empty_schema_returns_empty(self) -> None:
+        """When schema is an empty dict, returns ([], {"return": str})."""
+        adapter = MagicMock(spec=McpToolAdapter)
+        adapter._input_schema = {}
+        params, annotations = MCPGateway._build_params(adapter)
+        assert params == []
+        assert annotations == {"return": str}
+
+    def test_adapter_valid_schema_delegates_to_from_schema(self) -> None:
+        """When schema has properties, delegates to _build_params_from_schema."""
+        adapter = MagicMock(spec=McpToolAdapter)
+        adapter._input_schema = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        }
+        params, annotations = MCPGateway._build_params(adapter)
+        assert len(params) == 1
+        assert params[0].name == "name"
+        assert params[0].annotation is str
+        assert "name" in annotations
+
+
+class TestBuildParamsFromSchema:
+    """Tests for MCPGateway._build_params_from_schema static method.
+
+    Converts a JSON-schema dict into (list[inspect.Parameter], dict[str, Any])
+    for overriding __signature__ and __annotations__ on the invoke function.
+    """
+
+    def test_empty_schema_returns_empty(self) -> None:
+        """Empty dict returns ([], {"return": str})."""
+        params, annotations = MCPGateway._build_params_from_schema({})
+        assert params == []
+        assert annotations == {"return": str}
+
+    def test_none_falsy_returns_empty(self) -> None:
+        """None input returns ([], {"return": str})."""
+        params, annotations = MCPGateway._build_params_from_schema(None)  # type: ignore[arg-type]
+        assert params == []
+        assert annotations == {"return": str}
+
+    def test_schema_without_properties_returns_empty(self) -> None:
+        """Schema missing 'properties' key returns ([], {"return": str})."""
+        params, annotations = MCPGateway._build_params_from_schema({"type": "object"})
+        assert params == []
+        assert annotations == {"return": str}
+
+    def test_single_required_string_property(self) -> None:
+        """A single required string property produces one positional-or-keyword
+        Parameter with annotation=str and no default."""
+        schema = {
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+        }
+        params, annotations = MCPGateway._build_params_from_schema(schema)
+        assert len(params) == 1
+        p = params[0]
+        assert p.name == "message"
+        assert p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+        assert p.annotation is str
+        assert p.default is inspect.Parameter.empty
+        assert annotations["message"] is str
+        # annotations dict does NOT contain "return" when properties exist;
+        # that key is only set by the caller (_make_tool_func).
+
+    def test_single_optional_property_no_default(self) -> None:
+        """An optional property without 'default' gets default=None and
+        annotation becomes str | None."""
+        schema = {
+            "type": "object",
+            "properties": {"nickname": {"type": "string"}},
+        }
+        params, annotations = MCPGateway._build_params_from_schema(schema)
+        assert len(params) == 1
+        p = params[0]
+        assert p.name == "nickname"
+        assert p.default is None
+        # annotation should be str | None
+        assert annotations["nickname"] == str | None
+
+    def test_single_optional_property_with_default(self) -> None:
+        """An optional property with 'default' uses the provided default value
+        and keeps the original type annotation."""
+        schema = {
+            "type": "object",
+            "properties": {"count": {"type": "integer", "default": 42}},
+        }
+        params, annotations = MCPGateway._build_params_from_schema(schema)
+        assert len(params) == 1
+        p = params[0]
+        assert p.name == "count"
+        assert p.default == 42
+        assert p.annotation is int
+        assert annotations["count"] is int
+
+    def test_mixed_required_and_optional(self) -> None:
+        """Mix of required and optional properties produces correct params
+        with proper defaults and annotations."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"},
+                "active": {"type": "boolean", "default": True},
+            },
+            "required": ["name", "age"],
+        }
+        params, annotations = MCPGateway._build_params_from_schema(schema)
+        assert len(params) == 3
+
+        # 'name' — required
+        assert params[0].name == "name"
+        assert params[0].default is inspect.Parameter.empty
+        assert params[0].annotation is str
+
+        # 'age' — required
+        assert params[1].name == "age"
+        assert params[1].default is inspect.Parameter.empty
+        assert params[1].annotation is int
+
+        # 'active' — optional with default
+        assert params[2].name == "active"
+        assert params[2].default is True
+        assert params[2].annotation is bool
+
+    def test_non_dict_prop_def_skipped(self) -> None:
+        """Non-dict property definitions (e.g. strings, ints) are skipped."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "valid": {"type": "string"},
+                "bad_string": "not a dict",
+                "bad_int": 42,
+            },
+            "required": ["valid"],
+        }
+        params, annotations = MCPGateway._build_params_from_schema(schema)
+        # Only 'valid' should produce a Parameter
+        assert len(params) == 1
+        assert params[0].name == "valid"
+        assert "bad_string" not in annotations
+        assert "bad_int" not in annotations
+
+    def test_boolean_type_resolves_to_bool(self) -> None:
+        """Boolean schema property resolves to Python bool type."""
+        schema = {
+            "type": "object",
+            "properties": {"flag": {"type": "boolean"}},
+            "required": ["flag"],
+        }
+        params, annotations = MCPGateway._build_params_from_schema(schema)
+        assert len(params) == 1
+        assert params[0].annotation is bool
+        assert annotations["flag"] is bool
+
+    def test_number_type_resolves_to_float(self) -> None:
+        """Number schema property resolves to Python float type."""
+        schema = {
+            "type": "object",
+            "properties": {"ratio": {"type": "number"}},
+            "required": ["ratio"],
+        }
+        params, annotations = MCPGateway._build_params_from_schema(schema)
+        assert len(params) == 1
+        assert params[0].annotation is float
+        assert annotations["ratio"] is float
+
+    def test_array_type_resolves_to_list(self) -> None:
+        """Array schema property resolves to list[item_type]."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "items": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["items"],
+        }
+        params, annotations = MCPGateway._build_params_from_schema(schema)
+        assert len(params) == 1
+        p = params[0]
+        assert p.name == "items"
+        # Should be list[str]
+        assert annotations["items"] == list[str]
+
+    def test_object_type_resolves_to_pydantic_model(self) -> None:
+        """Object schema property resolves to a dynamically created
+        Pydantic BaseModel subclass."""
+        from pydantic import BaseModel
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "properties": {"key": {"type": "string"}},
+                    "required": ["key"],
+                },
+            },
+            "required": ["config"],
+        }
+        params, annotations = MCPGateway._build_params_from_schema(schema)
+        assert len(params) == 1
+        config_type = annotations["config"]
+        assert isinstance(config_type, type)
+        assert issubclass(config_type, BaseModel)
+
+    def test_optional_with_none_default_annotation(self) -> None:
+        """Optional property without 'default' key: annotation is type|None,
+        default value is None."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "maybe_int": {"type": "integer"},
+            },
+            # not in required — optional, no default key
+        }
+        params, annotations = MCPGateway._build_params_from_schema(schema)
+        assert len(params) == 1
+        p = params[0]
+        assert p.name == "maybe_int"
+        assert p.default is None
+        # annotation should be int | None
+        assert annotations["maybe_int"] == int | None
+
+    def test_empty_properties_returns_empty_params(self) -> None:
+        """Schema with empty properties dict returns no params and empty annotations."""
+        schema = {
+            "type": "object",
+            "properties": {},
+        }
+        params, annotations = MCPGateway._build_params_from_schema(schema)
+        assert params == []
+        # The method enters the properties loop but finds nothing, so
+        # annotations is an empty dict (no "return" key — that is added
+        # by the caller, not by _build_params_from_schema itself).
+        assert annotations == {}

@@ -69,12 +69,15 @@ def _parse_sources_list(raw: object | None) -> list[SourceEntry]:
     """Validate raw YAML entries and return SourceEntry list."""
     if raw is None:
         return []
+    if not isinstance(raw, list):
+        return []
     entries: list[SourceEntry] = []
     for item in raw:
         if not isinstance(item, dict):
             logger.warning("Skipping non-mapping source entry: %r", item)
             continue
-        name = item.get("name")
+        item_dict: dict[str, Any] = item  # ty: ignore[invalid-assignment]
+        name = item_dict.get("name")
         if not isinstance(name, str) or not name.strip():
             logger.error("Skipping source entry with missing/invalid 'name': %r", item)
             continue
@@ -82,9 +85,9 @@ def _parse_sources_list(raw: object | None) -> list[SourceEntry]:
             entries.append(
                 SourceEntry(
                     name=name,
-                    type=item.get("type", "git"),
-                    url=item.get("url", ""),
-                    branch=item.get("branch", "main"),
+                    type=item_dict.get("type", "git"),
+                    url=item_dict.get("url", ""),
+                    branch=item_dict.get("branch", "main"),
                 )
             )
         except Exception as exc:

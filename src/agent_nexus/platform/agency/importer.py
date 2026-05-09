@@ -56,7 +56,7 @@ def _dump_yaml(data: object, f: Any, indent: int = 0) -> None:
     prefix = "  " * indent
     if isinstance(data, dict):
         for key, value in data.items():
-            _write_kv(f, prefix, key, value, indent)
+            _write_kv(f, prefix, str(key), value, indent)
     elif isinstance(data, list):
         for item in data:
             if isinstance(item, dict):
