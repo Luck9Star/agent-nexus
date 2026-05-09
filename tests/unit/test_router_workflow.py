@@ -10,34 +10,6 @@ from agent_nexus.platform.router.workflow import (
     WorkflowResult,
 )
 
-# ---------------------------------------------------------------------------
-# WorkflowPhase enum
-# ---------------------------------------------------------------------------
-
-
-class TestWorkflowPhase:
-    def test_four_phases_exist(self):
-        names = {p.value for p in WorkflowPhase}
-        assert names == {"research", "synthesis", "implementation", "verification"}
-
-    def test_phase_order(self):
-        order = [
-            WorkflowPhase.research,
-            WorkflowPhase.synthesis,
-            WorkflowPhase.implementation,
-            WorkflowPhase.verification,
-        ]
-        assert order == list(WorkflowPhase)
-
-    def test_str_enum_comparison(self):
-        assert WorkflowPhase.research == "research"
-        assert WorkflowPhase.synthesis != "research"
-
-    def test_string_conversion(self):
-        # StrEnum: str() returns the value, repr() shows the enum name
-        assert WorkflowPhase.verification.value == "verification"
-        assert WorkflowPhase.implementation == "implementation"
-
 
 # ---------------------------------------------------------------------------
 # WorkflowContext

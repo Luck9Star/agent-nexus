@@ -7,6 +7,7 @@ from agent_nexus.platform.agency.integrator import (
     ConflictItem,
     IntegratedArtifact,
     Integrator,
+    _detect_risk_conflicts,
 )
 
 # ---------------------------------------------------------------------------
@@ -203,3 +204,84 @@ class TestIntegratedArtifact:
             "agency.software-architect",
             "agency.security-engineer",
         }
+
+
+# ---------------------------------------------------------------------------
+# _detect_risk_conflicts — CC 10 boundary function
+# ---------------------------------------------------------------------------
+
+
+class TestDetectRiskConflicts:
+    """Tests for _detect_risk_conflicts (CC 10)."""
+
+    def _make_artifact(
+        self,
+        agent: str,
+        sections: dict[str, object],
+    ) -> Artifact:
+        return Artifact(
+            source_agent=agent,
+            artifact_type="report",
+            sections=sections,
+        )
+
+    def test_single_artifact_no_conflict(self) -> None:
+        a = self._make_artifact("a1", {"risks": ["token cost"]})
+        assert _detect_risk_conflicts([a]) == []
+
+    def test_no_risks_no_conflict(self) -> None:
+        a1 = self._make_artifact("a1", {"findings": ["x"]})
+        a2 = self._make_artifact("a2", {"findings": ["y"]})
+        assert _detect_risk_conflicts([a1, a2]) == []
+
+    def test_similar_risks_no_conflict(self) -> None:
+        """Similar risk descriptions should NOT produce a conflict."""
+        a1 = self._make_artifact("a1", {"risks": ["token cost may increase significantly"]})
+        a2 = self._make_artifact("a2", {"risks": ["token cost may increase significantly"]})
+        assert _detect_risk_conflicts([a1, a2]) == []
+
+    def test_disjoint_risks_with_shared_sections_produces_conflict(self) -> None:
+        """Completely different risks + overlapping sections = conflict."""
+        a1 = self._make_artifact("a1", {
+            "risks": ["authentication bypass vulnerability"],
+            "mitigation": ["patch auth module"],
+        })
+        a2 = self._make_artifact("a2", {
+            "risks": ["performance degradation under load"],
+            "mitigation": ["add caching layer"],
+        })
+        result = _detect_risk_conflicts([a1, a2])
+        assert len(result) == 1
+        assert result[0].field == "risks"
+        assert "disjoint" in result[0].description.lower()
+        assert set(result[0].agents) == {"a1", "a2"}
+
+    def test_disjoint_risks_no_shared_sections_no_conflict(self) -> None:
+        """Disjoint risks + no overlapping sections = no conflict."""
+        a1 = self._make_artifact("a1", {"risks": ["auth bypass"]})
+        a2 = self._make_artifact("a2", {"other_key": ["perf issue"]})
+        # a2 has no 'risks' key → no overlap possible
+        assert _detect_risk_conflicts([a1, a2]) == []
+
+    def test_three_agents_disjoint_risks(self) -> None:
+        a1 = self._make_artifact("a1", {"risks": ["auth bypass"], "findings": ["x"]})
+        a2 = self._make_artifact("a2", {"risks": ["memory leak in parser"], "findings": ["y"]})
+        a3 = self._make_artifact("a3", {"risks": ["disk exhaustion"], "findings": ["z"]})
+        result = _detect_risk_conflicts([a1, a2, a3])
+        assert len(result) == 1
+        assert set(result[0].agents) == {"a1", "a2", "a3"}
+
+    def test_structural_sections_excluded_from_overlap(self) -> None:
+        """Structural sections (decision_summary, recommendation) should not count."""
+        a1 = self._make_artifact("a1", {
+            "risks": ["auth bypass"],
+        })
+        a2 = self._make_artifact("a2", {
+            "risks": ["memory leak in parser"],
+            "recommendation": "monitor",
+        })
+        # a1 has {risks}, a2 has {risks, recommendation}
+        # After removing structural: a1={risks}, a2={risks} → overlap on risks
+        # So this DOES produce a conflict
+        result = _detect_risk_conflicts([a1, a2])
+        assert len(result) == 1

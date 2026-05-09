@@ -789,18 +789,7 @@ class SkillStore:
             return {}
         try:
             loaded = json.loads(raw)
-            if not isinstance(loaded, dict) or not loaded:
-                return {}
-            if all(isinstance(v, str) for v in loaded.values()):
-                return loaded
-            non_str = [k for k, v in loaded.items() if not isinstance(v, str)]
-            logger.warning(
-                "content_snapshot for skill '%s' has non-string "
-                "values in keys %s, discarding snapshot",
-                skill_id,
-                non_str,
-            )
-            return {}
+            return SkillStore._validate_snapshot_dict(loaded, skill_id)
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             logger.warning(
                 "Corrupted content_snapshot for skill '%s': %s",
@@ -808,6 +797,22 @@ class SkillStore:
                 exc,
             )
             return {}
+
+    @staticmethod
+    def _validate_snapshot_dict(loaded: Any, skill_id: str) -> dict[str, str]:
+        """Validate parsed snapshot is a dict[str, str]."""
+        if not isinstance(loaded, dict) or not loaded:
+            return {}
+        if all(isinstance(v, str) for v in loaded.values()):
+            return loaded
+        non_str = [k for k, v in loaded.items() if not isinstance(v, str)]
+        logger.warning(
+            "content_snapshot for skill '%s' has non-string "
+            "values in keys %s, discarding snapshot",
+            skill_id,
+            non_str,
+        )
+        return {}
 
     @staticmethod
     def _resolve_origin(raw_origin: str, skill_id: str) -> SkillOrigin:

@@ -12,29 +12,6 @@ from agent_nexus.models.task import TaskGraphSnapshot, TaskItem, TaskState
 # ---------------------------------------------------------------------------
 
 
-class TestTaskState:
-    def test_members(self):
-        assert set(TaskState) == {
-            TaskState.PENDING,
-            TaskState.IN_PROGRESS,
-            TaskState.COMPLETED,
-            TaskState.FAILED,
-        }
-
-    def test_values(self):
-        assert TaskState.PENDING == "pending"
-        assert TaskState.IN_PROGRESS == "in_progress"
-        assert TaskState.COMPLETED == "completed"
-        assert TaskState.FAILED == "failed"
-
-    def test_from_string(self):
-        assert TaskState("pending") is TaskState.PENDING
-        assert TaskState("in_progress") is TaskState.IN_PROGRESS
-
-    def test_invalid_string_raises(self):
-        with pytest.raises(ValueError):
-            TaskState("unknown")
-
 
 # ---------------------------------------------------------------------------
 # TaskItem

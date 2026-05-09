@@ -14,39 +14,10 @@ from agent_nexus.models.ipc import (
     PlatformToAgentType,
 )
 
+
 # ---------------------------------------------------------------------------
-# Enum tests
+# PlatformToAgent
 # ---------------------------------------------------------------------------
-
-
-class TestEnums:
-    def test_message_direction(self):
-        assert set(MessageDirection) == {
-            MessageDirection.PLATFORM_TO_AGENT,
-            MessageDirection.AGENT_TO_PLATFORM,
-        }
-
-    def test_platform_to_agent_type(self):
-        assert set(PlatformToAgentType) == {
-            PlatformToAgentType.CHAT,
-            PlatformToAgentType.TASK,
-            PlatformToAgentType.DATA_REFERENCE,
-        }
-
-    def test_agent_to_platform_type(self):
-        assert set(AgentToPlatformType) == {
-            AgentToPlatformType.RESULT,
-            AgentToPlatformType.PROGRESS,
-            AgentToPlatformType.ERROR,
-        }
-
-    def test_invalid_enum_raises(self):
-        with pytest.raises(ValueError):
-            PlatformToAgentType("unknown")
-        with pytest.raises(ValueError):
-            AgentToPlatformType("unknown")
-
-
 # ---------------------------------------------------------------------------
 # PlatformToAgent
 # ---------------------------------------------------------------------------

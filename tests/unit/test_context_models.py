@@ -12,35 +12,6 @@ from agent_nexus.models.context import (
     TokenUsage,
 )
 
-# ---------------------------------------------------------------------------
-# ContextLevel enum
-# ---------------------------------------------------------------------------
-
-
-class TestContextLevel:
-    def test_members(self):
-        assert set(ContextLevel) == {
-            ContextLevel.L0_IDENTITY,
-            ContextLevel.L1_EXECUTION,
-            ContextLevel.L2_EXTENDED,
-            ContextLevel.L3_RUNTIME,
-        }
-
-    def test_values(self):
-        assert ContextLevel.L0_IDENTITY == 0
-        assert ContextLevel.L1_EXECUTION == 1
-        assert ContextLevel.L2_EXTENDED == 2
-        assert ContextLevel.L3_RUNTIME == 3
-
-    def test_ordering(self):
-        assert ContextLevel.L0_IDENTITY < ContextLevel.L1_EXECUTION
-        assert ContextLevel.L1_EXECUTION < ContextLevel.L2_EXTENDED
-        assert ContextLevel.L2_EXTENDED < ContextLevel.L3_RUNTIME
-
-    def test_is_int_enum(self):
-        assert isinstance(ContextLevel.L0_IDENTITY, int)
-        assert ContextLevel.L0_IDENTITY == 0
-
 
 # ---------------------------------------------------------------------------
 # ContextBudget

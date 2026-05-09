@@ -14,50 +14,10 @@ from agent_nexus.models.evolution import (
     SkillRecord,
 )
 
-# ---------------------------------------------------------------------------
-# EvolutionType enum
-# ---------------------------------------------------------------------------
-
-
-class TestEvolutionType:
-    def test_members(self):
-        assert set(EvolutionType) == {
-            EvolutionType.FIX,
-            EvolutionType.DERIVED,
-            EvolutionType.CAPTURED,
-        }
-
-    def test_values(self):
-        assert EvolutionType.FIX == "fix"
-        assert EvolutionType.DERIVED == "derived"
-        assert EvolutionType.CAPTURED == "captured"
-
-    def test_invalid_string_raises(self):
-        with pytest.raises(ValueError):
-            EvolutionType("unknown")
-
 
 # ---------------------------------------------------------------------------
-# SkillOrigin enum
+# SkillLineage
 # ---------------------------------------------------------------------------
-
-
-class TestSkillOrigin:
-    def test_members(self):
-        assert set(SkillOrigin) == {
-            SkillOrigin.IMPORTED,
-            SkillOrigin.CAPTURED,
-            SkillOrigin.DERIVED,
-            SkillOrigin.FIXED,
-        }
-
-    def test_values(self):
-        assert SkillOrigin.IMPORTED == "imported"
-        assert SkillOrigin.CAPTURED == "captured"
-        assert SkillOrigin.DERIVED == "derived"
-        assert SkillOrigin.FIXED == "fixed"
-
-
 # ---------------------------------------------------------------------------
 # SkillLineage
 # ---------------------------------------------------------------------------

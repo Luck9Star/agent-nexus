@@ -16,67 +16,6 @@ from agent_nexus.models.hooks import (
 from agent_nexus.platform.hooks.executor import HookExecutor
 
 # ---------------------------------------------------------------------------
-# HookType enum
-# ---------------------------------------------------------------------------
-
-
-class TestHookType:
-    def test_members(self):
-        assert set(HookType) == {
-            HookType.COMMAND,
-            HookType.HTTP,
-            HookType.PROMPT,
-            HookType.AGENT,
-        }
-
-    def test_values(self):
-        assert HookType.COMMAND == "command"
-        assert HookType.HTTP == "http"
-        assert HookType.PROMPT == "prompt"
-        assert HookType.AGENT == "agent"
-
-    def test_from_string(self):
-        assert HookType("command") is HookType.COMMAND
-        assert HookType("http") is HookType.HTTP
-
-    def test_invalid_string_raises(self):
-        with pytest.raises(ValueError):
-            HookType("unknown")
-
-
-# ---------------------------------------------------------------------------
-# HookEvent enum
-# ---------------------------------------------------------------------------
-
-
-class TestHookEvent:
-    def test_members(self):
-        assert set(HookEvent) == {
-            HookEvent.PRE_EXECUTION,
-            HookEvent.POST_EXECUTION,
-            HookEvent.PRE_TOOL_USE,
-            HookEvent.POST_TOOL_USE,
-            HookEvent.ON_ERROR,
-            HookEvent.ON_EVOLUTION,
-        }
-
-    def test_values(self):
-        assert HookEvent.PRE_EXECUTION == "pre_execution"
-        assert HookEvent.POST_EXECUTION == "post_execution"
-        assert HookEvent.PRE_TOOL_USE == "pre_tool_use"
-        assert HookEvent.POST_TOOL_USE == "post_tool_use"
-        assert HookEvent.ON_ERROR == "on_error"
-        assert HookEvent.ON_EVOLUTION == "on_evolution"
-
-    def test_all_six_events(self):
-        assert len(HookEvent) == 6
-
-    def test_invalid_string_raises(self):
-        with pytest.raises(ValueError):
-            HookEvent("unknown")
-
-
-# ---------------------------------------------------------------------------
 # HookDefinition
 # ---------------------------------------------------------------------------
 

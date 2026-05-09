@@ -350,11 +350,7 @@ def _has_similar_risks(risk_sets: dict[str, list[str]]) -> bool:
 def _detect_risk_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
     risk_sets = _extract_risk_sets(artifacts)
 
-    if len(risk_sets) < 2:
-        return []
-    if _has_similar_risks(risk_sets):
-        return []
-    if not all(len(v) > 0 for v in risk_sets.values()):
+    if not _has_valid_risk_data(risk_sets):
         return []
 
     # No similar risks and all non-empty — check shared section overlap
@@ -380,6 +376,15 @@ def _detect_risk_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:
             agents=list(risk_sets.keys()),
         )
     ]
+
+
+def _has_valid_risk_data(risk_sets: dict[str, list[str]]) -> bool:
+    """Check if risk data is sufficient for conflict detection."""
+    if len(risk_sets) < 2:
+        return False
+    if _has_similar_risks(risk_sets):
+        return False
+    return all(len(v) > 0 for v in risk_sets.values())
 
 
 def _detect_recommendation_conflicts(artifacts: list[Artifact]) -> list[ConflictItem]:

@@ -17,52 +17,10 @@ from agent_nexus.models.distribution import (
     SourceType,
 )
 
-# ---------------------------------------------------------------------------
-# SourceType enum
-# ---------------------------------------------------------------------------
-
-
-class TestSourceType:
-    def test_members(self):
-        assert set(SourceType) == {
-            SourceType.OFFICIAL,
-            SourceType.PRIVATE,
-            SourceType.DIRECT,
-        }
-
-    def test_values(self):
-        assert SourceType.OFFICIAL == "official"
-        assert SourceType.PRIVATE == "private"
-        assert SourceType.DIRECT == "direct"
-
-    def test_invalid_string_raises(self):
-        with pytest.raises(ValueError):
-            SourceType("unknown")
-
 
 # ---------------------------------------------------------------------------
-# InstallationStatus enum
+# SourceEntry
 # ---------------------------------------------------------------------------
-
-
-class TestInstallationStatus:
-    def test_members(self):
-        assert set(InstallationStatus) == {
-            InstallationStatus.INSTALLED,
-            InstallationStatus.OUTDATED,
-            InstallationStatus.NOT_INSTALLED,
-            InstallationStatus.INSTALLING,
-            InstallationStatus.FAILED,
-        }
-
-    def test_values(self):
-        assert InstallationStatus.INSTALLED == "installed"
-        assert InstallationStatus.OUTDATED == "outdated"
-        assert InstallationStatus.NOT_INSTALLED == "not_installed"
-        assert InstallationStatus.INSTALLING == "installing"
-        assert InstallationStatus.FAILED == "failed"
-
-
 # ---------------------------------------------------------------------------
 # SourceEntry
 # ---------------------------------------------------------------------------

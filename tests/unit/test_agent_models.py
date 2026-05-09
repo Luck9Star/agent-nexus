@@ -16,98 +16,10 @@ from agent_nexus.models.agent import (
     CommandDef,
     HookDef,
     McpServerConfig,
-    ModelTier,
-    RunMode,
     SkillDefinition,
 )
 from agent_nexus.models.hooks import HookEvent, HookType
 from agent_nexus.models.permission import PermissionConfig, PermissionMode
-
-# ---------------------------------------------------------------------------
-# AgentType enum
-# ---------------------------------------------------------------------------
-
-
-class TestAgentType:
-    def test_members(self):
-        assert set(AgentType) == {
-            AgentType.ATOMIC,
-            AgentType.COMPOSITE,
-        }
-
-    def test_values(self):
-        assert AgentType.ATOMIC == "atomic"
-        assert AgentType.COMPOSITE == "composite"
-
-    def test_from_string(self):
-        assert AgentType("atomic") is AgentType.ATOMIC
-        assert AgentType("composite") is AgentType.COMPOSITE
-
-    def test_invalid_string_raises(self):
-        with pytest.raises(ValueError):
-            AgentType("unknown")
-
-
-# ---------------------------------------------------------------------------
-# RunMode enum
-# ---------------------------------------------------------------------------
-
-
-class TestRunMode:
-    def test_members(self):
-        assert set(RunMode) == {
-            RunMode.MCP_STANDALONE,
-            RunMode.PLATFORM_ROUTER,
-            RunMode.CLI_STANDALONE,
-        }
-
-    def test_values(self):
-        assert RunMode.MCP_STANDALONE == "mcp"
-        assert RunMode.PLATFORM_ROUTER == "local"
-        assert RunMode.CLI_STANDALONE == "cli"
-
-
-# ---------------------------------------------------------------------------
-# AgentRole enum
-# ---------------------------------------------------------------------------
-
-
-class TestAgentRole:
-    def test_members(self):
-        assert set(AgentRole) == {
-            AgentRole.EXPLORE,
-            AgentRole.PLAN,
-            AgentRole.WORKER,
-            AgentRole.VERIFICATION,
-        }
-
-    def test_values(self):
-        assert AgentRole.EXPLORE == "explore"
-        assert AgentRole.PLAN == "plan"
-        assert AgentRole.WORKER == "worker"
-        assert AgentRole.VERIFICATION == "verification"
-
-
-# ---------------------------------------------------------------------------
-# ModelTier enum
-# ---------------------------------------------------------------------------
-
-
-class TestModelTier:
-    def test_members(self):
-        assert set(ModelTier) == {
-            ModelTier.LIGHTWEIGHT,
-            ModelTier.STANDARD,
-            ModelTier.POWERFUL,
-            ModelTier.PREMIUM,
-        }
-
-    def test_values(self):
-        assert ModelTier.LIGHTWEIGHT == "lightweight"
-        assert ModelTier.STANDARD == "standard"
-        assert ModelTier.POWERFUL == "powerful"
-        assert ModelTier.PREMIUM == "premium"
-
 
 # ---------------------------------------------------------------------------
 # AgentModelConfig

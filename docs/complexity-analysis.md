@@ -1,6 +1,6 @@
 # Complexity Analysis Report
 
-> Generated: 2026-05-10 (Iteration 17 — Cycle 2 First Principles Re-audit)
+> Generated: 2026-05-10 (Iteration 22 — Cycle 2 CC Refactoring + Test Signal Audit)
 > Scope: `src/agent_nexus/` | Baseline: radon 6.0.1
 
 ## 1. Overall Baseline
@@ -48,39 +48,18 @@
 | 13 | `_generate_suggestions` | analyzer.py | 10 → 6 | Extract `_deduplicate_suggestions` |
 | 13 | `load_dag_into_graph` | dag_dispatcher.py | 10 → 6 | Extract `_build_specialist_items` |
 | 13 | `_execute_command` | executor.py | 11 → 9 | Merge CancelledError into BaseException |
+| 22 | `_parse_snapshot` | skill_store.py | 10 → 4 | Extract `_validate_snapshot_dict` |
+| 22 | `_detect_risk_conflicts` | integrator.py | 10 → 7 | Extract `_has_valid_risk_data` (CC 4) |
 
 ---
 
 ## 2. CC=10 Boundary Functions — First Principles Root Cause Analysis
 
-These 6 remaining functions sit at the B/C-grade boundary. 5 of the original 11 were refactored in Iteration 13 (CC 10→6). None of the remaining 6 require immediate action.
+4 remaining functions at the B/C-grade boundary (down from 11 original). All 4 are domain-inherent or pseudo-positive — **all high-ROI refactoring exhausted**.
 
-### 2.1 `SkillStore._parse_snapshot` (CC 10)
+### 2.1 ~~`SkillStore._parse_snapshot`~~ (CC 10 → 4) [REFACTORED Iter 22]
 
-- **File**: `src/agent_nexus/platform/evolution/skill_store.py:784-809`
-- **Lines**: 26
-- **Target CC**: 6
-- **Root Cause**: **职责混合** — parsing + validation + error handling + logging in one function
-
-**CC Decomposition**:
-| Decision Point | CC |
-|----------------|-----|
-| Base | 1 |
-| `if not raw or raw in (...)` | 2 (if + or) |
-| `try/except` block | 1 (except) |
-| `if not isinstance(loaded, dict) or not loaded` | 2 (if + or) |
-| `if all(isinstance(v, str) ...)` | 1 (if) |
-| Generator in `all()` | 1 (for) |
-| List comp `if not isinstance(v, str)` | 1 (if) |
-| **Total** | **10** |
-
-**First Principles Check**:
-- Does ONE thing? **No** — parses JSON, validates types, handles errors, logs warnings.
-- Data-driven alternative? **Yes** — validation can be extracted.
-
-**Recommendation**: Extract `_validate_snapshot_dict(loaded, skill_id)` to handle type validation + warning. CC → 6.
-
-**Estimated change**: +10 lines (helper), -8 lines (simplified), net +2.
+**Status**: Extracted `_validate_snapshot_dict` to separate validation from parsing. Main function CC dropped from 10 to 4 (A-grade).
 
 ---
 
@@ -176,35 +155,9 @@ Effective CC: **2** (A-grade). The dict literal with 13 lambdas inflates the rad
 
 ---
 
-### 2.6 `_detect_risk_conflicts` (CC 10)
+### 2.6 ~~`_detect_risk_conflicts`~~ (CC 10 → 7) [REFACTORED Iter 22]
 
-- **File**: `src/agent_nexus/platform/agency/integrator.py:349-381`
-- **Lines**: 33
-- **Target CC**: 5
-- **Root Cause**: **防御性返回 (Defensive Returns)** — 6 early-exit guards
-
-**CC Decomposition**:
-| Decision Point | CC |
-|----------------|-----|
-| Base | 1 |
-| `if len(risk_sets) < 2` | 1 |
-| `if _has_similar_risks(risk_sets)` | 1 |
-| `if not all(len(v) > 0 for v in ...)` | 2 (if + generator for) |
-| `if a.source_agent in risk_sets` (list comp filter) | 1 |
-| `if not section_sets` | 1 |
-| `for s in section_sets[1:]` | 1 |
-| `if not shared` | 1 |
-| `all(len(v) > 0 ...)` generator | 1 |
-| **Total** | **10** |
-
-**First Principles Check**:
-- Does ONE thing? **Yes** — detects if expert risk findings are completely disjoint.
-- Data-driven alternative? The early-return guards are necessary safety checks.
-- Is this reducible? Some guards could be combined.
-
-**Recommendation**: Combine related guards into a single `_has_valid_risk_data(risk_sets, artifacts)` helper. CC → 5. Low priority — function is correct and readable.
-
-**Estimated change**: +8 lines (helper), -6 lines (simplified), net +2.
+**Status**: Extracted `_has_valid_risk_data` (CC 4) to combine 3 data-validity guards. Main function CC dropped from 10 to 7.
 
 ---
 
@@ -423,17 +376,17 @@ All 100+ source files pass MI > 20 (maintainable). `radon mi -nc` returned zero 
 
 ## 11. Complexity Metrics Trend
 
-| Metric | Iter 1 | After Iter 2 | After Iter 6 | Iter 10 | Iter 13 | **Iter 17 (Current)** |
-|--------|--------|-------------|-------------|---------|---------|----------------------|
-| Total blocks | 1,306 | 1,309 | 1,313 | 1,313 | ~1,325 | **1,319** |
-| Average CC | 3.35 | 3.33 | ~3.30 | 3.32 | < 3.3 | **3.30** |
-| Max CC | 11 | 11 | 10 | 10 | 10 | **10** |
-| C-grade functions | 5 | 3 | 0 | 0 | 0 | **0** |
-| CC=10 boundary | — | — | 11 | 11 | ~6 | **6** |
-| Dead abstractions | Unknown | Unknown | 0 | 0 | 0 | **0** |
-| MI issues | — | — | 0 | 0 | 0 | **0** |
-| Classes > 20 methods | 8 | 8 | 8 | 8 | 8 | **14** |
-| SRP violations | 0 critical | 0 critical | 0 critical | 0 critical | 0 critical | **0 critical** |
+| Metric | Iter 1 | After Iter 2 | After Iter 6 | Iter 10 | Iter 13 | Iter 17 | **Iter 22 (Current)** |
+|--------|--------|-------------|-------------|---------|---------|---------|----------------------|
+| Total blocks | 1,306 | 1,309 | 1,313 | 1,313 | ~1,325 | 1,319 | **~1,321** |
+| Average CC | 3.35 | 3.33 | ~3.30 | 3.32 | < 3.3 | 3.30 | **~3.28** |
+| Max CC | 11 | 11 | 10 | 10 | 10 | 10 | **10** |
+| C-grade functions | 5 | 3 | 0 | 0 | 0 | 0 | **0** |
+| CC=10 boundary | — | — | 11 | 11 | ~6 | 6 | **4** |
+| Dead abstractions | Unknown | Unknown | 0 | 0 | 0 | 0 | **0** |
+| MI issues | — | — | 0 | 0 | 0 | 0 | **0** |
+| Classes > 20 methods | 8 | 8 | 8 | 8 | 8 | 14 | **14** |
+| SRP violations | 0 critical | 0 critical | 0 critical | 0 critical | 0 critical | 0 critical | **0 critical** |
 
 ---
 
@@ -441,11 +394,11 @@ All 100+ source files pass MI > 20 (maintainable). `radon mi -nc` returned zero 
 
 The codebase complexity is **well-managed and stable**:
 
-1. **Zero C-grade functions** (CC ≥ 11) — stable across 11 iterations
-2. **6 CC=10 boundary functions** — down from 11 after 5 successful refactoring operations; all 6 remaining are domain-inherent or pseudo-positive
+1. **Zero C-grade functions** (CC ≥ 11) — stable across 15+ iterations
+2. **4 CC=10 boundary functions** — down from 11 original after 8 successful refactoring operations; all 4 remaining are domain-inherent or pseudo-positive
 3. **No maintainability issues** — all files MI > 20
 4. **No SRP violations** — all 14 large classes (>20 methods) have cohesive method sets
 5. **No dead abstractions** — all 4 Protocol/ABC definitions have consumers
-6. **Average CC 3.30 (Grade A)** — well below industry average (~6-8)
+6. **Average CC ~3.28 (Grade A)** — well below industry average (~6-8)
 
-The remaining complexity is **proportional to domain requirements** (dispatch state machines, JSON Schema resolution, multi-provider LLM adaptation, markdown parsing) rather than accidental (poor structure, missing abstractions). The 12 successful CC refactoring operations (CC reductions: 6× CC 10→6, 3× CC 11→6-8, 1× CC 11→3, 1× CC 11→4, 1× CC 11→9) have exhausted all high-ROI refactoring targets.
+The remaining complexity is **proportional to domain requirements** (dispatch state machines, JSON Schema resolution, multi-provider LLM adaptation, markdown parsing) rather than accidental (poor structure, missing abstractions). The 14 successful CC refactoring operations (CC reductions: 6× CC 10→6, 3× CC 11→6-8, 1× CC 11→3, 1× CC 11→4, 1× CC 11→9, 1× CC 10→4, 1× CC 10→7) have exhausted all high-ROI refactoring targets.

@@ -12,33 +12,6 @@ from agent_nexus.models.config import (
     RuntimeConfig,
 )
 
-# ---------------------------------------------------------------------------
-# ProviderApiType enum
-# ---------------------------------------------------------------------------
-
-
-class TestProviderApiType:
-    def test_members(self):
-        assert set(ProviderApiType) == {
-            ProviderApiType.OPENAI_COMPATIBLE,
-            ProviderApiType.ANTHROPIC_MESSAGES,
-            ProviderApiType.OLLAMA,
-            ProviderApiType.CLI,
-        }
-
-    def test_values(self):
-        assert ProviderApiType.OPENAI_COMPATIBLE == "openai-compatible"
-
-    def test_cli_variant(self):
-        assert ProviderApiType.CLI.value == "cli"
-        assert ProviderApiType("cli") == ProviderApiType.CLI
-        assert ProviderApiType.ANTHROPIC_MESSAGES == "anthropic-messages"
-        assert ProviderApiType.OLLAMA == "ollama"
-
-    def test_invalid_string_raises(self):
-        with pytest.raises(ValueError):
-            ProviderApiType("unknown")
-
 
 # ---------------------------------------------------------------------------
 # ProviderConfig

@@ -597,3 +597,71 @@ class TestExpandFrontiers:
         )
         assert not progress
         assert next_f == {"a": []}
+
+
+# ===================================================================
+# _parse_snapshot — CC 10 boundary function
+# ===================================================================
+
+
+class TestParseSnapshot:
+    """Tests for SkillStore._parse_snapshot static method (CC 10)."""
+
+    def test_none_returns_empty(self) -> None:
+        assert SkillStore._parse_snapshot(None, "s1") == {}
+
+    def test_empty_string_returns_empty(self) -> None:
+        assert SkillStore._parse_snapshot("", "s1") == {}
+
+    def test_double_quoted_empty_returns_empty(self) -> None:
+        assert SkillStore._parse_snapshot('""', "s1") == {}
+
+    def test_empty_json_object_returns_empty(self) -> None:
+        assert SkillStore._parse_snapshot("{}", "s1") == {}
+
+    def test_null_string_returns_empty(self) -> None:
+        assert SkillStore._parse_snapshot("null", "s1") == {}
+
+    def test_valid_dict_all_strings(self) -> None:
+        raw = '{"file.py": "content", "README.md": "docs"}'
+        assert SkillStore._parse_snapshot(raw, "s1") == {
+            "file.py": "content",
+            "README.md": "docs",
+        }
+
+    def test_non_dict_json_returns_empty(self) -> None:
+        assert SkillStore._parse_snapshot("[1, 2, 3]", "s1") == {}
+
+    def test_json_number_returns_empty(self) -> None:
+        assert SkillStore._parse_snapshot("42", "s1") == {}
+
+    def test_non_string_values_returns_empty_with_warning(self, caplog) -> None:
+        raw = '{"file.py": 123, "other.py": [1, 2]}'
+        with caplog.at_level("WARNING"):
+            result = SkillStore._parse_snapshot(raw, "s1")
+        assert result == {}
+        assert "non-string" in caplog.text
+        assert "s1" in caplog.text
+
+    def test_partial_non_string_values_returns_empty(self, caplog) -> None:
+        """Even one non-string value causes full rejection."""
+        raw = '{"file.py": "ok", "bad.py": 42}'
+        with caplog.at_level("WARNING"):
+            result = SkillStore._parse_snapshot(raw, "s1")
+        assert result == {}
+
+    def test_corrupted_json_returns_empty_with_warning(self, caplog) -> None:
+        with caplog.at_level("WARNING"):
+            result = SkillStore._parse_snapshot("{not-json{{{", "s1")
+        assert result == {}
+        assert "Corrupted" in caplog.text
+
+    def test_invalid_type_input_returns_empty(self, caplog) -> None:
+        with caplog.at_level("WARNING"):
+            result = SkillStore._parse_snapshot(12345, "s1")  # type: ignore[arg-type]
+        assert result == {}
+        assert "Corrupted" in caplog.text
+
+    def test_single_entry(self) -> None:
+        raw = '{"main.py": "print(1)"}'
+        assert SkillStore._parse_snapshot(raw, "s1") == {"main.py": "print(1)"}

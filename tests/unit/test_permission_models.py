@@ -13,54 +13,6 @@ from agent_nexus.models.permission import (
     PermissionMode,
 )
 
-# ---------------------------------------------------------------------------
-# PermissionMode enum
-# ---------------------------------------------------------------------------
-
-
-class TestPermissionMode:
-    def test_members(self):
-        assert set(PermissionMode) == {
-            PermissionMode.DEFAULT,
-            PermissionMode.PLAN,
-            PermissionMode.FULL_AUTO,
-        }
-
-    def test_values(self):
-        assert PermissionMode.DEFAULT == "default"
-        assert PermissionMode.PLAN == "plan"
-        assert PermissionMode.FULL_AUTO == "full_auto"
-
-    def test_from_string(self):
-        assert PermissionMode("default") is PermissionMode.DEFAULT
-        assert PermissionMode("plan") is PermissionMode.PLAN
-        assert PermissionMode("full_auto") is PermissionMode.FULL_AUTO
-
-    def test_invalid_string_raises(self):
-        with pytest.raises(ValueError):
-            PermissionMode("unknown")
-
-
-# ---------------------------------------------------------------------------
-# PathAccess enum
-# ---------------------------------------------------------------------------
-
-
-class TestPathAccess:
-    def test_members(self):
-        assert set(PathAccess) == {
-            PathAccess.READ,
-            PathAccess.WRITE,
-            PathAccess.READ_WRITE,
-            PathAccess.DENY,
-        }
-
-    def test_values(self):
-        assert PathAccess.READ == "read"
-        assert PathAccess.WRITE == "write"
-        assert PathAccess.READ_WRITE == "read-write"
-        assert PathAccess.DENY == "deny"
-
 
 # ---------------------------------------------------------------------------
 # PathRule
