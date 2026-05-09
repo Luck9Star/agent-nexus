@@ -32,6 +32,19 @@ from agent_nexus.platform.evolution.thresholds import (
 logger = logging.getLogger(__name__)
 
 
+def _deduplicate_suggestions(
+    suggestions: list[EvolutionSuggestion],
+) -> list[EvolutionSuggestion]:
+    """Keep the highest-confidence suggestion per (evolution_type, skill_id)."""
+    seen: dict[tuple[EvolutionType, str], EvolutionSuggestion] = {}
+    for s in suggestions:
+        dedup_id = s.target_skill_ids[0] if s.target_skill_ids else ""
+        key = (s.evolution_type, dedup_id)
+        if key not in seen or s.confidence > seen[key].confidence:
+            seen[key] = s
+    return list(seen.values())
+
+
 @dataclass
 class AnalysisResult:
     """Result of analyzing a task execution."""
@@ -220,7 +233,6 @@ class ExecutionAnalyzer:
             if skill is None:
                 continue
 
-            # Compute rates
             rates = SkillRates.from_record(skill)
             if rates is None:
                 continue
@@ -246,15 +258,7 @@ class ExecutionAnalyzer:
                 )
             )
 
-        # Deduplicate: same (evolution_type, skill_id) can trigger from
-        # multiple thresholds — keep the one with highest confidence.
-        seen: dict[tuple[EvolutionType, str], EvolutionSuggestion] = {}
-        for s in suggestions:
-            dedup_id = s.target_skill_ids[0] if s.target_skill_ids else ""
-            key = (s.evolution_type, dedup_id)
-            if key not in seen or s.confidence > seen[key].confidence:
-                seen[key] = s
-        return list(seen.values())
+        return _deduplicate_suggestions(suggestions)
 
     def _build_analysis_text(
         self,

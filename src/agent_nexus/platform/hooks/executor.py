@@ -434,11 +434,6 @@ class HookExecutor:
                 start,
             )
 
-        except asyncio.CancelledError:
-            if proc is not None:
-                await self._kill_subprocess(proc)
-            raise
-
         except Exception as exc:
             return await self._kill_and_build_error(
                 hook,
@@ -449,6 +444,7 @@ class HookExecutor:
             )
 
         except BaseException:
+            # CancelledError, SystemExit, KeyboardInterrupt — clean up and re-raise.
             if proc is not None:
                 await self._kill_subprocess(proc)
             raise

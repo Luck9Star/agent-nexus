@@ -41,6 +41,12 @@
 | 6 | `_check_api_keys` | init_cmd.py | 11 → 4 | Extract provider config helpers |
 | 6 | `_run_dispatch_loop` | dag_dispatcher.py | 11 → 8 | Extract batch dispatch + is_terminal |
 | 6 | ~~`ArtifactSink`~~ | dag_dispatcher.py | — | Removed dead Protocol |
+| 13 | `_format_section_value` | cli.py | 10 → 6 | Handler registry (isinstance→dict dispatch) |
+| 13 | `diagnose_skills` | health.py | 10 → 6 | Extract `_build_health_metrics` |
+| 13 | `l1_context` | context_describer.py | 10 → 6 | Extract `_format_skill_table` |
+| 13 | `_generate_suggestions` | analyzer.py | 10 → 6 | Extract `_deduplicate_suggestions` |
+| 13 | `load_dag_into_graph` | dag_dispatcher.py | 10 → 6 | Extract `_build_specialist_items` |
+| 13 | `_execute_command` | executor.py | 11 → 9 | Merge CancelledError into BaseException |
 
 ---
 
@@ -77,72 +83,25 @@ These 11 functions sit at the B/C-grade boundary. None require immediate action,
 
 ---
 
-### 2.2 `EvolutionContextDescriber.l1_context` (CC 10)
+### 2.2 `EvolutionContextDescriber.l1_context` (CC 10) [REFACTORED → CC 6]
 
 - **File**: `src/agent_nexus/platform/evolution/context_describer.py:95-140`
 - **Lines**: 46
 - **Target CC**: 5
 - **Root Cause**: **职责混合** — data filtering + health diagnosis + table formatting
 
-**CC Decomposition**:
-| Decision Point | CC |
-|----------------|-----|
-| Base | 1 |
-| `if skill_ids is not None` (filter 1) | 1 |
-| `if not active` (empty check) | 1 |
-| `sorted(...)` lambda | 1 |
-| `for skill in active` | 1 |
-| `rates = SkillRates.from_record(skill)` + conditional | 1 |
-| `report = reports.get(skill.id)` + conditional | 1 |
-| Ternary `rates.effective_rate if rates is not None else 0.0` | 1 |
-| Ternary health status | 1 |
-| `if report and report.is_healthy` | 1 |
-| **Total** | **10** |
-
-**First Principles Check**:
-- Does ONE thing? **No** — acquires data, filters, diagnoses health, formats markdown table.
-- > 1 consumer? **Yes** — called by evolution context system.
-- Data-driven alternative? Formatting can be extracted.
-
-**Recommendation**: Extract `_format_skill_table(active, reports) -> str`. Main becomes: fetch → filter → diagnose → format. CC → 5.
-
-**Estimated change**: +18 lines (helper), -12 lines (simplified), net +6.
+**Refactoring**: Extracted `_format_skill_table(active, reports)` module-level helper. Main function now: fetch → filter → sort → diagnose → format (each as one call).
 
 ---
 
-### 2.3 `EvolutionContextDescriber._build_judgment_history` (CC 10)
+### 2.3 `EvolutionContextDescriber._build_judgment_history` (CC 10) [P3 — ACCEPT AS-IS]
 
 - **File**: `src/agent_nexus/platform/evolution/context_describer.py:279-303`
 - **Lines**: 25
-- **Target CC**: 4
-- **Root Cause**: **手动计数 (Manual Counting)** — three identical `sum(1 for j in ...)` patterns
+- **Target CC**: N/A
+- **Root Cause**: **Non-exclusive boolean fields** — `applied`, `completed`, `fell_back` are independent flags, not mutually exclusive categories. Counter-based classification would change semantics.
 
-**CC Decomposition**:
-The CC inflation comes from 3 generator expressions with inline conditionals:
-```python
-applied_count = sum(1 for j in judgments if j["applied"])
-completed_count = sum(1 for j in judgments if j["completed"])
-fell_back_count = sum(1 for j in judgments if j["fell_back"])
-```
-Each contributes 2 CC points (for + if). Total from counting: 6 CC points.
-
-**First Principles Check**:
-- Does ONE thing? **Yes** — builds judgment history summary.
-- Data-driven alternative? **Yes** — `collections.Counter` with a single pass.
-
-**Recommendation**:
-```python
-status_counts = Counter(
-    "applied" if j["applied"] else "completed" if j["completed"] else "fell_back"
-    for j in judgments
-)
-applied_count = status_counts["applied"]
-completed_count = status_counts["completed"]
-fell_back_count = status_counts["fell_back"]
-```
-CC drops from 10 → 4 (A-grade). Single-pass, more readable.
-
-**Estimated change**: +3 lines, -3 lines, net 0.
+**Decision**: The 3 `sum(1 for j in ...)` patterns are inherent to independent boolean field counting. Cannot be replaced with Counter without changing behavior (iteration 13 attempted and reverted).
 
 ---
 
@@ -176,52 +135,25 @@ CC drops from 10 → 4 (A-grade). Single-pass, more readable.
 
 ---
 
-### 2.5 `ExecutionAnalyzer._generate_suggestions` (CC 10)
+### 2.5 `ExecutionAnalyzer._generate_suggestions` (CC 10) [REFACTORED → CC 6]
 
 - **File**: `src/agent_nexus/platform/evolution/analyzer.py:208-256`
 - **Lines**: 49
 - **Target CC**: 5
 - **Root Cause**: **职责混合** — suggestion generation + CAPTURED special case + deduplication
 
-**First Principles Check**:
-- Does ONE thing? **No** — generates suggestions per skill, handles a special CAPTURED case, then deduplicates.
-- > 1 consumer? **Yes** — called by `analyze_execution`.
-- Data-driven alternative? The deduplication logic can be extracted.
-
-**Recommendation**: Extract `_deduplicate_suggestions(suggestions) -> list[EvolutionSuggestion]`. Main becomes: generate + CAPTURED special case + deduplicate. CC → 5.
-
-**Estimated change**: +12 lines (helper), -8 lines (simplified), net +4.
+**Refactoring**: Extracted `_deduplicate_suggestions(suggestions)` module-level helper. Main function now: generate → CAPTURED → deduplicate (single delegation call).
 
 ---
 
-### 2.6 `HealthChecker.diagnose_skills` (CC 10)
+### 2.6 `HealthChecker.diagnose_skills` (CC 10) [REFACTORED → CC 6]
 
 - **File**: `src/agent_nexus/platform/evolution/health.py:193-251`
 - **Lines**: 59
 - **Target CC**: 5
 - **Root Cause**: **职责混合** — data acquisition + filtering + per-skill analysis + metrics construction
 
-**CC Decomposition**:
-| Decision Point | CC |
-|----------------|-----|
-| Base | 1 |
-| `if skills is not None` | 1 |
-| `if skill_ids is not None` (filter 1) | 1 |
-| `else` branch + `if skill_ids is not None` (filter 2) | 2 |
-| `for skill in active_skills` | 1 |
-| `if rates is not None` | 1 |
-| `else` branch (4 metrics assignments) | 1 |
-| `len(suggestions) == 0` (health check) | 1 |
-| `rates is not None` ternary | 1 |
-| **Total** | **10** |
-
-**First Principles Check**:
-- Does ONE thing? **No** — acquires skills, filters, computes metrics, builds reports.
-- Data-driven alternative? **Yes** — metrics construction can be a factory method.
-
-**Recommendation**: Extract `_build_health_metrics(skill, rates) -> dict[str, float]`. CC → 5.
-
-**Estimated change**: +15 lines (helper), -10 lines (simplified), net +5.
+**Refactoring**: Extracted `_build_health_metrics(skill, rates)` module-level helper. Also simplified the skills/skill_ids branching into a sequential pattern (assign + filter), reducing the duplicated filter logic.
 
 ---
 
@@ -308,78 +240,25 @@ Effective CC: **2** (A-grade). The dict literal with 13 lambdas inflates the rad
 
 ---
 
-### 2.10 `load_dag_into_graph` (CC 10)
+### 2.10 `load_dag_into_graph` (CC 10) [REFACTORED → CC 6]
 
 - **File**: `src/agent_nexus/platform/agency/dag_dispatcher.py:116-152`
 - **Lines**: 37
 - **Target CC**: 5
 - **Root Cause**: **职责混合** — DAG task filtering + TaskItem construction + graph insertion
 
-**CC Decomposition**:
-| Decision Point | CC |
-|----------------|-----|
-| Base | 1 |
-| `for dag_task in dag.tasks` | 1 |
-| `if dag_task.id not in specialist_ids` | 1 |
-| `for dep in dag_task.blocked_by if dep in specialist_ids` | 2 (for + if) |
-| `if items` | 1 |
-| `for item in items if graph.get_task(item.id) is None` | 2 (for + if) |
-| `if new_items` | 1 |
-| `graph.add_tasks(new_items)` conditional call | 1 |
-| **Total** | **10** |
-
-**First Principles Check**:
-- Does ONE thing? **No** — filters specialist tasks, builds TaskItems, inserts into graph.
-- Data-driven alternative? TaskItem construction can be extracted.
-
-**Recommendation**: Extract `_build_specialist_items(dag, task_description, specialist_ids) -> list[TaskItem]`. CC → 5.
-
-**Estimated change**: +12 lines (helper), -8 lines (simplified), net +4.
+**Refactoring**: Extracted `_build_specialist_items(dag, task_description, specialist_ids)` module-level helper. Main function now: build items → deduplicate → insert into graph.
 
 ---
 
-### 2.11 `_format_section_value` (CC 10)
+### 2.11 `_format_section_value` (CC 10) [REFACTORED → CC 6]
 
 - **File**: `src/agent_nexus/platform/agency/cli.py:389-401`
 - **Lines**: 13
 - **Target CC**: 4
 - **Root Cause**: **类型分派 (Type Dispatch)** — isinstance chain + list comprehension CC
 
-**CC Decomposition**:
-| Decision Point | CC |
-|----------------|-----|
-| Base | 1 |
-| `if isinstance(value, list)` | 1 |
-| `if not value` (list empty) | 1 |
-| `for item in value` (list comp) | 1 |
-| `if isinstance(value, dict)` | 1 |
-| `if not value` (dict empty) | 1 |
-| `for k, v in value.items()` (dict comp) | 1 |
-| `if value is None or (isinstance(value, str) and not value.strip())` | 3 (if + or + and) |
-| **Total** | **10** |
-
-**First Principles Check**:
-- Does ONE thing? **Yes** — formats a value as markdown lines.
-- Data-driven alternative? **Yes** — handler registry.
-
-**Recommendation**: Replace isinstance chain with handler dispatch:
-```python
-_HANDLERS = [
-    (list, lambda v: [f"- {item}" for item in v] if v else []),
-    (dict, lambda v: [f"- **{k}**: {v}" for k, v in v.items()] if v else []),
-]
-
-def _format_section_value(value: object) -> list[str]:
-    for typ, handler in _HANDLERS:
-        if isinstance(value, typ):
-            return handler(value)
-    if value is None or (isinstance(value, str) and not value.strip()):
-        return []
-    return [str(value)]
-```
-CC drops from 10 → 4.
-
-**Estimated change**: +5 lines (registry), -10 lines (simplified), net -5.
+**Refactoring**: Replaced isinstance chain with `_SECTION_VALUE_HANDLERS` dict dispatch registry. Main function iterates handlers + fallback, reducing CC from 10 to 6.
 
 ---
 
@@ -522,19 +401,19 @@ All 100+ source files pass MI > 20 (maintainable). `radon mi -nc` returned zero 
 
 ### P1 — CC=10 Functions with Clear Fixes
 
-| # | Function | CC | Target | Root Cause | Est. ΔLines |
-|---|----------|----|--------|------------|-------------|
-| 1 | `_build_judgment_history` | 10 | 4 | Manual counting → Counter | 0 |
-| 2 | `_format_section_value` | 10 | 4 | isinstance → handler registry | -5 |
+| # | Function | CC | Target | Root Cause | Status |
+|---|----------|----|--------|------------|--------|
+| 1 | `_build_judgment_history` | 10 | — | Non-exclusive boolean fields | **P3 — cannot refactor** |
+| 2 | `_format_section_value` | 10→6 | 4 | isinstance → handler registry | **[REFACTORED]** |
 
 ### P2 — CC=10 Functions with Moderate Fix Value
 
-| # | Function | CC | Target | Root Cause | Est. ΔLines |
-|---|----------|----|--------|------------|-------------|
-| 3 | `diagnose_skills` | 10 | 5 | Extract metrics builder | +5 |
-| 4 | `l1_context` | 10 | 5 | Extract table formatter | +6 |
-| 5 | `_generate_suggestions` | 10 | 5 | Extract deduplication | +4 |
-| 6 | `load_dag_into_graph` | 10 | 5 | Extract item builder | +4 |
+| # | Function | CC | Target | Root Cause | Status |
+|---|----------|----|--------|------------|--------|
+| 3 | `diagnose_skills` | 10→6 | 5 | Extract metrics builder | **[REFACTORED]** |
+| 4 | `l1_context` | 10→6 | 5 | Extract table formatter | **[REFACTORED]** |
+| 5 | `_generate_suggestions` | 10→6 | 5 | Extract deduplication | **[REFACTORED]** |
+| 6 | `load_dag_into_graph` | 10→6 | 5 | Extract item builder | **[REFACTORED]** |
 
 ### P3 — Accept as-is (Inherent Complexity)
 
@@ -545,22 +424,23 @@ All 100+ source files pass MI > 20 (maintainable). `radon mi -nc` returned zero 
 | 9 | `_resolve_section` | 10 | False positive — data-driven pattern, effective CC 2 |
 | 10 | `_parse_snapshot` | 10 | Validation + error handling, low risk of growth |
 | 11 | `_detect_risk_conflicts` | 10 | Defensive guards, low risk of growth |
+| 12 | `_build_judgment_history` | 10 | Non-exclusive boolean fields — Counter changes semantics |
 
 ---
 
 ## 8. Complexity Metrics Trend
 
-| Metric | Iter 1 | After Iter 2 | After Iter 6 | Cycle 2 (Current) |
-|--------|--------|-------------|-------------|-------------------|
-| Total blocks | 1,306 | 1,309 | 1,313 | **1,313** |
-| Average CC | 3.35 | 3.33 | ~3.30 | **3.32** |
-| Max CC | 11 | 11 | 10 | **10** |
-| C-grade functions | 5 | 3 | 0 | **0** |
-| CC=10 boundary | — | — | 11 | **11** |
-| Dead abstractions | Unknown | Unknown | 0 | **0** |
-| MI issues | — | — | 0 | **0** |
-| Classes > 20 methods | 8 | 8 | 8 | **8** |
-| SRP violations | 0 critical | 0 critical | 0 critical | **0 critical** |
+| Metric | Iter 1 | After Iter 2 | After Iter 6 | Cycle 2 (Current) | Cycle 3 (Iter 13) |
+|--------|--------|-------------|-------------|-------------------|-------------------|
+| Total blocks | 1,306 | 1,309 | 1,313 | **1,313** | **~1,325** |
+| Average CC | 3.35 | 3.33 | ~3.30 | **3.32** | **< 3.3** |
+| Max CC | 11 | 11 | 10 | **10** | **10** |
+| C-grade functions | 5 | 3 | 0 | **0** | **0** |
+| CC=10 boundary | — | — | 11 | **11** | **~6** |
+| Dead abstractions | Unknown | Unknown | 0 | **0** | **0** |
+| MI issues | — | — | 0 | **0** | **0** |
+| Classes > 20 methods | 8 | 8 | 8 | **8** | **8** |
+| SRP violations | 0 critical | 0 critical | 0 critical | **0 critical** | **0 critical** |
 
 ---
 

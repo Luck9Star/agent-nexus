@@ -33,6 +33,24 @@ from agent_nexus.platform.evolution.thresholds import (
 logger = logging.getLogger(__name__)
 
 
+def _build_health_metrics(
+    skill: SkillRecord, rates: SkillRates | None
+) -> dict[str, float]:
+    """Build health metrics dict from a skill record and its rates."""
+    metrics: dict[str, float] = {"total_selections": float(skill.total_selections)}
+    if rates is not None:
+        metrics["applied_rate"] = rates.applied_rate
+        metrics["completion_rate"] = rates.completion_rate
+        metrics["effective_rate"] = rates.effective_rate
+        metrics["fallback_rate"] = rates.fallback_rate
+    else:
+        metrics["applied_rate"] = 0.0
+        metrics["completion_rate"] = 0.0
+        metrics["effective_rate"] = 0.0
+        metrics["fallback_rate"] = 0.0
+    return metrics
+
+
 def build_health_suggestions(
     skill_id: str,
     rates: SkillRates,
@@ -207,39 +225,17 @@ class HealthChecker:
         Returns:
             Dict mapping skill_id -> HealthReport.
         """
-        if skills is not None:
-            active_skills = skills
-            if skill_ids is not None:
-                active_skills = [s for s in active_skills if s.id in skill_ids]
-        else:
-            active_skills = self._store.get_active_skills()
-            if skill_ids is not None:
-                active_skills = [s for s in active_skills if s.id in skill_ids]
+        active_skills = skills if skills is not None else self._store.get_active_skills()
+
+        if skill_ids is not None:
+            active_skills = [s for s in active_skills if s.id in skill_ids]
+
         reports: dict[str, HealthReport] = {}
 
         for skill in active_skills:
-            # Compute rates once and pass into check_health to avoid
-            # redundant SkillRates.from_record() call.
             rates = SkillRates.from_record(skill)
             suggestions = self.check_health(skill, rates=rates)
-
-            metrics: dict[str, float] = {
-                "total_selections": float(skill.total_selections),
-            }
-            if rates is not None:
-                metrics["applied_rate"] = rates.applied_rate
-                metrics["completion_rate"] = rates.completion_rate
-                metrics["effective_rate"] = rates.effective_rate
-                metrics["fallback_rate"] = rates.fallback_rate
-            else:
-                metrics.update(
-                    {
-                        "applied_rate": 0.0,
-                        "completion_rate": 0.0,
-                        "effective_rate": 0.0,
-                        "fallback_rate": 0.0,
-                    }
-                )
+            metrics = _build_health_metrics(skill, rates)
 
             reports[skill.id] = HealthReport(
                 skill_id=skill.id,

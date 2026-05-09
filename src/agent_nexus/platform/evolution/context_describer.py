@@ -21,6 +21,24 @@ from agent_nexus.platform.evolution.thresholds import SkillRates
 logger = logging.getLogger(__name__)
 
 
+def _format_skill_table(
+    active: list[SkillRecord], reports: dict[str, HealthReport]
+) -> str:
+    """Format active skills as a markdown table with health status."""
+    lines: list[str] = ["[Evolution Skill Metrics]"]
+    lines.append("| Skill | Selections | Eff. Rate | Health |")
+    lines.append("|-------|-----------|-----------|--------|")
+
+    for skill in active:
+        rates = SkillRates.from_record(skill)
+        eff = rates.effective_rate if rates is not None else 0.0
+        report = reports.get(skill.id)
+        health_status = "OK" if report and report.is_healthy else "WARN"
+        lines.append(f"| {skill.name} | {skill.total_selections} | {eff:.2f} | {health_status} |")
+
+    return "\n".join(lines)
+
+
 class EvolutionContextDescriber:
     """Generate tiered evolution context descriptions for LLM injection.
 
@@ -119,26 +137,9 @@ class EvolutionContextDescriber:
         if not active:
             return "[Evolution] No matching active skills"
 
-        # Sort by total_selections descending (top skills first)
         active = sorted(active, key=lambda s: s.total_selections, reverse=True)
-
-        # Build health reports, passing the already-filtered list to
-        # avoid diagnose_skills fetching get_active_skills() again.
         reports = self._health.diagnose_skills(skills=active)
-
-        lines: list[str] = ["[Evolution Skill Metrics]"]
-        lines.append("| Skill | Selections | Eff. Rate | Health |")
-        lines.append("|-------|-----------|-----------|--------|")
-
-        for skill in active:
-            sel = skill.total_selections
-            rates = SkillRates.from_record(skill)
-            eff = rates.effective_rate if rates is not None else 0.0
-            report = reports.get(skill.id)
-            health_status = "OK" if report and report.is_healthy else "WARN"
-            lines.append(f"| {skill.name} | {sel} | {eff:.2f} | {health_status} |")
-
-        return "\n".join(lines)
+        return _format_skill_table(active, reports)
 
     # ------------------------------------------------------------------
     # L2: Full (~300 tokens)

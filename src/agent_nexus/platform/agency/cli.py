@@ -389,17 +389,18 @@ def _report_profile_results(checked: int, errors: list[str]) -> None:
 
 def _format_section_value(value: object) -> list[str]:
     """Format a merged section value as markdown lines."""
-    if isinstance(value, list):
-        if not value:
-            return []
-        return [f"- {item}" for item in value]
-    if isinstance(value, dict):
-        if not value:
-            return []
-        return [f"- **{k}**: {v}" for k, v in value.items()]
+    for typ, handler in _SECTION_VALUE_HANDLERS:
+        if isinstance(value, typ):
+            return handler(value)
     if value is None or (isinstance(value, str) and not value.strip()):
         return []
     return [str(value)]
+
+
+_SECTION_VALUE_HANDLERS: list[tuple[type, object]] = [
+    (list, lambda v: [f"- {item}" for item in v] if v else []),
+    (dict, lambda v: [f"- **{k}**: {v}" for k, v in v.items()] if v else []),
+]
 
 
 def _print_result(result: TaskComposerResult) -> None:

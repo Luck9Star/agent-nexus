@@ -114,6 +114,29 @@ def dag_task_to_task_item(
     )
 
 
+def _build_specialist_items(
+    dag: CompositionDAG,
+    task_description: str,
+    specialist_ids: set[str],
+) -> list[TaskItem]:
+    """Build TaskItems for specialist tasks, filtering deps to specialist-only."""
+    items: list[TaskItem] = []
+    for dag_task in dag.tasks:
+        if dag_task.id not in specialist_ids:
+            continue
+        filtered_deps = [dep for dep in dag_task.blocked_by if dep in specialist_ids]
+        items.append(
+            TaskItem(
+                id=dag_task.id,
+                description=task_description,
+                agent=dag_task.agent,
+                blocked_by=filtered_deps,
+                vars={"output_contract": dag_task.output},
+            )
+        )
+    return items
+
+
 def load_dag_into_graph(
     dag: CompositionDAG,
     task_description: str,
@@ -127,26 +150,10 @@ def load_dag_into_graph(
     Returns the list of created TaskItems for inspection.
     """
     specialist_ids = {t.id for t in dag.specialist_tasks}
-    items: list[TaskItem] = []
-    for dag_task in dag.tasks:
-        if dag_task.id not in specialist_ids:
-            continue
-        # Strip blocked_by refs to non-specialist tasks (they're handled
-        # externally by Integrator / QAGate outside the dispatcher).
-        # Filter without mutating the shared DAGTask dataclass.
-        filtered_deps = [dep for dep in dag_task.blocked_by if dep in specialist_ids]
-        item = TaskItem(
-            id=dag_task.id,
-            description=task_description,
-            agent=dag_task.agent,
-            blocked_by=filtered_deps,
-            vars={"output_contract": dag_task.output},
-        )
-        items.append(item)
+    items = _build_specialist_items(dag, task_description, specialist_ids)
 
     new_items: list[TaskItem] = []
     if items:
-        # Skip tasks that already exist in the graph (idempotent for re-dispatch)
         new_items = [item for item in items if graph.get_task(item.id) is None]
         if new_items:
             graph.add_tasks(new_items)
