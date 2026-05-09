@@ -1,303 +1,274 @@
-# Test Audit Report: Gap & Redundancy Analysis (Cycle 4)
+# Test Audit Report: Gap & Redundancy Analysis (Cycle 5)
 
 **Date**: 2026-05-10
 **Branch**: nf/serena-using-superpo-ff6f4b
-**Iteration**: 20 (Cycle 4 — async_safety focused, full re-analysis)
-**Total Tests**: 4,841 across 174 files
+**Iteration**: 27 (Cycle 5 — full re-analysis after Cycle 4 async_safety focus)
+**Total Tests**: 4,739 across 163 files
 
 ---
 
 ## 1. Overall Statistics
 
-| Metric | Cycle 3 (Iter 11) | Current (Cycle 4) | Delta |
+| Metric | Cycle 4 (Iter 20) | Current (Cycle 5) | Delta |
 |--------|--------------------|--------------------|-------|
-| Test files (excl. conftest/__init__) | 170 | 174 | +4 |
-| Unit test files | 124 | 129 | +5 |
-| E2E test files | 20 | 18 | -2 (reclassified) |
-| Integration test files | 10 | 11 | +1 |
-| Capability test files | 16 | 6 | -10 (contract files excluded) |
-| **Total test functions** | **4,778** | **4,841** | **+63** |
-| No-assertion tests (verified) | ~176 (claimed) | **1** (skipped test) | **-175 (v3 claim debunked)** |
-| Async safety test grade | Not assessed | **B+** | NEW |
+| Test files (excl. conftest/__init__) | 174 | 163 | -11 (iter 25 cleanup) |
+| Unit test files | 129 | 129 | 0 |
+| E2E test files | 18 | 18 | 0 |
+| Integration test files | 11 | 10 | -1 |
+| Capability test files | 6 | 6 | 0 |
+| **Total test functions** | **4,841** | **4,739** | **-102** |
+| No-assertion tests | 1 (skipped) | 4 (LOW severity) | +3 (stricter detection) |
+| Async safety test grade | B+ | B+ | Stable |
+| Cyclomatic complexity | avg CC 3.28 | avg CC 3.28 | Stable |
 
 ---
 
-## 2. Gap Analysis: Untested Public Symbols
+## 2. Gap Analysis: Module Coverage
 
-### 2.1 Previous P0 Gaps — All Fixed
+### 2.1 Module Coverage Distribution
 
-All 6 P0 gaps from Cycle 3 report have been addressed in iterations 7 and 14:
+83 source modules analyzed. Coverage classification:
 
-| v3 P0 Gap | Status | Test File |
-|-----------|--------|-----------|
-| EvolutionStore.get_metrics/deactivate_skill | **FIXED** (Iter 14) | `test_store_p0_unit.py` (26 tests) |
-| HealthChecker.get_health_summary | **FIXED** (Iter 14) | `test_store_p0_unit.py` |
-| GitInstaller._run_git/_run_git_capture | **FIXED** (Iter 14) | `test_installer_unit.py` (26 tests) |
-| GitInstaller._create_venv/_run_uv | **FIXED** (Iter 14) | `test_installer_unit.py` |
-| AgentSupervisor._resolve_package_name etc. | **FIXED** (Iter 14) | `test_supervisor_cmd_unit.py` (16 tests) |
-| McpToolAdapter/SchemaTransformer/DeferredAgentRegistry | **FIXED** (Iter 14) | `test_gateway_tool_call_e2e.py` (26 tests) |
+| Classification | Count | Percentage | Description |
+|---------------|-------|------------|-------------|
+| HIGH (≥70%) | 46 | 55% | Well-tested, maintenance only |
+| MEDIUM (40-69%) | 32 | 39% | Targeted gap-filling needed |
+| LOW (10-39%) | 4 | 5% | Significant gaps, priority action |
+| ZERO (0%) | 1 | 1% | Completely untested |
 
-### 2.2 Current P0 Gaps — Async Safety Critical
+### 2.2 ZERO Coverage
 
-| # | Module | Function | async | Resource | Issue |
-|---|--------|----------|-------|----------|-------|
-| 1 | `agency/dag_dispatcher.py` | `_run_dispatch_loop` | N | ThreadPoolExecutor | **ZERO direct tests.** Core sync dispatch loop. No test for BaseException/KeyboardInterrupt during loop execution. |
-| 2 | `agency/dag_dispatcher.py` | `_drain_single_future` | N | ThreadPoolExecutor | **ZERO direct tests.** Exception detail capture. No test for CancelledError or BaseException from future. |
-| 3 | `agency/dag_dispatcher.py` | `_collect_futures` | N | asyncio | **ZERO direct tests.** Result collection. No test for mixed success/exception futures or TimeoutError. |
-| 4 | `local/installer.py` | `install_local` | Y | file, subprocess | **Entirely untested.** Symlink escape, venv creation, manifest validation for local paths. |
-| 5 | `local/installer.py` | `update` (happy path) | Y | subprocess, file | Only negative path tested (`test_update_raises_when_not_installed`). Successful update flow untested. |
-| 6 | `evolution/store.py` | `evolve_skill` (concurrent) | N | DB | UPSERT race: two coroutines calling evolve_skill for same skill_id. asyncio.Lock not used (sync module). |
-| 7 | `hooks/executor.py` | `_execute_command` (BaseException) | Y | subprocess | CancelledError tested but SystemExit/GeneratorExit (other BaseException subclasses) untested. |
+| Module | Functions | Issue |
+|--------|-----------|-------|
+| `models/errors.py` | 7 error classes | Zero tests. All custom exceptions (SkillLoadError, AgentRuntimeError, etc.). May be acceptable if only used as exception hierarchy, but `__str__` / `__repr__` and any custom methods should be tested. |
 
-### 2.3 P1 Gaps — Moderate Risk
+### 2.3 P0 Gaps — Critical
 
-| # | Module | Gap | async | Resource |
-|---|--------|-----|-------|----------|
-| 1 | `task_graph.py` | `_insert_tasks_and_deps` concurrent batch writes | N | DB |
-| 2 | `task_graph.py` | `aclose` racing with concurrent write | Y | DB |
-| 3 | `task_graph.py` | CancelledError during async operation (no targeted test) | Y | DB |
-| 4 | `process_manager.py` | `stop_agent` PermissionError (macOS SIP) | Y | subprocess |
-| 5 | `process_manager.py` | `_terminate_process` ProcessLookupError | Y | subprocess |
-| 6 | `process_manager.py` | `_cleanup_dead` racing with `start_agent` | Y | subprocess |
-| 7 | `ipc.py` | `close` racing with concurrent `send` | Y | pipe |
-| 8 | `ipc.py` | `send` drain cancelled externally | Y | pipe |
-| 9 | `router.py` | `_execute_parallel_agents` CancelledError propagation | Y | asyncio |
-| 10 | `gateway.py` | `_stop_external_servers` mid-connect | Y | network |
-| 11 | `gateway.py` | `_cleanup_agent_registration` name collision | Y | pipe |
-| 12 | `external_mcp_adapter.py` | BaseException disconnect (no direct test) | Y | network |
-| 13 | `agency/executor.py` | `LLMExecutor.__call__` network timeout | Y | network |
-| 14 | `agency/executor.py` | `LLMExecutor.close` httpx cleanup | N | httpx |
-| 15 | `agency/task_composer.py` | Entire `_dispatch_legacy` path | N | — |
-| 16 | `config/model_db.py` | Index building pipeline (`_build_index` etc.) | N | — |
-| 17 | `local/supervisor.py` | `_build_command`, `_try_venv_command`, `_try_system_command` | N | file |
-| 18 | `hooks/executor.py` | `_execute_http` timeout | Y | httpx |
-| 19 | `hooks/executor.py` | `close` when httpx client is mid-request | Y | httpx |
+| # | Module | Coverage | Functions | Issue |
+|---|--------|----------|-----------|-------|
+| 1 | `agency/cli.py` | ~30% | CLI backend commands | Most CLI backend functions untested. `run_composition`, `_execute_pipeline`, and 7+ CLI command handlers have zero direct coverage. |
+| 2 | `evolution/engine.py` | ~40% | Evolution orchestration | `EvolutionEngine` high-level orchestration methods undertested. Skill analysis → evolve → promote cycle coverage gaps. |
+| 3 | `models/composition.py` | ~30% | Composition models | Composite agent models with complex validation logic. Multiple validators and computed fields untested. |
+| 4 | `agency/dag_dispatcher.py` | Partial | Core dispatch functions | `_run_dispatch_loop`, `_drain_single_future`, `_collect_futures` still lack direct unit tests (flagged since Cycle 4). |
 
-### 2.4 P2 Gaps — Low Priority
+### 2.4 P1 Gaps — Moderate Risk
+
+| # | Module | Coverage | Issue |
+|---|--------|----------|-------|
+| 1 | `platform/local/_lifecycle.py` | ~30% | Agent lifecycle management. Start/stop/restart flows partially tested. |
+| 2 | `local/installer.py` | ~55% | `install_local` still entirely untested (flagged since Cycle 4). Update happy path untested. |
+| 3 | `local/supervisor.py` | ~55% | `_build_command`, `_try_venv_command`, `_try_system_command` untested. |
+| 4 | `local/sources.py` | ~55% | BaseException cleanup handlers untested (flagged since Cycle 4). |
+| 5 | `agency/llm_integrator.py` | ~50% | Semantic synthesis logic. Integration with quality gate partially covered. |
+| 6 | `agency/executor.py` | ~60% | `LLMExecutor.close` httpx cleanup, network timeout scenarios. |
+| 7 | `task_graph.py` | ~65% | CancelledError during async operation, concurrent write asyncio.Lock, `aclose` racing. |
+| 8 | `process_manager.py` | ~70% | `stop_agent` PermissionError (macOS SIP), `_cleanup_dead` racing with `start_agent`. |
+| 9 | `external_mcp_adapter.py` | ~60% | BaseException disconnect handler untested. |
+| 10 | `hooks/executor.py` | ~70% | `_execute_http` CancelledError, `close` when httpx client mid-request. |
+
+### 2.5 P2 Gaps — Low Priority
 
 | Module | Gap |
 |--------|-----|
-| `task_graph.py` | `_would_create_cycle` concurrent pre-check race |
-| `task_graph.py` | `_detect_cycles_conn` large graph performance |
-| `ipc.py` | `receive` cancelled between buffered reads |
+| `task_graph.py` | `_would_create_cycle` concurrent pre-check race, `_detect_cycles_conn` large graph performance |
+| `ipc.py` | `receive` cancelled between buffered reads, `close` racing with concurrent `send` |
 | `dag_dispatcher.py` | `adispatch` via `Task.cancel()` |
-| `task_composer.py` | `_check_deadline`, `_should_skip_task` |
+| `task_composer.py` | `_check_deadline`, `_should_skip_task`, `_dispatch_legacy` path |
 | `cli.py` | `run_composition`, `_execute_pipeline` end-to-end |
-| `external_mcp_adapter.py` | Transport selection ambiguity |
-| `model_db.py` | `_trigram_candidates` fuzzy matching internals |
+| `model_db.py` | `_trigram_candidates` fuzzy matching, `_build_index` pipeline |
+| `router.py` | `_execute_parallel_agents` CancelledError propagation |
+| `gateway.py` | `_stop_external_servers` mid-connect, `_cleanup_agent_registration` name collision |
+| `config/config_templates.py` | Template rendering edge cases |
 
-### 2.5 Module Coverage Matrix
+### 2.6 Module Coverage Matrix
 
 | Module | Symbols | Covered | Gaps | Coverage | Trend |
 |--------|---------|---------|------|----------|-------|
 | hooks/ | 6 | 6 | 0 | 100% | Stable |
 | skills/ | 16 | 16 | 0 | 100% | Stable |
-| models/ | ~95 | ~93 | ~2 | 98% | +3% |
-| runtime/ | ~50 | ~48 | 2 | 96% | Stable |
-| orchestration/ | ~75 | ~72 | 3 | 96% | +3% |
-| gateway/ | ~65 | ~63 | 2 | 97% | +5% |
-| evolution/ | ~110 | ~107 | 3 | 97% | +6% |
-| config/ | 44 | 42 | 2 | 95% | +9% |
-| agency/ | ~120 | ~112 | 8 | 93% | +5% |
-| router/ | ~20 | ~19 | 1 | 95% | +5% |
-| local/ | ~50 | ~46 | 4 | 92% | +8% |
+| models/ | ~95 | ~88 | ~7 | 93% | -5% (stricter measurement) |
+| runtime/ | ~50 | ~47 | 3 | 94% | Stable |
+| orchestration/ | ~75 | ~70 | 5 | 93% | -3% |
+| gateway/ | ~65 | ~61 | 4 | 94% | -3% |
+| evolution/ | ~110 | ~100 | 10 | 91% | -6% (engine/cli gaps) |
+| config/ | 44 | 40 | 4 | 91% | -4% |
+| agency/ | ~120 | ~90 | 30 | 75% | -18% (cli.py, dag gaps) |
+| router/ | ~20 | ~18 | 2 | 90% | -5% |
+| local/ | ~50 | ~40 | 10 | 80% | -12% (installer/supervisor gaps) |
 
 ---
 
-## 3. Redundancy Analysis (Corrected)
+## 3. Redundancy Analysis
 
-### 3.1 CRITICAL CORRECTION: No-Assertion Tests
-
-**Cycle 3 claimed 176 no-assertion tests. Deep AST-level verification found this is INCORRECT.**
-
-Actual analysis of all 884 test functions across the top 15 flagged files:
-
-| Verification Mechanism | Count |
-|------------------------|-------|
-| Bare `assert` statements | 772 |
-| `pytest.raises` (no bare assert) | 84 |
-| Mock assertions (`assert_called_once` etc.) | 27 |
-| **Genuinely missing assertions** | **1** |
-
-The 1 genuinely missing assertion is `test_run_with_retry_propagates_system_exit` in `test_router_module.py:1361` — an intentionally `@pytest.mark.skip`-ed test with documented reason. **No action needed.**
-
-**Root cause of v3 overcount**: The previous analysis searched for `assert` keyword but did not account for `pytest.raises` context managers, mock assertion methods (`mock.assert_called_once`), or CliRunner result checks (`result.exit_code`). These are all valid verification mechanisms.
-
-### 3.2 Remaining Redundancy: Tautological Tests
-
-| File | Count | Pattern | Status |
-|------|-------|---------|--------|
-| `test_token_counter_enhanced.py` | 8 | `mock.return_value = 42; assert result == 42` | Deferred (low risk) |
-| `test_cli_module.py` | 4 | Mock command construction assertions | Deferred |
-| `test_local_supervisor.py` | 1 | `sup.list_running() == ["a", "b"]` from mock | Deferred |
-
-**Subtotal: ~13 tautological tests** (down from 49 in v2, 45 deleted in iter 7)
-
-### 3.3 Remaining Redundancy: Duplicate File Pairs
-
-| Pair | Overlap | Redundant Tests | Status |
-|------|---------|-----------------|--------|
-| Config triple (`test_config.py` + `test_config_loader.py` + `config/test_loader.py`) | Empty/missing config, invalid_api_type, sources, TOML errors | ~15-20 | Deferred (layered testing has value) |
-| Permission checker (`test_permission_checker.py` vs `test_permission_checker_unit.py`) | 9 shared concepts | ~15 | Deferred |
-| Process manager (`test_process_manager.py` vs `test_process_manager_unit.py`) | 10 similar tests | ~10 | Deferred |
-| LLM planner (`test_llm_planner.py` vs `test_llm_planner_structured.py`) | fallback/parse paths | ~5-7 | Deferred |
-| Gateway module vs tool adapter | adapter at different layers | ~5 | Deferred |
-
-**Subtotal: ~50-57 duplicate tests across 5 pairs** (unchanged from Cycle 3)
-
-### 3.4 Framework Tests
-
-| Category | Count | Value | Action |
-|----------|-------|-------|--------|
-| Pydantic frozen/constructor/serialization | ~66 | Low (37 frozen deleted in iter 16) | Mark as low-value |
-| Enum value tests | ~35 | Zero regression protection | Mark as low-value |
-| Stdlib behavior tests | ~21 | Zero project value | Mark as low-value |
-
-**Subtotal: ~122 framework tests** (down from 159 after iter 16 cleanup)
-
-### 3.5 Redundancy Summary
+### 3.1 Summary
 
 | Category | Count | Severity | Action |
 |----------|-------|----------|--------|
-| ~~No-assertion tests~~ | ~~176~~ → **1** | ~~Critical~~ None | **No action needed** |
-| Tautological tests | ~13 | Low | Deferred |
-| Duplicate file pairs | ~50-57 | Medium | Deferred (some overlap is intentional) |
-| Framework tests | ~122 | Low | Mark as low-value |
-| **Actionable total** | **~63-70** | | **Deferred to future cycle** |
+| Pydantic framework tests | ~200 | Low | Delete construction/defaults/serialization boilerplate |
+| Duplicate gateway file | ~20 | Medium | Merge `test_gateway_tool_adapter.py` into `test_gateway_module.py` |
+| Frozen/stdlib behavior tests | ~12 | Low | Delete |
+| No-assertion tests (verified) | 4 | Low | Retain (valid "should not raise" patterns) |
+| **Total removable** | **~236** | | |
+
+### 3.2 Pydantic Framework Tests (~200)
+
+Tests that verify Pydantic's own behavior rather than project logic:
+
+| File | Pattern | Count | Example |
+|------|---------|-------|---------|
+| `test_agent_model.py` | Constructor defaults, field validation | ~25 | `assert AgentConfig(role="x").role == "x"` |
+| `test_capability_model.py` | Enum values, frozen checks | ~20 | `assert CapabilityType.TOOL.value == "tool"` |
+| `test_composition_model.py` | Nested model construction | ~20 | `assert CompositeAgent(...).name == "x"` |
+| `test_config_model.py` | TOML parsing, defaults | ~25 | `assert Config().agents == []` |
+| `test_context_model.py` | Token budget defaults | ~20 | `assert ContextTier.SYSTEM.value == "system"` |
+| `test_evolution_model.py` | Evolution record construction | ~20 | `assert EvolutionRecord(...).skill_id` |
+| `test_hooks_model.py` | Hook type enum values | ~15 | `assert HookType.PRE.value == "pre"` |
+| `test_ipc_model.py` | Message construction | ~15 | `assert IPCMessage(...).type` |
+| `test_runtime_model.py` | Runtime config defaults | ~20 | `assert RuntimeConfig().timeout` |
+| `test_task_model.py` | Task status enum, priority | ~20 | `assert TaskStatus.PENDING.value == "pending"` |
+
+**Deletion criteria**: Any test that only verifies Pydantic construction, field defaults, enum values, or serialization without project-specific validation logic.
+
+**Retention criteria**: Tests with custom validators, `@model_validator`, computed fields, or cross-field invariants.
+
+### 3.3 Duplicate File Pairs
+
+| Pair | Overlap | Redundant Tests | Merge Recommendation |
+|------|---------|-----------------|---------------------|
+| `test_gateway_tool_adapter.py` ⊂ `test_gateway_module.py` | McpToolAdapter/SchemaTransformer tests | ~20 | Delete `test_gateway_tool_adapter.py`, keep `test_gateway_module.py` (superset) |
+| `test_config.py` + `test_config_loader.py` + `config/test_loader.py` | Empty config, invalid_api_type, TOML errors | ~15-20 | Consolidate to 2 files (model tests + loader tests) |
+| `test_permission_checker.py` vs `test_permission_checker_unit.py` | 9 shared concepts | ~15 | Keep unit file, remove integration duplicates |
+| `test_process_manager.py` vs `test_process_manager_unit.py` | 10 similar tests | ~10 | Keep unit file, remove integration duplicates |
+| `test_llm_planner.py` vs `test_llm_planner_structured.py` | Fallback/parse paths | ~5-7 | Keep structured, remove legacy |
+
+### 3.4 No-Assertion Tests (Verified)
+
+4 tests flagged as having no direct `assert` statement. All are valid "should not raise" patterns using `pytest.raises` context managers or implicit pass-on-no-exception:
+
+| File | Test | Severity | Verdict |
+|------|------|----------|---------|
+| `test_router_module.py:1361` | `test_run_with_retry_propagates_system_exit` | LOW | `@pytest.mark.skip` — intentional |
+| Various | 3 "should not raise" patterns | LOW | Valid — testing that code paths don't throw |
+
+### 3.5 Mega-File Anti-Pattern
+
+Two test files exceed 2500 lines, indicating insufficient modularization:
+
+| File | Lines | Recommendation |
+|------|-------|----------------|
+| `test_gateway_module.py` | 2,597 | Split by concern: adapter tests, lifecycle tests, tool call tests |
+| `test_local_module.py` | 3,363 | Split by module: installer tests, supervisor tests, sources tests, CLI tests |
+
+### 3.6 Redundancy Trend
+
+| Cycle | Action | Tests Affected |
+|-------|--------|---------------|
+| Cycle 2 (Iter 7) | Deleted 47 redundant tests | +71 net |
+| Cycle 3 (Iter 16) | Deleted 48 zero-signal Pydantic tests | -48 |
+| Cycle 3 (Iter 25) | Removed 138 tests (2 file deletions, 7 class removals) | -138 |
+| **Cycle 5 identified** | **~236 removable** | **Pending action** |
+| **Cumulative removed** | **233 across 3 cycles** | **+222 P0 added** |
 
 ---
 
-## 4. Async Safety Test Coverage Assessment
+## 4. E2E Test Quality Assessment
 
-### 4.1 CancelledError Handling
+### 4.1 Classification
 
-| Component | Grade | Tests | Gaps |
-|-----------|-------|-------|------|
-| ProcessManager | **A** | 5 classes, 15+ tests | Zombie PID edge case |
-| IPC | **A** | 2 targeted tests | None significant |
-| HookExecutor | **A** | 2 targeted tests (CancelledError + kill-fails) | SystemExit/GeneratorExit not tested |
-| TaskGraph | **D** | 0 targeted CancelledError tests | No test for cancel during async operation |
-| Router Subtask | **F** | 1 test (SKIPPED) | `subtask.py` BaseException re-raise has zero coverage |
-| EvolutionStore | N/A | — | Sync module, CancelledError not applicable |
+| Classification | Files | Tests | Files |
+|----------------|-------|-------|-------|
+| **TRUE_E2E** | 5 | ~91 | hooks_lifecycle, ipc_async_safety, ipc_real_subprocess, process_manager_async_safety, process_manager_cancel |
+| **INTEGRATION** | 11 | ~248 | agency, agency_pipeline, config, dag_dispatcher, dsl_toml, evolution_*, task_graph_*, runtime, gateway_tool_call (partial) |
+| **MISCLASSIFIED_UNIT** | 2 | ~73 | test_runtime_security_e2e (~59 unit tests), test_gateway_tool_call_e2e (~14 unit tests) |
 
-### 4.2 Resource Cleanup on Exception
+### 4.2 TRUE_E2E Details
 
-| Resource | Component | Grade | Tests | Critical Gap |
-|----------|-----------|-------|-------|-------------|
-| Subprocess kill | ProcessManager | **A** | 6+ tests across 3 files | PermissionError on kill |
-| Subprocess kill | HookExecutor | **A** | 2 targeted tests | SystemExit/GeneratorExit |
-| Subprocess kill | Installer | **A** | 1 KeyboardInterrupt test | None |
-| SQLite close | TaskGraph | **C** | close() tested, exception-path not | No mid-operation exception cleanup test |
-| SQLite close | EvolutionStore | **C** | close-and-reopen tested | No mid-transaction failure test |
-| httpx.AsyncClient | HookExecutor | **C** | close() + lifecycle tested | CancelledError during HTTP POST |
-| httpx.Client | ModelDBClient | **B** | close() tested | None significant |
-| IPC pipe | IPCStream | **A** | 3 targeted tests | Close racing with send |
-| MCP adapter | ExternalMcpAdapter | **D** | Source has BaseException handler | No direct test for disconnect on BaseException |
+These 5 files use real OS resources (subprocess, pipes, filesystem) and verify actual side effects:
 
-### 4.3 Concurrent Access
+| File | Tests | What It Tests |
+|------|-------|---------------|
+| `test_hooks_lifecycle_e2e.py` | ~18 | Hook execution with real subprocess |
+| `test_ipc_async_safety_e2e.py` | ~12 | IPC with real pipe I/O under concurrent access |
+| `test_ipc_real_subprocess_e2e.py` | ~15 | IPC with real subprocess stdin/stdout |
+| `test_process_manager_async_safety_e2e.py` | ~25 | Process lifecycle with real OS processes |
+| `test_process_manager_cancel_e2e.py` | ~21 | Cancel/kill with real subprocess |
 
-| Pattern | Component | Grade | Tests | Gap |
-|---------|-----------|-------|-------|-----|
-| Concurrent SQLite reads | TaskGraph | **A** | 5+ tests | None |
-| Concurrent SQLite writes | TaskGraph | **D** | 0 tests | asyncio.Lock serialization completely untested |
-| Concurrent subprocess | ProcessManager | **A** | 6+ tests | None |
-| Concurrent IPC | IPCStream | **B** | 1 lock test | None significant |
-| Concurrent SQLite reads | EvolutionStore | **A** | Async safety e2e | None |
-| Concurrent SQLite writes | EvolutionStore | **D** | 0 tests | evolve_skill UPSERT race |
+### 4.3 MISCLASSIFIED_UNIT Details
 
-### 4.4 asyncio.gather Patterns
+| File | Problem | Recommendation |
+|------|---------|----------------|
+| `test_runtime_security_e2e.py` | ~59 tests mock all I/O — no real subprocess, no real AST execution | Re-classify as unit tests. Add 3-5 TRUE_E2E tests with real runtime. |
+| `test_gateway_tool_call_e2e.py` | ~14 tests use mock adapters — no real MCP connection | Re-classify as unit tests. Keep existing TRUE_E2E subset. |
 
-| File | Line | `return_exceptions` | Risk | Assessment |
-|------|------|---------------------|------|------------|
-| `router.py` | 391 | No | ~~HIGH~~ **SAFE** | Each `_fetch_single_agent_tools` catches Exception internally, returns `[]` on failure. Gather cannot propagate exceptions. |
-| `gateway.py` | 126 | No | ~~HIGH~~ **SAFE** | Each `_activate_one` catches Exception internally, returns error string. Gather cannot propagate exceptions. |
-| `_lifecycle.py` | 214 | Yes | SAFE | Explicitly uses return_exceptions=True. |
-| `process_manager.py` | 550 | Yes | SAFE | stop_all uses return_exceptions=True. |
-| `supervisor.py` | 125,262,324 | Yes | SAFE | start_all/stop_all/restart use return_exceptions=True. |
-
-**Key correction**: The router.py and gateway.py gather calls were flagged as HIGH risk in initial analysis, but verification confirms both inner functions handle their own exceptions. The gather pattern is safe.
-
-### 4.5 BaseException Handler Coverage
-
-| Source File | Line | Handler | Has Test |
-|-------------|------|---------|----------|
-| `hooks/executor.py` | 446 | `except BaseException` → kill subprocess | Yes (CancelledError) |
-| `hooks/executor.py` | 524 | `except Exception` (NOT BaseException) | No CancelledError test for HTTP path |
-| `router/subtask.py` | 100 | `except (SystemExit, KeyboardInterrupt, ...)` | **NO** (test is skipped) |
-| `external_mcp_adapter.py` | 96 | `except BaseException` → disconnect | **NO** |
-| `local/installer.py` | 609,701,723 | `except BaseException` → cleanup | Yes (KeyboardInterrupt) |
-| `local/sources.py` | 278,377 | `except BaseException` → cleanup | **NO** |
-| `local/lockfile.py` | 103,159 | `except BaseException` → cleanup | **NO** |
-| `utils.py` | 61 | `except BaseException` → cleanup | **NO** |
-| `_shared.py` | 178 | `except BaseException` → cleanup | **NO** |
-
-### 4.6 Overall Async Safety Grade
-
-| Dimension | Grade |
-|-----------|-------|
-| CancelledError handling | **B+** |
-| Resource cleanup | **B** |
-| Concurrent access | **C+** |
-| BaseException coverage | **C** |
-| gather safety | **A** |
-| Timeout coverage | **A-** |
-| **Overall** | **B+** |
-
----
-
-## 5. E2E Test Quality Assessment
-
-### 5.1 Classification
-
-| Classification | Count | Files |
-|---|---|---|
-| **TRUE_E2E** | **14** | hooks_lifecycle, config, dsl_toml, evolution(×3), ipc(×2), process_manager(×2), runtime(×2), task_graph(×2), gateway_tool_call |
-| **INTEGRATION** | **3** | agency_pipeline, dag_dispatcher, agency |
-| **RECLASSIFIED** | **1** | gateway_tool_call (new in iter 14, valid E2E with real adapters) |
-
-### 5.2 Missing E2E Scenarios
+### 4.4 Missing E2E Scenarios
 
 | Priority | Scenario | Description |
 |----------|----------|-------------|
-| **P0** | Gateway complete tool call flow | Register agent → start subprocess → discover tools → MCP call → get result → cleanup |
-| **P0** | Router composite 4-phase flow | Load DSL → create TaskGraph → execute with echo agent → aggregate results |
+| **P0** | Gateway full lifecycle | Register agent → start subprocess → discover tools → MCP call → get result → cleanup |
+| **P0** | CLI init + install + run | `agent-nexus init` → `install` → `run` complete pipeline |
+| **P1** | Router composite 4-phase flow | Load DSL → create TaskGraph → execute with echo agent → aggregate results |
 | **P1** | External MCP adapter real connection | Connect stdio MCP server → discover tools → call → disconnect |
-| **P1** | CLI init + install + run flow | agent-nexus init → install → run complete flow |
-| **P2** | Evolution full cycle | Seed skills → analyze → evolve → promote → verify post-promotion availability |
+| **P2** | Evolution autonomous cycle | Seed skills → analyze → evolve → promote → verify post-promotion availability |
 
 ---
 
-## 6. Priority Actions (Cycle 4)
+## 5. Async Safety Assessment (Carried Forward)
 
-### P0 — Immediate (Zero/Low Regression Risk)
+### 5.1 Grade Summary
 
-| # | Action | Impact | Est. Work |
-|---|--------|--------|-----------|
-| 1 | Add tests for `_run_dispatch_loop` / `_drain_single_future` / `_collect_futures` | Cover 3 zero-test core functions | ~15 tests |
-| 2 | Add `install_local` tests (currently entirely untested) | Cover critical install path | ~10 tests |
-| 3 | Add `update` happy path test | Cover update success flow | ~5 tests |
-| 4 | Add concurrent SQLite write tests for TaskGraph | Verify asyncio.Lock serialization | ~5 tests |
-| 5 | Unskip `test_run_with_retry_propagates_system_exit` or add alternative | Cover subtask.py BaseException re-raise | ~2 tests |
+| Dimension | Grade | Change from Cycle 4 |
+|-----------|-------|---------------------|
+| CancelledError handling | B+ | Stable |
+| Resource cleanup | B | Stable |
+| Concurrent access | C+ | Stable |
+| BaseException coverage | C | Stable |
+| gather safety | A | Stable |
+| Timeout coverage | A- | Stable |
+| **Overall** | **B+** | **Stable** |
+
+### 5.2 Outstanding Async Safety Gaps
+
+Unchanged from Cycle 4 P0/P1 list. Key items:
+
+- `TaskGraph` concurrent SQLite write tests (asyncio.Lock serialization) — **D grade**
+- `Router/subtask.py` BaseException re-raise — **F grade** (test is skipped)
+- `ExternalMcpAdapter` BaseException disconnect — **no test**
+- `evolution/store.py` `evolve_skill` UPSERT race — **no test**
+
+---
+
+## 6. Priority Actions (Cycle 5)
+
+### P0 — Immediate
+
+| # | Action | Impact | Est. Tests |
+|---|--------|--------|------------|
+| 1 | Delete ~200 Pydantic framework tests | Remove low-signal noise | -200 |
+| 2 | Add tests for `agency/cli.py` commands | Cover 70% of CLI backend | +30 |
+| 3 | Add `evolution/engine.py` orchestration tests | Cover evolution cycle | +15 |
+| 4 | Add `models/composition.py` validator tests | Cover complex validation | +10 |
+| 5 | Re-classify `test_runtime_security_e2e.py` as unit | Fix E2E classification accuracy | 0 |
+| 6 | Add Gateway full lifecycle E2E test | Cover P0 E2E gap | +5 |
 
 ### P1 — Medium Priority
 
 | # | Action | Impact |
 |---|--------|--------|
-| 1 | Add TaskGraph CancelledError during async operation test | Cancel safety for DB operations |
-| 2 | Add ProcessManager stop_agent PermissionError test | macOS SIP edge case |
-| 3 | Add ExternalMcpAdapter BaseException disconnect test | MCP adapter cleanup safety |
-| 4 | Add HookExecutor `_execute_http` CancelledError test | httpx client cleanup during HTTP |
-| 5 | Add `_execute_parallel_agents` CancelledError propagation test | Router parallel execution safety |
-| 6 | Add concurrent `evolve_skill` same skill_id test | Evolution UPSERT race detection |
+| 1 | Merge `test_gateway_tool_adapter.py` into `test_gateway_module.py` | Eliminate ~20 duplicate tests |
+| 2 | Split mega-files (gateway 2597L, local 3363L) into focused test files | Improve maintainability |
+| 3 | Add TaskGraph concurrent write tests | Verify asyncio.Lock serialization |
+| 4 | Add `install_local` tests (flagged since Cycle 4) | Cover critical install path |
+| 5 | Consolidate config test triple → 2 files | Remove ~15-20 duplicates |
 
 ### P2 — Long Term
 
 | # | Action |
 |---|--------|
 | 1 | Add BaseException tests for sources.py, lockfile.py, utils.py, _shared.py |
-| 2 | Create 1-2 real Gateway + Router E2E tests |
+| 2 | Create CLI pipeline E2E test (init → install → run) |
 | 3 | Add LLMExecutor network timeout + CancelledError tests |
-| 4 | Merge remaining duplicate file pairs (config triple, permission checker) |
+| 4 | Unskip `test_run_with_retry_propagates_system_exit` or add alternative |
+| 5 | Add ExternalMcpAdapter BaseException disconnect test |
 
 ---
 
@@ -308,11 +279,13 @@ The 1 genuinely missing assertion is `test_run_with_retry_propagates_system_exit
 | v1 (Iter 1) | Initial coverage analysis | Baseline: 4,437 tests |
 | v2 (Iter 4) | Deep audit: corrections, redundancy | Identified ~96 removable |
 | Iter 7 | Deleted 47 redundant + added 128 P0 tests | +71 net (4,437→4,508→4,778) |
-| Cycle 3 (Iter 11) | Full re-analysis: no-assertion, E2E quality | Claimed 176 no-assertion (later debunked) |
+| Cycle 3 (Iter 11) | Full re-analysis: no-assertion debunked | Claimed 176 no-assertion (later debunked) |
 | Iter 14 | Added 94 P0 tests + E2E rewrites | +94 new, 37 reclassified |
 | Iter 16 | Deleted 48 zero-signal Pydantic tests | -48 frozen/required_field |
-| **Cycle 4 (Iter 20)** | **async_safety focused re-audit** | **Corrected 176→1 no-assertion; identified 7 P0 async gaps** |
+| Cycle 4 (Iter 20) | async_safety focused re-audit | Corrected 176→1 no-assertion; 7 P0 async gaps |
+| Iter 25 | Removed 138 tests (2 deletions, 7 class removals) | -138 |
+| **Cycle 5 (Iter 27)** | **Full re-analysis: module coverage + redundancy + E2E** | **4,739 tests; ~236 removable identified** |
 
 ---
 
-*Report generated by 3 parallel agents (API coverage scan, no-assertion AST audit, async_safety pattern analysis). All findings cross-verified against source code.*
+*Report generated by 3 parallel agents (E2E quality analysis, module coverage scan, redundancy detection). All findings cross-referenced against source code and verified with `pytest --co`.*
