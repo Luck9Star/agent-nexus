@@ -359,8 +359,16 @@ class ProcessManager:
         """Cancel stderr drain task safely."""
         if drain_task is not None and not drain_task.done():
             drain_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
+            try:
                 await drain_task
+            except asyncio.CancelledError:
+                # If our own task was cancelled externally, propagate cancellation
+                task = asyncio.current_task()
+                if task is not None and task.cancelling() > 0:
+                    raise
+                # Drain task cancellation — expected
+            except Exception:
+                pass
 
     async def _close_ipc_quietly(self, name: str, handle: AgentHandle) -> None:
         """Close IPC stream, logging failures at debug level."""

@@ -138,24 +138,24 @@ class TestLLMReflector:
         assert result.sufficient is False
         assert result.reason == "bad"
 
-    def test_parse_invalid_json_defaults_to_pass(self):
-        """Invalid JSON → default pass (don't block pipeline)."""
+    def test_parse_invalid_json_defaults_to_reject(self):
+        """Invalid JSON → fail closed (don't bypass quality gate)."""
         client = MagicMock()
         reflector = LLMReflector(client)
 
         result = reflector._parse_reflection("not json at all {{{")
-        assert result.sufficient is True
+        assert result.sufficient is False
         assert "parse" in result.reason.lower() or "Failed" in result.reason
 
     def test_evaluate_handles_llm_exception(self):
-        """LLM call failure defaults to pass."""
+        """LLM call failure → fail closed (don't bypass quality gate)."""
         client = MagicMock()
         client.call.side_effect = RuntimeError("LLM down")
         reflector = LLMReflector(client)
 
         result = reflector.evaluate("task", "result", attempt=1)
-        assert result.sufficient is True
-        assert "failed" in result.reason.lower() or "defaulting" in result.reason.lower()
+        assert result.sufficient is False
+        assert "failed" in result.reason.lower() or "reject" in result.reason.lower()
 
 
 # ---------------------------------------------------------------------------

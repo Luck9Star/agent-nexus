@@ -264,8 +264,8 @@ The codebase is **well-structured and defensively programmed**. No P0 (critical)
 
 | ID | Module | File:Line | Description | Recommendation |
 |----|--------|-----------|-------------|----------------|
-| C4-01 | agency | `reflector.py:120-122` | LLM failure in `reflect()` defaults to `sufficient=True`, bypassing quality gate. If reflection LLM fails (network error, rate limit), bad outputs pass through to users. | Change fallback to `sufficient=False` (fail-closed). |
-| C4-02 | orchestration | `process_manager.py:362` | `contextlib.suppress(asyncio.CancelledError)` in `_cancel_drain` silently swallows task cancellation, breaking cancellation propagation chain. | Remove suppress, add explicit CancelledError handler with re-raise. |
+| C4-01 | agency | `reflector.py:120-122` | ~~LLM failure in `reflect()` defaults to `sufficient=True`, bypassing quality gate~~ **[FIXED Cycle 4]** Changed to `sufficient=False` (fail-closed). Also fixed `_parse_reflection` JSON parse failure and missing-field default to `sufficient=False`. Added logging for rule evaluation failures (C4-08). |
+| C4-02 | orchestration | `process_manager.py:362` | ~~`contextlib.suppress(asyncio.CancelledError)` in `_cancel_drain` silently swallows task cancellation~~ **[FIXED Cycle 4]** Replaced with explicit try/except: CancelledError re-raised if current task is being cancelled externally (`task.cancelling() > 0`), otherwise swallowed as expected drain-task cancellation. |
 
 #### P2 (Medium) — 10 New Issues
 
@@ -276,7 +276,7 @@ The codebase is **well-structured and defensively programmed**. No P0 (critical)
 | C4-05 | gateway | `gateway.py:406-430` | Monkey-patched `__signature__`/`__annotations__` to fool FastMCP — fragile coupling |
 | C4-06 | agency | `llm_client.py:65-67,198,218,227,243,321` | 7 bare `Any` annotations in LLMClient — types available in same package |
 | C4-07 | agency | `llm_planner.py:190-194` | LLM failure silently falls back to keyword strategy — no degradation signal |
-| C4-08 | agency | `reflector.py:173-174` | Rule evaluation failures silently skipped in loop — bugs hidden |
+| C4-08 | agency | `reflector.py:173-174` | ~~Rule evaluation failures silently skipped in loop~~ **[FIXED Cycle 4]** Added `logger.warning` with rule name and `exc_info=True` for failed reflection rules. |
 | C4-09 | orchestration | `task_graph.py:385+` | All `conn` parameters typed as `Any` instead of `sqlite3.Connection` |
 | C4-10 | evolution | `skill_store.py:900-906` | `_rows_to_records` silently skips corrupt rows — DB corruption hidden from callers |
 | C4-11 | config | `model_db.py:273,292,332` | 3 bare `except Exception:` blocks swallow disk cache errors without logging |
@@ -361,10 +361,10 @@ A single parametrized class with ~6 cases would cover all invariants.
 |--------|:--------:|:--------:|:--------:|:--------:|
 | P0 issues | 0 | 0 | 0 | 0 |
 | P1 issues (new) | 2 | 4 | 3 | 2 |
-| P1 issues (fixed) | 2 | 4 | 3 | — |
+| P1 issues (fixed) | 2 | 4 | 3 | 2 |
 | P2 issues (new) | 4 | 3 | 4 | 10 |
-| P2 issues (fixed) | 2 | 3 | 4 | — |
-| Total fixes applied | 7 | 10 | 19 | 19 (verified) |
+| P2 issues (fixed) | 2 | 3 | 4 | 1 |
+| Total fixes applied | 7 | 10 | 19 | 22 |
 | Test count | 4460 | 4728 | 4784 | ~4700 |
 | Tests removed (cumulative) | 20 | 67 | 138 | 138 |
 | Low-value tests identified | 96 | 176→1 | 138 removed | ~207 remaining |

@@ -8,10 +8,13 @@ deeper quality assessment when rules have no opinion.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from .llm_client import LLMClient
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -118,8 +121,11 @@ class LLMReflector:
             )
             return self._parse_reflection(response.text)
         except Exception:
-            # LLM failure -> default to sufficient (don't block pipeline)
-            return Reflection(sufficient=True, reason="LLM evaluation failed, defaulting to pass")
+            # LLM failure -> fail closed (don't bypass quality gate)
+            return Reflection(
+                sufficient=False,
+                reason="LLM evaluation failed, defaulting to reject",
+            )
 
     def _parse_reflection(self, text: str) -> Reflection:
         """Parse LLM JSON response into Reflection."""
@@ -132,14 +138,14 @@ class LLMReflector:
                 cleaned = cleaned.rsplit("```", 1)[0]
             data = json.loads(cleaned)
             return Reflection(
-                sufficient=bool(data.get("sufficient", True)),
+                sufficient=bool(data.get("sufficient", False)),
                 reason=str(data.get("reason", "")),
                 feedback=str(data.get("feedback", "")),
                 next_queries=data.get("next_queries", []),
             )
         except (json.JSONDecodeError, KeyError):
             return Reflection(
-                sufficient=True,
+                sufficient=False,
                 reason="Failed to parse LLM reflection response",
             )
 
@@ -171,7 +177,8 @@ class Reflector:
                 if verdict is not None:
                     return verdict
             except Exception:
-                continue  # Rule failure -> skip, try next
+                logger.warning("Reflection rule %s failed", type(rule).__name__, exc_info=True)
+                continue
 
         # LLM layer: fine-grained
         if self._llm:

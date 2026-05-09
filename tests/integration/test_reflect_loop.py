@@ -334,17 +334,17 @@ class TestReflectorWithLLM:
 class TestReflectorLLMFailureGraceful:
     """LLM exceptions should not crash the pipeline."""
 
-    def test_llm_exception_defaults_to_sufficient(self):
+    def test_llm_exception_defaults_to_reject(self):
         mock_client = MagicMock()
         mock_client.call.side_effect = RuntimeError("API unavailable")
 
         reflector = LLMReflector(mock_client)
         result = reflector.evaluate("Task", "Some result", attempt=1)
 
-        assert result.sufficient is True
-        assert "failed" in result.reason.lower() or "default" in result.reason.lower()
+        assert result.sufficient is False
+        assert "failed" in result.reason.lower() or "reject" in result.reason.lower()
 
-    def test_llm_invalid_json_defaults_to_sufficient(self):
+    def test_llm_invalid_json_defaults_to_reject(self):
         mock_client = MagicMock()
         mock_client.call.return_value = LLMResponse(
             text="This is not JSON at all",
@@ -355,7 +355,7 @@ class TestReflectorLLMFailureGraceful:
         reflector = LLMReflector(mock_client)
         result = reflector.evaluate("Task", "Result", attempt=1)
 
-        assert result.sufficient is True
+        assert result.sufficient is False
 
     def test_llm_missing_fields_defaults(self):
         mock_client = MagicMock()
@@ -368,8 +368,8 @@ class TestReflectorLLMFailureGraceful:
         reflector = LLMReflector(mock_client)
         result = reflector.evaluate("Task", "Result", attempt=1)
 
-        # Missing 'sufficient' defaults to True
-        assert result.sufficient is True
+        # Missing 'sufficient' defaults to False (fail-closed)
+        assert result.sufficient is False
 
     def test_rule_exception_skipped_gracefully(self):
         """Broken rule should be skipped, not crash the reflector."""
