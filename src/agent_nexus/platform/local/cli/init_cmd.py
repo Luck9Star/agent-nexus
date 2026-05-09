@@ -93,30 +93,33 @@ def _check_config_toml(config_path: Path) -> tuple[str, bool, str]:
         return ("config.toml exists and parses", False, str(exc))
 
 
-def _check_api_keys(config_path: Path) -> tuple[str, bool, str]:
-    """Check that at least one API key is configured."""
-    config_key_envs: list[str] = []
+def _load_provider_configs(config_path: Path) -> dict:
+    """Load provider config from TOML, return empty on failure."""
     try:
         import toml
 
         raw = toml.loads(config_path.read_text(encoding="utf-8"))
-        providers = raw.get("models", {}).get("providers", {})
-        config_key_envs = [
-            str(v["api_key_env"])
-            for v in providers.values()
-            if isinstance(v, dict) and "api_key_env" in v
-        ]
+        return raw.get("models", {}).get("providers", {})
     except (OSError, ValueError, KeyError):
-        pass  # config file missing or malformed; fall through to defaults
-    if not config_key_envs:
-        from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
+        return {}
 
-        config_key_envs = [
-            str(p["api_key_env"])
-            for p in DEFAULT_PROVIDERS.values()
-            if isinstance(p, dict) and "api_key_env" in p
-        ]
-    has_key = any(os.environ.get(k) for k in config_key_envs)
+
+def _collect_key_envs(providers: dict) -> list[str]:
+    """Extract api_key_env names from provider configs."""
+    return [
+        str(v["api_key_env"])
+        for v in providers.values()
+        if isinstance(v, dict) and "api_key_env" in v
+    ]
+
+
+def _check_api_keys(config_path: Path) -> tuple[str, bool, str]:
+    """Check that at least one API key is configured."""
+    from agent_nexus.platform.config.defaults import DEFAULT_PROVIDERS
+
+    providers = _load_provider_configs(config_path) or DEFAULT_PROVIDERS
+    key_envs = _collect_key_envs(providers)
+    has_key = any(os.environ.get(k) for k in key_envs)
     return ("API key configured", has_key, "at least one set" if has_key else "none set")
 
 

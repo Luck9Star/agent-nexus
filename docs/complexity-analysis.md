@@ -9,8 +9,8 @@
 |--------|-------|----------------------|
 | Total blocks analyzed | 1,309 | +3 |
 | Average complexity | **3.33 (Grade A)** | 3.35 → 3.33 |
-| Max CC | 11 (unchanged) | — |
-| C-grade functions (CC ≥ 11) | **3** | 5 → 3 (2 refactored) |
+| Max CC | **10 (B-grade)** | 11 → 10 |
+| C-grade functions (CC ≥ 11) | **0** | 5 → 3 → **0** (all refactored) |
 | B-grade functions (CC 6-10) | ~242 | — |
 | D-F functions (CC > 20) | 0 | — |
 
@@ -38,11 +38,20 @@
 | `run_composition` | cli.py | 11 | ~7 | 3 helper extraction |
 | `get_health_summary` | health.py | 10 | 7 | Counter replacement |
 
+### Iteration 6 Refactoring Results
+
+| Function | File | CC Before | CC After | Method |
+|----------|------|-----------|----------|--------|
+| `evolution_history` | evolution_cmd.py | 11 | 3 | Extract `_resolve_skill_id` + `_format_ancestry` |
+| `_check_api_keys` | init_cmd.py | 11 | 4 | Extract `_load_provider_configs` + `_collect_key_envs` |
+| `_run_dispatch_loop` | dag_dispatcher.py | 11 | 8 | Extract `_dispatch_batch` + `DispatchResult.is_terminal` property |
+| ~~`ArtifactSink`~~ | dag_dispatcher.py | — | — | Removed dead Protocol (0 consumers) |
+
 ---
 
 ## 2. Remaining C-Grade Functions — First Principles Analysis
 
-### 2.1 `DAGDispatcher._run_dispatch_loop` (CC 11)
+### 2.1 `DAGDispatcher._run_dispatch_loop` (CC 11) [REFACTORED → CC 8]
 
 - **File**: `src/agent_nexus/platform/agency/dag_dispatcher.py:331-363`
 - **Lines**: 33
@@ -88,7 +97,7 @@ CC drops from 11 → 8 (B-grade). Further: extract `result.is_terminal` property
 
 ---
 
-### 2.2 `_check_api_keys` (CC 11)
+### 2.2 `_check_api_keys` (CC 11) [REFACTORED → CC 4]
 
 - **File**: `src/agent_nexus/platform/local/cli/init_cmd.py:95-119`
 - **Lines**: 25
@@ -146,7 +155,7 @@ CC drops from 11 → 5 (A-grade). The two helpers are reusable if other commands
 
 ---
 
-### 2.3 `evolution_history` (CC 11)
+### 2.3 `evolution_history` (CC 11) [REFACTORED → CC 3]
 
 - **File**: `src/agent_nexus/platform/local/cli/evolution_cmd.py:118-156`
 - **Lines**: 39
@@ -246,7 +255,7 @@ All large classes have methods that serve a single cohesive responsibility. The 
 
 | Abstraction | Type | Consumers | Status |
 |-------------|------|-----------|--------|
-| `ArtifactSink` | Protocol | **0** | **DEAD** — defined but never referenced outside its declaration |
+| `ArtifactSink` | Protocol | **0** | **DEAD — REMOVED** in Iteration 6 |
 
 ### Justified Abstractions
 
@@ -340,13 +349,13 @@ This is a low-cost, high-impact refactoring pattern.
 
 ## 7. Complexity Metrics Trend
 
-| Metric | Iteration 1 | After Iteration 2 | Current (Iter 3) |
-|--------|-------------|-------------------|-------------------|
-| C-grade functions | 5 | 3 | 3 |
-| Average CC | 3.35 | 3.33 | 3.33 |
-| Max CC | 11 | 11 | 11 |
-| Dead abstractions | Unknown | Unknown | 1 (ArtifactSink) |
-| Classes > 20 methods | 8 | 8 | 8 |
-| SRP violations | 0 critical | 0 critical | 0 critical |
+| Metric | Iteration 1 | After Iteration 2 | After Iteration 3 | After Iteration 6 |
+|--------|-------------|-------------------|-------------------|-------------------|
+| C-grade functions | 5 | 3 | 3 | **0** |
+| Average CC | 3.35 | 3.33 | 3.33 | **~3.30** |
+| Max CC | 11 | 11 | 11 | **10** |
+| Dead abstractions | Unknown | Unknown | 1 (ArtifactSink) | **0** |
+| Classes > 20 methods | 8 | 8 | 8 | 8 |
+| SRP violations | 0 critical | 0 critical | 0 critical | 0 critical |
 
-**Overall Assessment**: The codebase is in excellent shape. After the P1 refactoring (2 functions), **zero functions will exceed CC 10**. The remaining complexity is inherent to the domain (dispatch state machines, SQLite store patterns, CLI command workflows).
+**Overall Assessment**: The codebase complexity is now fully optimized. **Zero functions exceed CC 10.** All C-grade functions have been refactored. The remaining B-grade complexity is inherent to the domain (dispatch state machines, SQLite store patterns, CLI command workflows).

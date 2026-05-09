@@ -13,6 +13,7 @@ from agent_nexus.platform.utils import AGENT_NAME_RE
 
 if TYPE_CHECKING:
     from agent_nexus.platform.evolution.engine import EvolutionEngine
+    from agent_nexus.platform.evolution.skill_store import SkillRecord
 
 evolution_app = typer.Typer(help="Self-Evolution Engine")
 
@@ -116,30 +117,37 @@ def evolution_list(
             )
 
 
+def _resolve_skill_id(engine: EvolutionEngine, identifier: str) -> str | None:
+    """Resolve a skill identifier (UUID or name) to its internal ID."""
+    skill = engine.store.get_skill_record(identifier)
+    if skill is not None:
+        return skill.id
+    versions = engine.store.get_versions(identifier)
+    if not versions:
+        return None
+    active = [v for v in versions if v.is_active]
+    return (active[0] if active else versions[-1]).id
+
+
+def _format_ancestry(ancestry: list[SkillRecord]) -> str:
+    """Format ancestry chain as indented tree."""
+    lines: list[str] = []
+    indent = ""
+    for i, ancestor in enumerate(ancestry):
+        created = ancestor.first_seen.isoformat().split("T")[0] if ancestor.first_seen else "?"
+        lines.append(f"{indent}{ancestor.name} (gen {ancestor.lineage.generation}, {created})")
+        if i < len(ancestry) - 1:
+            indent += "  -> "
+    return "\n".join(lines)
+
+
 @evolution_app.command("history")
 def evolution_history(
     skill_name: str = typer.Argument(help="Skill name or ID to trace ancestry"),
 ) -> None:
     """Show version lineage for a skill."""
     with _engine_context() as engine:
-        # Find skill by name (indexed query) or by ID (direct lookup).
-        # Uses get_versions(name) which hits idx_sr_name instead of
-        # loading all skill records.
-        skill_id = None
-
-        # Try as UUID first (direct ID lookup)
-        skill = engine.store.get_skill_record(skill_name)
-        if skill is not None:
-            skill_id = skill.id
-        else:
-            # Try as name (indexed query, returns all versions)
-            versions = engine.store.get_versions(skill_name)
-            if versions:
-                # Pick the active one if available, otherwise latest generation
-                active = [v for v in versions if v.is_active]
-                target = active[0] if active else versions[-1]
-                skill_id = target.id
-
+        skill_id = _resolve_skill_id(engine, skill_name)
         if skill_id is None:
             typer.echo(f"Skill '{skill_name}' not found.", err=True)
             raise typer.Exit(code=1)
@@ -149,12 +157,7 @@ def evolution_history(
             typer.echo(f"No ancestry found for '{skill_name}'.")
             return
 
-        indent = ""
-        for i, ancestor in enumerate(ancestry):
-            created = ancestor.first_seen.isoformat().split("T")[0] if ancestor.first_seen else "?"
-            typer.echo(f"{indent}{ancestor.name} (gen {ancestor.lineage.generation}, {created})")
-            if i < len(ancestry) - 1:
-                indent += "  -> "
+        typer.echo(_format_ancestry(ancestry))
 
 
 @evolution_app.command("metrics")

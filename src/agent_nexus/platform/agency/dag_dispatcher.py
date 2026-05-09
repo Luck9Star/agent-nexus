@@ -51,12 +51,6 @@ class ExpertExecutor(Protocol):
     ) -> Artifact: ...
 
 
-class ArtifactSink(Protocol):
-    """Callable that receives artifacts as they complete."""
-
-    def __call__(self, task_id: str, artifact: Artifact) -> None: ...
-
-
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
@@ -86,6 +80,11 @@ class DispatchResult:
 
     hit_iteration_limit: bool = False
     """Whether the dispatch exceeded its iteration guard (indicates a possible bug)."""
+
+    @property
+    def is_terminal(self) -> bool:
+        """True if any task has failed or been cancelled (dispatch should stop)."""
+        return bool(self.failed) or bool(self.cancelled)
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +328,19 @@ class DAGDispatcher:
             return True
         return False
 
+    def _dispatch_batch(
+        self,
+        batch: list[TaskItem],
+        task_description: str,
+        deadline: float | None,
+        result: DispatchResult,
+    ) -> None:
+        """Dispatch a batch via parallel or sequential strategy."""
+        if self._concurrent and len(batch) > 1:
+            self._dispatch_parallel(batch, task_description, deadline, result)
+        else:
+            self._dispatch_sequential(batch, task_description, deadline, result)
+
     def _run_dispatch_loop(
         self,
         specialist_ids: set[str],
@@ -353,12 +365,9 @@ class DAGDispatcher:
 
             else:
                 batch = ready_specialists[: self._max_batch_size]
-                if self._concurrent and len(batch) > 1:
-                    self._dispatch_parallel(batch, task_description, deadline, result)
-                else:
-                    self._dispatch_sequential(batch, task_description, deadline, result)
+                self._dispatch_batch(batch, task_description, deadline, result)
 
-                if result.failed or result.cancelled:
+                if result.is_terminal:
                     return False
 
         return False
