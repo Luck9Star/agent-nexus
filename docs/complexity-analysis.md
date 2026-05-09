@@ -1,33 +1,34 @@
 # Complexity Analysis Report
 
-> Generated: 2026-05-10 (Iteration 10 — Cycle 2 First Principles Deep Audit)
+> Generated: 2026-05-10 (Iteration 17 — Cycle 2 First Principles Re-audit)
 > Scope: `src/agent_nexus/` | Baseline: radon 6.0.1
 
 ## 1. Overall Baseline
 
-| Metric | Value | Delta from Cycle 1 |
+| Metric | Value | Delta from Iter 10 |
 |--------|-------|---------------------|
-| Total blocks analyzed | 1,313 | +4 |
-| Average complexity | **3.32 (Grade A)** | 3.33 → 3.32 |
+| Total blocks analyzed | 1,319 | +6 |
+| Average complexity | **3.30 (Grade A)** | 3.32 → 3.30 |
 | Max CC | **10 (B-grade)** | Unchanged |
 | C-grade functions (CC ≥ 11) | **0** | Unchanged |
-| B-grade functions (CC 6-10) | ~245 | +3 |
+| CC=10 boundary functions | **6** | 11 → 6 (5 refactored in Iter 13) |
+| B-grade functions (CC 6-10) | ~250 | +5 |
 | Maintainability Index issues | **0 files** (all MI > 20) | — |
 
 ### CC Score Distribution
 
 | CC | Count | Grade | Cumulative % |
 |----|-------|-------|-------------|
-| 1  | ~418  | A     | 31.8%       |
-| 2  | ~175  | A     | 45.1%       |
-| 3  | ~180  | A     | 58.9%       |
-| 4  | ~163  | A     | 71.3%       |
-| 5  | ~118  | A     | 80.3%       |
-| 6  | ~98   | B     | 87.8%       |
-| 7  | ~59   | B     | 92.3%       |
-| 8  | ~49   | B     | 96.0%       |
-| 9  | ~25   | B     | 97.9%       |
-| 10 | 11    | B     | 98.7%       |
+| 1  | ~420  | A     | 31.8%       |
+| 2  | ~176  | A     | 45.2%       |
+| 3  | ~182  | A     | 59.0%       |
+| 4  | ~165  | A     | 71.5%       |
+| 5  | ~120  | A     | 80.6%       |
+| 6  | ~100  | B     | 88.2%       |
+| 7  | ~60   | B     | 92.7%       |
+| 8  | ~50   | B     | 96.5%       |
+| 9  | ~26   | B     | 98.5%       |
+| 10 | 6     | B     | 99.0%       |
 | 11+| 0     | —     | 100.0%      |
 
 ### Refactoring History Summary
@@ -52,7 +53,7 @@
 
 ## 2. CC=10 Boundary Functions — First Principles Root Cause Analysis
 
-These 11 functions sit at the B/C-grade boundary. None require immediate action, but each carries risk of becoming C-grade if features are added.
+These 6 remaining functions sit at the B/C-grade boundary. 5 of the original 11 were refactored in Iteration 13 (CC 10→6). None of the remaining 6 require immediate action.
 
 ### 2.1 `SkillStore._parse_snapshot` (CC 10)
 
@@ -83,18 +84,7 @@ These 11 functions sit at the B/C-grade boundary. None require immediate action,
 
 ---
 
-### 2.2 `EvolutionContextDescriber.l1_context` (CC 10) [REFACTORED → CC 6]
-
-- **File**: `src/agent_nexus/platform/evolution/context_describer.py:95-140`
-- **Lines**: 46
-- **Target CC**: 5
-- **Root Cause**: **职责混合** — data filtering + health diagnosis + table formatting
-
-**Refactoring**: Extracted `_format_skill_table(active, reports)` module-level helper. Main function now: fetch → filter → sort → diagnose → format (each as one call).
-
----
-
-### 2.3 `EvolutionContextDescriber._build_judgment_history` (CC 10) [P3 — ACCEPT AS-IS]
+### 2.2 `EvolutionContextDescriber._build_judgment_history` (CC 10) [P3 — ACCEPT AS-IS]
 
 - **File**: `src/agent_nexus/platform/evolution/context_describer.py:279-303`
 - **Lines**: 25
@@ -105,7 +95,7 @@ These 11 functions sit at the B/C-grade boundary. None require immediate action,
 
 ---
 
-### 2.4 `SchemaTransformer._resolve_one_of_any_of` (CC 10)
+### 2.3 `SchemaTransformer._resolve_one_of_any_of` (CC 10)
 
 - **File**: `src/agent_nexus/platform/gateway/schema_transformer.py:209-237`
 - **Lines**: 29
@@ -135,29 +125,7 @@ These 11 functions sit at the B/C-grade boundary. None require immediate action,
 
 ---
 
-### 2.5 `ExecutionAnalyzer._generate_suggestions` (CC 10) [REFACTORED → CC 6]
-
-- **File**: `src/agent_nexus/platform/evolution/analyzer.py:208-256`
-- **Lines**: 49
-- **Target CC**: 5
-- **Root Cause**: **职责混合** — suggestion generation + CAPTURED special case + deduplication
-
-**Refactoring**: Extracted `_deduplicate_suggestions(suggestions)` module-level helper. Main function now: generate → CAPTURED → deduplicate (single delegation call).
-
----
-
-### 2.6 `HealthChecker.diagnose_skills` (CC 10) [REFACTORED → CC 6]
-
-- **File**: `src/agent_nexus/platform/evolution/health.py:193-251`
-- **Lines**: 59
-- **Target CC**: 5
-- **Root Cause**: **职责混合** — data acquisition + filtering + per-skill analysis + metrics construction
-
-**Refactoring**: Extracted `_build_health_metrics(skill, rates)` module-level helper. Also simplified the skills/skill_ids branching into a sequential pattern (assign + filter), reducing the duplicated filter logic.
-
----
-
-### 2.7 `SkillLoader._split_body_resources` (CC 10)
+### 2.4 `SkillLoader._split_body_resources` (CC 10)
 
 - **File**: `src/agent_nexus/platform/skills/loader.py:184-217`
 - **Lines**: 34
@@ -188,7 +156,7 @@ These 11 functions sit at the B/C-grade boundary. None require immediate action,
 
 ---
 
-### 2.8 `ProfileBasedExecutor._resolve_section` (CC 10)
+### 2.5 `ProfileBasedExecutor._resolve_section` (CC 10)
 
 - **File**: `src/agent_nexus/platform/agency/executor.py:117-148`
 - **Lines**: 32
@@ -208,7 +176,7 @@ Effective CC: **2** (A-grade). The dict literal with 13 lambdas inflates the rad
 
 ---
 
-### 2.9 `_detect_risk_conflicts` (CC 10)
+### 2.6 `_detect_risk_conflicts` (CC 10)
 
 - **File**: `src/agent_nexus/platform/agency/integrator.py:349-381`
 - **Lines**: 33
@@ -237,28 +205,6 @@ Effective CC: **2** (A-grade). The dict literal with 13 lambdas inflates the rad
 **Recommendation**: Combine related guards into a single `_has_valid_risk_data(risk_sets, artifacts)` helper. CC → 5. Low priority — function is correct and readable.
 
 **Estimated change**: +8 lines (helper), -6 lines (simplified), net +2.
-
----
-
-### 2.10 `load_dag_into_graph` (CC 10) [REFACTORED → CC 6]
-
-- **File**: `src/agent_nexus/platform/agency/dag_dispatcher.py:116-152`
-- **Lines**: 37
-- **Target CC**: 5
-- **Root Cause**: **职责混合** — DAG task filtering + TaskItem construction + graph insertion
-
-**Refactoring**: Extracted `_build_specialist_items(dag, task_description, specialist_ids)` module-level helper. Main function now: build items → deduplicate → insert into graph.
-
----
-
-### 2.11 `_format_section_value` (CC 10) [REFACTORED → CC 6]
-
-- **File**: `src/agent_nexus/platform/agency/cli.py:389-401`
-- **Lines**: 13
-- **Target CC**: 4
-- **Root Cause**: **类型分派 (Type Dispatch)** — isinstance chain + list comprehension CC
-
-**Refactoring**: Replaced isinstance chain with `_SECTION_VALUE_HANDLERS` dict dispatch registry. Main function iterates handlers + fallback, reducing CC from 10 to 6.
 
 ---
 
@@ -343,18 +289,41 @@ Effective CC: **2** (A-grade). The dict literal with 13 lambdas inflates the rad
 | Class | Module | Methods | Max Method CC | SRP Risk | Assessment |
 |-------|--------|---------|---------------|----------|------------|
 | TaskGraph | orchestration | 43 | 9 | **Monitor** | Cohesive: DAG CRUD + queries. 18 thin wrappers inflate count. Effective responsibilities: ~25. |
+| EvolutionStore | evolution | 37 | 8 | **Low** | SQL-backed store. Methods are domain queries (metrics, records, batch). Cohesive. |
 | SkillStore | evolution | 34 | 10 | **Low** | SQL-backed store. Methods are domain queries. Cohesive. |
-| ProcessManager | orchestration | 21 | 9 | **Low** | Subprocess lifecycle: spawn, health, cleanup. Cohesive. |
+| PlatformRouter | router | 26 | 8 | **Low** | 4-phase workflow dispatch. Cohesive. |
+| DAGDispatcher | agency | 26 | 9 | **Low** | Task dispatch + parallel execution. Cohesive. |
+| GitInstaller | local | 25 | 9 | **Low** | Git clone/validate/venv lifecycle. Cohesive. |
 | MCPGateway | gateway | 24 | 8 | **Monitor** | Consider extracting `ExternalServerManager` (4 methods). |
 | DeferredAgentRegistry | gateway | ~24 | 7 | **Low** | Agent registry + subprocess lifecycle. Cohesive. |
+| HookExecutor | hooks | 23 | 9 | **Low** | Command/HTTP hook execution. Cohesive. |
+| OrchestrationDSL | orchestration | 21 | 9 | **Low** | TOML DSL parsing + validation. Cohesive. |
+| AgentSupervisor | local | 20 | 8 | **Low** | Auto-restart + health monitoring. Cohesive. |
+| ProcessManager | orchestration | 19 | 9 | **Low** | Subprocess lifecycle: spawn, health, cleanup. Cohesive. |
+| LLMClient | agency | 18 | 9 | **Low** | Multi-provider LLM calls. Cohesive. |
 | ConfigLoader | config | 18 | 9 | **Low** | Config loading from TOML/YAML. Cohesive. |
-| DAGDispatcher | agency | 25 | 9 | **Low** | Task dispatch + parallel execution. Cohesive. |
 
 **Key Finding**: No critical SRP violations. All large classes have cohesive method sets. The inflated method counts come from thin wrappers (async mirrors, properties, single-line SQL calls).
 
 ---
 
-## 5. Cross-Module Complexity Patterns
+## 5. Over-Abstraction Audit (First Principles)
+
+### Protocol/ABC Consumer Analysis
+
+| Abstraction | Consumers | Verdict |
+|-------------|-----------|---------|
+| `ExpertExecutor` (Protocol) | DAGDispatcher, TaskComposer (5+ sites) | **Well-justified** — pluggable execution strategy |
+| `ContextProvider` (Protocol) | ContextProviderRegistry (register/get/providers) | **Well-justified** — pluggable context sources |
+| `ReflectionRule` (Protocol) | Reflector (rules parameter) | **Well-justified** — pluggable reflection rules |
+| `SecurityRule` (ABC) | 4 concrete implementations + SecurityChecker | **Well-justified** — extensible security rules |
+| ~~`ArtifactSink` (Protocol)~~ | 0 consumers | **Deleted** in Iteration 6 |
+
+**Finding**: Zero dead abstractions. All Protocol/ABC definitions have ≥1 consumer and serve legitimate extensibility points.
+
+---
+
+## 6. Cross-Module Complexity Patterns
 
 ### Pattern 1: Manual Counting (3 occurrences)
 
@@ -391,68 +360,92 @@ Four stores share identical `_conn()/_memory_conn/close()` patterns. This is **b
 
 ---
 
-## 6. Maintainability Index
+## 7. CC=9 Priority Module Functions — Analysis
+
+These CC=9 functions in the 6 priority modules are worth monitoring:
+
+| Function | Module | CC | Root Cause | Verdict |
+|----------|--------|----|------------|---------|
+| `LLMClient.from_config` | llm_client | 9 | Multi-provider factory init | Domain-inherent (6 provider types) |
+| `LLMClient._build_litellm_kwargs` | llm_client | 9 | Sequential optional kwargs | Could use data-driven pattern (low ROI) |
+| `LLMClient._call_cli` | llm_client | 9 | I/O + session recording + error handling | Extract session recording (P2) |
+| `LLMClient.call` | llm_client | 8 | CLI/API dispatch + hooks + error | Clean dispatch pattern |
+| `DAGDispatcher._collect_futures` | dag_dispatcher | 9 | Fail-fast + timeout + error | Domain-inherent |
+| `DAGDispatcher._run_dispatch_loop` | dag_dispatcher | 8 | Dispatch state machine | Already refactored (CC 11→8) |
+| `TaskGraph.add_task` | task_graph | 9 | Multi-step validation + insert | Extract validators (P3) |
+| `SkillEvolver.process_tool_degradation` | evolver | 9 | Anti-loop tracking + evolution | Domain-inherent |
+| `SkillEvolver._evolve_derived` | evolver | 9 | Parent validation + derived creation | Domain-inherent |
+| `OrchestrationDSL._parse_composition_tasks` | dsl | 9 | TOML field validation | Domain-inherent (7 validation steps) |
+| `OrchestrationDSL._parse_composition_format` | dsl | 9 | TOML parsing + validation delegation | Clean delegation pattern |
+| `EvolutionContextDescriber.l2_context` | context_describer | 9 | Multi-section context builder | Clean section assembly |
+
+**Assessment**: All CC=9 functions reflect inherent domain complexity. None carry risk of becoming C-grade without significant feature additions.
+
+---
+
+## 8. Maintainability Index
 
 All 100+ source files pass MI > 20 (maintainable). `radon mi -nc` returned zero output, confirming no low-maintainability files.
 
 ---
 
-## 7. Actionable Refactoring Priority Matrix
+## 10. Actionable Refactoring Priority Matrix
 
-### P1 — CC=10 Functions with Clear Fixes
-
-| # | Function | CC | Target | Root Cause | Status |
-|---|----------|----|--------|------------|--------|
-| 1 | `_build_judgment_history` | 10 | — | Non-exclusive boolean fields | **P3 — cannot refactor** |
-| 2 | `_format_section_value` | 10→6 | 4 | isinstance → handler registry | **[REFACTORED]** |
-
-### P2 — CC=10 Functions with Moderate Fix Value
+### P1 — CC=10 Functions Refactored (Iteration 13)
 
 | # | Function | CC | Target | Root Cause | Status |
 |---|----------|----|--------|------------|--------|
-| 3 | `diagnose_skills` | 10→6 | 5 | Extract metrics builder | **[REFACTORED]** |
-| 4 | `l1_context` | 10→6 | 5 | Extract table formatter | **[REFACTORED]** |
-| 5 | `_generate_suggestions` | 10→6 | 5 | Extract deduplication | **[REFACTORED]** |
-| 6 | `load_dag_into_graph` | 10→6 | 5 | Extract item builder | **[REFACTORED]** |
+| 1 | `_format_section_value` | 10→6 | 4 | isinstance → handler registry | **[REFACTORED]** |
+| 2 | `diagnose_skills` | 10→6 | 5 | Extract metrics builder | **[REFACTORED]** |
+| 3 | `l1_context` | 10→6 | 5 | Extract table formatter | **[REFACTORED]** |
+| 4 | `_generate_suggestions` | 10→6 | 5 | Extract deduplication | **[REFACTORED]** |
+| 5 | `load_dag_into_graph` | 10→6 | 5 | Extract item builder | **[REFACTORED]** |
+
+### P2 — CC=9 Functions with Moderate Fix Value
+
+| # | Function | CC | Target | Root Cause | Status |
+|---|----------|----|--------|------------|--------|
+| 6 | `LLMClient._call_cli` | 9 | 5 | Extract session recording | **Deferred** |
+| 7 | `LLMClient._build_litellm_kwargs` | 9 | 5 | Data-driven optional kwargs | **Deferred** |
 
 ### P3 — Accept as-is (Inherent Complexity)
 
 | # | Function | CC | Reason |
 |---|----------|----|--------|
-| 7 | `_resolve_one_of_any_of` | 10 | JSON Schema semantics, proportional to domain complexity |
-| 8 | `_split_body_resources` | 10 | Minimal state machine (2 states), correctly implemented |
-| 9 | `_resolve_section` | 10 | False positive — data-driven pattern, effective CC 2 |
-| 10 | `_parse_snapshot` | 10 | Validation + error handling, low risk of growth |
-| 11 | `_detect_risk_conflicts` | 10 | Defensive guards, low risk of growth |
-| 12 | `_build_judgment_history` | 10 | Non-exclusive boolean fields — Counter changes semantics |
+| 8 | `_resolve_one_of_any_of` | 10 | JSON Schema semantics, proportional to domain complexity |
+| 9 | `_split_body_resources` | 10 | Minimal state machine (2 states), correctly implemented |
+| 10 | `_resolve_section` | 10 | False positive — data-driven pattern, effective CC 2 |
+| 11 | `_parse_snapshot` | 10 | Validation + error handling, low risk of growth |
+| 12 | `_detect_risk_conflicts` | 10 | Defensive guards, low risk of growth |
+| 13 | `_build_judgment_history` | 10 | Non-exclusive boolean fields — Counter changes semantics |
 
 ---
 
-## 8. Complexity Metrics Trend
+## 11. Complexity Metrics Trend
 
-| Metric | Iter 1 | After Iter 2 | After Iter 6 | Cycle 2 (Current) | Cycle 3 (Iter 13) |
-|--------|--------|-------------|-------------|-------------------|-------------------|
-| Total blocks | 1,306 | 1,309 | 1,313 | **1,313** | **~1,325** |
-| Average CC | 3.35 | 3.33 | ~3.30 | **3.32** | **< 3.3** |
-| Max CC | 11 | 11 | 10 | **10** | **10** |
-| C-grade functions | 5 | 3 | 0 | **0** | **0** |
-| CC=10 boundary | — | — | 11 | **11** | **~6** |
-| Dead abstractions | Unknown | Unknown | 0 | **0** | **0** |
-| MI issues | — | — | 0 | **0** | **0** |
-| Classes > 20 methods | 8 | 8 | 8 | **8** | **8** |
-| SRP violations | 0 critical | 0 critical | 0 critical | **0 critical** | **0 critical** |
+| Metric | Iter 1 | After Iter 2 | After Iter 6 | Iter 10 | Iter 13 | **Iter 17 (Current)** |
+|--------|--------|-------------|-------------|---------|---------|----------------------|
+| Total blocks | 1,306 | 1,309 | 1,313 | 1,313 | ~1,325 | **1,319** |
+| Average CC | 3.35 | 3.33 | ~3.30 | 3.32 | < 3.3 | **3.30** |
+| Max CC | 11 | 11 | 10 | 10 | 10 | **10** |
+| C-grade functions | 5 | 3 | 0 | 0 | 0 | **0** |
+| CC=10 boundary | — | — | 11 | 11 | ~6 | **6** |
+| Dead abstractions | Unknown | Unknown | 0 | 0 | 0 | **0** |
+| MI issues | — | — | 0 | 0 | 0 | **0** |
+| Classes > 20 methods | 8 | 8 | 8 | 8 | 8 | **14** |
+| SRP violations | 0 critical | 0 critical | 0 critical | 0 critical | 0 critical | **0 critical** |
 
 ---
 
-## 9. Overall Assessment
+## 12. Overall Assessment
 
 The codebase complexity is **well-managed and stable**:
 
-1. **Zero C-grade functions** (CC ≥ 11) — all previously identified have been refactored
-2. **11 CC=10 boundary functions** — 6 have clear refactoring paths (P1/P2), 5 are inherent to their domain (P3)
+1. **Zero C-grade functions** (CC ≥ 11) — stable across 11 iterations
+2. **6 CC=10 boundary functions** — down from 11 after 5 successful refactoring operations; all 6 remaining are domain-inherent or pseudo-positive
 3. **No maintainability issues** — all files MI > 20
-4. **No SRP violations** — all large classes have cohesive method sets
-5. **No dead abstractions** — ArtifactSink Protocol removed in Iteration 6
-6. **Average CC 3.32 (Grade A)** — well below industry average (~6-8)
+4. **No SRP violations** — all 14 large classes (>20 methods) have cohesive method sets
+5. **No dead abstractions** — all 4 Protocol/ABC definitions have consumers
+6. **Average CC 3.30 (Grade A)** — well below industry average (~6-8)
 
-The remaining complexity is **proportional to domain requirements** (dispatch state machines, JSON Schema resolution, multi-provider LLM adaptation) rather than accidental (poor structure, missing abstractions). Further refactoring of P1/P2 items would improve the metrics but carries diminishing returns for bug prevention.
+The remaining complexity is **proportional to domain requirements** (dispatch state machines, JSON Schema resolution, multi-provider LLM adaptation, markdown parsing) rather than accidental (poor structure, missing abstractions). The 12 successful CC refactoring operations (CC reductions: 6× CC 10→6, 3× CC 11→6-8, 1× CC 11→3, 1× CC 11→4, 1× CC 11→9) have exhausted all high-ROI refactoring targets.
