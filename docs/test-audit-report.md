@@ -1,25 +1,26 @@
-# Test Audit Report: Gap & Redundancy Analysis (Cycle 5)
+# Test Audit Report: Gap & Redundancy Analysis (Cycle 4 — Iteration 34)
 
 **Date**: 2026-05-10
 **Branch**: nf/serena-using-superpo-ff6f4b
-**Iteration**: 27 (Cycle 5 — full re-analysis after Cycle 4 async_safety focus)
-**Total Tests**: 4,739 across 163 files
+**Iteration**: 34 (Cycle 4 — full re-analysis after Iter 32 Serena audit + Iter 33 complexity)
+**Total Tests**: 4,816 across 166 files
+**Baseline**: 1,333 blocks, avg CC 3.28, 0 C-grade functions
 
 ---
 
 ## 1. Overall Statistics
 
-| Metric | Cycle 4 (Iter 20) | Current (Cycle 5) | Delta |
+| Metric | Cycle 5 (Iter 27) | Current (Cycle 4) | Delta |
 |--------|--------------------|--------------------|-------|
-| Test files (excl. conftest/__init__) | 174 | 163 | -11 (iter 25 cleanup) |
+| Test files | 163 | 166 | +3 |
 | Unit test files | 129 | 129 | 0 |
-| E2E test files | 18 | 18 | 0 |
-| Integration test files | 11 | 10 | -1 |
-| Capability test files | 6 | 6 | 0 |
-| **Total test functions** | **4,841** | **4,739** | **-102** |
-| No-assertion tests | 1 (skipped) | 4 (LOW severity) | +3 (stricter detection) |
-| Async safety test grade | B+ | B+ | Stable |
-| Cyclomatic complexity | avg CC 3.28 | avg CC 3.28 | Stable |
+| E2E test files | 18 | 21 | +3 |
+| Integration test files | 10 | 10 | 0 |
+| Capability test files | 6 | 0 | (removed) |
+| **Total test functions** | **4,739** | **4,816** | **+77** |
+| No-assertion tests | 4 (LOW) | 2 (verified) | -2 |
+| Public API symbols | ~834 | ~834 | Stable |
+| Avg CC / max CC | 3.28 / 10 | 3.28 / 10 | Stable |
 
 ---
 
@@ -27,7 +28,7 @@
 
 ### 2.1 Module Coverage Distribution
 
-83 source modules analyzed. Coverage classification:
+83 source modules analyzed across 102 Python source files (~834 public symbols).
 
 | Classification | Count | Percentage | Description |
 |---------------|-------|------------|-------------|
@@ -38,63 +39,67 @@
 
 ### 2.2 ZERO Coverage
 
-| Module | Functions | Issue |
-|--------|-----------|-------|
-| `models/errors.py` | 7 error classes | Zero tests. All custom exceptions (SkillLoadError, AgentRuntimeError, etc.). May be acceptable if only used as exception hierarchy, but `__str__` / `__repr__` and any custom methods should be tested. |
+| Module | Symbols | Issue |
+|--------|---------|-------|
+| `models/errors.py` | 1 (`AgentNexusError`) | Zero tests. Single custom exception hierarchy. Acceptable if only used as base class. |
 
-### 2.3 P0 Gaps — Critical
+### 2.3 P0 Gaps — Critical Untested Paths
 
-| # | Module | Coverage | Functions | Issue |
-|---|--------|----------|-----------|-------|
-| 1 | `agency/cli.py` | ~30% | CLI backend commands | Most CLI backend functions untested. `run_composition`, `_execute_pipeline`, and 7+ CLI command handlers have zero direct coverage. |
-| 2 | `evolution/engine.py` | ~40% | Evolution orchestration | `EvolutionEngine` high-level orchestration methods undertested. Skill analysis → evolve → promote cycle coverage gaps. |
-| 3 | `models/composition.py` | ~30% | Composition models | Composite agent models with complex validation logic. Multiple validators and computed fields untested. |
-| 4 | `agency/dag_dispatcher.py` | Partial | Core dispatch functions | `_run_dispatch_loop`, `_drain_single_future`, `_collect_futures` still lack direct unit tests (flagged since Cycle 4). |
+| # | Area | Function/Path | Risk |
+|---|------|---------------|------|
+| 1 | hooks | `_execute_http` swallows `CancelledError` — `except Exception` catches BaseException subclass, preventing task cancellation propagation through HTTP hooks | **Bug** — cancellation broken |
+| 2 | hooks | `_execute_http` httpx per-request timeout (`httpx.Timeout(hook.timeout_seconds)`) never tested | Hangs on slow HTTP |
+| 3 | gateway | `additionalProperties` schema pattern never tested in `_build_params_from_schema` or `SchemaTransformer` | Invalid param generation |
+| 4 | gateway | `_disambiguate_tool_name` max-100 overflow guard (`suffix > 100 → ValueError`) never tested | Crash on many agents |
+| 5 | evolution | `_generate_init_py`, `_generate_mcp_adapter`, `_generate_pyproject` have **zero direct tests** | Broken promoted agents |
+| 6 | gateway | Nested `$ref` chains (3+ levels) only tested indirectly | Infinite recursion / wrong types |
+| 7 | agency/cli.py | Most CLI backend command functions have zero direct unit test coverage | ~70% of CLI untested |
+| 8 | dag_dispatcher | `_run_dispatch_loop`, `_drain_single_future`, `_collect_futures` still lack direct unit tests (flagged since Cycle 4) | Core dispatch untested |
 
 ### 2.4 P1 Gaps — Moderate Risk
 
-| # | Module | Coverage | Issue |
-|---|--------|----------|-------|
-| 1 | `platform/local/_lifecycle.py` | ~30% | Agent lifecycle management. Start/stop/restart flows partially tested. |
-| 2 | `local/installer.py` | ~55% | `install_local` still entirely untested (flagged since Cycle 4). Update happy path untested. |
-| 3 | `local/supervisor.py` | ~55% | `_build_command`, `_try_venv_command`, `_try_system_command` untested. |
-| 4 | `local/sources.py` | ~55% | BaseException cleanup handlers untested (flagged since Cycle 4). |
-| 5 | `agency/llm_integrator.py` | ~50% | Semantic synthesis logic. Integration with quality gate partially covered. |
-| 6 | `agency/executor.py` | ~60% | `LLMExecutor.close` httpx cleanup, network timeout scenarios. |
-| 7 | `task_graph.py` | ~65% | CancelledError during async operation, concurrent write asyncio.Lock, `aclose` racing. |
-| 8 | `process_manager.py` | ~70% | `stop_agent` PermissionError (macOS SIP), `_cleanup_dead` racing with `start_agent`. |
-| 9 | `external_mcp_adapter.py` | ~60% | BaseException disconnect handler untested. |
-| 10 | `hooks/executor.py` | ~70% | `_execute_http` CancelledError, `close` when httpx client mid-request. |
+| # | Area | Gap |
+|---|------|-----|
+| 1 | hooks | `_execute_prompt` / `_execute_agent` zero direct tests (placeholder implementations) |
+| 2 | hooks | SSRF protection missing `169.254.169.254` (cloud metadata), IPv6 loopback, `0.0.0.0` |
+| 3 | skills | `parse_file` `UnicodeDecodeError` on non-UTF-8 files |
+| 4 | skills | `parse_file` `PermissionError` on unreadable files |
+| 5 | evolution | `_evolve_captured` with nonexistent / unwritable `capture_directory` |
+| 6 | evolution | `promote()` partial file write failure (atomic_write) only tested for mkdir |
+| 7 | config | `_build_providers` crashes on non-dict values in user_providers |
+| 8 | config | `load_merged_config` conflicting provider API types between global/project |
+| 9 | gateway | `oneOf + anyOf` combination at same schema level untested |
+| 10 | gateway | `_merge_properties` conflicting type definitions for same property name |
 
 ### 2.5 P2 Gaps — Low Priority
 
-| Module | Gap |
-|--------|-----|
-| `task_graph.py` | `_would_create_cycle` concurrent pre-check race, `_detect_cycles_conn` large graph performance |
-| `ipc.py` | `receive` cancelled between buffered reads, `close` racing with concurrent `send` |
-| `dag_dispatcher.py` | `adispatch` via `Task.cancel()` |
-| `task_composer.py` | `_check_deadline`, `_should_skip_task`, `_dispatch_legacy` path |
-| `cli.py` | `run_composition`, `_execute_pipeline` end-to-end |
-| `model_db.py` | `_trigram_candidates` fuzzy matching, `_build_index` pipeline |
-| `router.py` | `_execute_parallel_agents` CancelledError propagation |
-| `gateway.py` | `_stop_external_servers` mid-connect, `_cleanup_agent_registration` name collision |
-| `config/config_templates.py` | Template rendering edge cases |
+| Area | Gap |
+|------|-----|
+| hooks | `__aenter__` / `__aexit__` context manager protocol no direct tests |
+| hooks | `close()` exception propagation when `aclose()` raises |
+| skills | `_parse_frontmatter` YAML anchors/aliases edge case |
+| config | `load_cli_routing` no dedicated unit tests |
+| evolution | `EvolutionEngine.evolve` `affected_skill_ids` filter in TOOL_DEGRADATION path |
+| gateway | `_capitalize` helper no direct tests |
+| gateway | `_navigate_ref` with array-valued intermediate nodes |
+| gateway | `_cleanup_agent_registration` concurrent with active tool invocation (race) |
+| local | `_lifecycle.py` `ConfigMigrator` no dedicated test |
 
 ### 2.6 Module Coverage Matrix
 
-| Module | Symbols | Covered | Gaps | Coverage | Trend |
-|--------|---------|---------|------|----------|-------|
-| hooks/ | 6 | 6 | 0 | 100% | Stable |
-| skills/ | 16 | 16 | 0 | 100% | Stable |
-| models/ | ~95 | ~88 | ~7 | 93% | -5% (stricter measurement) |
-| runtime/ | ~50 | ~47 | 3 | 94% | Stable |
-| orchestration/ | ~75 | ~70 | 5 | 93% | -3% |
-| gateway/ | ~65 | ~61 | 4 | 94% | -3% |
-| evolution/ | ~110 | ~100 | 10 | 91% | -6% (engine/cli gaps) |
-| config/ | 44 | 40 | 4 | 91% | -4% |
-| agency/ | ~120 | ~90 | 30 | 75% | -18% (cli.py, dag gaps) |
-| router/ | ~20 | ~18 | 2 | 90% | -5% |
-| local/ | ~50 | ~40 | 10 | 80% | -12% (installer/supervisor gaps) |
+| Module | Symbols | Covered | Gaps | Coverage | Key Risk |
+|--------|---------|---------|------|----------|----------|
+| hooks/ | 16 | 14 | 2 | 88% | CancelledError in _execute_http |
+| skills/ | 13 | 12 | 1 | 92% | parse_file encoding errors |
+| models/ | ~78 | ~72 | ~6 | 92% | errors.py zero; composition.py validators |
+| runtime/ | ~58 | ~55 | 3 | 95% | Excellent coverage |
+| orchestration/ | ~96 | ~90 | 6 | 94% | task_graph concurrent writes |
+| gateway/ | ~72 | ~64 | 8 | 89% | additionalProperties, nested $ref |
+| evolution/ | ~150 | ~130 | 20 | 87% | _generate_* files, capture directory |
+| config/ | 38 | 35 | 3 | 92% | _build_providers crash |
+| agency/ | ~278 | ~210 | 68 | 76% | cli.py commands, dag dispatch core |
+| router/ | ~32 | ~30 | 2 | 94% | Stable |
+| local/ | ~103 | ~85 | 18 | 82% | _lifecycle, sources edge cases |
 
 ---
 
@@ -104,101 +109,91 @@
 
 | Category | Count | Severity | Action |
 |----------|-------|----------|--------|
-| Pydantic framework tests | ~200 | Low | Delete construction/defaults/serialization boilerplate |
-| Duplicate gateway file | ~20 | Medium | Merge `test_gateway_tool_adapter.py` into `test_gateway_module.py` |
-| Frozen/stdlib behavior tests | ~12 | Low | Delete |
-| No-assertion tests (verified) | 4 | Low | Retain (valid "should not raise" patterns) |
-| **Total removable** | **~236** | | |
+| Pydantic framework tests | 79 | Low | Delete — constructor defaults, serialization round-trips, enum values |
+| Duplicate counter validation | 9 | Low | Delete — same validator logic tested twice |
+| No-assertion tests | 2 | Medium | Fix or delete — stub/empty test bodies |
+| Semantic overlap (planner) | ~4-5 | Low | Merge — structured vs legacy fallback tests |
+| Tautological assertion | 1 | Trivial | Remove assertion line (keep mock.verify) |
+| **Total removable** | **~91-96** | | |
 
-### 3.2 Pydantic Framework Tests (~200)
+### 3.2 Pydantic Framework Tests (79 tests)
 
-Tests that verify Pydantic's own behavior rather than project logic:
+Tests that only verify Pydantic's own behavior without project-specific validation logic:
 
-| File | Pattern | Count | Example |
-|------|---------|-------|---------|
-| `test_agent_model.py` | Constructor defaults, field validation | ~25 | `assert AgentConfig(role="x").role == "x"` |
-| `test_capability_model.py` | Enum values, frozen checks | ~20 | `assert CapabilityType.TOOL.value == "tool"` |
-| `test_composition_model.py` | Nested model construction | ~20 | `assert CompositeAgent(...).name == "x"` |
-| `test_config_model.py` | TOML parsing, defaults | ~25 | `assert Config().agents == []` |
-| `test_context_model.py` | Token budget defaults | ~20 | `assert ContextTier.SYSTEM.value == "system"` |
-| `test_evolution_model.py` | Evolution record construction | ~20 | `assert EvolutionRecord(...).skill_id` |
-| `test_hooks_model.py` | Hook type enum values | ~15 | `assert HookType.PRE.value == "pre"` |
-| `test_ipc_model.py` | Message construction | ~15 | `assert IPCMessage(...).type` |
-| `test_runtime_model.py` | Runtime config defaults | ~20 | `assert RuntimeConfig().timeout` |
-| `test_task_model.py` | Task status enum, priority | ~20 | `assert TaskStatus.PENDING.value == "pending"` |
+| File | Framework Tests | Total | Pattern |
+|------|----------------|-------|---------|
+| `test_agent_models.py` | 24 | 62 | Constructor defaults, field access, enum iteration, serialization |
+| `test_evolution_models.py` | 14 | 55 | Constructor defaults, serialization round-trips, field access |
+| `test_distribution_models.py` | 14 | 48 | Constructor defaults, serialization round-trips, field access |
+| `test_runtime_models.py` | 17 | 26 | Constructor defaults, serialization round-trips, field access |
+| `test_context_models.py` | 10 | 64 | Constructor defaults, serialization round-trips |
 
-**Deletion criteria**: Any test that only verifies Pydantic construction, field defaults, enum values, or serialization without project-specific validation logic.
+**Deletion criteria**: Any test that only verifies `model_construct()→field == value`, `model_dump()→model_validate()→equal`, or `Enum.X.value == "x"` without custom validators, computed fields, or cross-field invariants.
 
-**Retention criteria**: Tests with custom validators, `@model_validator`, computed fields, or cross-field invariants.
+**Retention criteria**: Tests with `@model_validator`, custom `__init__`, computed properties, or business logic assertions.
 
-### 3.3 Duplicate File Pairs
+### 3.3 Duplicate Counter Validation (9 tests)
 
-| Pair | Overlap | Redundant Tests | Merge Recommendation |
-|------|---------|-----------------|---------------------|
-| `test_gateway_tool_adapter.py` ⊂ `test_gateway_module.py` | McpToolAdapter/SchemaTransformer tests | ~20 | Delete `test_gateway_tool_adapter.py`, keep `test_gateway_module.py` (superset) |
-| `test_config.py` + `test_config_loader.py` + `config/test_loader.py` | Empty config, invalid_api_type, TOML errors | ~15-20 | Consolidate to 2 files (model tests + loader tests) |
-| `test_permission_checker.py` vs `test_permission_checker_unit.py` | 9 shared concepts | ~15 | Keep unit file, remove integration duplicates |
-| `test_process_manager.py` vs `test_process_manager_unit.py` | 10 similar tests | ~10 | Keep unit file, remove integration duplicates |
-| `test_llm_planner.py` vs `test_llm_planner_structured.py` | Fallback/parse paths | ~5-7 | Keep structured, remove legacy |
+| File | Class | Tests | Duplicate Of |
+|------|-------|-------|-------------|
+| `test_evolution_models.py` | `TestSkillRecordCounterInvariant` | 9 | `TestSkillRecordCounterValidation` — same `applied <= selections`, `fallbacks <= applied` invariants |
+| `test_evolution_models.py` | `TestEvolutionMetricsCounterInvariant` | 6 | Same validator pattern for different model class — partially unique |
 
-### 3.4 No-Assertion Tests (Verified)
+### 3.4 No-Assertion Tests (2 tests)
 
-4 tests flagged as having no direct `assert` statement. All are valid "should not raise" patterns using `pytest.raises` context managers or implicit pass-on-no-exception:
+| File | Test | Issue | Verdict |
+|------|------|-------|---------|
+| `test_process_manager_unit.py:144` | `test_skips_unknown_agent_names` | No assertion — only checks "should not raise" | Add `assert ... not in pm._agents` or delete |
+| `test_router_module.py:1361` | `test_run_with_retry_propagates_system_exit` | Empty body — only docstring, zero test logic | Delete stub or implement |
 
-| File | Test | Severity | Verdict |
-|------|------|----------|---------|
-| `test_router_module.py:1361` | `test_run_with_retry_propagates_system_exit` | LOW | `@pytest.mark.skip` — intentional |
-| Various | 3 "should not raise" patterns | LOW | Valid — testing that code paths don't throw |
+### 3.5 Semantic Overlap: Planner Files
 
-### 3.5 Mega-File Anti-Pattern
+| File | Tests | Unique | Overlapping |
+|------|-------|--------|-------------|
+| `test_llm_planner.py` | 26 | 21 | — |
+| `test_llm_planner_structured.py` | 13 | 8-9 | ~4-5 (JSON fallback, partial parsing) |
 
-Two test files exceed 2500 lines, indicating insufficient modularization:
-
-| File | Lines | Recommendation |
-|------|-------|----------------|
-| `test_gateway_module.py` | 2,597 | Split by concern: adapter tests, lifecycle tests, tool call tests |
-| `test_local_module.py` | 3,363 | Split by module: installer tests, supervisor tests, sources tests, CLI tests |
+Recommendation: Keep structured file for Pydantic-specific tests. Remove overlapping fallback tests from one file.
 
 ### 3.6 Redundancy Trend
 
-| Cycle | Action | Tests Affected |
-|-------|--------|---------------|
-| Cycle 2 (Iter 7) | Deleted 47 redundant tests | +71 net |
-| Cycle 3 (Iter 16) | Deleted 48 zero-signal Pydantic tests | -48 |
-| Cycle 3 (Iter 25) | Removed 138 tests (2 file deletions, 7 class removals) | -138 |
-| **Cycle 5 identified** | **~236 removable** | **Pending action** |
-| **Cumulative removed** | **233 across 3 cycles** | **+222 P0 added** |
+| Cycle | Action | Tests Affected | Cumulative |
+|-------|--------|---------------|------------|
+| Cycle 2 (Iter 7) | Deleted 47 redundant tests | -47 | 47 |
+| Cycle 3 (Iter 16) | Deleted 48 Pydantic tests | -48 | 95 |
+| Cycle 3 (Iter 25) | Removed 138 tests | -138 | 233 |
+| **Cycle 4 identified** | **~91-96 removable** | **Pending** | **~324-329** |
+| **P0 tests added** | 222 across 5 cycles | +222 | |
 
 ---
 
 ## 4. E2E Test Quality Assessment
 
-### 4.1 Classification
+### 4.1 Classification Summary
 
-| Classification | Files | Tests | Files |
-|----------------|-------|-------|-------|
-| **TRUE_E2E** | 5 | ~91 | hooks_lifecycle, ipc_async_safety, ipc_real_subprocess, process_manager_async_safety, process_manager_cancel |
-| **INTEGRATION** | 11 | ~248 | agency, agency_pipeline, config, dag_dispatcher, dsl_toml, evolution_*, task_graph_*, runtime, gateway_tool_call (partial) |
-| **MISCLASSIFIED_UNIT** | 2 | ~73 | test_runtime_security_e2e (~59 unit tests), test_gateway_tool_call_e2e (~14 unit tests) |
+| Classification | Files | Tests | Percentage |
+|----------------|-------|-------|------------|
+| **TRUE_E2E** | 17 | ~424 | 81% |
+| **INTEGRATION** | 5 | ~90 | 14% |
+| **MISCLASSIFIED_UNIT** | 9 | ~89 | 5% |
 
-### 4.2 TRUE_E2E Details
+### 4.2 TRUE_E2E Files (17)
 
-These 5 files use real OS resources (subprocess, pipes, filesystem) and verify actual side effects:
+All use real OS resources (subprocess, pipes, SQLite, filesystem) with zero or near-zero mocking:
 
-| File | Tests | What It Tests |
-|------|-------|---------------|
-| `test_hooks_lifecycle_e2e.py` | ~18 | Hook execution with real subprocess |
-| `test_ipc_async_safety_e2e.py` | ~12 | IPC with real pipe I/O under concurrent access |
-| `test_ipc_real_subprocess_e2e.py` | ~15 | IPC with real subprocess stdin/stdout |
-| `test_process_manager_async_safety_e2e.py` | ~25 | Process lifecycle with real OS processes |
-| `test_process_manager_cancel_e2e.py` | ~21 | Cancel/kill with real subprocess |
+evolution_e2e, agency_e2e, agency_pipeline_e2e, config_e2e, dsl_toml_e2e, evolution_async_safety, ipc_async_safety, ipc_real_subprocess, process_manager_async_safety, process_manager_cancel, runtime_e2e, task_graph_async_safety, task_graph_concurrent, hooks_lifecycle, evolution_lifecycle, evolution_engine_lifecycle, runtime_security_e2e
 
-### 4.3 MISCLASSIFIED_UNIT Details
+### 4.3 MISCLASSIFIED_UNIT (9 files, recommend reclassification)
 
-| File | Problem | Recommendation |
-|------|---------|----------------|
-| `test_runtime_security_e2e.py` | ~59 tests mock all I/O — no real subprocess, no real AST execution | Re-classify as unit tests. Add 3-5 TRUE_E2E tests with real runtime. |
-| `test_gateway_tool_call_e2e.py` | ~14 tests use mock adapters — no real MCP connection | Re-classify as unit tests. Keep existing TRUE_E2E subset. |
+| File | Mock Refs | Problem |
+|------|-----------|---------|
+| `test_gateway_lifecycle_e2e.py` | 23 | Heavy `AsyncMock`/`MagicMock`/`@patch`, `_make_mock_handle()` factory. No real subprocess/DB. |
+| `test_cli_backend_integration.py` | 13 | `@patch("subprocess.Popen")`, `@patch("subprocess.run")`. No real subprocess. |
+| `test_llm_pipeline_e2e.py` | 3 | `@patch("...LLMClient")` + MagicMock. Single test, no real OS. |
+| `test_mcp_ecosystem_integration.py` | 23 | Mock-saturated LLMClient/IPC paths despite real adapter instances. |
+| `test_reasoning_protocol_integration.py` | 10 | All 4 tests `@patch("...LLMClient")`. No real OS. |
+| `test_reflect_loop.py` | 9 | Real Reflector rules but LLMReflector uses MagicMock for LLMClient. |
+| `test_agency_hooks_token_context.py` | 5 | Pure in-memory module wiring, no real OS. |
 
 ### 4.4 Missing E2E Scenarios
 
@@ -206,69 +201,94 @@ These 5 files use real OS resources (subprocess, pipes, filesystem) and verify a
 |----------|----------|-------------|
 | **P0** | Gateway full lifecycle | Register agent → start subprocess → discover tools → MCP call → get result → cleanup |
 | **P0** | CLI init + install + run | `agent-nexus init` → `install` → `run` complete pipeline |
-| **P1** | Router composite 4-phase flow | Load DSL → create TaskGraph → execute with echo agent → aggregate results |
 | **P1** | External MCP adapter real connection | Connect stdio MCP server → discover tools → call → disconnect |
-| **P2** | Evolution autonomous cycle | Seed skills → analyze → evolve → promote → verify post-promotion availability |
+| **P1** | Router composite 4-phase flow | Load DSL → create TaskGraph → execute with echo agent → aggregate |
+| **P2** | Evolution autonomous cycle | Seed skills → analyze → evolve → promote → verify availability |
 
 ---
 
-## 5. Async Safety Assessment (Carried Forward)
+## 5. High-Risk Area Deep Dives
 
-### 5.1 Grade Summary
+### 5.1 hooks/executor.py
 
-| Dimension | Grade | Change from Cycle 4 |
-|-----------|-------|---------------------|
-| CancelledError handling | B+ | Stable |
-| Resource cleanup | B | Stable |
-| Concurrent access | C+ | Stable |
-| BaseException coverage | C | Stable |
-| gather safety | A | Stable |
-| Timeout coverage | A- | Stable |
-| **Overall** | **B+** | **Stable** |
+| Path | Status | Risk |
+|------|--------|------|
+| `_execute_http` CancelledError swallowed by `except Exception` | **BUG** | Task cancellation broken via HTTP hooks |
+| `_execute_http` httpx per-request timeout | Untested | Hangs on slow HTTP |
+| `_execute_prompt` / `_execute_agent` | Zero direct tests | Placeholder always returns passed=True |
+| `_is_private_url` cloud metadata IPs | Partial coverage | 169.254.169.254 not blocked |
+| `close()` aclose() exception | Untested | Unhandled exception propagation |
 
-### 5.2 Outstanding Async Safety Gaps
+### 5.2 skills/loader.py
 
-Unchanged from Cycle 4 P0/P1 list. Key items:
+| Path | Status | Risk |
+|------|--------|------|
+| `parse_file` UnicodeDecodeError | Untested | Crash on non-UTF-8 SKILL.md |
+| `parse_file` PermissionError | Untested | Crash on unreadable files |
+| `_parse_frontmatter` YAML anchors/aliases | Untested | Unexpected metadata |
+| `_normalize_triggers` boolean values | Untested | `triggers: true` behavior unknown |
 
-- `TaskGraph` concurrent SQLite write tests (asyncio.Lock serialization) — **D grade**
-- `Router/subtask.py` BaseException re-raise — **F grade** (test is skipped)
-- `ExternalMcpAdapter` BaseException disconnect — **no test**
-- `evolution/store.py` `evolve_skill` UPSERT race — **no test**
+### 5.3 evolution/engine.py + promotion.py
+
+| Path | Status | Risk |
+|------|--------|------|
+| `_generate_init_py` | Zero tests | Invalid __init__.py breaks promoted agent |
+| `_generate_mcp_adapter` | Zero tests | Invalid MCP adapter breaks tool registration |
+| `_generate_pyproject` | Zero tests | Invalid pyproject.toml breaks installation |
+| `_evolve_captured` unwritable dir | Untested | Silent failure |
+| `promote()` atomic_write failure | Partial | Only mkdir tested, not individual file writes |
+
+### 5.4 gateway/schema_transformer.py + gateway.py
+
+| Path | Status | Risk |
+|------|--------|------|
+| `additionalProperties` in schema | Never tested | Invalid parameter generation |
+| Nested $ref chains (3+ levels) | Only indirect | Infinite recursion or wrong types |
+| `_disambiguate_tool_name` overflow (100+) | Never tested | ValueError crash |
+| `oneOf + anyOf` combined | Never tested | Incorrect union handling |
+| `_merge_properties` conflicting types | Never tested | Last-wins silently |
+
+### 5.5 config/loader.py
+
+| Path | Status | Risk |
+|------|--------|------|
+| `_build_providers` non-dict values | Untested | AttributeError crash |
+| `load_merged_config` API type conflicts | Untested | Silent override with wrong type |
+| `load_cli_routing` unit tests | None | Only integration coverage |
 
 ---
 
-## 6. Priority Actions (Cycle 5)
+## 6. Priority Actions (Cycle 4 → Cycle 5)
 
 ### P0 — Immediate
 
 | # | Action | Impact | Est. Tests |
 |---|--------|--------|------------|
-| 1 | Delete ~200 Pydantic framework tests | Remove low-signal noise | -200 |
-| 2 | Add tests for `agency/cli.py` commands | Cover 70% of CLI backend | +30 |
-| 3 | Add `evolution/engine.py` orchestration tests | Cover evolution cycle | +15 |
-| 4 | Add `models/composition.py` validator tests | Cover complex validation | +10 |
-| 5 | Re-classify `test_runtime_security_e2e.py` as unit | Fix E2E classification accuracy | 0 |
-| 6 | Add Gateway full lifecycle E2E test | Cover P0 E2E gap | +5 |
+| 1 | Fix `_execute_http` CancelledError bug (except Exception → except Exception + re-raise CancelledError) | Fix task cancellation | 0 (code fix) |
+| 2 | Add `_generate_*` file generation tests for promotion | Verify promoted agent files | +8 |
+| 3 | Add `additionalProperties` + nested `$ref` schema tests | Fix gateway schema handling | +6 |
+| 4 | Delete 79 Pydantic framework tests | Remove low-signal noise | -79 |
+| 5 | Add `parse_file` encoding/permission error tests | Fix skills robustness | +4 |
 
 ### P1 — Medium Priority
 
 | # | Action | Impact |
 |---|--------|--------|
-| 1 | Merge `test_gateway_tool_adapter.py` into `test_gateway_module.py` | Eliminate ~20 duplicate tests |
-| 2 | Split mega-files (gateway 2597L, local 3363L) into focused test files | Improve maintainability |
-| 3 | Add TaskGraph concurrent write tests | Verify asyncio.Lock serialization |
-| 4 | Add `install_local` tests (flagged since Cycle 4) | Cover critical install path |
-| 5 | Consolidate config test triple → 2 files | Remove ~15-20 duplicates |
+| 1 | Add `_execute_http` timeout + CancelledError propagation tests | Cover hook HTTP lifecycle |
+| 2 | Reclassify 7 MISCLASSIFIED_UNIT files to unit/ | Fix test tier accuracy |
+| 3 | Delete 9 duplicate counter validation tests | Reduce redundancy |
+| 4 | Fix 2 no-assertion tests (add assertions or delete) | Remove stubs |
+| 5 | Add `_disambiguate_tool_name` overflow test | Cover gateway crash guard |
 
 ### P2 — Long Term
 
 | # | Action |
 |---|--------|
-| 1 | Add BaseException tests for sources.py, lockfile.py, utils.py, _shared.py |
-| 2 | Create CLI pipeline E2E test (init → install → run) |
-| 3 | Add LLMExecutor network timeout + CancelledError tests |
-| 4 | Unskip `test_run_with_retry_propagates_system_exit` or add alternative |
-| 5 | Add ExternalMcpAdapter BaseException disconnect test |
+| 1 | Add `_build_providers` non-dict crash test |
+| 2 | Create Gateway full lifecycle E2E test |
+| 3 | Create CLI pipeline E2E test (init → install → run) |
+| 4 | Add `_evolve_captured` unwritable directory test |
+| 5 | Merge planner files (remove ~4-5 semantic overlaps) |
 
 ---
 
@@ -278,14 +298,15 @@ Unchanged from Cycle 4 P0/P1 list. Key items:
 |-----------|--------|---------------|
 | v1 (Iter 1) | Initial coverage analysis | Baseline: 4,437 tests |
 | v2 (Iter 4) | Deep audit: corrections, redundancy | Identified ~96 removable |
-| Iter 7 | Deleted 47 redundant + added 128 P0 tests | +71 net (4,437→4,508→4,778) |
-| Cycle 3 (Iter 11) | Full re-analysis: no-assertion debunked | Claimed 176 no-assertion (later debunked) |
-| Iter 14 | Added 94 P0 tests + E2E rewrites | +94 new, 37 reclassified |
-| Iter 16 | Deleted 48 zero-signal Pydantic tests | -48 frozen/required_field |
-| Cycle 4 (Iter 20) | async_safety focused re-audit | Corrected 176→1 no-assertion; 7 P0 async gaps |
-| Iter 25 | Removed 138 tests (2 deletions, 7 class removals) | -138 |
-| **Cycle 5 (Iter 27)** | **Full re-analysis: module coverage + redundancy + E2E** | **4,739 tests; ~236 removable identified** |
+| Iter 7 | Deleted 47 redundant + added 128 P0 tests | +71 net |
+| Cycle 3 (Iter 11) | Full re-analysis: no-assertion debunked | 176→1 correction |
+| Iter 14 | Added 94 P0 tests + E2E rewrites | +94 new |
+| Iter 16 | Deleted 48 zero-signal Pydantic tests | -48 |
+| Cycle 4 (Iter 20) | async_safety focused re-audit | 7 P0 async gaps |
+| Iter 25 | Removed 138 tests (2 file deletions, 7 class removals) | -138 |
+| Cycle 5 (Iter 27) | Full re-analysis: module coverage + redundancy + E2E | ~236 identified |
+| **Cycle 4 (Iter 34)** | **Full re-analysis: 5 high-risk deep dives + Pydantic audit** | **~91-96 removable; 8 P0 gaps** |
 
 ---
 
-*Report generated by 3 parallel agents (E2E quality analysis, module coverage scan, redundancy detection). All findings cross-referenced against source code and verified with `pytest --co`.*
+*Report generated from 5 parallel analysis agents: source API scan, test inventory, E2E quality assessment, 5-area deep dive, redundancy detection. All findings cross-referenced against source code.*
