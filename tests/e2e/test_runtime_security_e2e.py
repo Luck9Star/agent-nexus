@@ -688,3 +688,88 @@ class TestNewImportBypassVectors:
             assert result.error is not None and "security violation" in result.error.lower()
         finally:
             executor.close()
+
+
+# ---------------------------------------------------------------------------
+# Timeout execution and contaminated shell
+# ---------------------------------------------------------------------------
+
+
+class TestExecutorTimeoutContamination:
+    """Tests for executor timeout handling and contaminated shell rejection.
+
+    Uses a short sleep (3s) with 0.3s timeout so the orphan worker thread
+    finishes quickly in the background without blocking teardown.
+    """
+
+    @pytest.mark.asyncio
+    async def test_timeout_marks_executor_contaminated(self) -> None:
+        """Code that exceeds timeout marks executor as contaminated."""
+        executor = IPythonExecutor()
+        try:
+            result = await executor.execute(
+                "import time; time.sleep(3)", timeout=0.3
+            )
+            assert result.success is False
+            assert result.error is not None and "timed out" in result.error.lower()
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_contaminated_executor_rejects_subsequent(self) -> None:
+        """After timeout, executor rejects new execute calls until reset()."""
+        executor = IPythonExecutor()
+        try:
+            # Trigger timeout
+            await executor.execute(
+                "import time; time.sleep(3)", timeout=0.3
+            )
+            # Subsequent call should fail (shell contaminated)
+            result = await executor.execute("x = 1", timeout=5.0)
+            assert result.success is False
+            assert result.error is not None and "contaminated" in result.error.lower()
+        finally:
+            executor.close()
+
+    @pytest.mark.asyncio
+    async def test_reset_clears_contamination(self) -> None:
+        """reset() clears contaminated state, allowing execution again."""
+        executor = IPythonExecutor()
+        try:
+            await executor.execute(
+                "import time; time.sleep(3)", timeout=0.3
+            )
+            executor.reset()
+            result = await executor.execute("x = 42", timeout=5.0)
+            assert result.success is True
+            assert executor.get("x") == 42
+        finally:
+            executor.close()
+
+
+# ---------------------------------------------------------------------------
+# Concurrent execution serialization
+# ---------------------------------------------------------------------------
+
+
+class TestExecutorConcurrentSerialization:
+    """Tests that concurrent execute() calls are properly serialized."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_executes_are_serialized(self) -> None:
+        """Multiple concurrent execute() calls don't corrupt namespace."""
+        import asyncio
+
+        executor = IPythonExecutor()
+        try:
+            tasks = [
+                executor.execute(f"x{i} = {i}", timeout=5.0)
+                for i in range(5)
+            ]
+            results = await asyncio.gather(*tasks)
+            assert all(r.success for r in results)
+            # All variables should be set
+            for i in range(5):
+                assert executor.get(f"x{i}") == i
+        finally:
+            executor.close()

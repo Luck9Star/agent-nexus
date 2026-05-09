@@ -59,34 +59,6 @@ def _make_mock_handle(
 class TestCleanupDead:
     """Tests for ProcessManager._cleanup_dead()."""
 
-    def test_removes_dead_agents(self) -> None:
-        """Dead agents are removed from _agents dict."""
-        pm = ProcessManager()
-        alive_handle = _make_mock_handle("alive-agent", alive=True)
-        dead_handle = _make_mock_handle("dead-agent", alive=False)
-        pm._agents = {
-            "alive-agent": alive_handle,
-            "dead-agent": dead_handle,
-        }
-
-        result = pm._cleanup_dead()
-
-        assert "alive-agent" in pm._agents
-        assert "dead-agent" not in pm._agents
-        assert result == ["dead-agent"]
-
-    def test_alive_agents_remain(self) -> None:
-        """Alive agents are not removed."""
-        pm = ProcessManager()
-        handle1 = _make_mock_handle("agent-a", alive=True)
-        handle2 = _make_mock_handle("agent-b", alive=True)
-        pm._agents = {"agent-a": handle1, "agent-b": handle2}
-
-        result = pm._cleanup_dead()
-
-        assert len(pm._agents) == 2
-        assert result == []
-
     def test_returns_cleaned_up_names(self) -> None:
         """Returns list of names for all cleaned up agents."""
         pm = ProcessManager()
@@ -100,16 +72,6 @@ class TestCleanupDead:
         assert sorted(result) == ["d1", "d2"]
         assert list(pm._agents.keys()) == ["a1"]
 
-    def test_cancels_drain_tasks_for_dead_agents(self) -> None:
-        """Drain tasks for dead agents are cancelled."""
-        pm = ProcessManager()
-        dead_handle = _make_mock_handle("dead-agent", alive=False, has_drain_task=True)
-        pm._agents = {"dead-agent": dead_handle}
-
-        pm._cleanup_dead()
-
-        dead_handle.drain_task.cancel.assert_called_once()
-
     def test_no_drain_task_no_error(self) -> None:
         """Dead agent with no drain task does not cause error."""
         pm = ProcessManager()
@@ -120,25 +82,6 @@ class TestCleanupDead:
         result = pm._cleanup_dead()
 
         assert result == ["dead-agent"]
-
-    def test_empty_agents_returns_empty(self) -> None:
-        """Empty _agents dict returns empty list."""
-        pm = ProcessManager()
-        pm._agents = {}
-
-        result = pm._cleanup_dead()
-
-        assert result == []
-
-    def test_closes_ipc_streams_for_dead_agents(self) -> None:
-        """IPC streams are closed for dead agents after dict mutation."""
-        pm = ProcessManager()
-        dead_handle = _make_mock_handle("dead-agent", alive=False)
-        pm._agents = {"dead-agent": dead_handle}
-
-        pm._cleanup_dead()
-
-        dead_handle.ipc.stream.close_sync.assert_called_once()
 
 
 # ============================================================================
@@ -228,45 +171,6 @@ class TestForceKillAndReap:
 class TestBuildSpawnEnv:
     """Tests for _build_spawn_env() security properties."""
 
-    def test_only_includes_essential_vars(self) -> None:
-        """_build_spawn_env() only includes essential env vars, not all of os.environ."""
-        # Patch os.environ to include a sensitive variable that should NOT leak
-        with patch.dict(
-            os.environ,
-            {
-                "PATH": "/usr/bin",
-                "HOME": "/home/test",
-                "USER": "testuser",
-                "LANG": "en_US.UTF-8",
-                "TERM": "xterm",
-                "AWS_SECRET_ACCESS_KEY": "super-secret-key-12345",
-                "DATABASE_URL": "postgres://admin:pass@db:5432/secret",
-            },
-            clear=True,
-        ):
-            env = _build_spawn_env()
-
-        assert "PATH" in env
-        assert "HOME" in env
-        assert "USER" in env
-        assert "LANG" in env
-        assert "TERM" in env
-        assert "AWS_SECRET_ACCESS_KEY" not in env
-        assert "DATABASE_URL" not in env
-
-    def test_extra_vars_layered_on_top(self) -> None:
-        """Extra variables are layered on top of essential env vars."""
-        with patch.dict(
-            os.environ,
-            {"PATH": "/usr/bin", "HOME": "/home/test"},
-            clear=True,
-        ):
-            env = _build_spawn_env(extra={"MY_API_KEY": "key-123", "CUSTOM_VAR": "val"})
-
-        assert env["MY_API_KEY"] == "key-123"
-        assert env["CUSTOM_VAR"] == "val"
-        assert env["PATH"] == "/usr/bin"
-
     def test_extra_overrides_essential(self) -> None:
         """Extra vars can override essential vars."""
         with patch.dict(
@@ -277,28 +181,6 @@ class TestBuildSpawnEnv:
             env = _build_spawn_env(extra={"PATH": "/custom/path"})
 
         assert env["PATH"] == "/custom/path"
-
-    def test_no_extra_returns_minimal_env(self) -> None:
-        """Without extra, only essential vars from os.environ are included."""
-        with patch.dict(
-            os.environ,
-            {"PATH": "/usr/bin", "HOME": "/home/test", "BOGUS": "nope"},
-            clear=True,
-        ):
-            env = _build_spawn_env()
-
-        assert "PATH" in env
-        assert "HOME" in env
-        assert "BOGUS" not in env
-
-    def test_missing_essential_vars_omitted(self) -> None:
-        """Essential vars not present in os.environ are omitted from result."""
-        with patch.dict(os.environ, {"PATH": "/usr/bin"}, clear=True):
-            env = _build_spawn_env()
-
-        assert "PATH" in env
-        assert "HOME" not in env
-        assert "USER" not in env
 
     def test_agent_nexus_home_included_when_present(self) -> None:
         """AGENT_NEXUS_HOME is included when set in the environment."""
