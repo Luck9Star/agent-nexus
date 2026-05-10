@@ -27,6 +27,7 @@ from agent_nexus.models.ipc import (
     PlatformToAgent,
     PlatformToAgentType,
 )
+from agent_nexus.platform.orchestration.agent_directory import AgentDirectory
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
 
 logger = logging.getLogger(__name__)
@@ -40,8 +41,13 @@ class MessageBroker:
     coordinator.
     """
 
-    def __init__(self, process_manager: ProcessManager) -> None:
+    def __init__(
+        self,
+        process_manager: ProcessManager,
+        agent_directory: AgentDirectory | None = None,
+    ) -> None:
         self._pm = process_manager
+        self._directory = agent_directory
         self._pending_replies: dict[str, asyncio.Future[str]] = {}
         self._active_requests: set[str] = set()
 
@@ -108,10 +114,10 @@ class MessageBroker:
         try:
             await self._deliver(msg)
             return await asyncio.wait_for(future, timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise TimeoutError(
                 f"Request from '{from_id}' to '{to_id}' timed out after {timeout}s"
-            )
+            ) from None
         finally:
             self._pending_replies.pop(msg.message_id, None)
             self._active_requests.discard(request_key)
@@ -172,10 +178,12 @@ class MessageBroker:
         """
         match message.msg_type:
             case "chat":
-                assert message.to_agent is not None
+                if message.to_agent is None:
+                    raise ValueError("chat message requires to_agent")
                 await self.send_message(from_id, message.to_agent, message.content)
             case "request":
-                assert message.to_agent is not None
+                if message.to_agent is None:
+                    raise ValueError("request message requires to_agent")
                 await self.send_request(from_id, message.to_agent, message.content)
             case "broadcast":
                 await self.broadcast(from_id, message.content)
@@ -215,7 +223,8 @@ class MessageBroker:
 
     async def _deliver(self, msg: A2AMessage) -> None:
         """Serialize *msg* into a ``PlatformToAgent`` and send via IPC."""
-        assert msg.to_agent is not None, "Cannot deliver message with to_agent=None"
+        if msg.to_agent is None:
+            raise ValueError("Cannot deliver message with to_agent=None")
         handle = self._pm.get_agent(msg.to_agent)
         if handle is None:
             raise KeyError(f"Agent '{msg.to_agent}' not found")
@@ -247,10 +256,17 @@ class MessageBroker:
         }[msg_type]
 
     def _get_broadcast_targets(self, from_id: str, group: str | None) -> list[str]:
-        """Return agent IDs eligible for broadcast, excluding *from_id*."""
+        """Return agent IDs eligible for broadcast, excluding *from_id*.
+
+        When *group* is provided and an ``AgentDirectory`` is wired in,
+        filter targets by role (the *group* value is treated as a role name).
+        Otherwise fall back to all running agents.
+        """
+        if group is not None and self._directory is not None:
+            role_agents = {addr.agent_id for addr in self._directory.find_by_role(group)}
+            running = set(self._pm.list_running())
+            return [aid for aid in running if aid != from_id and aid in role_agents]
         running = self._pm.list_running()
-        # Future: filter by composition group when group tracking exists
-        _ = group  # reserved for group-based filtering
         return [aid for aid in running if aid != from_id]
 
     def _check_nesting(self, from_id: str, to_id: str) -> None:

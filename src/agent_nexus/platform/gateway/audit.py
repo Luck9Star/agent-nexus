@@ -50,6 +50,7 @@ Phase 1 — AuditLogger Design
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -59,9 +60,7 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import Literal
-
-import asyncio
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -112,6 +111,17 @@ class AuditFilter(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# AuditSink protocol (G5: pluggable event sinks)
+# ---------------------------------------------------------------------------
+
+
+class AuditSink(Protocol):
+    """Protocol for audit event sinks."""
+
+    async def write(self, event: AuditEvent) -> None: ...
+
+
+# ---------------------------------------------------------------------------
 # SQLite schema
 # ---------------------------------------------------------------------------
 
@@ -157,9 +167,15 @@ class AuditLogger:
         max_size_mb: Maximum database size in MB before rotation (default 500).
     """
 
-    def __init__(self, db_path: str, max_size_mb: float = 500) -> None:
+    def __init__(
+        self,
+        db_path: str,
+        max_size_mb: float = 500,
+        sinks: list[AuditSink] | None = None,
+    ) -> None:
         self._db_path = Path(db_path)
         self._max_size_bytes = int(max_size_mb * 1024 * 1024)
+        self._sinks: list[AuditSink] = sinks or []
         self._init_db()
 
     # ------------------------------------------------------------------
@@ -291,9 +307,12 @@ class AuditLogger:
     # ------------------------------------------------------------------
 
     async def log(self, event: AuditEvent) -> None:
-        """Async write event to audit log."""
+        """Async write event to audit log and forward to sinks."""
         await asyncio.to_thread(self._insert_event, event)
         await asyncio.to_thread(self._rotate_if_needed)
+        # Forward to pluggable sinks (G5)
+        for sink in self._sinks:
+            await sink.write(event)
 
     async def query(self, filt: AuditFilter) -> list[AuditEvent]:
         """Query audit events with filters."""

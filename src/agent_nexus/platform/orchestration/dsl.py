@@ -22,6 +22,26 @@ from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.models.task import TaskItem, TaskState
 
 # ---------------------------------------------------------------------------
+# MessagingConfig (used by both DSL and MessageBroker)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_CHANNELS = ["chat", "request", "broadcast"]
+
+
+@dataclass(frozen=True)
+class MessagingConfig:
+    """Configuration for the A2A messaging subsystem.
+
+    Parsed from the optional ``[messaging]`` TOML section. All fields
+    have sensible defaults so the section is optional.
+    """
+
+    enabled: bool = True
+    max_message_size: int = 1_048_576  # 1 MB
+    request_timeout: float = 30.0
+    allowed_channels: list[str] = field(default_factory=lambda: list(_DEFAULT_CHANNELS))
+
+# ---------------------------------------------------------------------------
 # DSL data types (immutable)
 # ---------------------------------------------------------------------------
 
@@ -115,6 +135,7 @@ class OrchestrationDefinition:
     agents: dict[str, DSLAgent]  # name -> DSLAgent
     tasks: list[DSLTask]  # Ordered task list
     tool_loading: DSLToolLoading
+    messaging: MessagingConfig = field(default_factory=MessagingConfig)
 
     def get_root_tasks(self) -> list[DSLTask]:
         """Get tasks with no dependencies (entry points)."""
@@ -274,6 +295,7 @@ class OrchestrationDSL:
         agents = self._parse_canonical_agents(raw)
         tasks = self._parse_canonical_tasks(raw)
         tool_loading = self._parse_tool_loading(raw)
+        messaging = self._parse_messaging(raw)
 
         definition = OrchestrationDefinition(
             goal=goal,
@@ -281,6 +303,7 @@ class OrchestrationDSL:
             agents=agents,
             tasks=tasks,
             tool_loading=tool_loading,
+            messaging=messaging,
         )
 
         # Run validation, raise on errors (cycles, bad refs)
@@ -466,6 +489,7 @@ class OrchestrationDSL:
 
         # -- [tool_loading] (optional, rare in composition format) --
         tool_loading = self._parse_tool_loading(raw)
+        messaging = self._parse_messaging(raw)
 
         definition = OrchestrationDefinition(
             goal=goal,
@@ -473,6 +497,7 @@ class OrchestrationDSL:
             agents=agents,
             tasks=tasks,
             tool_loading=tool_loading,
+            messaging=messaging,
         )
 
         # Run validation (same as canonical path)
@@ -544,6 +569,38 @@ class OrchestrationDSL:
             )
         except ValueError as exc:
             raise DSLSyntaxError(f"[tool_loading]: {exc}") from exc
+
+    @staticmethod
+    def _parse_messaging(raw: dict[str, Any]) -> MessagingConfig:
+        """Parse [messaging] section from raw TOML dict."""
+        raw_msg = raw.get("messaging")
+        if raw_msg is None:
+            return MessagingConfig()
+        if not isinstance(raw_msg, dict):
+            raise DSLSyntaxError("[messaging] must be a table")
+        enabled = raw_msg.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise DSLSyntaxError("[messaging].enabled must be a boolean")
+        max_size = raw_msg.get("max_message_size", 1_048_576)
+        if not isinstance(max_size, int) or max_size <= 0:
+            raise DSLSyntaxError("[messaging].max_message_size must be a positive integer")
+        timeout = raw_msg.get("request_timeout", 30.0)
+        if not isinstance(timeout, (int, float)) or timeout <= 0:
+            raise DSLSyntaxError("[messaging].request_timeout must be a positive number")
+        channels = raw_msg.get("allowed_channels", list(_DEFAULT_CHANNELS))
+        if not isinstance(channels, list):
+            raise DSLSyntaxError("[messaging].allowed_channels must be a list")
+        for idx, ch in enumerate(channels):
+            if not isinstance(ch, str) or not ch:
+                raise DSLSyntaxError(
+                    f"[messaging].allowed_channels[{idx}] must be a non-empty string"
+                )
+        return MessagingConfig(
+            enabled=enabled,
+            max_message_size=max_size,
+            request_timeout=float(timeout),
+            allowed_channels=cast("list[str]", channels),
+        )
 
     @staticmethod
     def _detect_cycles(task_map: dict[str, DSLTask]) -> list[list[str]]:

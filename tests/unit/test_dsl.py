@@ -17,6 +17,7 @@ from agent_nexus.platform.orchestration.dsl import (
     DSLTask,
     DSLToolLoading,
     DSLValidationError,
+    MessagingConfig,
     OrchestrationDefinition,
     OrchestrationDSL,
 )
@@ -1196,3 +1197,148 @@ class TestGetTaskDepthCacheHit:
         assert defn.get_task_depth("T1") == 0
         assert defn.get_task_depth("T2") == 1
         assert defn.get_task_depth("T3") == 1
+
+
+# ============================================================================
+# MessagingConfig
+# ============================================================================
+
+
+class TestMessagingConfig:
+    def test_defaults(self) -> None:
+        mc = MessagingConfig()
+        assert mc.enabled is True
+        assert mc.max_message_size == 1_048_576
+        assert mc.request_timeout == 30.0
+        assert mc.allowed_channels == ["chat", "request", "broadcast"]
+
+    def test_custom_values(self) -> None:
+        mc = MessagingConfig(
+            enabled=False,
+            max_message_size=2048,
+            request_timeout=60.0,
+            allowed_channels=["chat"],
+        )
+        assert mc.enabled is False
+        assert mc.max_message_size == 2048
+        assert mc.request_timeout == 60.0
+        assert mc.allowed_channels == ["chat"]
+
+
+# ============================================================================
+# [messaging] TOML parsing
+# ============================================================================
+
+
+class TestMessagingTomlParsing:
+    def test_parse_without_messaging_section(self) -> None:
+        """Definition without [messaging] gets defaults."""
+        dsl = OrchestrationDSL()
+        defn = dsl.parse_string(_MINIMAL_VALID_TOML)
+        assert defn.messaging.enabled is True
+        assert defn.messaging.max_message_size == 1_048_576
+        assert defn.messaging.request_timeout == 30.0
+
+    def test_parse_messaging_section_canonical(self) -> None:
+        """Parse [messaging] in canonical TOML format."""
+        toml_str = _MINIMAL_VALID_TOML + """
+[messaging]
+enabled = false
+max_message_size = 4096
+request_timeout = 10.0
+allowed_channels = ["chat"]
+"""
+        dsl = OrchestrationDSL()
+        defn = dsl.parse_string(toml_str)
+        assert defn.messaging.enabled is False
+        assert defn.messaging.max_message_size == 4096
+        assert defn.messaging.request_timeout == 10.0
+        assert defn.messaging.allowed_channels == ["chat"]
+
+    def test_parse_messaging_section_composition_format(self) -> None:
+        """Parse [messaging] in composition TOML format."""
+        toml_str = """
+[composition]
+name = "test-pipeline"
+description = "A test pipeline"
+
+[tasks.T1]
+name = "step-1"
+agent = "worker-a"
+
+[messaging]
+enabled = true
+max_message_size = 8192
+request_timeout = 15.0
+"""
+        dsl = OrchestrationDSL()
+        defn = dsl.parse_string(toml_str)
+        assert defn.messaging.enabled is True
+        assert defn.messaging.max_message_size == 8192
+        assert defn.messaging.request_timeout == 15.0
+
+    def test_messaging_not_a_table(self) -> None:
+        """[messaging] as scalar raises DSLSyntaxError."""
+        import toml as toml_lib
+
+        dsl = OrchestrationDSL()
+        raw = toml_lib.loads(_MINIMAL_VALID_TOML)
+        raw["messaging"] = "bad"
+        with pytest.raises(DSLSyntaxError, match=r"\[messaging\] must be a table"):
+            dsl._parse(raw)
+
+    def test_messaging_enabled_not_bool(self) -> None:
+        """[messaging].enabled as string raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match="enabled must be a boolean"):
+            dsl.parse_string(_MINIMAL_VALID_TOML + """
+[messaging]
+enabled = "yes"
+""")
+
+    def test_messaging_max_size_not_positive(self) -> None:
+        """[messaging].max_message_size as negative raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match="max_message_size must be a positive"):
+            dsl.parse_string(_MINIMAL_VALID_TOML + """
+[messaging]
+max_message_size = -1
+""")
+
+    def test_messaging_timeout_not_positive(self) -> None:
+        """[messaging].request_timeout as negative raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match="request_timeout must be a positive"):
+            dsl.parse_string(_MINIMAL_VALID_TOML + """
+[messaging]
+request_timeout = -5.0
+""")
+
+    def test_messaging_channels_not_a_list(self) -> None:
+        """[messaging].allowed_channels as string raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match="allowed_channels must be a list"):
+            dsl.parse_string(_MINIMAL_VALID_TOML + """
+[messaging]
+allowed_channels = "chat"
+""")
+
+    def test_messaging_channels_empty_entry(self) -> None:
+        """Empty string in allowed_channels raises DSLSyntaxError."""
+        dsl = OrchestrationDSL()
+        with pytest.raises(DSLSyntaxError, match=r"allowed_channels\[1\] must be a non-empty"):
+            dsl.parse_string(_MINIMAL_VALID_TOML + """
+[messaging]
+allowed_channels = ["chat", ""]
+""")
+
+    def test_messaging_partial_section(self) -> None:
+        """Partial [messaging] section uses defaults for missing fields."""
+        dsl = OrchestrationDSL()
+        defn = dsl.parse_string(_MINIMAL_VALID_TOML + """
+[messaging]
+enabled = false
+""")
+        assert defn.messaging.enabled is False
+        assert defn.messaging.max_message_size == 1_048_576
+        assert defn.messaging.request_timeout == 30.0

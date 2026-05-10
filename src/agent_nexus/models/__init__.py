@@ -89,6 +89,8 @@ from agent_nexus.models.hooks import (
 
 # ipc.py — Inter-process communication
 from agent_nexus.models.ipc import (
+    A2AMessage,
+    AgentAddress,
     AgentToPlatform,
     AgentToPlatformType,
     IPCMessage,
@@ -133,6 +135,8 @@ __all__ = [
     "AgentPackage",
     "AgentRole",
     # ipc.py
+    "A2AMessage",
+    "AgentAddress",
     "AgentToPlatform",
     "AgentToPlatformType",
     "AgentType",
