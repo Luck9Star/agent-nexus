@@ -1,0 +1,17 @@
+[agent]
+name = "config-linter"
+version = "0.1.0"
+type = "atomic"
+description = "Config file linter for TOML, YAML, and JSON"
+
+[agent.model_config]
+recommended = "economy"
+fallback = "economy"
+max_turns = 3
+
+[agent.mcp]
+tools = ["lint_config"]
+
+[agent.permissions]
+mode = "default"
+allowed_tools = ["file_read"]

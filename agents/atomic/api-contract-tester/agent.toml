@@ -1,0 +1,17 @@
+[agent]
+name = "api-contract-tester"
+version = "0.1.0"
+type = "atomic"
+description = "API contract testing and validation agent"
+
+[agent.model_config]
+recommended = "standard"
+fallback = "economy"
+max_turns = 5
+
+[agent.mcp]
+tools = ["validate_contract", "generate_tests"]
+
+[agent.permissions]
+mode = "default"
+allowed_tools = ["file_read"]

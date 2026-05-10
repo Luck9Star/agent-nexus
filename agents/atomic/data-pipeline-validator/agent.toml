@@ -1,0 +1,17 @@
+[agent]
+name = "data-pipeline-validator"
+version = "0.1.0"
+type = "atomic"
+description = "ETL pipeline validation agent"
+
+[agent.model_config]
+recommended = "standard"
+fallback = "economy"
+max_turns = 5
+
+[agent.mcp]
+tools = ["validate_pipeline"]
+
+[agent.permissions]
+mode = "default"
+allowed_tools = ["file_read"]

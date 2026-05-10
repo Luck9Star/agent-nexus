@@ -1,0 +1,17 @@
+[agent]
+name = "error-analyzer"
+version = "0.1.0"
+type = "atomic"
+description = "Error pattern analyzer and fix suggestion engine"
+
+[agent.model_config]
+recommended = "standard"
+fallback = "economy"
+max_turns = 5
+
+[agent.mcp]
+tools = ["analyze_error"]
+
+[agent.permissions]
+mode = "default"
+allowed_tools = ["file_read"]

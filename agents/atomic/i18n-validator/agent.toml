@@ -1,0 +1,17 @@
+[agent]
+name = "i18n-validator"
+version = "0.1.0"
+type = "atomic"
+description = "Internationalization completeness checking agent"
+
+[agent.model_config]
+recommended = "standard"
+fallback = "economy"
+max_turns = 5
+
+[agent.mcp]
+tools = ["validate_i18n"]
+
+[agent.permissions]
+mode = "default"
+allowed_tools = ["file_read"]
