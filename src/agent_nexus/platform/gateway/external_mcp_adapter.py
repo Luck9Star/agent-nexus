@@ -143,6 +143,14 @@ class ExternalMcpAdapter:
         if self._session is None or not self.is_alive:
             raise RuntimeError(f"External MCP server '{self._config.name}' is not connected")
 
+        # Enforce allowed_tools restriction
+        allowed = self._config.allowed_tools
+        if allowed and tool_name not in allowed:
+            raise PermissionError(
+                f"Tool '{tool_name}' is not in the allowed list for server "
+                f"'{self._config.name}'. Allowed: {allowed}"
+            )
+
         result = await self._session.call_tool(tool_name, arguments)
 
         # Extract text from content blocks; non-text blocks are represented
@@ -198,8 +206,12 @@ class ExternalMcpAdapter:
         """Build HTTP headers from auth configuration.
 
         Returns extra headers to merge with any user-supplied headers.
+        Note: mTLS auth uses certificates at the transport level (see
+        ``_open_sse_transport`` / ``_open_http_transport``), not headers.
         """
         auth = self._config.auth
+        if auth is None:
+            return {}
         if auth.method == "bearer":
             token = self._resolve_env_vars(auth.bearer_token)
             if token:
@@ -208,6 +220,11 @@ class ExternalMcpAdapter:
             key = self._resolve_env_vars(auth.api_key)
             if key:
                 return {"X-API-Key": key}
+        elif auth.method == "mtls":
+            logger.info(
+                "mTLS auth configured for '%s' — certificates applied at transport level",
+                self._config.name,
+            )
         return {}
 
     async def _open_transport(
@@ -267,10 +284,24 @@ class ExternalMcpAdapter:
         if not self._config.url:
             raise ValueError(f"SSE transport requires 'url' for server '{self._config.name}'")
         headers = {**self._build_auth_headers(), **(self._config.headers or {})}
+
+        import httpx
+
+        def _httpx_factory(
+            headers: dict[str, str] | None = None,
+            timeout: Any = None,
+            auth: Any = None,
+        ) -> httpx.AsyncClient:
+            return httpx.AsyncClient(
+                headers=headers, timeout=timeout, auth=auth,
+                verify=self._config.tls_verify,
+            )
+
         return await self._exit_stack.enter_async_context(
             sse_client(
                 url=self._config.url,
                 headers=headers or None,
+                httpx_client_factory=_httpx_factory,
             )
         )
 
@@ -282,10 +313,24 @@ class ExternalMcpAdapter:
                 f"HTTP_STREAM transport requires 'url' for server '{self._config.name}'"
             )
         headers = {**self._build_auth_headers(), **(self._config.headers or {})}
+
+        import httpx
+
+        def _httpx_factory(
+            headers: dict[str, str] | None = None,
+            timeout: Any = None,
+            auth: Any = None,
+        ) -> httpx.AsyncClient:
+            return httpx.AsyncClient(
+                headers=headers, timeout=timeout, auth=auth,
+                verify=self._config.tls_verify,
+            )
+
         streams = await self._exit_stack.enter_async_context(
             streamablehttp_client(
                 url=self._config.url,
                 headers=headers or None,
+                httpx_client_factory=_httpx_factory,
             )
         )
         # streamablehttp_client yields (read, write, get_session_id)

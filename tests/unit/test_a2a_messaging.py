@@ -28,6 +28,7 @@ from agent_nexus.models.ipc import (
     PlatformToAgentType,
 )
 from agent_nexus.platform.orchestration.message_broker import MessageBroker
+from agent_nexus.platform.orchestration.agent_directory import AgentDirectory
 from agent_nexus.platform.orchestration.process_manager import AgentHandle
 
 
@@ -591,3 +592,53 @@ class TestMessageBrokerBuildHelpers:
 
     def test_request_key_format(self) -> None:
         assert MessageBroker._request_key("a", "b") == "a->b"
+
+
+# ============================================================================
+# MessageBroker — composition boundary (D4)
+# ============================================================================
+
+
+class TestCompositionBoundary:
+    def test_same_composition_allowed(self) -> None:
+        """Agents in the same composition group can message each other."""
+        broker = MessageBroker(process_manager=MagicMock())
+        directory = AgentDirectory()
+        directory.register("a", [], "worker", composition="pipeline-1")
+        directory.register("b", [], "worker", composition="pipeline-1")
+        broker._directory = directory
+        # Should not raise
+        broker._check_composition_boundary("a", "b")
+
+    def test_different_composition_blocked(self) -> None:
+        """Agents in different composition groups cannot message each other."""
+        broker = MessageBroker(process_manager=MagicMock())
+        directory = AgentDirectory()
+        directory.register("a", [], "worker", composition="pipeline-1")
+        directory.register("b", [], "worker", composition="pipeline-2")
+        broker._directory = directory
+        with pytest.raises(PermissionError, match="Composition boundary"):
+            broker._check_composition_boundary("a", "b")
+
+    def test_no_directory_allows_all(self) -> None:
+        """Without a directory, all messages are allowed."""
+        broker = MessageBroker(process_manager=MagicMock())
+        # No directory set — should not raise
+        broker._check_composition_boundary("a", "b")
+
+    def test_no_composition_group_allows_all(self) -> None:
+        """Agents without composition group can message freely."""
+        broker = MessageBroker(process_manager=MagicMock())
+        directory = AgentDirectory()
+        directory.register("a", [], "worker")  # no composition
+        directory.register("b", [], "worker")  # no composition
+        broker._directory = directory
+        broker._check_composition_boundary("a", "b")  # no error
+
+    def test_unknown_agent_allows(self) -> None:
+        """Unknown agents in directory are allowed (may not be registered yet)."""
+        broker = MessageBroker(process_manager=MagicMock())
+        directory = AgentDirectory()
+        directory.register("a", [], "worker", composition="pipeline-1")
+        broker._directory = directory
+        broker._check_composition_boundary("a", "unknown")  # no error

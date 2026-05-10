@@ -26,7 +26,13 @@ class AgentDirectory:
     # Public API
     # ------------------------------------------------------------------
 
-    def register(self, agent_id: str, capabilities: list[str], role: str) -> None:
+    def register(
+        self,
+        agent_id: str,
+        capabilities: list[str],
+        role: str,
+        composition: str | None = None,
+    ) -> None:
         """Register (or re-register) an agent with capabilities and role.
 
         If the agent was previously registered, its old capabilities are
@@ -43,8 +49,8 @@ class AgentDirectory:
                     if not ids:
                         self._cap_index.pop(cap, None)
 
-        # Store address with role metadata
-        addr = AgentAddress(agent_id=agent_id, role=role)
+        # Store address with role and composition metadata
+        addr = AgentAddress(agent_id=agent_id, role=role, composition=composition)
         # Stash capabilities on the address object for re-registration cleanup.
         # We use a private attribute since AgentAddress is a BaseModel.
         addr._capabilities = capabilities  # type: ignore[attr-defined]

@@ -225,6 +225,10 @@ class MessageBroker:
         """Serialize *msg* into a ``PlatformToAgent`` and send via IPC."""
         if msg.to_agent is None:
             raise ValueError("Cannot deliver message with to_agent=None")
+
+        # D4: composition boundary — only allow messaging within same composition
+        self._check_composition_boundary(msg.from_agent, msg.to_agent)
+
         handle = self._pm.get_agent(msg.to_agent)
         if handle is None:
             raise KeyError(f"Agent '{msg.to_agent}' not found")
@@ -268,6 +272,28 @@ class MessageBroker:
             return [aid for aid in running if aid != from_id and aid in role_agents]
         running = self._pm.list_running()
         return [aid for aid in running if aid != from_id]
+
+    def _check_composition_boundary(self, from_id: str, to_id: str) -> None:
+        """D4: restrict messaging to agents in the same composition group.
+
+        When an AgentDirectory is available and both agents declare a
+        composition group, delivery is blocked if the groups don't match.
+        If either agent has no composition (or no directory), delivery is
+        allowed — this supports standalone agents that aren't part of any group.
+        """
+        if self._directory is None:
+            return
+        from_addr = self._directory.resolve(from_id)
+        to_addr = self._directory.resolve(to_id)
+        if from_addr is None or to_addr is None:
+            return
+        if from_addr.composition is None or to_addr.composition is None:
+            return
+        if from_addr.composition != to_addr.composition:
+            raise PermissionError(
+                f"Composition boundary: agent '{from_id}' (group={from_addr.composition}) "
+                f"cannot message agent '{to_id}' (group={to_addr.composition})"
+            )
 
     def _check_nesting(self, from_id: str, to_id: str) -> None:
         """Prevent A→B request when B→A is already pending.

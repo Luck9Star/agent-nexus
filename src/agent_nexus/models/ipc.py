@@ -152,6 +152,7 @@ class AgentAddress(BaseModel):
 
     agent_id: str
     role: str | None = None
+    composition: str | None = None
 
 
 class A2AMessage(BaseModel):

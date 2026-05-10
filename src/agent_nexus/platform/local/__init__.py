@@ -15,18 +15,48 @@ Usage::
     supervisor = AgentSupervisor(process_manager, lockfile_mgr, config_loader)
 """
 
+from .dependency_resolver import ConflictReport, DependencyResolver, ResolvedDependency
 from .installer import AgentNotFoundError, GitInstaller, InstallationError
 from .lockfile import LockfileManager
+from .quality_gate import (
+    BaseCheck,
+    CheckResult,
+    CheckSeverity,
+    CheckVerdict,
+    DependencyCheck,
+    ManifestCheck,
+    QualityGate,
+    QualityGateResult,
+    SecurityCheck,
+    SkillFileCheck,
+    TestCoverageCheck,
+)
 from .sources import SourceManager
 from .supervisor import AgentSupervisor, RestartTracker
 
 __all__ = [
     # Core classes
     "AgentSupervisor",
+    "DependencyResolver",
     "GitInstaller",
     "LockfileManager",
+    "QualityGate",
     "RestartTracker",
     "SourceManager",
+    # Quality Gate
+    "BaseCheck",
+    "CheckResult",
+    "CheckSeverity",
+    "CheckVerdict",
+    "DependencyCheck",
+    "ManifestCheck",
+    "QualityGateResult",
+    "SecurityCheck",
+    "SkillFileCheck",
+    "TestCoverageCheck",
+    # Dependency Resolver
+    "ConflictReport",
+    "ResolvedDependency",
     # Exceptions
     "AgentNotFoundError",
     "InstallationError",

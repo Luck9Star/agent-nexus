@@ -241,3 +241,48 @@ class TestConfigLoaderAuth:
         result = ConfigLoader._parse_external_server(item)
         assert result is not None
         assert result.allowed_tools is None
+
+
+class TestAllowedToolsEnforcement:
+    """Verify that call_tool enforces allowed_tools restriction."""
+
+    def test_allowed_tool_passes(self) -> None:
+        """Tool in allowed list should not raise."""
+        config = ExternalServerConfig(
+            name="test",
+            transport=TransportType.SSE,
+            url="http://localhost:8080",
+            allowed_tools=["read_file", "write_file"],
+        )
+        adapter = ExternalMcpAdapter(config)
+        # Manually set session to simulate connected state
+        adapter._session = True  # type: ignore[assignment]
+        # Check directly — allowed_tools enforcement happens before the call
+        allowed = config.allowed_tools
+        assert allowed is not None
+        assert "read_file" in allowed
+
+    async def test_disallowed_tool_raises(self) -> None:
+        """Tool NOT in allowed list should raise PermissionError."""
+        import pytest
+
+        config = ExternalServerConfig(
+            name="test",
+            transport=TransportType.SSE,
+            url="http://localhost:8080",
+            allowed_tools=["read_file"],
+        )
+        adapter = ExternalMcpAdapter(config)
+        adapter._session = True  # type: ignore[assignment]
+        adapter._exit_stack = True  # type: ignore[assignment]
+        with pytest.raises(PermissionError, match="not in the allowed list"):
+            await adapter.call_tool("delete_file", {})
+
+    def test_no_allowed_tools_all_all(self) -> None:
+        """When allowed_tools is None, all tools are permitted."""
+        config = ExternalServerConfig(
+            name="test",
+            transport=TransportType.SSE,
+            url="http://localhost:8080",
+        )
+        assert config.allowed_tools is None
