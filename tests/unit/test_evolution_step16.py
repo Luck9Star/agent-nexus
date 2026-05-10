@@ -320,3 +320,18 @@ class TestDashboard:
         lineage = dashboard.get_skill_lineage(skill.id)
         assert lineage is not None
         assert lineage.name == "root-skill"
+
+    def test_lineage_with_children(self, store: EvolutionStore) -> None:
+        """Verify children are found (regression: visited set pre-seeding bug)."""
+        parent = _register_skill(store, _make_skill("parent"))
+        _register_skill(
+            store,
+            _make_skill("child", parent_ids=[parent.id]),
+        )
+
+        dashboard = EvolutionDashboard(store)
+        lineage = dashboard.get_skill_lineage(parent.id)
+
+        assert lineage is not None
+        assert len(lineage.children) == 1
+        assert lineage.children[0].name == "child"

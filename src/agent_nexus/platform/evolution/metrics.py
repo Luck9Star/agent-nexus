@@ -140,7 +140,7 @@ class EvolutionDashboard:
 
         all_skills = self._store.get_all_skills()
         children = self._find_children(
-            skill_id, all_skills=all_skills, visited={skill_id}, depth=0
+            skill_id, all_skills=all_skills, visited=set(), depth=0
         )
         return LineageNode(
             skill_id=record.id,
