@@ -357,6 +357,23 @@ class TestQualityGate:
         assert not result.passed
         assert result.score == 0.9
 
+    def test_check_exception_converts_to_critical(self, tmp_path: Path) -> None:
+        """A check that raises an exception becomes a CRITICAL failure."""
+
+        class BrokenCheck(BaseCheck):
+            name = "broken"
+
+            def run(self, d: Path) -> CheckResult:
+                raise RuntimeError("something broke")
+
+        gate = QualityGate(checks=[BrokenCheck()])
+        result = gate.evaluate(tmp_path)
+        assert not result.passed
+        assert any(
+            c.check_name == "broken" and c.severity == CheckSeverity.CRITICAL
+            for c in result.checks
+        )
+
     def test_custom_checks(self, tmp_path: Path) -> None:
         """QualityGate with a custom check list."""
         agent_dir = _make_valid_agent(tmp_path)

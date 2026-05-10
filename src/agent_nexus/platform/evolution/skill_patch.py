@@ -225,7 +225,7 @@ class SkillPatcher:
             r"\bsubprocess\s*\.",
             r"\bos\.system\s*\(",
             r"\b__import__\s*\(",
-            r"\bopen\s*\(.+[\'\"]w",
+            r"\bopen\s*\(['\"][^'\"]*['\"],\s*['\"]w",
         )
         return not any(re.search(p, code_text) for p in dangerous)
 

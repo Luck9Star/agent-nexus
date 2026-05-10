@@ -153,6 +153,24 @@ class TestValidatePatch:
         result = self.patcher.validate_patch("", content)
         assert result.security_pass is True
 
+    def test_unclosed_code_block_detects_dangerous(self) -> None:
+        """Unclosed code block (odd number of ```) still scanned for safety."""
+        content = "# Skill\n\n```python\nsubprocess.run(cmd)\n"
+        result = self.patcher.validate_patch("", content)
+        assert result.security_pass is False
+
+    def test_open_read_not_flagged(self) -> None:
+        """open() with read mode or path containing 'w' should not trigger."""
+        content = "# Skill\n\n```python\nf = open(os.path.join('data', 'write_log'), 'r')\n```"
+        result = self.patcher.validate_patch("", content)
+        assert result.security_pass is True
+
+    def test_open_write_flagged(self) -> None:
+        """open() with write mode should be flagged."""
+        content = "# Skill\n\n```python\nf = open('output.txt', 'w')\n```"
+        result = self.patcher.validate_patch("", content)
+        assert result.security_pass is False
+
 
 # ---------------------------------------------------------------------------
 # SkillPatcher — generate_fix

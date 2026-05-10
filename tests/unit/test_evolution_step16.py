@@ -133,6 +133,21 @@ class TestExperimenter:
         assigned = ex.assign(exp)
         assert assigned.id in (parent.id, evolved.id)
 
+    def test_assign_raises_when_skill_deleted(self, store: EvolutionStore) -> None:
+        """assign() raises KeyError if the skill was deleted after experiment creation."""
+        parent = _register_skill(store, _make_skill("parent"))
+        evolved = _register_skill(store, _make_skill("evolved", SkillOrigin.FIXED))
+
+        ex = EvolutionExperimenter(store)
+        exp = ex.create_experiment(parent, evolved)
+
+        # Delete both skills so assign can't find either
+        with store._conn() as conn:
+            conn.execute("DELETE FROM skill_records WHERE id IN (?, ?)", (parent.id, evolved.id))
+
+        with pytest.raises(KeyError, match="Skill not found"):
+            ex.assign(exp)
+
     def test_record_outcome_parent(self, store: EvolutionStore) -> None:
         parent = _register_skill(store, _make_skill("parent"))
         evolved = _register_skill(store, _make_skill("evolved", SkillOrigin.FIXED))
@@ -244,6 +259,21 @@ class TestExperimenter:
         updated_exp = ex.get_experiment(exp.experiment_id)
         assert updated_exp is not None
         assert updated_exp.status == ExperimentStatus.REVERTED
+
+    def test_rollback_raises_when_parent_deleted(self, store: EvolutionStore) -> None:
+        """rollback() raises KeyError if parent skill was deleted from store."""
+        parent = _register_skill(store, _make_skill("parent"))
+        evolved = _register_skill(store, _make_skill("evolved", SkillOrigin.FIXED))
+
+        ex = EvolutionExperimenter(store)
+        exp = ex.create_experiment(parent, evolved)
+
+        # Delete parent from store entirely
+        with store._conn() as conn:
+            conn.execute("DELETE FROM skill_records WHERE id = ?", (parent.id,))
+
+        with pytest.raises(KeyError, match="Parent skill not found"):
+            ex.rollback(exp.experiment_id)
 
     def test_list_active_experiments(self, store: EvolutionStore) -> None:
         parent = _register_skill(store, _make_skill("parent"))

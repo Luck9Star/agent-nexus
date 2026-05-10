@@ -336,7 +336,7 @@ class QualityGate:
     Parameters
     ----------
     floor:
-        Minimum score required for a PASS verdict.  Default 0.7.
+        Minimum score required for a PASS verdict.  Default 0.6.
     checks:
         Custom list of checks.  Defaults to the standard 5-check pipeline.
     """
