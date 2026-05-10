@@ -20,6 +20,7 @@ from .registry import ExpertRegistry
 from .selector import SelectionRequest, SelectionResult, SpecialistSelector
 
 if TYPE_CHECKING:
+    from agent_nexus.platform.evolution.engine import EvolutionEngine
     from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
     from .dag_dispatcher import ExpertExecutor
@@ -212,10 +213,15 @@ class TaskComposer:
     6. Validate via QAGate
     """
 
-    def __init__(self, registry: ExpertRegistry) -> None:
+    def __init__(
+        self,
+        registry: ExpertRegistry,
+        evolution_engine: EvolutionEngine | None = None,
+    ) -> None:
         self.registry = registry
         self.selector = SpecialistSelector(registry)
         self.planner = DynamicCompositePlanner()
+        self._evolution_engine = evolution_engine
 
     def run(
         self,
@@ -350,7 +356,9 @@ class TaskComposer:
         )
 
         # Step 7: Evolution hook (optional, post-QAGate)
-        if evolution_callback is not None and qa_result.passed:
+        if self._evolution_engine is not None:
+            self._trigger_evolution(result)
+        elif evolution_callback is not None and qa_result.passed:
             try:
                 evolution_callback(result)
                 result.evolution_triggered = True
@@ -586,3 +594,54 @@ class TaskComposer:
             task_type=input.mode,
         )
         return QAGate.run(gate_input)
+
+    def _trigger_evolution(self, result: TaskComposerResult) -> None:
+        """Trigger evolution analysis via EvolutionEngine after pipeline completion.
+
+        Builds a minimal EvolutionContext from the pipeline result and calls
+        ``engine.evolve(trigger=POST_ANALYSIS, ctx=...)``.  Failures are
+        logged but never propagated to the caller — this is a side-channel
+        hook, not a pipeline gate.
+        """
+        import uuid
+
+        from agent_nexus.models.evolution import EvolutionContext
+        from agent_nexus.platform.evolution.analyzer import AnalysisResult
+        from agent_nexus.platform.evolution.evolver import EvolutionTrigger
+
+        assert self._evolution_engine is not None  # guarded by caller
+
+        agent_ids = [s.agent_id for s in result.selected_agents]
+
+        # Build a minimal evolution context from pipeline results.
+        ctx = EvolutionContext(
+            agent_id=agent_ids[0] if agent_ids else "agency-pipeline",
+            task_id=f"composition-{uuid.uuid4().hex}",
+            task_description=result.task,
+            task_completed=bool(result.qa_passed),
+            skill_ids_used=agent_ids,
+            execution_output=(
+                str(result.integrated.merged_sections)[:5000]
+                if result.integrated
+                else None
+            ),
+        )
+
+        try:
+            analysis = self._evolution_engine.evolve(
+                trigger=EvolutionTrigger.POST_ANALYSIS,
+                ctx=ctx,
+            )
+            if isinstance(analysis, AnalysisResult) and analysis.suggestions:
+                result.evolution_triggered = True
+            logger.info(
+                "TaskComposer: evolution analysis completed (suggestions=%d)",
+                len(analysis.suggestions)
+                if isinstance(analysis, AnalysisResult)
+                else 0,
+            )
+        except Exception:
+            logger.warning(
+                "TaskComposer: evolution analysis failed (non-fatal)",
+                exc_info=True,
+            )

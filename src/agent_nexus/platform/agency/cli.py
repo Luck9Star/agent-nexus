@@ -20,6 +20,7 @@ from .importer import AgencyImporter
 
 if TYPE_CHECKING:
     from agent_nexus.models.capability import ModelCapabilityRegistry
+    from agent_nexus.platform.evolution.engine import EvolutionEngine
 
     from .executor import LLMExecutor, ProfileBasedExecutor
     from .llm_client import LLMClient
@@ -478,6 +479,7 @@ def _execute_pipeline(
     llm_integrator: LLMIntegrator | None,
     llm_qa_gate: LLMQualityGate | None,
     evolution_callback: Callable | None = None,
+    evolution_engine: EvolutionEngine | None = None,
 ) -> TaskComposerResult:
     """Run the TaskComposer pipeline with proper resource cleanup."""
     from agent_nexus.platform.orchestration.task_graph import TaskGraph
@@ -485,7 +487,7 @@ def _execute_pipeline(
     from .task_composer import TaskComposer, TaskComposerInput
 
     with TaskGraph(":memory:") as graph:
-        composer = TaskComposer(registry)
+        composer = TaskComposer(registry, evolution_engine=evolution_engine)
         composer_input = TaskComposerInput(
             task=message,
             mode=mode,
@@ -734,6 +736,12 @@ def _write_report(result: TaskComposerResult, path: Path) -> None:
     default=False,
     help="Enable structured reasoning protocol for expert execution",
 )
+@click.option(
+    "--enable-evolution",
+    is_flag=True,
+    default=False,
+    help="Enable self-evolution analysis after pipeline completion",
+)
 def run_composition(
     message: str,
     mode: str,
@@ -747,6 +755,7 @@ def run_composition(
     timeout: int | None,
     call_timeout: int | None,
     reasoning_protocol: bool,
+    enable_evolution: bool,
 ) -> None:
     """Full pipeline: load experts, select, build DAG, execute, integrate, QA.
 
@@ -808,6 +817,15 @@ def run_composition(
         reasoning_protocol,
     )
 
+    # Step 4b: Create evolution engine if requested
+    evolution_engine = None
+    if enable_evolution:
+        from agent_nexus.platform.evolution.engine import EvolutionEngine
+        from agent_nexus.platform.evolution.store import EvolutionStore
+
+        evo_db = Path(config_dir or "~/.agent-nexus/").expanduser() / "evolution.db"
+        evolution_engine = EvolutionEngine(EvolutionStore(evo_db))
+
     # Step 5: Execute pipeline
     try:
         composer_result = _execute_pipeline(
@@ -822,6 +840,7 @@ def run_composition(
             llm_planner=llm_planner,
             llm_integrator=llm_integrator,
             llm_qa_gate=llm_qa_gate,
+            evolution_engine=evolution_engine,
         )
     finally:
         if shared_client is not None:

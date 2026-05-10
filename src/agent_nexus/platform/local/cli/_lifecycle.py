@@ -112,9 +112,12 @@ async def _install(name: str, version: str | None, source_url: str | None, local
         AgentNotFoundError,
         GitInstaller,
     )
+    from agent_nexus.platform.local.quality_gate import QualityGate
 
     _loader, lockfile, sources, config_dir = _init_managers()
-    installer = GitInstaller(sources, lockfile, config_dir)
+    installer = GitInstaller(
+        sources, lockfile, config_dir, quality_gate=QualityGate(),
+    )
 
     try:
         if local:
@@ -197,9 +200,12 @@ def _report_update_results(agents_to_update: list[str], results: Sequence[object
 async def _update(name: str | None, all_agents: bool) -> None:
     """Async update implementation."""
     from agent_nexus.platform.local.installer import GitInstaller
+    from agent_nexus.platform.local.quality_gate import QualityGate
 
     _loader, lockfile, sources, config_dir = _init_managers()
-    installer = GitInstaller(sources, lockfile, config_dir)
+    installer = GitInstaller(
+        sources, lockfile, config_dir, quality_gate=QualityGate(),
+    )
 
     agents_to_update = _resolve_update_targets(name, all_agents, lockfile)
     if agents_to_update is None:

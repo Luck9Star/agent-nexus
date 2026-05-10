@@ -356,7 +356,18 @@ class QualityGate:
         score = 1.0
 
         for check in self._checks:
-            result = check.run(agent_dir)
+            try:
+                result = check.run(agent_dir)
+            except Exception as exc:
+                logger.warning(
+                    "Check %s raised %s: %s", check.name, type(exc).__name__, exc,
+                )
+                result = CheckResult(
+                    check_name=check.name or type(check).__name__,
+                    passed=False,
+                    severity=CheckSeverity.CRITICAL,
+                    message=f"Check error: {exc}",
+                )
             results.append(result)
 
             if not result.passed:

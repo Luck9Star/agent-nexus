@@ -46,6 +46,11 @@ from agent_nexus.platform.orchestration.process_manager import ProcessManager
 from agent_nexus.platform.utils import IPC_FATAL_ERROR_TYPES
 
 if TYPE_CHECKING:
+    from agent_nexus.platform.gateway.audit import AuditLogger
+    from agent_nexus.platform.gateway.auth import (
+        GatewayAuthenticator,
+        ToolAccessChecker,
+    )
     from agent_nexus.platform.router.router import PlatformRouter
 
 logger = logging.getLogger(__name__)
@@ -71,9 +76,16 @@ class MCPGateway:
         self,
         process_manager: ProcessManager,
         router: PlatformRouter,
+        *,
+        authenticator: GatewayAuthenticator | None = None,
+        access_checker: ToolAccessChecker | None = None,
+        audit_logger: AuditLogger | None = None,
     ) -> None:
         self._pm = process_manager
         self._router = router
+        self._authenticator = authenticator
+        self._access_checker = access_checker
+        self._audit_logger = audit_logger
         self._registered_agents: set[str] = set()
         self._reg_lock = asyncio.Lock()
         self._registered_tool_names: set[str] = set()
@@ -92,7 +104,7 @@ class MCPGateway:
         self._mcp.tool(self._list_agents, name="list_agents")
         self._mcp.tool(self._agent_info, name="agent_info")
 
-    async def _search_and_activate(self, query: str) -> str:
+    async def _search_and_activate(self, query: str, _api_key: str | None = None) -> str:
         """Search agents by query and activate matching ones.
 
         Searches agent names and descriptions for keyword matches.
@@ -102,10 +114,18 @@ class MCPGateway:
 
         Args:
             query: Search keywords (e.g. "code review", "document").
+            _api_key: API key for authentication (reserved).
 
         Returns:
             Summary of activated agents and their available tools.
         """
+        # Security: activation is a write operation — require auth
+        _, sec_err = await self._check_tool_access(
+            "search_and_activate", "gateway", _api_key,
+        )
+        if sec_err:
+            return sec_err
+
         results = self._registry.search_agents(query)
         if not results:
             return "No matching agents found."
@@ -364,6 +384,54 @@ class MCPGateway:
             return None, f"Error: agent '{agent_name}' process has died"
         return info, None
 
+    async def _check_tool_access(
+        self,
+        tool_name: str,
+        agent_id: str,
+        api_key: str | None,
+    ) -> tuple[Any | None, str | None]:
+        """Unified security check: authenticate → authorize → rate-limit.
+
+        Returns (client, error_msg).  When error_msg is set the caller
+        should return it directly; client will be None.  When client is
+        set the call is authorised.
+        """
+        from agent_nexus.platform.gateway.auth import AuthenticatedClient
+
+        client = AuthenticatedClient(client_id="anonymous")
+
+        if self._authenticator is not None:
+            if api_key is None:
+                await self._log_audit(
+                    tool_name, agent_id, "auth_failed",
+                    "No API key provided",
+                )
+                return None, f"Error: authentication required for tool '{tool_name}'"
+            try:
+                client = self._authenticator.authenticate(api_key)
+            except PermissionError:
+                await self._log_audit(
+                    tool_name, agent_id, "auth_failed",
+                    "Invalid API key",
+                )
+                return None, f"Error: authentication failed for tool '{tool_name}'"
+
+        if self._access_checker is not None:
+            if not self._access_checker.is_tool_allowed(client, tool_name):
+                await self._log_audit(
+                    tool_name, agent_id, "denied",
+                    f"Tool access denied by policy for client '{client.client_id}'",
+                )
+                return None, f"Error: access denied for tool '{tool_name}'"
+            if not self._access_checker.check_rate_limit(client.client_id):
+                await self._log_audit(
+                    tool_name, agent_id, "rate_limited",
+                    f"Rate limit exceeded for client '{client.client_id}'",
+                )
+                return None, f"Error: rate limit exceeded for tool '{tool_name}'"
+
+        return client, None
+
     def _handle_ipc_result(
         self,
         result: dict,
@@ -409,16 +477,34 @@ class MCPGateway:
                 return health_err
             assert info is not None  # guaranteed when health_err is None
 
+            # Security: authenticate -> authorize -> rate-limit
+            api_key = kwargs.pop("_api_key", None)
+            _, sec_err = await self._check_tool_access(
+                display_name, adapter.agent_name, api_key,
+            )
+            if sec_err:
+                return sec_err
+
             try:
                 result = await adapter.execute(info.handle, kwargs)
             except (TimeoutError, OSError, ConnectionError, IPCError) as exc:
                 self._cleanup_agent_registration(adapter.agent_name)
+                await self._log_audit(
+                    display_name, adapter.agent_name, "error",
+                    f"IPC failed: {exc}",
+                )
                 return (
                     f"Error: IPC failed for agent "
                     f"'{adapter.agent_name}' [{type(exc).__name__}]: {exc}"
                 )
 
-            return self._handle_ipc_result(result, adapter.agent_name)
+            response = self._handle_ipc_result(result, adapter.agent_name)
+            status = "success" if result.get("success") else "error"
+            await self._log_audit(
+                display_name, adapter.agent_name, status,
+                response[:200],
+            )
+            return response
 
         # Override __signature__ and __annotations__ so FastMCP's
         # ParsedFunction.from_function() sees explicit typed parameters
@@ -595,8 +681,8 @@ class MCPGateway:
                 )
         self._external_adapters.clear()
 
-    @staticmethod
     def _make_external_tool_func(
+        self,
         adapter: ExternalMcpAdapter,
         tool_name: str,
         display_name: str,
@@ -608,9 +694,25 @@ class MCPGateway:
         """
 
         async def _invoke(**kwargs: Any) -> str:
+            # Security: same chain as internal tools
+            api_key = kwargs.pop("_api_key", None)
+            _, sec_err = await self._check_tool_access(
+                display_name, "external", api_key,
+            )
+            if sec_err:
+                return sec_err
+
             try:
-                return await adapter.call_tool(tool_name, kwargs)
+                result = await adapter.call_tool(tool_name, kwargs)
+                await self._log_audit(
+                    display_name, "external", "success",
+                    result[:200] if isinstance(result, str) else str(result)[:200],
+                )
+                return result
             except RuntimeError as exc:
+                await self._log_audit(
+                    display_name, "external", "error", str(exc),
+                )
                 return f"Error: {exc}"
             except Exception as exc:
                 logger.error(
@@ -618,6 +720,10 @@ class MCPGateway:
                     display_name,
                     exc,
                     type(exc).__name__,
+                )
+                await self._log_audit(
+                    display_name, "external", "error",
+                    f"{type(exc).__name__}: {exc}",
                 )
                 return f"Error: {type(exc).__name__}: {exc}"
 
@@ -666,6 +772,53 @@ class MCPGateway:
         finally:
             await self._stop_external_servers()
             remove_all_locks()
+
+    # ------------------------------------------------------------------
+    # Security helpers
+    # ------------------------------------------------------------------
+
+    async def _log_audit(
+        self,
+        tool_name: str,
+        agent_id: str,
+        status: str,
+        summary: str,
+    ) -> None:
+        """Fire-and-forget audit log. Swallows errors to never block tool calls."""
+        if self._audit_logger is None:
+            return
+        try:
+            from agent_nexus.platform.gateway.audit import AuditEvent
+
+            event = AuditEvent(
+                event_type="tool_call",
+                client_id="anonymous",
+                agent_id=agent_id,
+                tool_name=tool_name,
+                response_status=status,
+                request_summary=summary,
+            )
+            await self._audit_logger.log(event)
+        except Exception:
+            logger.debug("Audit log write failed", exc_info=True)
+
+    def configure_security(
+        self,
+        authenticator: GatewayAuthenticator | None = None,
+        access_checker: ToolAccessChecker | None = None,
+        audit_logger: AuditLogger | None = None,
+    ) -> None:
+        """Configure security components at runtime.
+
+        Allows deferred setup after construction (e.g., after loading
+        config files or environment variables).
+        """
+        if authenticator is not None:
+            self._authenticator = authenticator
+        if access_checker is not None:
+            self._access_checker = access_checker
+        if audit_logger is not None:
+            self._audit_logger = audit_logger
 
     # ------------------------------------------------------------------
     # Properties
