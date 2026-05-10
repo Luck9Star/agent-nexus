@@ -197,12 +197,28 @@ class SkillPatcher:
     def _check_security(content: str) -> bool:
         """Best-effort content safety heuristic for skill instruction text.
 
-        NOTE: This is a heuristic check on skill instruction text, not
-        executable code.  Patterns like ``\\bexec\\s*\\(`` will match
-        prose such as "Execute the plan".  This is intentional as a
-        coarse filter; it is **not** a security boundary.
+        Only scans within fenced code blocks (```) to avoid false positives
+        on natural language prose like "Execute the plan".
         """
-        # NOTE: This is a heuristic check on skill instruction text, not executable code.
+        code_sections: list[str] = []
+        in_block = False
+        current: list[str] = []
+        for line in content.splitlines():
+            if line.strip().startswith("```"):
+                if in_block:
+                    code_sections.append("\n".join(current))
+                    current = []
+                in_block = not in_block
+                continue
+            if in_block:
+                current.append(line)
+        if current:
+            code_sections.append("\n".join(current))
+
+        if not code_sections:
+            return True
+
+        code_text = "\n".join(code_sections)
         dangerous = (
             r"\bexec\s*\(",
             r"\beval\s*\(",
@@ -211,7 +227,7 @@ class SkillPatcher:
             r"\b__import__\s*\(",
             r"\bopen\s*\(.+[\'\"]w",
         )
-        return not any(re.search(p, content) for p in dangerous)
+        return not any(re.search(p, code_text) for p in dangerous)
 
     @staticmethod
     def _compute_regression_risk(original: str, patched: str) -> float:

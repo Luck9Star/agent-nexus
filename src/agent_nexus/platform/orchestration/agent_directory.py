@@ -20,6 +20,7 @@ class AgentDirectory:
 
     def __init__(self) -> None:
         self._registry: dict[str, AgentAddress] = {}
+        self._capabilities: dict[str, list[str]] = {}
         self._cap_index: dict[str, set[str]] = {}
 
     # ------------------------------------------------------------------
@@ -39,22 +40,19 @@ class AgentDirectory:
         removed from the inverted index before the new ones are added.
         """
         # Clean up old capability index entries if re-registering
-        old = self._registry.get(agent_id)
-        if old is not None:
-            old_caps = getattr(old, "_capabilities", [])
-            for cap in old_caps:
-                ids = self._cap_index.get(cap)
-                if ids is not None:
-                    ids.discard(agent_id)
-                    if not ids:
-                        self._cap_index.pop(cap, None)
+        old_caps = self._capabilities.get(agent_id, [])
+        for cap in old_caps:
+            ids = self._cap_index.get(cap)
+            if ids is not None:
+                ids.discard(agent_id)
+                if not ids:
+                    self._cap_index.pop(cap, None)
 
-        # Store address with role and composition metadata
-        addr = AgentAddress(agent_id=agent_id, role=role, composition=composition)
-        # Stash capabilities on the address object for re-registration cleanup.
-        # We use a private attribute since AgentAddress is a BaseModel.
-        addr._capabilities = capabilities  # type: ignore[attr-defined]
-        self._registry[agent_id] = addr
+        # Store address and capabilities separately
+        self._registry[agent_id] = AgentAddress(
+            agent_id=agent_id, role=role, composition=composition,
+        )
+        self._capabilities[agent_id] = list(capabilities)
 
         # Update inverted index
         for cap in capabilities:
@@ -67,10 +65,8 @@ class AgentDirectory:
 
         Silently ignores unknown agent_ids (idempotent).
         """
-        old = self._registry.pop(agent_id, None)
-        if old is None:
-            return
-        old_caps = getattr(old, "_capabilities", [])
+        self._registry.pop(agent_id, None)
+        old_caps = self._capabilities.pop(agent_id, [])
         for cap in old_caps:
             ids = self._cap_index.get(cap)
             if ids is not None:

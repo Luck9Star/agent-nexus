@@ -102,6 +102,21 @@ CREATE TABLE IF NOT EXISTS agent_records (
 );
 CREATE INDEX IF NOT EXISTS idx_ar_active ON agent_records(is_active);
 CREATE INDEX IF NOT EXISTS idx_ar_name ON agent_records(name);
+
+CREATE TABLE IF NOT EXISTS experiments (
+    experiment_id TEXT PRIMARY KEY,
+    parent_skill_id TEXT NOT NULL,
+    evolved_skill_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',
+    created_at REAL NOT NULL,
+    min_samples INTEGER NOT NULL DEFAULT 30,
+    confidence_level REAL NOT NULL DEFAULT 0.95,
+    parent_successes INTEGER NOT NULL DEFAULT 0,
+    parent_total INTEGER NOT NULL DEFAULT 0,
+    evolved_successes INTEGER NOT NULL DEFAULT 0,
+    evolved_total INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_exp_status ON experiments(status);
 """
 
 

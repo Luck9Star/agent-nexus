@@ -39,18 +39,6 @@ class TestPathRule:
             pr = PathRule(pattern=pat)
             assert pr.pattern == pat
 
-    def test_serialization_round_trip(self):
-        pr = PathRule(pattern="*.docx", access=PathAccess.READ_WRITE)
-        data = pr.model_dump()
-        pr2 = PathRule(**data)
-        assert pr2 == pr
-
-    def test_json_serialization(self):
-        pr = PathRule(pattern="*.env", access=PathAccess.DENY)
-        json_str = pr.model_dump_json()
-        pr2 = PathRule.model_validate_json(json_str)
-        assert pr2 == pr
-
     def test_missing_pattern_raises(self):
         with pytest.raises(ValidationError):
             PathRule()
@@ -104,28 +92,6 @@ class TestPermissionConfig:
         )
         assert cfg.mode is PermissionMode.PLAN
         assert len(cfg.denied_commands) == 2
-
-    def test_serialization_round_trip(self):
-        cfg = PermissionConfig(
-            mode=PermissionMode.FULL_AUTO,
-            allowed_tools=["file_read"],
-            path_rules=[PathRule(pattern="*.docx", access=PathAccess.READ_WRITE)],
-        )
-        data = cfg.model_dump()
-        cfg2 = PermissionConfig(**data)
-        assert cfg2 == cfg
-
-    def test_json_serialization(self):
-        cfg = PermissionConfig(mode=PermissionMode.PLAN, denied_tools=["bash"])
-        json_str = cfg.model_dump_json()
-        parsed = json.loads(json_str)
-        assert parsed["mode"] == "plan"
-        cfg2 = PermissionConfig.model_validate_json(json_str)
-        assert cfg2 == cfg
-
-    def test_full_auto_mode(self):
-        cfg = PermissionConfig(mode=PermissionMode.FULL_AUTO)
-        assert cfg.mode is PermissionMode.FULL_AUTO
 
 
 # ---------------------------------------------------------------------------

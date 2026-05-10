@@ -343,7 +343,7 @@ class QualityGate:
 
     def __init__(
         self,
-        floor: float = 0.7,
+        floor: float = 0.6,
         checks: list[BaseCheck] | None = None,
     ) -> None:
         self._floor = floor

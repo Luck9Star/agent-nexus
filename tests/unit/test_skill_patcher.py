@@ -122,8 +122,8 @@ class TestValidatePatch:
         result = self.patcher.validate_patch("aaaa", "xxxx")
         assert result.regression_risk > 0.5
 
-    def test_dangerous_code_fails_security(self) -> None:
-        content = "# Skill\n\nUse exec(code) to run."
+    def test_dangerous_code_in_code_block_fails_security(self) -> None:
+        content = "# Skill\n\n```python\nexec(code)\n```"
         result = self.patcher.validate_patch("", content)
         assert result.security_pass is False
 
@@ -132,15 +132,26 @@ class TestValidatePatch:
         result = self.patcher.validate_patch("", content)
         assert result.security_pass is True
 
-    def test_eval_fails_security(self) -> None:
-        content = "# Skill\n\nUse eval(expr)."
+    def test_dangerous_prose_passes_security(self) -> None:
+        """Prose like 'Execute the plan' should NOT trigger security check."""
+        content = "# Skill\n\nExecute the plan and evaluate the results."
+        result = self.patcher.validate_patch("", content)
+        assert result.security_pass is True
+
+    def test_eval_in_code_block_fails_security(self) -> None:
+        content = "# Skill\n\n```python\neval(expr)\n```"
         result = self.patcher.validate_patch("", content)
         assert result.security_pass is False
 
-    def test_subprocess_fails_security(self) -> None:
-        content = "# Skill\n\nUse subprocess.run(cmd)."
+    def test_subprocess_in_code_block_fails_security(self) -> None:
+        content = "# Skill\n\n```python\nsubprocess.run(cmd)\n```"
         result = self.patcher.validate_patch("", content)
         assert result.security_pass is False
+
+    def test_no_code_blocks_passes_security(self) -> None:
+        content = "# Skill\n\nNo code blocks here."
+        result = self.patcher.validate_patch("", content)
+        assert result.security_pass is True
 
 
 # ---------------------------------------------------------------------------

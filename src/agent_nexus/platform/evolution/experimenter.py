@@ -3,11 +3,13 @@
 Design decisions (from docs/roadmap/p2-5-evolution.md):
   D23: Evolution mode: configurable, default A/B test
   D24: Rollback: previous version only (no arbitrary version history)
+
+Experiments are persisted to the EvolutionStore SQLite database so that
+in-flight experiments survive process restarts.
 """
 
 from __future__ import annotations
 
-import dataclasses as _dc
 import logging
 import random
 import time
@@ -51,6 +53,22 @@ class ExperimentResult:
     samples_remaining: int
 
 
+def _row_to_experiment(row: tuple) -> Experiment:
+    return Experiment(
+        experiment_id=row[0],
+        parent_skill_id=row[1],
+        evolved_skill_id=row[2],
+        status=ExperimentStatus(row[3]),
+        created_at=row[4],
+        min_samples=row[5],
+        confidence_level=row[6],
+        parent_successes=row[7],
+        parent_total=row[8],
+        evolved_successes=row[9],
+        evolved_total=row[10],
+    )
+
+
 class EvolutionExperimenter:
     """A/B testing for evolved skills.
 
@@ -66,22 +84,7 @@ class EvolutionExperimenter:
     """
 
     def __init__(self, store: EvolutionStore) -> None:
-        """Initialise the experimenter.
-
-        .. warning::
-
-            All experiment state is held in memory (``dict``).  If the
-            process restarts, in-flight experiments and their accumulated
-            sample counts are lost.  This is an intentional design
-            decision -- persistence would add significant scope (SQLite
-            migration, schema versioning) with limited POC value.
-        """
         self._store = store
-        self._experiments: dict[str, Experiment] = {}
-        logger.warning(
-            "EvolutionExperimenter created with in-memory experiment registry -- "
-            "all experiment state will be lost on process restart"
-        )
 
     def create_experiment(
         self,
@@ -97,7 +100,7 @@ class EvolutionExperimenter:
             min_samples=min_samples,
             confidence_level=confidence_level,
         )
-        self._experiments[exp.experiment_id] = exp
+        self._save(exp)
         logger.info(
             "Created experiment %s: parent=%s evolved=%s",
             exp.experiment_id[:8],
@@ -121,25 +124,49 @@ class EvolutionExperimenter:
         skill_id: str,
         success: bool,
     ) -> None:
-        exp = self._experiments.get(experiment_id)
+        exp = self._load(experiment_id)
         if exp is None:
             raise KeyError(f"Experiment not found: {experiment_id}")
 
         if skill_id == exp.parent_skill_id:
             total = exp.parent_total + 1
             successes = exp.parent_successes + (1 if success else 0)
-            updated = _dc.replace(exp, parent_successes=successes, parent_total=total)
+            updated = Experiment(
+                experiment_id=exp.experiment_id,
+                parent_skill_id=exp.parent_skill_id,
+                evolved_skill_id=exp.evolved_skill_id,
+                status=exp.status,
+                created_at=exp.created_at,
+                min_samples=exp.min_samples,
+                confidence_level=exp.confidence_level,
+                parent_successes=successes,
+                parent_total=total,
+                evolved_successes=exp.evolved_successes,
+                evolved_total=exp.evolved_total,
+            )
         elif skill_id == exp.evolved_skill_id:
             total = exp.evolved_total + 1
             successes = exp.evolved_successes + (1 if success else 0)
-            updated = _dc.replace(exp, evolved_successes=successes, evolved_total=total)
+            updated = Experiment(
+                experiment_id=exp.experiment_id,
+                parent_skill_id=exp.parent_skill_id,
+                evolved_skill_id=exp.evolved_skill_id,
+                status=exp.status,
+                created_at=exp.created_at,
+                min_samples=exp.min_samples,
+                confidence_level=exp.confidence_level,
+                parent_successes=exp.parent_successes,
+                parent_total=exp.parent_total,
+                evolved_successes=successes,
+                evolved_total=total,
+            )
         else:
             raise ValueError(f"Skill {skill_id} is not part of experiment {experiment_id}")
 
-        self._experiments[experiment_id] = updated
+        self._save(updated)
 
     def evaluate(self, experiment_id: str) -> ExperimentResult:
-        exp = self._experiments.get(experiment_id)
+        exp = self._load(experiment_id)
         if exp is None:
             raise KeyError(f"Experiment not found: {experiment_id}")
 
@@ -149,7 +176,6 @@ class EvolutionExperimenter:
         total_samples = exp.parent_total + exp.evolved_total
         samples_remaining = max(0, exp.min_samples * 2 - total_samples)
 
-        # Simple confidence: minimum of parent/evolved sample counts / min_samples
         min_ratio = min(exp.parent_total, exp.evolved_total) / max(exp.min_samples, 1)
         confidence = min(1.0, min_ratio)
 
@@ -175,7 +201,7 @@ class EvolutionExperimenter:
 
         D24: Rollback to previous version only.
         """
-        exp = self._experiments.get(experiment_id)
+        exp = self._load(experiment_id)
         if exp is None:
             raise KeyError(f"Experiment not found: {experiment_id}")
 
@@ -190,8 +216,20 @@ class EvolutionExperimenter:
             self._store.reactivate_skill(exp.parent_skill_id)
 
         # Mark experiment as reverted
-        updated = _dc.replace(exp, status=ExperimentStatus.REVERTED)
-        self._experiments[experiment_id] = updated
+        updated = Experiment(
+            experiment_id=exp.experiment_id,
+            parent_skill_id=exp.parent_skill_id,
+            evolved_skill_id=exp.evolved_skill_id,
+            status=ExperimentStatus.REVERTED,
+            created_at=exp.created_at,
+            min_samples=exp.min_samples,
+            confidence_level=exp.confidence_level,
+            parent_successes=exp.parent_successes,
+            parent_total=exp.parent_total,
+            evolved_successes=exp.evolved_successes,
+            evolved_total=exp.evolved_total,
+        )
+        self._save(updated)
 
         if parent is None:
             raise KeyError(f"Parent skill not found: {exp.parent_skill_id}")
@@ -199,7 +237,52 @@ class EvolutionExperimenter:
         return parent
 
     def get_experiment(self, experiment_id: str) -> Experiment | None:
-        return self._experiments.get(experiment_id)
+        return self._load(experiment_id)
 
     def list_active(self) -> list[Experiment]:
-        return [e for e in self._experiments.values() if e.status == ExperimentStatus.RUNNING]
+        with self._store._conn() as conn:
+            rows = conn.execute(
+                "SELECT experiment_id, parent_skill_id, evolved_skill_id, "
+                "status, created_at, min_samples, confidence_level, "
+                "parent_successes, parent_total, evolved_successes, evolved_total "
+                "FROM experiments WHERE status = 'running'"
+            ).fetchall()
+        return [_row_to_experiment(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Persistence helpers
+    # ------------------------------------------------------------------
+
+    def _save(self, exp: Experiment) -> None:
+        with self._store._conn() as conn:
+            conn.execute(
+                "INSERT INTO experiments "
+                "(experiment_id, parent_skill_id, evolved_skill_id, status, "
+                "created_at, min_samples, confidence_level, "
+                "parent_successes, parent_total, evolved_successes, evolved_total) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(experiment_id) DO UPDATE SET "
+                "status=excluded.status, parent_successes=excluded.parent_successes, "
+                "parent_total=excluded.parent_total, "
+                "evolved_successes=excluded.evolved_successes, "
+                "evolved_total=excluded.evolved_total",
+                (
+                    exp.experiment_id, exp.parent_skill_id, exp.evolved_skill_id,
+                    exp.status.value, exp.created_at, exp.min_samples,
+                    exp.confidence_level, exp.parent_successes, exp.parent_total,
+                    exp.evolved_successes, exp.evolved_total,
+                ),
+            )
+
+    def _load(self, experiment_id: str) -> Experiment | None:
+        with self._store._conn() as conn:
+            row = conn.execute(
+                "SELECT experiment_id, parent_skill_id, evolved_skill_id, "
+                "status, created_at, min_samples, confidence_level, "
+                "parent_successes, parent_total, evolved_successes, evolved_total "
+                "FROM experiments WHERE experiment_id = ?",
+                (experiment_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return _row_to_experiment(row)
