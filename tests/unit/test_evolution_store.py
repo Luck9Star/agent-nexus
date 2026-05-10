@@ -465,23 +465,14 @@ class TestMalformedSnapshot:
             )
         return sid
 
-    def test_null_snapshot(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "snapshot_json",
+        ["null", "[1, 2, 3]", '"just a string"', "not json at all {{{"],
+        ids=["null", "list", "string", "invalid_json"],
+    )
+    def test_non_dict_snapshot_returns_none(self, tmp_path: Path, snapshot_json: str) -> None:
         store = self._make_store(tmp_path)
-        sid = self._save_raw(store, "null")
-        record = store.get_skill_record(sid)
-        assert record is not None
-        assert record.lineage.content_snapshot is None
-
-    def test_list_snapshot(self, tmp_path: Path) -> None:
-        store = self._make_store(tmp_path)
-        sid = self._save_raw(store, "[1, 2, 3]")
-        record = store.get_skill_record(sid)
-        assert record is not None
-        assert record.lineage.content_snapshot is None
-
-    def test_string_snapshot(self, tmp_path: Path) -> None:
-        store = self._make_store(tmp_path)
-        sid = self._save_raw(store, '"just a string"')
+        sid = self._save_raw(store, snapshot_json)
         record = store.get_skill_record(sid)
         assert record is not None
         assert record.lineage.content_snapshot is None
@@ -492,13 +483,6 @@ class TestMalformedSnapshot:
         record = store.get_skill_record(sid)
         assert record is not None
         assert record.lineage.content_snapshot == {"key": "value"}
-
-    def test_invalid_json_snapshot(self, tmp_path: Path) -> None:
-        store = self._make_store(tmp_path)
-        sid = self._save_raw(store, "not json at all {{{")
-        record = store.get_skill_record(sid)
-        assert record is not None
-        assert record.lineage.content_snapshot is None
 
     def test_get_active_skills_with_malformed(self, tmp_path: Path) -> None:
         """All active skills should load even if one has a malformed snapshot."""
@@ -532,77 +516,30 @@ class TestRecordAnalysisSkipsBadSkillId:
             )
         )
 
-    def test_none_skill_id_skipped(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "bad_judgment",
+        [
+            {"skill_id": None, "selected": True},
+            {"skill_id": "", "selected": True},
+            {"selected": True},  # no skill_id key at all
+        ],
+        ids=["none", "empty", "missing_key"],
+    )
+    def test_bad_skill_id_skipped(self, tmp_path: Path, bad_judgment: dict) -> None:
         store = _make_store(tmp_path)
         self._seed_skill(store, "s-valid")
 
-        store.record_analysis(  # noqa: FURB118  # pyright: ignore[reportUnusedVariable]
+        store.record_analysis(
             task_id="t1",
             agent_name="tester",
             analysis_text="check",
-            judgments=[
-                {"skill_id": None, "selected": True},
-                {"skill_id": "s-valid", "selected": True},
-            ],
+            judgments=[bad_judgment, {"skill_id": "s-valid", "selected": True}],
         )
 
-        # Only the valid judgment should appear under this analysis
         analyses = store.get_analyses_for_task("t1")
         assert len(analyses) == 1
         assert len(analyses[0]["judgments"]) == 1
         assert analyses[0]["judgments"][0]["skill_id"] == "s-valid"
-
-    def test_empty_string_skill_id_skipped(self, tmp_path: Path) -> None:
-        store = _make_store(tmp_path)
-        self._seed_skill(store, "s-valid")
-
-        store.record_analysis(
-            task_id="t2",
-            agent_name="tester",
-            analysis_text="check",
-            judgments=[
-                {"skill_id": "", "selected": True},
-                {"skill_id": "s-valid", "selected": True, "applied": True},
-            ],
-        )
-
-        analyses = store.get_analyses_for_task("t2")
-        assert len(analyses[0]["judgments"]) == 1
-        assert analyses[0]["judgments"][0]["skill_id"] == "s-valid"
-
-    def test_missing_skill_id_key_skipped(self, tmp_path: Path) -> None:
-        store = _make_store(tmp_path)
-        self._seed_skill(store, "s-valid")
-
-        store.record_analysis(
-            task_id="t3",
-            agent_name="tester",
-            analysis_text="check",
-            judgments=[
-                {"selected": True},  # no skill_id key at all
-                {"skill_id": "s-valid", "selected": True},
-            ],
-        )
-
-        analyses = store.get_analyses_for_task("t3")
-        assert len(analyses[0]["judgments"]) == 1
-
-    def test_all_invalid_skill_ids_no_judgments(self, tmp_path: Path) -> None:
-        store = _make_store(tmp_path)
-
-        store.record_analysis(  # pyright: ignore[reportUnusedVariable]
-            task_id="t4",
-            agent_name="tester",
-            analysis_text="check",
-            judgments=[
-                {"skill_id": None},
-                {"skill_id": ""},
-                {"selected": True},
-            ],
-        )
-
-        analyses = store.get_analyses_for_task("t4")
-        assert len(analyses[0]["judgments"]) == 0
 
 
 class TestSkillJudgmentFKEnforcement:
@@ -1163,9 +1100,14 @@ class TestInvalidLineageOrigin:
             )
         return sid
 
-    def test_invalid_origin_defaults_to_captured(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "origin",
+        ["totally_invalid_value", ""],
+        ids=["invalid", "empty"],
+    )
+    def test_invalid_origin_defaults_to_captured(self, tmp_path: Path, origin: str) -> None:
         store = self._make_store(tmp_path)
-        sid = self._save_with_origin(store, "totally_invalid_value")
+        sid = self._save_with_origin(store, origin)
         record = store.get_skill_record(sid)
         assert record is not None
         assert record.lineage.origin == SkillOrigin.CAPTURED
@@ -1176,13 +1118,6 @@ class TestInvalidLineageOrigin:
         record = store.get_skill_record(sid)
         assert record is not None
         assert record.lineage.origin == SkillOrigin.FIXED
-
-    def test_empty_origin_defaults_to_captured(self, tmp_path: Path) -> None:
-        store = self._make_store(tmp_path)
-        sid = self._save_with_origin(store, "")
-        record = store.get_skill_record(sid)
-        assert record is not None
-        assert record.lineage.origin == SkillOrigin.CAPTURED
 
 
 # ============================================================================

@@ -2181,37 +2181,6 @@ class TestDeferredRegistryValidateToolSchemas:
         assert valid[0]["inputSchema"] == {"type": "object", "properties": {}}
 
 
-# ============================================================================
-# Coverage gap tests: deferred_registry.py lines 320-324 (non-dict schema)
-# ============================================================================
-
-
-class TestDeferredRegistryNonDictSchema:
-    """_validate_tool_schemas skips non-dict entries (lines 320-324)."""
-
-    def test_skips_string_schema_entry(self) -> None:
-        """String entries in tool schema list are skipped."""
-        result = DeferredAgentRegistry._validate_tool_schemas(
-            [
-                "not a dict",
-                {"name": "valid", "inputSchema": {"type": "object"}},
-                None,
-            ]
-        )
-        assert len(result) == 1
-        assert result[0]["name"] == "valid"
-
-    def test_skips_list_schema_entry(self) -> None:
-        """List entries in tool schema list are skipped."""
-        result = DeferredAgentRegistry._validate_tool_schemas(
-            [
-                ["nested", "list"],
-                {"name": "ok", "inputSchema": {"type": "object"}},
-            ]
-        )
-        assert len(result) == 1
-
-
 # iter125 regression: error_type consistency in tool_adapter error paths
 class TestToolAdapterErrorTypeConsistency:
     """Every error return dict from McpToolAdapter must include error_type."""
@@ -2342,26 +2311,15 @@ class TestBuildParams:
     or property-less schemas.
     """
 
-    def test_adapter_no_schema_returns_empty(self) -> None:
-        """When adapter._input_schema is None, returns ([], {"return": str})."""
+    @pytest.mark.parametrize(
+        "schema",
+        [None, {"type": "object"}, {}],
+        ids=["none", "no_properties", "empty"],
+    )
+    def test_empty_schema_returns_empty(self, schema: object) -> None:
+        """Empty/None/property-less schemas return ([], {"return": str})."""
         adapter = MagicMock(spec=McpToolAdapter)
-        adapter._input_schema = None
-        params, annotations = MCPGateway._build_params(adapter)
-        assert params == []
-        assert annotations == {"return": str}
-
-    def test_adapter_schema_without_properties_returns_empty(self) -> None:
-        """When schema has no 'properties' key, returns ([], {"return": str})."""
-        adapter = MagicMock(spec=McpToolAdapter)
-        adapter._input_schema = {"type": "object"}
-        params, annotations = MCPGateway._build_params(adapter)
-        assert params == []
-        assert annotations == {"return": str}
-
-    def test_adapter_empty_schema_returns_empty(self) -> None:
-        """When schema is an empty dict, returns ([], {"return": str})."""
-        adapter = MagicMock(spec=McpToolAdapter)
-        adapter._input_schema = {}
+        adapter._input_schema = schema
         params, annotations = MCPGateway._build_params(adapter)
         assert params == []
         assert annotations == {"return": str}

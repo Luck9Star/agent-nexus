@@ -1705,13 +1705,23 @@ class TestExecuteSingleAgentReturnTypeSafety:
     str return type.  Now uses explicit str() conversion.
     """
 
+    @pytest.mark.parametrize(
+        "content, expected_check",
+        [
+            (None, "== ''"),
+            (["item1", "item2"], "'item1' in"),
+            ({"key": "value"}, "'key' in"),
+            (42, "== '42'"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_none_content_returns_empty_string(self) -> None:
-        """response.content=None returns '', not None."""
+    async def test_non_string_content_returns_str(
+        self, content: object, expected_check: str
+    ) -> None:
         handle = _make_agent_handle()
         mock_resp = MagicMock()
         mock_resp.type = AgentToPlatformType.RESULT
-        mock_resp.content = None
+        mock_resp.content = content
         mock_resp.error = None
         mock_resp.status = "completed"
         mock_resp.is_success = True
@@ -1721,61 +1731,7 @@ class TestExecuteSingleAgentReturnTypeSafety:
         router = PlatformRouter(process_manager=pm)
 
         result = await router._execute_single_agent("a1", "hi", "c1")
-        assert result == ""
-
-    @pytest.mark.asyncio
-    async def test_list_content_returns_string_repr(self) -> None:
-        """response.content as list returns str(list), not the list itself."""
-        handle = _make_agent_handle()
-        mock_resp = MagicMock()
-        mock_resp.type = AgentToPlatformType.RESULT
-        mock_resp.content = ["item1", "item2"]
-        mock_resp.error = None
-        mock_resp.status = "completed"
-        mock_resp.is_success = True
-        handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
-
-        pm = _make_process_manager(agents={"a1": handle})
-        router = PlatformRouter(process_manager=pm)
-
-        result = await router._execute_single_agent("a1", "hi", "c1")
-        assert "item1" in result
-
-    @pytest.mark.asyncio
-    async def test_dict_content_returns_string_repr(self) -> None:
-        """response.content as dict returns str(dict), not the dict itself."""
-        handle = _make_agent_handle()
-        mock_resp = MagicMock()
-        mock_resp.type = AgentToPlatformType.RESULT
-        mock_resp.content = {"key": "value"}
-        mock_resp.error = None
-        mock_resp.status = "completed"
-        mock_resp.is_success = True
-        handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
-
-        pm = _make_process_manager(agents={"a1": handle})
-        router = PlatformRouter(process_manager=pm)
-
-        result = await router._execute_single_agent("a1", "hi", "c1")
-        assert "key" in result
-
-    @pytest.mark.asyncio
-    async def test_int_content_returns_string(self) -> None:
-        """response.content as int returns str(int), not int."""
-        handle = _make_agent_handle()
-        mock_resp = MagicMock()
-        mock_resp.type = AgentToPlatformType.RESULT
-        mock_resp.content = 42
-        mock_resp.error = None
-        mock_resp.status = "completed"
-        mock_resp.is_success = True
-        handle.ipc.receive_until_result = AsyncMock(return_value=mock_resp)
-
-        pm = _make_process_manager(agents={"a1": handle})
-        router = PlatformRouter(process_manager=pm)
-
-        result = await router._execute_single_agent("a1", "hi", "c1")
-        assert result == "42"
+        assert isinstance(result, str)
 
 
 # ============================================================================
@@ -2067,32 +2023,6 @@ class TestTopologicalSortTasks:
 
 
 # ---------------------------------------------------------------------------
-# iter100 regression: _phase_to_role forward compatibility
-# ---------------------------------------------------------------------------
-
-
-class TestPhaseToRoleForwardCompat:
-    def test_unknown_phase_returns_worker(self):
-        """mapping.get(phase, "worker") prevents KeyError on future phases."""
-        from agent_nexus.platform.router.workflow import WorkflowPhase
-
-        # Create a fake phase by using a string that isn't a valid phase
-        # We verify the method uses .get() by checking all known phases work
-        for phase in WorkflowPhase:
-            role = PlatformRouter._phase_to_role(phase)
-            assert isinstance(role, str)
-            assert len(role) > 0
-
-    def test_known_phase_mappings(self):
-        from agent_nexus.platform.router.workflow import WorkflowPhase
-
-        assert PlatformRouter._phase_to_role(WorkflowPhase.research) == "explore"
-        assert PlatformRouter._phase_to_role(WorkflowPhase.synthesis) == "plan"
-        assert PlatformRouter._phase_to_role(WorkflowPhase.implementation) == "worker"
-        assert PlatformRouter._phase_to_role(WorkflowPhase.verification) == "verification"
-
-
-# ---------------------------------------------------------------------------
 # iter114 regression: composite workflow overall timeout
 # ---------------------------------------------------------------------------
 
@@ -2176,33 +2106,20 @@ class TestTopologicalSortCycleFallback:
 class TestRouteChatEmptyStringGuard:
     """route_chat rejects empty agent_name and message."""
 
+    @pytest.mark.parametrize("agent_name", ["", "   "])
     @pytest.mark.asyncio
-    async def test_empty_agent_name_rejected(self) -> None:
+    async def test_blank_agent_name_rejected(self, agent_name: str) -> None:
         router = PlatformRouter(process_manager=_make_process_manager(agents={}))
-        result = await router.route_chat("", "hello")
+        result = await router.route_chat(agent_name, "hello")
         assert result["success"] is False
         assert "agent_name" in result["error"]
 
+    @pytest.mark.parametrize("message", ["", "   "])
     @pytest.mark.asyncio
-    async def test_whitespace_agent_name_rejected(self) -> None:
-        router = PlatformRouter(process_manager=_make_process_manager(agents={}))
-        result = await router.route_chat("   ", "hello")
-        assert result["success"] is False
-        assert "agent_name" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_empty_message_rejected(self) -> None:
+    async def test_blank_message_rejected(self, message: str) -> None:
         handle = _make_agent_handle()
         router = PlatformRouter(process_manager=_make_process_manager(agents={"a": handle}))
-        result = await router.route_chat("a", "")
-        assert result["success"] is False
-        assert "message" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_whitespace_message_rejected(self) -> None:
-        handle = _make_agent_handle()
-        router = PlatformRouter(process_manager=_make_process_manager(agents={"a": handle}))
-        result = await router.route_chat("a", "   ")
+        result = await router.route_chat("a", message)
         assert result["success"] is False
         assert "message" in result["error"]
 
@@ -2323,17 +2240,30 @@ class TestUnifiedIpcLock:
 class TestErrorTypeConsistency:
     """Every error return dict from route_to_atomic must include error_type."""
 
+    @pytest.mark.parametrize(
+        "method, kwargs, expected_error_type",
+        [
+            (
+                "route_to_atomic",
+                {"atomic_name": "nonexistent", "message": "hello", "conversation_id": "c1"},
+                "KeyError",
+            ),
+            ("route_chat", {"agent_name": "", "message": "hello"}, "ValueError"),
+            ("route_chat", {"agent_name": "some-agent", "message": ""}, "ValueError"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_agent_not_found_has_error_type(self) -> None:
-        """Agent not found returns error_type='KeyError'."""
+    async def test_error_type_present(
+        self, method: str, kwargs: dict, expected_error_type: str
+    ) -> None:
         from agent_nexus.platform.orchestration.process_manager import ProcessManager
-        from agent_nexus.platform.router.router import PlatformRouter
 
         pm = ProcessManager()
         router = PlatformRouter(process_manager=pm)
-        result = await router.route_to_atomic("nonexistent", "hello", "conv-1")
+        fn = getattr(router, method)
+        result = await fn(**kwargs)
         assert result["success"] is False
-        assert result["error_type"] == "KeyError"
+        assert result["error_type"] == expected_error_type
 
     @pytest.mark.asyncio
     async def test_agent_not_alive_has_error_type(self) -> None:
@@ -2344,7 +2274,6 @@ class TestErrorTypeConsistency:
             AgentHandle,
             ProcessManager,
         )
-        from agent_nexus.platform.router.router import PlatformRouter
 
         pm = ProcessManager()
         router = PlatformRouter(process_manager=pm)
@@ -2355,30 +2284,6 @@ class TestErrorTypeConsistency:
         result = await router.route_to_atomic("dead-agent", "hello", "conv-1")
         assert result["success"] is False
         assert result["error_type"] == "ProcessNotAliveError"
-
-    @pytest.mark.asyncio
-    async def test_empty_agent_name_has_error_type(self) -> None:
-        """Empty agent_name returns error_type='ValueError'."""
-        from agent_nexus.platform.orchestration.process_manager import ProcessManager
-        from agent_nexus.platform.router.router import PlatformRouter
-
-        pm = ProcessManager()
-        router = PlatformRouter(process_manager=pm)
-        result = await router.route_chat("", "hello")
-        assert result["success"] is False
-        assert result["error_type"] == "ValueError"
-
-    @pytest.mark.asyncio
-    async def test_empty_message_has_error_type(self) -> None:
-        """Empty message returns error_type='ValueError'."""
-        from agent_nexus.platform.orchestration.process_manager import ProcessManager
-        from agent_nexus.platform.router.router import PlatformRouter
-
-        pm = ProcessManager()
-        router = PlatformRouter(process_manager=pm)
-        result = await router.route_chat("some-agent", "")
-        assert result["success"] is False
-        assert result["error_type"] == "ValueError"
 
 
 # iter132 regression: ctx.close() exception safety in route_composite

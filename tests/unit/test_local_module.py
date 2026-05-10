@@ -1775,28 +1775,19 @@ class TestSupervisorConfigLoadLogsError:
 class TestSourceManagerListValidation:
     """Regression: sources.yaml 'sources' key must be a list, not other types."""
 
-    def test_sources_string_value_uses_defaults(self, tmp_path: Path) -> None:
-        """When 'sources' maps to a string, SourceManager falls back to defaults."""
+    @pytest.mark.parametrize(
+        "yaml_content",
+        [
+            "sources: just_a_string\n",
+            "sources:\n  name: official\n  url: http://x.com\n",
+            "sources: 42\n",
+        ],
+        ids=["string", "dict", "int"],
+    )
+    def test_non_list_sources_uses_defaults(self, tmp_path: Path, yaml_content: str) -> None:
+        """Non-list 'sources' values fall back to defaults."""
         path = tmp_path / "sources.yaml"
-        path.write_text("sources: just_a_string\n", encoding="utf-8")
-        mgr = SourceManager(path)
-        sources = mgr.list_sources()
-        assert len(sources) == 1
-        assert sources[0].name == "official"
-
-    def test_sources_dict_value_uses_defaults(self, tmp_path: Path) -> None:
-        """When 'sources' maps to a dict, SourceManager falls back to defaults."""
-        path = tmp_path / "sources.yaml"
-        path.write_text("sources:\n  name: official\n  url: http://x.com\n", encoding="utf-8")
-        mgr = SourceManager(path)
-        sources = mgr.list_sources()
-        assert len(sources) == 1
-        assert sources[0].name == "official"
-
-    def test_sources_int_value_uses_defaults(self, tmp_path: Path) -> None:
-        """When 'sources' maps to an int, SourceManager falls back to defaults."""
-        path = tmp_path / "sources.yaml"
-        path.write_text("sources: 42\n", encoding="utf-8")
+        path.write_text(yaml_content, encoding="utf-8")
         mgr = SourceManager(path)
         sources = mgr.list_sources()
         assert len(sources) == 1
@@ -1824,8 +1815,16 @@ class TestSourceManagerListValidation:
 class TestSourceManagerIndexListValidation:
     """Regression: index.yaml 'agents' key must be a list."""
 
-    def test_index_agents_string_returns_none(self, tmp_path: Path) -> None:
-        """When index 'agents' is a string, _load_source_index returns None."""
+    @pytest.mark.parametrize(
+        "yaml_content",
+        [
+            "agents: not_a_list\n",
+            "agents:\n  name: x\n  version: 1.0\n",
+        ],
+        ids=["string", "dict"],
+    )
+    def test_non_list_agents_returns_none(self, tmp_path: Path, yaml_content: str) -> None:
+        """Non-list 'agents' in index returns None."""
         import hashlib
 
         path = tmp_path / "sources.yaml"
@@ -1835,25 +1834,7 @@ class TestSourceManagerIndexListValidation:
         url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
         cache_dir = tmp_path / "cache" / "repos" / url_hash
         cache_dir.mkdir(parents=True, exist_ok=True)
-        (cache_dir / "index.yaml").write_text("agents: not_a_list\n", encoding="utf-8")
-
-        result = mgr._load_source_index(mgr.list_sources()[0])
-        assert result is None
-
-    def test_index_agents_dict_returns_none(self, tmp_path: Path) -> None:
-        """When index 'agents' is a dict, _load_source_index returns None."""
-        import hashlib
-
-        path = tmp_path / "sources.yaml"
-        mgr = SourceManager(path)
-
-        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
-        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
-        cache_dir = tmp_path / "cache" / "repos" / url_hash
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        (cache_dir / "index.yaml").write_text(
-            "agents:\n  name: x\n  version: 1.0\n", encoding="utf-8"
-        )
+        (cache_dir / "index.yaml").write_text(yaml_content, encoding="utf-8")
 
         result = mgr._load_source_index(mgr.list_sources()[0])
         assert result is None
