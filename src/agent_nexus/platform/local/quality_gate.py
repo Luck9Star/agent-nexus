@@ -12,7 +12,7 @@ from __future__ import annotations
 import ast
 import logging
 import re
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -26,14 +26,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class CheckSeverity(str, Enum):
+class CheckSeverity(StrEnum):
     """Severity of a quality check finding."""
 
     CRITICAL = "critical"
     WARNING = "warning"
 
 
-class CheckVerdict(str, Enum):
+class CheckVerdict(StrEnum):
     """Overall quality gate verdict."""
 
     PASS = "PASS"

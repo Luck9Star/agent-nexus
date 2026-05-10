@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .manifest import find_manifest, load_manifest_dict
@@ -169,7 +169,6 @@ class DependencyResolver:
                 continue
 
             # Compare each pair
-            seen_specs: set[str] = set()
             for i, (agent_a, spec_a) in enumerate(entries):
                 for agent_b, spec_b in entries[i + 1 :]:
                     if spec_a != spec_b:
