@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -62,6 +63,7 @@ class TaskComposerResult:
     skipped_tasks: list[str] = field(default_factory=list)
     output_target: str | None = None
     """Detected output intent: ``None``, ``"file"`` (generic), or a specific file path."""
+    evolution_triggered: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +226,7 @@ class TaskComposer:
         llm_integrator: LLMIntegrator | None = None,
         llm_qa_gate: LLMQualityGate | None = None,
         concurrent: bool = False,
+        evolution_callback: Callable[[TaskComposerResult], None] | None = None,
     ) -> TaskComposerResult:
         """Execute the full pipeline.
 
@@ -336,7 +339,7 @@ class TaskComposer:
             llm_integrator is not None,
         )
 
-        return TaskComposerResult(
+        result = TaskComposerResult(
             task=input.task,
             selected_agents=selected,
             dag=dag,
@@ -345,6 +348,17 @@ class TaskComposer:
             skipped_tasks=list(skipped),
             output_target=output_target,
         )
+
+        # Step 7: Evolution hook (optional, post-QAGate)
+        if evolution_callback is not None and qa_result.passed:
+            try:
+                evolution_callback(result)
+                result.evolution_triggered = True
+                logger.info("TaskComposer: evolution callback triggered")
+            except Exception:
+                logger.warning("TaskComposer: evolution callback failed", exc_info=True)
+
+        return result
 
     # ------------------------------------------------------------------
     # Private helpers (extracted from run() to reduce complexity)

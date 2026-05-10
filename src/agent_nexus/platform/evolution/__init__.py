@@ -8,6 +8,7 @@ Public API:
     BudgetStore              -- context budget events and maintenance
     ExecutionAnalyzer        -- post-task analysis and quality evaluation
     SkillEvolver             -- FIX / DERIVED / CAPTURED evolution execution
+    SkillPatcher             -- LLM-driven skill content modification
     CompactionGuard          -- context window protection against compaction loops
     HealthChecker            -- threshold-based evolution trigger diagnostics
     AgentPromoter            -- skill-to-agent promotion
@@ -35,6 +36,11 @@ from agent_nexus.platform.evolution.promotion import (
     PromotionCandidate,
     PromotionResult,
 )
+from agent_nexus.platform.evolution.skill_patch import (
+    PatchResult,
+    SkillPatcher,
+    ValidationResult,
+)
 from agent_nexus.platform.evolution.skill_store import SkillStore
 from agent_nexus.platform.evolution.store import EvolutionStore
 
@@ -46,6 +52,7 @@ __all__ = [
     "BudgetStore",
     "ExecutionAnalyzer",
     "SkillEvolver",
+    "SkillPatcher",
     "AgentContext",
     "CompactionGuard",
     "HealthChecker",
@@ -54,4 +61,7 @@ __all__ = [
     "PromotionCandidate",
     "PromotionResult",
     "EvolutionContextDescriber",
+    # SkillPatcher models
+    "PatchResult",
+    "ValidationResult",
 ]

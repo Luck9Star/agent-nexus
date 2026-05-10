@@ -7,9 +7,10 @@ import logging
 import shutil
 import sys
 import tempfile
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -397,7 +398,7 @@ def _format_section_value(value: object) -> list[str]:
     return [str(value)]
 
 
-_SECTION_VALUE_HANDLERS: list[tuple[type, object]] = [
+_SECTION_VALUE_HANDLERS: list[tuple[type, Callable[[Any], list[str]]]] = [
     (list, lambda v: [f"- {item}" for item in v] if v else []),
     (dict, lambda v: [f"- **{k}**: {v}" for k, v in v.items()] if v else []),
 ]
@@ -476,6 +477,7 @@ def _execute_pipeline(
     llm_planner: LLMPlanner | None,
     llm_integrator: LLMIntegrator | None,
     llm_qa_gate: LLMQualityGate | None,
+    evolution_callback: Callable | None = None,
 ) -> TaskComposerResult:
     """Run the TaskComposer pipeline with proper resource cleanup."""
     from agent_nexus.platform.orchestration.task_graph import TaskGraph
@@ -500,6 +502,7 @@ def _execute_pipeline(
                 llm_integrator=llm_integrator,
                 llm_qa_gate=llm_qa_gate,
                 concurrent=True,
+                evolution_callback=evolution_callback,
             )
         finally:
             if is_llm:
