@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent_nexus.models._common import FrozenModel
 
@@ -24,6 +24,11 @@ class PlatformToAgentType(StrEnum):
     CHAT = "chat"
     TASK = "task"
     DATA_REFERENCE = "data_reference"
+    # A2A delivery types — Platform relays these to target agents
+    RECEIVE_MESSAGE = "receive_message"
+    RECEIVE_REQUEST = "receive_request"
+    RECEIVE_BROADCAST = "receive_broadcast"
+    RECEIVE_REPLY = "receive_reply"
 
 
 class AgentToPlatformType(StrEnum):
@@ -32,6 +37,11 @@ class AgentToPlatformType(StrEnum):
     RESULT = "result"
     PROGRESS = "progress"
     ERROR = "error"
+    # A2A origination types — Agent asks Platform to relay
+    SEND_MESSAGE = "send_message"
+    SEND_REQUEST = "send_request"
+    BROADCAST = "broadcast"
+    REPLY = "reply"
 
 
 class PlatformToAgent(FrozenModel):
@@ -123,3 +133,49 @@ class IPCMessage(FrozenModel):
             elif direction == MessageDirection.AGENT_TO_PLATFORM.value:
                 values["payload"] = AgentToPlatform.model_validate(payload)
         return values
+
+
+# ---------------------------------------------------------------------------
+# A2A (Agent-to-Agent) messaging models
+# ---------------------------------------------------------------------------
+# Platform-as-Broker pattern: agents never connect directly.
+# Platform Router relays messages between agents via existing IPC transport.
+# See: docs/roadmap/ for A2A design document.
+
+
+class AgentAddress(BaseModel):
+    """Network-layer address for an agent in A2A communication.
+
+    Used to identify senders and recipients in agent-to-agent messages.
+    ``role`` is optional metadata (e.g. "coordinator", "worker", "reviewer").
+    """
+
+    agent_id: str
+    role: str | None = None
+
+
+class A2AMessage(BaseModel):
+    """Agent-to-Agent message carried over the Platform-as-Broker relay.
+
+    This is the high-level message model. It is serialized into a
+    ``PlatformToAgent`` envelope for delivery to the target agent's IPC stream.
+
+    Attributes:
+        message_id: Unique identifier (UUID) for this message.
+        from_agent: Sender agent identifier.
+        to_agent: Recipient agent identifier. ``None`` for broadcasts.
+        msg_type: Message pattern — "chat", "request", "broadcast", "reply".
+        in_reply_to: For replies, the ``message_id`` of the original request.
+        content: Message payload (text).
+        metadata: Optional key-value metadata (e.g. priority, correlation tags).
+        timestamp: Unix timestamp (seconds since epoch).
+    """
+
+    message_id: str
+    from_agent: str
+    to_agent: str | None = None
+    msg_type: Literal["chat", "request", "broadcast", "reply"]
+    in_reply_to: str | None = None
+    content: str
+    metadata: dict[str, Any] = {}
+    timestamp: float
