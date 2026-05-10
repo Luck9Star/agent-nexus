@@ -78,5 +78,10 @@ app.add_typer(create_app, name="create")
 app.add_typer(sources_app, name="sources")
 app.command("check")(check_agent)
 
+# --- create-agent command (capability-taxonomy aware scaffolding) ---
+from agent_nexus.platform.local.cli._create_agent_cmd import create_agent_cmd
+
+app.command("create-agent")(create_agent_cmd)
+
 if __name__ == "__main__":
     app()

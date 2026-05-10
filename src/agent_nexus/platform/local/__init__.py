@@ -15,6 +15,7 @@ Usage::
     supervisor = AgentSupervisor(process_manager, lockfile_mgr, config_loader)
 """
 
+from .create_agent import AgentCreator, AgentCreatorError
 from .dependency_resolver import ConflictReport, DependencyResolver, ResolvedDependency
 from .installer import AgentNotFoundError, GitInstaller, InstallationError
 from .lockfile import LockfileManager
@@ -31,11 +32,14 @@ from .quality_gate import (
     SkillFileCheck,
     TestCoverageCheck,
 )
+from .signer import AgentSigner, SignatureBundle, SigningMethod, VerificationResult
 from .sources import SourceManager
 from .supervisor import AgentSupervisor, RestartTracker
 
 __all__ = [
     # Core classes
+    "AgentCreator",
+    "AgentSigner",
     "AgentSupervisor",
     "DependencyResolver",
     "GitInstaller",
@@ -57,7 +61,12 @@ __all__ = [
     # Dependency Resolver
     "ConflictReport",
     "ResolvedDependency",
+    # Signer
+    "SignatureBundle",
+    "SigningMethod",
+    "VerificationResult",
     # Exceptions
+    "AgentCreatorError",
     "AgentNotFoundError",
     "InstallationError",
 ]

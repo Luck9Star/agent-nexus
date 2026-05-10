@@ -1,0 +1,26 @@
+# Controlled vocabulary of agent capabilities
+
+[categories]
+code-quality = { name = "Code Quality", description = "Code analysis, review, and quality assurance" }
+security = { name = "Security", description = "Security scanning and vulnerability detection" }
+testing = { name = "Testing", description = "Test generation, execution, and analysis" }
+documentation = { name = "Documentation", description = "Documentation generation and management" }
+performance = { name = "Performance", description = "Performance profiling and optimization" }
+data = { name = "Data", description = "Data pipeline and schema analysis" }
+integration = { name = "Integration", description = "API contract testing and integration" }
+configuration = { name = "Configuration", description = "Configuration management and linting" }
+i18n = { name = "I18n", description = "Internationalization validation" }
+devops = { name = "DevOps", description = "CI/CD and deployment" }
+
+[capabilities]
+static-analysis = { category = "code-quality", description = "Static code analysis" }
+anti-pattern-detection = { category = "code-quality", description = "Anti-pattern detection" }
+security-scan = { category = "security", description = "Security vulnerability scanning" }
+test-generation = { category = "testing", description = "Automated test generation" }
+test-execution = { category = "testing", description = "Test execution and reporting" }
+doc-generation = { category = "documentation", description = "Documentation generation" }
+performance-profiling = { category = "performance", description = "Performance profiling" }
+schema-analysis = { category = "data", description = "Database schema analysis" }
+api-testing = { category = "integration", description = "API contract testing" }
+config-linting = { category = "configuration", description = "Configuration file linting" }
+i18n-validation = { category = "i18n", description = "Internationalization validation" }
