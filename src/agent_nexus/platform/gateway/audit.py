@@ -57,6 +57,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -176,6 +177,7 @@ class AuditLogger:
         self._db_path = Path(db_path)
         self._max_size_bytes = int(max_size_mb * 1024 * 1024)
         self._sinks: list[AuditSink] = sinks or []
+        self._rotate_lock = threading.Lock()
         self._init_db()
 
     # ------------------------------------------------------------------
@@ -196,7 +198,14 @@ class AuditLogger:
             conn.close()
 
     def _insert_event(self, event: AuditEvent) -> None:
-        """Insert a single event into the database."""
+        """Insert a single event into the database.
+
+        Design note: each call opens and closes its own SQLite connection.
+        This trades raw throughput for simplicity and correctness under
+        concurrent ``asyncio.to_thread`` calls.  SQLite WAL mode (enabled
+        in ``_init_db``) allows concurrent readers and writers without
+        blocking, mitigating the performance impact.
+        """
         summary = event.request_summary
         if summary is not None and len(summary) > _MAX_SUMMARY_LEN:
             summary = summary[:_MAX_SUMMARY_LEN]
@@ -288,19 +297,22 @@ class AuditLogger:
 
     def _rotate_if_needed(self) -> None:
         """Archive the current db and create a fresh one if size exceeded."""
-        if self._get_db_size_bytes() < self._max_size_bytes:
-            return
-
-        archive_path = Path(
-            f"{self._db_path}.{int(time.time())}.bak"
-        )
+        if not self._rotate_lock.acquire(blocking=False):
+            return  # Another thread is rotating, skip
         try:
-            os.rename(str(self._db_path), str(archive_path))
-            logger.info("Audit log rotated: archived to %s", archive_path)
-        except OSError:
-            logger.exception("Failed to archive audit log %s", self._db_path)
-            return
-        self._init_db()
+            if self._get_db_size_bytes() < self._max_size_bytes:
+                return
+
+            archive_path = Path(f"{self._db_path}.{int(time.time())}.bak")
+            try:
+                os.rename(str(self._db_path), str(archive_path))
+                logger.info("Audit log rotated: archived to %s", archive_path)
+            except OSError:
+                logger.exception("Failed to archive audit log %s", self._db_path)
+                return
+            self._init_db()
+        finally:
+            self._rotate_lock.release()
 
     # ------------------------------------------------------------------
     # Public async API

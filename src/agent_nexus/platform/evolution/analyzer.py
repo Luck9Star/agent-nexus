@@ -103,6 +103,8 @@ def _correct_single_id(raw_id: str, known_ids: set[str]) -> str:
     candidates = [k for k in known_ids if k.startswith(pfx)]
     max_dist = _max_edit_distance(raw_id, pfx, len(candidates))
     best = _find_best_candidate(raw_id, candidates, max_dist)
+    if best is not None and best != raw_id:
+        logger.info("Corrected skill ID '%s' -> '%s'", raw_id, best)
     return best if best is not None else raw_id
 
 

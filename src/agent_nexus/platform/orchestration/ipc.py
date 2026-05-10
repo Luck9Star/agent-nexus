@@ -239,6 +239,11 @@ class IPCProtocol:
         """Low-level stream access (for ProcessManager)."""
         return self._stream
 
+    @property
+    def discarded_count(self) -> int:
+        """Number of messages discarded due to buffer overflow."""
+        return self._discarded_count
+
     # -- buffer management --------------------------------------------------
 
     def _buffer_message(self, msg: AgentToPlatform) -> None:
@@ -249,7 +254,7 @@ class IPCProtocol:
         """
         if len(self._peek_buffer) >= self._MAX_PEEK_BUFFER_SIZE:
             self._discarded_count += 1
-            logger.warning(
+            logger.error(
                 "IPC peek buffer reached max size (%d); "
                 "discarding oldest message (total discarded: %d)",
                 self._MAX_PEEK_BUFFER_SIZE,

@@ -478,10 +478,17 @@ class DAGDispatcher:
         futures: dict[concurrent.futures.Future[tuple[Artifact | None, str | None]], TaskItem],
         result: DispatchResult,
     ) -> None:
-        """Collect results from submitted futures with fail-fast on first error."""
-        per_task_timeout = self._timeout_seconds
+        """Collect results from submitted futures with fail-fast on first error.
+
+        The *batch_timeout* applies to the ``as_completed`` iterator as a
+        whole — it caps the total time spent waiting for the entire batch,
+        not per-future.  If any individual future has not completed by the
+        time the batch timeout fires, a ``TimeoutError`` is raised and all
+        remaining futures are cancelled.
+        """
+        batch_timeout = self._timeout_seconds
         try:
-            for future in concurrent.futures.as_completed(futures, timeout=per_task_timeout):
+            for future in concurrent.futures.as_completed(futures, timeout=batch_timeout):
                 task_item = futures[future]
                 try:
                     artifact, error = future.result()

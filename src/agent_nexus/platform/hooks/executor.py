@@ -44,7 +44,14 @@ def _is_private_url(url: str) -> bool:
         return False
     try:
         ip = ipaddress.ip_address(hostname)
-        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        )
     except ValueError:
         # hostname is a domain, not IP — allow but block known internal endpoints
         blocked_hostnames = {"localhost", "metadata.google.internal", "metadata.internal"}

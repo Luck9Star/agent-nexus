@@ -16,6 +16,7 @@ import contextlib
 import logging
 import os
 import signal
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -122,6 +123,7 @@ class ProcessManager:
     def __init__(self) -> None:
         self._agents: dict[str, AgentHandle] = {}
         self._lock = asyncio.Lock()
+        self._cleanup_lock = threading.Lock()
         self._stopping: set[str] = set()
 
     # ------------------------------------------------------------------
@@ -576,14 +578,18 @@ class ProcessManager:
         Closes IPC streams and cancels drain tasks for dead agents to
         prevent FD leaks.
 
-        Note: mutates ``_agents`` without ``_lock``. Under CPython's
-        GIL, individual dict operations are atomic.  The close_sync()
-        calls are deferred until after the dict mutation loop completes
-        to avoid FD corruption if the drain task races with us.
+        Thread-safety is provided by ``_cleanup_lock`` (threading.Lock)
+        so that calls from ``list_running`` (sync) and ``health_check``
+        (async under ``_lock``) are both safe.
 
         Returns:
             List of agent names that were cleaned up.
         """
+        with self._cleanup_lock:
+            return self._cleanup_dead_locked()
+
+    def _cleanup_dead_locked(self) -> list[str]:
+        """Internal implementation of _cleanup_dead, called under _cleanup_lock."""
         dead: list[str] = []
         to_close: list[tuple[str, Any]] = []
         for name, handle in list(self._agents.items()):

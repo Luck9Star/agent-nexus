@@ -12,11 +12,14 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import logging
 import os
 import time
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -138,24 +141,42 @@ class ToolAccessChecker:
             for pattern in policy.tools_allowed:
                 if fnmatch.fnmatch(tool_name, pattern):
                     return True
+        logger.debug(
+            "No matching policy for client %s roles %s, denying tool %s",
+            client.client_id,
+            client.roles,
+            tool_name,
+        )
         return False  # no matching policy -> deny
 
-    def check_rate_limit(self, client_id: str) -> bool:
-        """Check if client is within rate limit. Returns True if OK."""
+    def check_rate_limit(
+        self,
+        client_id: str,
+        client: AuthenticatedClient | None = None,
+    ) -> bool:
+        """Check if client is within rate limit. Returns True if OK.
+
+        When *client* is provided, only policies whose ``client_roles``
+        overlap with the client's roles are considered for extracting the
+        rate limit.  Otherwise, all policies are checked (backward compat).
+        """
         now = time.time()
-        # Find applicable rate limit
+        # Find applicable rate limit, filtered by client roles
         limit = 100  # D12: default 100/min
+        applicable: list[int] = []
         for policy in self._policies:
-            if policy.rate_limit is not None:
-                limit = policy.rate_limit
+            if policy.rate_limit is not None and (
+                client is None or any(r in policy.client_roles for r in client.roles)
+            ):
+                applicable.append(policy.rate_limit)
+        if applicable:
+            limit = applicable[0]
 
         if client_id not in self._call_counts:
             self._call_counts[client_id] = []
 
         # Prune timestamps older than 60s
-        self._call_counts[client_id] = [
-            t for t in self._call_counts[client_id] if now - t < 60
-        ]
+        self._call_counts[client_id] = [t for t in self._call_counts[client_id] if now - t < 60]
 
         if len(self._call_counts[client_id]) >= limit:
             return False

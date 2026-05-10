@@ -232,8 +232,9 @@ class TestFuzzyMatch:
         """A model id with no recognisable provider gets a safe generic default."""
         reg = ModelCapabilityRegistry()
         cap = reg.get("some-future-model-v2")
-        # Falls to openai default based on provider heuristic
-        assert cap.provider == "openai"
+        # Falls to "unknown" provider default (not "openai") to avoid
+        # silently routing unknown models to OpenAI defaults.
+        assert cap.provider == "unknown"
         assert cap.max_output_tokens >= 4096
 
 

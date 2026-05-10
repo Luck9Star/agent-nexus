@@ -448,12 +448,12 @@ def _configure_logging(config_dir: str | None) -> None:
 def _load_experts(vendor_path: str, allowlist: str) -> ExpertRegistry:
     """Load expert profiles via AgencyImporter and populate the registry."""
     tmpdir = tempfile.mkdtemp(prefix="agency-run-")
-    importer = AgencyImporter(
-        vendor_path=vendor_path,
-        allowlist_path=allowlist,
-        output_dir=tmpdir,
-    )
     try:
+        importer = AgencyImporter(
+            vendor_path=vendor_path,
+            allowlist_path=allowlist,
+            output_dir=tmpdir,
+        )
         profiles = importer.dry_run()
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

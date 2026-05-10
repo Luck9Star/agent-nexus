@@ -195,6 +195,14 @@ class SkillPatcher:
 
     @staticmethod
     def _check_security(content: str) -> bool:
+        """Best-effort content safety heuristic for skill instruction text.
+
+        NOTE: This is a heuristic check on skill instruction text, not
+        executable code.  Patterns like ``\\bexec\\s*\\(`` will match
+        prose such as "Execute the plan".  This is intentional as a
+        coarse filter; it is **not** a security boundary.
+        """
+        # NOTE: This is a heuristic check on skill instruction text, not executable code.
         dangerous = (
             r"\bexec\s*\(",
             r"\beval\s*\(",

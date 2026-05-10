@@ -138,7 +138,10 @@ class EvolutionDashboard:
         if record is None:
             return None
 
-        children = self._find_children(skill_id)
+        all_skills = self._store.get_all_skills()
+        children = self._find_children(
+            skill_id, all_skills=all_skills, visited={skill_id}, depth=0
+        )
         return LineageNode(
             skill_id=record.id,
             name=record.name,
@@ -147,13 +150,36 @@ class EvolutionDashboard:
             children=children,
         )
 
-    def _find_children(self, skill_id: str) -> list[LineageNode]:
-        """Find skills that have skill_id as a parent."""
-        all_skills = self._store.get_all_skills()
+    def _find_children(
+        self,
+        skill_id: str,
+        *,
+        all_skills: list[SkillRecord],
+        visited: set[str],
+        depth: int,
+    ) -> list[LineageNode]:
+        """Find skills that have skill_id as a parent.
+
+        Parameters
+        ----------
+        skill_id:
+            The parent skill to find children for.
+        all_skills:
+            Pre-fetched list of all skills (avoids repeated queries).
+        visited:
+            Set of already-visited skill IDs to prevent cycles.
+        depth:
+            Current recursion depth (max 10 to prevent unbounded recursion).
+        """
+        if skill_id in visited or depth > 10:
+            return []
+        visited.add(skill_id)
         children: list[LineageNode] = []
         for s in all_skills:
             if skill_id in s.lineage.parent_skill_ids:
-                grandchildren = self._find_children(s.id)
+                grandchildren = self._find_children(
+                    s.id, all_skills=all_skills, visited=visited, depth=depth + 1
+                )
                 children.append(
                     LineageNode(
                         skill_id=s.id,

@@ -340,6 +340,18 @@ PROVIDER_DEFAULTS: dict[str, ModelCapability] = {
         temperature_max=2.0,
         knowledge_cutoff="2024-01",
     ),
+    "unknown": ModelCapability(
+        model_id="__unknown_default__",
+        provider="unknown",
+        max_output_tokens=4096,
+        context_window=8192,
+        supports_vision=False,
+        supports_tool_use=True,
+        supports_temperature=True,
+        temperature_min=0.0,
+        temperature_max=2.0,
+        knowledge_cutoff="2024-01",
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -386,13 +398,13 @@ def _extract_provider(model_id: str) -> str:
     """Heuristically determine the provider name from a model id string.
 
     Looks up known prefixes in ``_PROVIDER_PREFIX_MAP`` and falls back to
-    ``"openai"`` for unrecognised ids.
+    ``"unknown"`` for unrecognised ids.
     """
     lower = model_id.lower()
     for prefixes, provider in _PROVIDER_PREFIX_MAP:
         if lower.startswith(prefixes):
             return provider
-    return "openai"
+    return "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -487,7 +499,7 @@ class ModelCapabilityRegistry:
     def get_provider_default(self, provider: str) -> ModelCapability:
         """Return the safe default capability for a given provider.
 
-        If the provider is not recognised a conservative ``openai``-like
+        If the provider is not recognised a conservative ``unknown``
         default is returned.
         """
         default = PROVIDER_DEFAULTS.get(provider)

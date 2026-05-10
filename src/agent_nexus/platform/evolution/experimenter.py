@@ -7,6 +7,7 @@ Design decisions (from docs/roadmap/p2-5-evolution.md):
 
 from __future__ import annotations
 
+import dataclasses as _dc
 import logging
 import random
 import time
@@ -65,8 +66,22 @@ class EvolutionExperimenter:
     """
 
     def __init__(self, store: EvolutionStore) -> None:
+        """Initialise the experimenter.
+
+        .. warning::
+
+            All experiment state is held in memory (``dict``).  If the
+            process restarts, in-flight experiments and their accumulated
+            sample counts are lost.  This is an intentional design
+            decision -- persistence would add significant scope (SQLite
+            migration, schema versioning) with limited POC value.
+        """
         self._store = store
         self._experiments: dict[str, Experiment] = {}
+        logger.warning(
+            "EvolutionExperimenter created with in-memory experiment registry -- "
+            "all experiment state will be lost on process restart"
+        )
 
     def create_experiment(
         self,
@@ -113,35 +128,11 @@ class EvolutionExperimenter:
         if skill_id == exp.parent_skill_id:
             total = exp.parent_total + 1
             successes = exp.parent_successes + (1 if success else 0)
-            updated = Experiment(
-                experiment_id=exp.experiment_id,
-                parent_skill_id=exp.parent_skill_id,
-                evolved_skill_id=exp.evolved_skill_id,
-                status=exp.status,
-                created_at=exp.created_at,
-                min_samples=exp.min_samples,
-                confidence_level=exp.confidence_level,
-                parent_successes=successes,
-                parent_total=total,
-                evolved_successes=exp.evolved_successes,
-                evolved_total=exp.evolved_total,
-            )
+            updated = _dc.replace(exp, parent_successes=successes, parent_total=total)
         elif skill_id == exp.evolved_skill_id:
             total = exp.evolved_total + 1
             successes = exp.evolved_successes + (1 if success else 0)
-            updated = Experiment(
-                experiment_id=exp.experiment_id,
-                parent_skill_id=exp.parent_skill_id,
-                evolved_skill_id=exp.evolved_skill_id,
-                status=exp.status,
-                created_at=exp.created_at,
-                min_samples=exp.min_samples,
-                confidence_level=exp.confidence_level,
-                parent_successes=exp.parent_successes,
-                parent_total=exp.parent_total,
-                evolved_successes=successes,
-                evolved_total=total,
-            )
+            updated = _dc.replace(exp, evolved_successes=successes, evolved_total=total)
         else:
             raise ValueError(f"Skill {skill_id} is not part of experiment {experiment_id}")
 
@@ -199,19 +190,7 @@ class EvolutionExperimenter:
             self._store.reactivate_skill(exp.parent_skill_id)
 
         # Mark experiment as reverted
-        updated = Experiment(
-            experiment_id=exp.experiment_id,
-            parent_skill_id=exp.parent_skill_id,
-            evolved_skill_id=exp.evolved_skill_id,
-            status=ExperimentStatus.REVERTED,
-            created_at=exp.created_at,
-            min_samples=exp.min_samples,
-            confidence_level=exp.confidence_level,
-            parent_successes=exp.parent_successes,
-            parent_total=exp.parent_total,
-            evolved_successes=exp.evolved_successes,
-            evolved_total=exp.evolved_total,
-        )
+        updated = _dc.replace(exp, status=ExperimentStatus.REVERTED)
         self._experiments[experiment_id] = updated
 
         if parent is None:
