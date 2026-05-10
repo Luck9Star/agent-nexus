@@ -3,7 +3,7 @@
 Installation process:
 1. Resolve agent source (which repo + path)
 2. Sparse clone the agent directory (``git sparse-checkout``)
-3. Validate agent package (``agent-manifest.yaml``, ``SKILL.md``)
+3. Validate agent package (``agent.toml`` or ``agent-manifest.yaml``, ``SKILL.md``)
 4. Create per-agent venv with ``uv`` (if agent has ``pyproject.toml``)
 5. Update lockfile with version + commit SHA
 
@@ -19,7 +19,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import toml
-import yaml
 
 from agent_nexus.models.agent import AgentManifest, AgentType
 from agent_nexus.models.distribution import LockfileEntry, SourceEntry
@@ -27,6 +26,7 @@ from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.platform.utils import AGENT_NAME_RE
 
 from .lockfile import LockfileManager
+from .manifest import load_manifest_dict as _load_manifest_dict
 from .sources import SourceManager
 
 logger = logging.getLogger(__name__)
@@ -509,14 +509,14 @@ class GitInstaller:
         empty if the file is missing or unparseable.
 
         Checks:
-        1. ``agent-manifest.yaml`` exists and is parseable
+        1. Manifest file exists (``agent.toml`` or ``agent-manifest.yaml``)
         2. ``SKILL.md`` exists
         3. Basic manifest structure has required fields
         """
         issues: list[str] = []
 
-        # 1. agent-manifest.yaml
-        manifest_issues, manifest_data = self._validate_manifest_yaml(agent_dir)
+        # 1. manifest (TOML preferred, YAML fallback)
+        manifest_issues, manifest_data = _load_manifest_dict(agent_dir)
         issues.extend(manifest_issues)
 
         # 2. SKILL.md
@@ -526,44 +526,30 @@ class GitInstaller:
         return issues, manifest_data
 
     def _validate_manifest_yaml(self, agent_dir: Path) -> tuple[list[str], dict]:
-        """Validate and parse agent-manifest.yaml.
+        """Validate and parse agent-manifest.yaml (legacy, kept for compat).
 
-        Returns (issues, manifest_data).  manifest_data is empty dict
-        if the file is missing or unparseable.
+        Prefer ``_load_manifest_dict`` from the manifest module for new code.
         """
-        issues: list[str] = []
-        manifest_data: dict = {}
-
-        manifest_path = agent_dir / "agent-manifest.yaml"
-        if not manifest_path.exists():
-            return (["Missing agent-manifest.yaml"], {})
-
-        try:
-            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-            if not isinstance(manifest, dict):
-                return (["agent-manifest.yaml is not a valid mapping"], {})
-
-            manifest_data = manifest
-            for field in ("name", "version", "type"):
-                if field not in manifest:
-                    issues.append(f"agent-manifest.yaml missing required field: {field}")
-            if "type" in manifest and manifest["type"] not in {t.value for t in AgentType}:
-                issues.append(f"Invalid agent type: {manifest['type']}")
-        except yaml.YAMLError as exc:
-            issues.append(f"agent-manifest.yaml parse error: {exc}")
-
-        return issues, manifest_data
+        return _load_manifest_dict(agent_dir)
 
     def _read_manifest(self, agent_dir: Path) -> dict:
-        """Read and return the agent manifest as a raw dict."""
-        manifest_path = agent_dir / "agent-manifest.yaml"
-        if not manifest_path.exists():
+        """Read and return the agent manifest as a raw dict.
+
+        Probes for ``agent.toml`` first, then ``agent-manifest.yaml``.
+        Raises ``InstallationError`` if no manifest found or on parse failure.
+        """
+        from .manifest import ManifestError, _read_raw_manifest, find_manifest
+
+        manifest_path = find_manifest(agent_dir)
+        if manifest_path is None:
             return {}
         try:
-            raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-            return raw if isinstance(raw, dict) else {}
-        except Exception as exc:
-            raise InstallationError(f"Failed to read manifest from {manifest_path}: {exc}") from exc
+            raw = _read_raw_manifest(manifest_path)
+            return raw if raw is not None else {}
+        except (ManifestError, Exception) as exc:
+            raise InstallationError(
+                f"Failed to read manifest from {manifest_path}: {exc}"
+            ) from exc
 
     # ------------------------------------------------------------------
     # Internal: venv management

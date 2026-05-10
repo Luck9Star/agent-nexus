@@ -269,7 +269,7 @@ class TestValidateAgentPackage:
         (agent_dir / "SKILL.md").write_text("# Skill", encoding="utf-8")
 
         issues, manifest = installer._validate_agent_package(agent_dir)
-        assert "Missing agent-manifest.yaml" in issues
+        assert "No manifest found" in issues[0]
         assert manifest == {}
 
     def test_invalid_manifest_yaml(self, tmp_path: Path) -> None:

@@ -24,6 +24,7 @@ from agent_nexus.models.config import (
 )
 from agent_nexus.models.distribution import SourceEntry
 from agent_nexus.models.external_mcp import (
+    ExternalServerAuth,
     ExternalServerConfig,
     TransportType,
 )
@@ -441,6 +442,25 @@ class ConfigLoader:
             logger.warning("External server '%s' has non-dict 'headers', using empty dict", name)
             headers = {}
 
+        # Parse auth section
+        auth_raw = item.get("auth", {})
+        if not isinstance(auth_raw, dict):
+            logger.warning("External server '%s' has non-dict 'auth', using defaults", name)
+            auth_raw = {}
+        auth = ExternalServerAuth(
+            method=auth_raw.get("method", "none"),
+            api_key=auth_raw.get("api_key", ""),
+            bearer_token=auth_raw.get("bearer_token", ""),
+            client_cert_path=auth_raw.get("client_cert_path", ""),
+            client_key_path=auth_raw.get("client_key_path", ""),
+        )
+
+        # Parse allowed_tools
+        allowed_tools = item.get("allowed_tools")
+        if allowed_tools is not None and not isinstance(allowed_tools, list):
+            logger.warning("External server '%s' has non-list 'allowed_tools', ignoring", name)
+            allowed_tools = None
+
         return ExternalServerConfig(
             name=name,
             transport=transport,
@@ -449,6 +469,9 @@ class ConfigLoader:
             url=item.get("url", ""),
             headers=headers,
             enabled=bool(enabled),
+            auth=auth,
+            tls_verify=item.get("tls_verify", True),
+            allowed_tools=allowed_tools,
         )
 
     @staticmethod

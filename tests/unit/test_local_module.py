@@ -554,7 +554,7 @@ class TestGitInstaller:
         pkg_dir.mkdir()
         (pkg_dir / "SKILL.md").write_text("# Test", encoding="utf-8")
         issues, _ = installer._validate_agent_package(pkg_dir)
-        assert "Missing agent-manifest.yaml" in issues
+        assert "No manifest found" in issues[0]
 
     def test_validate_agent_package_missing_skill_md(self, tmp_path: Path) -> None:
         """_validate_agent_package reports missing SKILL.md."""
@@ -612,7 +612,7 @@ class TestGitInstaller:
         (pkg_dir / "agent-manifest.yaml").write_text("- list\n- not\n- dict", encoding="utf-8")
         (pkg_dir / "SKILL.md").write_text("# X", encoding="utf-8")
         issues, _ = installer._validate_agent_package(pkg_dir)
-        assert any("not a valid mapping" in i for i in issues)
+        assert any("empty or unparseable" in i.lower() for i in issues)
 
     def test_read_manifest_valid(self, tmp_path: Path) -> None:
         """_read_manifest returns dict for valid manifest."""
@@ -2303,7 +2303,7 @@ class TestGitInstallerInstall:
         installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
         # Make _validate_agent_package fail
         installer._validate_agent_package = MagicMock(
-            return_value=(["Missing agent-manifest.yaml"], {})
+            return_value=(["No manifest found. Expected one of: agent.toml, agent-manifest.yaml"], {})
         )
 
         with pytest.raises(InstallationError, match="validation failed"):

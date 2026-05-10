@@ -21,6 +21,17 @@ class TransportType(StrEnum):
 
 
 @dataclass
+class ExternalServerAuth:
+    """Auth configuration for external MCP server connections."""
+
+    method: str = "none"  # "none", "api_key", "bearer", "mtls"
+    api_key: str = ""  # or env var reference like ${ENV_VAR}
+    bearer_token: str = ""
+    client_cert_path: str = ""
+    client_key_path: str = ""
+
+
+@dataclass
 class ExternalServerConfig:
     """Configuration for a single external MCP Server connection.
 
@@ -34,3 +45,6 @@ class ExternalServerConfig:
     url: str = ""
     headers: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
+    auth: ExternalServerAuth = field(default_factory=ExternalServerAuth)
+    tls_verify: bool = True
+    allowed_tools: list[str] | None = None

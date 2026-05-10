@@ -16,6 +16,8 @@ unavailable.
 from __future__ import annotations
 
 import logging
+import os
+import re
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -29,6 +31,9 @@ from agent_nexus.models.external_mcp import (
     ExternalServerConfig,
     TransportType,
 )
+
+# Pattern for ${ENV_VAR} references in auth credentials
+_ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +189,27 @@ class ExternalMcpAdapter:
 
     # -- Internal helpers ----------------------------------------------------
 
+    @staticmethod
+    def _resolve_env_vars(value: str) -> str:
+        """Resolve ``${ENV_VAR}`` references in a string from ``os.environ``."""
+        return _ENV_VAR_RE.sub(lambda m: os.environ.get(m.group(1), ""), value)
+
+    def _build_auth_headers(self) -> dict[str, str]:
+        """Build HTTP headers from auth configuration.
+
+        Returns extra headers to merge with any user-supplied headers.
+        """
+        auth = self._config.auth
+        if auth.method == "bearer":
+            token = self._resolve_env_vars(auth.bearer_token)
+            if token:
+                return {"Authorization": f"Bearer {token}"}
+        elif auth.method == "api_key":
+            key = self._resolve_env_vars(auth.api_key)
+            if key:
+                return {"X-API-Key": key}
+        return {}
+
     async def _open_transport(
         self,
     ) -> tuple[Any, Any]:
@@ -240,10 +266,11 @@ class ExternalMcpAdapter:
         assert self._exit_stack is not None  # guarded by connect()
         if not self._config.url:
             raise ValueError(f"SSE transport requires 'url' for server '{self._config.name}'")
+        headers = {**self._build_auth_headers(), **(self._config.headers or {})}
         return await self._exit_stack.enter_async_context(
             sse_client(
                 url=self._config.url,
-                headers=self._config.headers or None,
+                headers=headers or None,
             )
         )
 
@@ -254,10 +281,11 @@ class ExternalMcpAdapter:
             raise ValueError(
                 f"HTTP_STREAM transport requires 'url' for server '{self._config.name}'"
             )
+        headers = {**self._build_auth_headers(), **(self._config.headers or {})}
         streams = await self._exit_stack.enter_async_context(
             streamablehttp_client(
                 url=self._config.url,
-                headers=self._config.headers or None,
+                headers=headers or None,
             )
         )
         # streamablehttp_client yields (read, write, get_session_id)
