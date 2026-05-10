@@ -12,7 +12,6 @@ from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic import ValidationError
 
 from agent_nexus.models.ipc import (
     AgentToPlatform,

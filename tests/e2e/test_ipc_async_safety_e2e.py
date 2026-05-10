@@ -183,6 +183,10 @@ class TestIPCLargePayload:
         The asyncio StreamReader has an internal limit (64KB default).
         When a single line exceeds that, readline() raises ValueError.
         Our IPCStream wraps this as an IPCError.
+
+        Payload kept at 80KB to exceed the 65536-byte StreamReader limit
+        while avoiding pipe-buffer deadlock (5MB payloads cause ~80 rounds
+        of pipe ping-pong and may hit the 30s test timeout).
         """
         huge_agent = [
             "python3",
@@ -190,7 +194,7 @@ class TestIPCLargePayload:
             (
                 "import sys, json\n"
                 "line = sys.stdin.readline()\n"
-                "payload = 'A' * (5 * 1024 * 1024)\n"
+                "payload = 'A' * (80 * 1024)\n"
                 "resp = json.dumps({'type':'result','content':payload})\n"
                 "sys.stdout.write(resp + '\\n')\n"
                 "sys.stdout.flush()\n"
@@ -204,8 +208,11 @@ class TestIPCLargePayload:
             with pytest.raises((IPCError, ValueError)):
                 await stream.receive(timeout=10.0)
         finally:
-            proc.terminate()
-            await proc.wait()
+            try:
+                proc.terminate()
+                await proc.wait()
+            except ProcessLookupError:
+                pass
 
 
 @pytest.mark.timeout(30)
@@ -312,5 +319,8 @@ class TestIPCStreamCloseSafety:
             # Second close must not raise — idempotent cleanup
             await stream.close()
         finally:
-            proc.terminate()
-            await proc.wait()
+            try:
+                proc.terminate()
+                await proc.wait()
+            except ProcessLookupError:
+                pass

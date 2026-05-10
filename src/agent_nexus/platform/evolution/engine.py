@@ -37,6 +37,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agent_nexus.models.evolution import SkillRecord
 from agent_nexus.platform.evolution.analyzer import (
     AnalysisResult,
     EvolutionSuggestion,
@@ -46,10 +47,16 @@ from agent_nexus.platform.evolution.compaction import (
     AgentContext,
     CompactionGuard,
 )
+from agent_nexus.platform.evolution.evolution_config import EvolutionConfig
 from agent_nexus.platform.evolution.evolver import (
     EvolutionTrigger,
     EvolveResult,
     SkillEvolver,
+)
+from agent_nexus.platform.evolution.experimenter import (
+    EvolutionExperimenter,
+    Experiment,
+    ExperimentResult,
 )
 from agent_nexus.platform.evolution.health import (
     HealthChecker,
@@ -59,6 +66,10 @@ from agent_nexus.platform.evolution.promotion import (
     AgentPromoter,
     PromotionCandidate,
     PromotionResult,
+)
+from agent_nexus.platform.evolution.skill_patch import (
+    PatchResult,
+    SkillPatcher,
 )
 from agent_nexus.platform.evolution.store import EvolutionStore
 
@@ -86,10 +97,13 @@ class EvolutionEngine:
         *,
         agent_id: str = "default",
         agents_root: Path | None = None,
+        config: EvolutionConfig | None = None,
+        skill_patcher: SkillPatcher | None = None,
     ) -> None:
         self._store = store
         self._agent_id = agent_id
         self._agents_root = agents_root
+        self._config = config or EvolutionConfig()
 
         # Create all sub-components
         self._analyzer = ExecutionAnalyzer(store)
@@ -97,6 +111,8 @@ class EvolutionEngine:
         self._health_checker = HealthChecker(store)
         self._compaction_guard = CompactionGuard(store, agent_id)
         self._promoter = AgentPromoter(store, agents_root)
+        self._experimenter = EvolutionExperimenter(store)
+        self._skill_patcher = skill_patcher
 
     # ------------------------------------------------------------------
     # Properties
@@ -131,6 +147,21 @@ class EvolutionEngine:
     def promoter(self) -> AgentPromoter:
         """Skill-to-agent promotion handler."""
         return self._promoter
+
+    @property
+    def config(self) -> EvolutionConfig:
+        """Evolution engine configuration."""
+        return self._config
+
+    @property
+    def experimenter(self) -> EvolutionExperimenter:
+        """A/B testing and rollback manager."""
+        return self._experimenter
+
+    @property
+    def patcher(self) -> SkillPatcher | None:
+        """LLM-powered skill patcher (requires LLMClient)."""
+        return self._skill_patcher
 
     # ------------------------------------------------------------------
     # Unified evolve() entry point
@@ -245,3 +276,70 @@ class EvolutionEngine:
             True if compaction should proceed.
         """
         return self._compaction_guard.should_compact(context)
+
+    def evolve_with_patch(
+        self,
+        skill_id: str,
+        *,
+        patch_type: str = "fix",
+        diagnosis_or_insights: str | list[str] = "",
+    ) -> PatchResult:
+        """Generate a patched skill via LLM and record the evolution.
+
+        Args:
+            skill_id: Skill to patch.
+            patch_type: "fix" or "derived".
+            diagnosis_or_insights: Diagnosis string (fix) or insight list (derived).
+
+        Returns:
+            PatchResult with diff, confidence, and validation.
+
+        Raises:
+            ValueError: If skill_patcher is not configured or skill not found.
+        """
+        if self._skill_patcher is None:
+            raise ValueError(
+                "SkillPatcher not configured. Provide skill_patcher to constructor."
+            )
+
+        record = self._store.get_skill_record(skill_id)
+        if record is None:
+            raise ValueError(f"Skill not found: {skill_id}")
+
+        if patch_type == "fix":
+            return self._skill_patcher.generate_fix(
+                record, diagnosis=str(diagnosis_or_insights)
+            )
+        elif patch_type == "derived":
+            insights = (
+                diagnosis_or_insights
+                if isinstance(diagnosis_or_insights, list)
+                else [diagnosis_or_insights]
+            )
+            return self._skill_patcher.generate_derived(record, insights)
+        else:
+            raise ValueError(f"Unknown patch_type: {patch_type!r}")
+
+    def create_experiment(
+        self,
+        parent_skill_id: str,
+        evolved_skill_id: str,
+    ) -> Experiment:
+        """Create an A/B experiment comparing parent vs evolved skill."""
+        parent = self._store.get_skill_record(parent_skill_id)
+        evolved = self._store.get_skill_record(evolved_skill_id)
+        if parent is None or evolved is None:
+            raise ValueError("Both parent and evolved skills must exist in store")
+        return self._experimenter.create_experiment(
+            parent, evolved,
+            min_samples=self._config.experiment_min_samples,
+            confidence_level=self._config.experiment_confidence_level,
+        )
+
+    def evaluate_experiment(self, experiment_id: str) -> ExperimentResult:
+        """Evaluate an A/B experiment and return recommendation."""
+        return self._experimenter.evaluate(experiment_id)
+
+    def rollback_experiment(self, experiment_id: str) -> SkillRecord:
+        """Roll back an experiment, reverting to the parent skill."""
+        return self._experimenter.rollback(experiment_id)

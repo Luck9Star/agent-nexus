@@ -17,6 +17,7 @@ import logging
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import toml
 
@@ -28,6 +29,10 @@ from agent_nexus.platform.utils import AGENT_NAME_RE
 from .lockfile import LockfileManager
 from .manifest import load_manifest_dict as _load_manifest_dict
 from .sources import SourceManager
+
+if TYPE_CHECKING:
+    from .dependency_resolver import DependencyResolver
+    from .quality_gate import QualityGate
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +92,9 @@ class GitInstaller:
         source_manager: SourceManager,
         lockfile_manager: LockfileManager,
         config_dir: Path,
+        *,
+        quality_gate: QualityGate | None = None,
+        dependency_resolver: DependencyResolver | None = None,
     ) -> None:
         self._sources = source_manager
         self._lockfile = lockfile_manager
@@ -94,6 +102,8 @@ class GitInstaller:
         self._agents_dir = config_dir / "agents"
         self._venvs_dir = config_dir / "venvs"
         self._cache_dir = config_dir / "cache" / "repos"
+        self._quality_gate = quality_gate
+        self._dependency_resolver = dependency_resolver
 
     # ------------------------------------------------------------------
     # Public API
@@ -242,6 +252,9 @@ class GitInstaller:
                     f"Agent '{agent_name}' validation failed: {'; '.join(issues)}"
                 )
 
+            self._run_quality_gate(agent_name, agent_dir)
+            self._check_dependencies(agent_name, agent_dir)
+
             dest = self._copy_to_agents_dir(agent_name, agent_dir)
             _created_paths.append(dest)
             manifest = self._parse_manifest_safe(agent_name, manifest_dict)
@@ -361,6 +374,9 @@ class GitInstaller:
         issues, manifest_dict = self._validate_agent_package(local_path)
         if issues:
             raise InstallationError(f"Agent '{agent_name}' validation failed: {'; '.join(issues)}")
+
+        self._run_quality_gate(agent_name, local_path)
+        self._check_dependencies(agent_name, local_path)
 
         _created_paths: list[Path] = []
         try:
@@ -496,6 +512,46 @@ class GitInstaller:
             raise InstallationError(
                 f"Could not determine commit SHA for {repo_path}: {exc}"
             ) from exc
+
+    # ------------------------------------------------------------------
+    # Internal: quality gate & dependency resolution
+    # ------------------------------------------------------------------
+
+    def _run_quality_gate(self, agent_name: str, agent_dir: Path) -> None:
+        """Run QualityGate checks against agent_dir, raising on critical failure."""
+        if self._quality_gate is None:
+            return
+        result = self._quality_gate.evaluate(agent_dir)
+        if not result.passed:
+            failed_critical = [
+                c for c in result.checks if not c.passed and c.severity == "critical"
+            ]
+            msgs = [f"{c.check_name}: {c.message}" for c in failed_critical]
+            raise InstallationError(
+                f"Agent '{agent_name}' failed quality gate (score={result.score:.2f}): "
+                + "; ".join(msgs)
+            )
+        if result.score < 1.0:
+            logger.info(
+                "Agent '%s' passed quality gate with warnings (score=%.2f)",
+                agent_name,
+                result.score,
+            )
+
+    def _check_dependencies(self, agent_name: str, agent_dir: Path) -> None:
+        """Check that declared atomic_agents dependencies are installed."""
+        if self._dependency_resolver is None:
+            return
+        deps = self._dependency_resolver.resolve(agent_dir)
+        missing = [
+            d.name for d in deps
+            if d.dep_type == "agent" and d.resolved_path is None
+        ]
+        if missing:
+            raise InstallationError(
+                f"Agent '{agent_name}' has unmet agent dependencies: {', '.join(missing)}. "
+                "Install them first."
+            )
 
     # ------------------------------------------------------------------
     # Internal: validation

@@ -24,7 +24,7 @@ import sqlite3
 import uuid
 from collections import deque
 from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_nexus.models.errors import AgentNexusError
 from agent_nexus.models.ipc import AgentToPlatformType
@@ -46,6 +46,9 @@ from agent_nexus.platform.utils import make_error_result as _make_error_result
 
 from .subtask import SubtaskController
 from .workflow import WorkflowContext, WorkflowPhase, WorkflowResult
+
+if TYPE_CHECKING:
+    from agent_nexus.platform.orchestration.message_broker import MessageBroker
 
 
 class AgentExecutionError(AgentNexusError):
@@ -112,10 +115,12 @@ class PlatformRouter:
         process_manager: ProcessManager,
         subtask_controller: SubtaskController | None = None,
         composite_definitions: dict[str, OrchestrationDefinition] | None = None,
+        message_broker: MessageBroker | None = None,
     ) -> None:
         self._pm = process_manager
         self._subtask = subtask_controller or SubtaskController()
         self._composite_defs: dict[str, OrchestrationDefinition] = composite_definitions or {}
+        self._broker = message_broker
 
     # ------------------------------------------------------------------
     # Public API
@@ -133,6 +138,11 @@ class PlatformRouter:
             definition: Parsed TOML orchestration definition.
         """
         self._composite_defs[name] = definition
+
+    @property
+    def broker(self) -> MessageBroker | None:
+        """The A2A message broker, if configured."""
+        return self._broker
 
     @staticmethod
     def _validate_chat_args(

@@ -843,7 +843,6 @@ class TestTimeoutMidBatch:
 
     def test_mid_batch_deadline_fails_started_unsubmitted(self) -> None:
         """Deadline reached mid-batch: started-but-unsubmitted tasks are cancelled, not stuck IN_PROGRESS."""
-        import unittest.mock
 
         call_count = {"n": 0}
 

@@ -459,7 +459,6 @@ class TestPathRuleMinLength:
     """PathRule.pattern rejects empty strings."""
 
     def test_empty_pattern_raises(self):
-        from pydantic import ValidationError
 
         from agent_nexus.models.permission import PathRule
 

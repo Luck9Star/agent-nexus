@@ -6,7 +6,6 @@ Only the HTTP target is deliberately unreachable (connection-refused) to test er
 
 from __future__ import annotations
 
-import asyncio
 
 import pytest
 

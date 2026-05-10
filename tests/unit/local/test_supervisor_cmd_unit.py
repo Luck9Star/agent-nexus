@@ -7,7 +7,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 from agent_nexus.models.distribution import AgentType, LockfileEntry
 from agent_nexus.platform.local.supervisor import AgentSupervisor, RestartTracker

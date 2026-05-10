@@ -3,7 +3,6 @@ _create_venv, _validate_agent_package, _validate_git_url."""
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 

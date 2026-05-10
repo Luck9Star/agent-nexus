@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 
 from agent_nexus.models.config import (
     ModelConfig,

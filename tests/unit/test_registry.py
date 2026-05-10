@@ -3,7 +3,6 @@
 import threading
 from typing import Any
 
-import pytest
 
 from agent_nexus.platform.agency.registry import ExpertRegistry
 

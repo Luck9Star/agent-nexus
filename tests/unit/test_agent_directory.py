@@ -11,9 +11,7 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 
-from agent_nexus.models.ipc import AgentAddress
 from agent_nexus.platform.orchestration.agent_directory import AgentDirectory
 
 
