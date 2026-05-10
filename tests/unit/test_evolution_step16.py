@@ -275,6 +275,26 @@ class TestExperimenter:
         with pytest.raises(KeyError, match="Parent skill not found"):
             ex.rollback(exp.experiment_id)
 
+    def test_rollback_preserves_status_on_failure(self, store: EvolutionStore) -> None:
+        """rollback() must NOT persist REVERTED status when parent is missing."""
+        parent = _register_skill(store, _make_skill("parent"))
+        evolved = _register_skill(store, _make_skill("evolved", SkillOrigin.FIXED))
+
+        ex = EvolutionExperimenter(store)
+        exp = ex.create_experiment(parent, evolved)
+
+        # Delete parent so rollback fails
+        with store._conn() as conn:
+            conn.execute("DELETE FROM skill_records WHERE id = ?", (parent.id,))
+
+        with pytest.raises(KeyError):
+            ex.rollback(exp.experiment_id)
+
+        # Experiment must still be RUNNING, not REVERTED
+        after = ex.get_experiment(exp.experiment_id)
+        assert after is not None
+        assert after.status == ExperimentStatus.RUNNING
+
     def test_list_active_experiments(self, store: EvolutionStore) -> None:
         parent = _register_skill(store, _make_skill("parent"))
         evolved = _register_skill(store, _make_skill("evolved", SkillOrigin.FIXED))

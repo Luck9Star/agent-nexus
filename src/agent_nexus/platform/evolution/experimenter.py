@@ -210,9 +210,18 @@ class EvolutionExperimenter:
         if evolved is not None and evolved.is_active:
             self._store.deactivate_skill(exp.evolved_skill_id)
 
-        # Ensure parent is active
+        # Validate parent exists before mutating state
         parent = self._store.get_skill_record(exp.parent_skill_id)
-        if parent is not None and not parent.is_active:
+        if parent is None:
+            raise KeyError(f"Parent skill not found: {exp.parent_skill_id}")
+
+        # Deactivate evolved skill
+        evolved = self._store.get_skill_record(exp.evolved_skill_id)
+        if evolved is not None and evolved.is_active:
+            self._store.deactivate_skill(exp.evolved_skill_id)
+
+        # Ensure parent is active
+        if not parent.is_active:
             self._store.reactivate_skill(exp.parent_skill_id)
 
         # Mark experiment as reverted
@@ -231,8 +240,6 @@ class EvolutionExperimenter:
         )
         self._save(updated)
 
-        if parent is None:
-            raise KeyError(f"Parent skill not found: {exp.parent_skill_id}")
         logger.info("Rolled back experiment %s: reactivated %s", experiment_id[:8], parent.id)
         return parent
 
