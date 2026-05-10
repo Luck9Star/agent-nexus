@@ -245,6 +245,15 @@ class SkillStore:
             )
             return cur.rowcount > 0
 
+    def reactivate_skill(self, skill_id: str) -> bool:
+        """Set is_active = True for a skill record."""
+        with self._conn(immediate=True) as conn:
+            cur = conn.execute(
+                "UPDATE skill_records SET is_active = 1, updated_at = ? WHERE id = ?",
+                (_now_iso(), skill_id),
+            )
+            return cur.rowcount > 0
+
     def get_versions(self, name: str) -> list[SkillRecord]:
         """Load all versions of a named skill, sorted by generation."""
         with self._conn() as conn:

@@ -13,6 +13,9 @@ Public API:
     HealthChecker            -- threshold-based evolution trigger diagnostics
     AgentPromoter            -- skill-to-agent promotion
     EvolutionContextDescriber -- tiered L0/L1/L2 evolution context for LLM injection
+    EvolutionExperimenter    -- A/B testing and rollback for evolved skills
+    EvolutionDashboard       -- evolution observability dashboard
+    EvolutionConfig          -- configurable thresholds for the evolution engine
 """
 
 from agent_nexus.platform.evolution.analysis_store import AnalysisStore
@@ -26,10 +29,23 @@ from agent_nexus.platform.evolution.context_describer import (
     EvolutionContextDescriber,
 )
 from agent_nexus.platform.evolution.engine import EvolutionEngine
+from agent_nexus.platform.evolution.evolution_config import EvolutionConfig
 from agent_nexus.platform.evolution.evolver import SkillEvolver
+from agent_nexus.platform.evolution.experimenter import (
+    EvolutionExperimenter,
+    Experiment,
+    ExperimentResult,
+    ExperimentStatus,
+)
 from agent_nexus.platform.evolution.health import (
     HealthChecker,
     HealthReport,
+)
+from agent_nexus.platform.evolution.metrics import (
+    EvolutionDashboard,
+    EvolutionSummary,
+    HealthOverview,
+    LineageNode,
 )
 from agent_nexus.platform.evolution.promotion import (
     AgentPromoter,
@@ -61,6 +77,15 @@ __all__ = [
     "PromotionCandidate",
     "PromotionResult",
     "EvolutionContextDescriber",
+    "EvolutionExperimenter",
+    "Experiment",
+    "ExperimentResult",
+    "ExperimentStatus",
+    "EvolutionDashboard",
+    "EvolutionSummary",
+    "HealthOverview",
+    "LineageNode",
+    "EvolutionConfig",
     # SkillPatcher models
     "PatchResult",
     "ValidationResult",

@@ -156,6 +156,10 @@ class EvolutionStore:
         """Set is_active = False for a skill record."""
         return self._skill_store.deactivate_skill(skill_id)
 
+    def reactivate_skill(self, skill_id: str) -> bool:
+        """Set is_active = True for a skill record."""
+        return self._skill_store.reactivate_skill(skill_id)
+
     def get_versions(self, name: str) -> list[SkillRecord]:
         """Load all versions of a named skill, sorted by generation."""
         return self._skill_store.get_versions(name)
