@@ -146,16 +146,8 @@ class TestEvolutionStoreCRUD:
         all_skills = store.get_all_skills()
         assert len(all_skills) == 2
 
-    def test_deactivate_skill(self, tmp_path: Path) -> None:
-        r = _make_record("s1", "x", is_active=True)
-        store = _store_with_records(tmp_path, r)
-        assert store.deactivate_skill("s1") is True
-        assert store.get_skill_record("s1") is not None
-        assert store.get_skill_record("s1").is_active is False  # type: ignore[union-attr]
-
-    def test_deactivate_nonexistent(self, tmp_path: Path) -> None:
-        store = _store_with_records(tmp_path)
-        assert store.deactivate_skill("nope") is False
+    # NOTE: test_deactivate_skill and test_deactivate_nonexistent removed —
+    # exact duplicates of TestDeactivateSkill in test_store_p0_unit.py
 
     def test_save_overwrites_existing(self, tmp_path: Path) -> None:
         r = _make_record("s1", "original")
@@ -245,49 +237,9 @@ class TestEvolutionStoreCounters:
 
 
 class TestEvolutionStoreAnalysis:
-    def test_record_analysis(self, tmp_path: Path) -> None:
-        store = _store_with_records(tmp_path, _make_record("s1", "x"))
-        analysis_id = store.record_analysis(
-            task_id="t1",
-            agent_name="agent-a",
-            analysis_text="looks good",
-            evolution_suggestions=[{"type": "fix", "target": "s1"}],
-            judgments=[
-                {
-                    "skill_id": "s1",
-                    "selected": True,
-                    "applied": True,
-                    "completed": False,
-                    "fell_back": False,
-                },
-            ],
-        )
-        assert analysis_id
-        analyses = store.get_analyses_for_task("t1")
-        assert len(analyses) == 1
-        assert analyses[0]["agent_name"] == "agent-a"
-        assert analyses[0]["analysis"] == "looks good"
-
-    def test_judgments_persisted(self, tmp_path: Path) -> None:
-        store = _store_with_records(tmp_path, _make_record("s1", "x"))
-        store.record_analysis(
-            task_id="t1",
-            agent_name="a",
-            analysis_text="text",
-            judgments=[
-                {
-                    "skill_id": "s1",
-                    "selected": True,
-                    "applied": True,
-                    "completed": True,
-                    "fell_back": False,
-                },
-            ],
-        )
-        judgments = store.get_judgments_for_skill("s1")
-        assert len(judgments) == 1
-        assert judgments[0]["selected"] is True
-        assert judgments[0]["completed"] is True
+    # NOTE: test_record_analysis and test_judgments_persisted removed —
+    # exact duplicates of TestGetAnalysesForTask and TestGetJudgmentsForSkill
+    # in test_evolution_store.py (which test the same methods more thoroughly)
 
     def test_analysis_increments_counters(self, tmp_path: Path) -> None:
         store = _store_with_records(tmp_path, _make_record("s1", "x"))
@@ -316,25 +268,9 @@ class TestEvolutionStoreAnalysis:
 
 
 class TestEvolutionStoreEvolveSkill:
-    def test_fix_deactivates_parent(self, tmp_path: Path) -> None:
-        parent = _make_record("p1", "buggy", is_active=True)
-        store = _store_with_records(tmp_path, parent)
-
-        child = _make_record(
-            "c1",
-            "buggy",
-            origin=SkillOrigin.FIXED,
-            generation=1,
-            parent_ids=["p1"],
-        )
-        store.evolve_skill(child, ["p1"])
-
-        rec_p1 = store.get_skill_record("p1")
-        assert rec_p1 is not None
-        assert rec_p1.is_active is False
-        rec_c1 = store.get_skill_record("c1")
-        assert rec_c1 is not None
-        assert rec_c1.is_active is True
+    # NOTE: test_fix_deactivates_parent removed — duplicate of
+    # TestEvolveSkillParentValidation in test_evolution_store.py and
+    # TestGetChildren.test_evolved_skill_has_children in test_store_p0_unit.py
 
     def test_derived_keeps_parent_active(self, tmp_path: Path) -> None:
         parent = _make_record("p1", "base", is_active=True)
@@ -369,47 +305,11 @@ class TestEvolutionStoreEvolveSkill:
         assert set(got.lineage.parent_skill_ids) == {"p1", "p2"}
 
 
-class TestEvolutionStoreAncestry:
-    def test_get_ancestry_linear(self, tmp_path: Path) -> None:
-        g0 = _make_record("g0", "skill", generation=0)
-        g1 = _make_record("g1", "skill", generation=1, parent_ids=["g0"])
-        g2 = _make_record("g2", "skill", generation=2, parent_ids=["g1"])
-        store = _store_with_records(tmp_path, g0, g1, g2)
+# NOTE: TestEvolutionStoreAncestry removed — exact duplicate of TestGetAncestry
+# in test_evolution_store.py and TestGetChildren in test_store_p0_unit.py
 
-        ancestors = store.get_ancestry("g2")
-        assert len(ancestors) == 2
-        assert ancestors[0].id == "g0"
-        assert ancestors[1].id == "g1"
-
-    def test_get_children(self, tmp_path: Path) -> None:
-        p = _make_record("p1", "parent")
-        c1 = _make_record("c1", "child", parent_ids=["p1"])
-        c2 = _make_record("c2", "child2", parent_ids=["p1"])
-        store = _store_with_records(tmp_path, p, c1, c2)
-
-        children = store.get_children("p1")
-        assert set(children) == {"c1", "c2"}
-
-
-class TestEvolutionStoreMetrics:
-    def test_get_metrics_all(self, tmp_path: Path) -> None:
-        r1 = _make_record("s1", "a", selections=10, applied=5, completions=3, fallbacks=1)
-        r2 = _make_record("s2", "b", selections=20, applied=15, completions=10, fallbacks=2)
-        store = _store_with_records(tmp_path, r1, r2)
-
-        metrics = store.get_metrics()
-        assert metrics.total_selections == 30
-        assert metrics.total_applied == 20
-        assert metrics.total_completions == 13
-        assert metrics.total_fallbacks == 3
-
-    def test_get_metrics_by_agent_name(self, tmp_path: Path) -> None:
-        r1 = _make_record("s1", "a", selections=10, directory="agents/myagent")
-        r2 = _make_record("s2", "b", selections=20, directory="agents/other")
-        store = _store_with_records(tmp_path, r1, r2)
-
-        metrics = store.get_metrics("myagent")
-        assert metrics.total_selections == 10
+# NOTE: TestEvolutionStoreMetrics removed — exact duplicate of TestGetMetrics
+# in test_store_p0_unit.py (which also tests aggregation, agent filter, and more)
 
 
 class TestEvolutionStoreBudgetLog:
@@ -1712,7 +1612,7 @@ class TestEvolutionEngineEvolveToolDegradation:
             problem_description="broken",
             affected_skill_ids={"s1"},
         )
-        assert len(results) == 1
+        assert isinstance(results, list) and len(results) == 1
 
     def test_tool_degradation_requires_tool_key(self, tmp_path: Path) -> None:
         store = _store_with_records(tmp_path)
@@ -1837,49 +1737,9 @@ class TestEvolutionEngineConvenienceMethods:
 # ============================================================================
 
 
-class TestEvolveSkillIntegrityError:
-    """evolve_skill catches sqlite3.IntegrityError on duplicate skill ID
-    and returns EvolveResult(success=False) with 'collision' in the error.
-    """
-
-    def test_duplicate_id_returns_failure(self, tmp_path: Path) -> None:
-        """Inserting the same skill ID twice via evolve_skill returns a
-        failure result instead of raising an exception."""
-        store = EvolutionStore(tmp_path / "test.db")
-
-        record = _make_record(
-            "s1",
-            "my-skill",
-            origin=SkillOrigin.DERIVED,
-            generation=1,
-            parent_ids=[],
-        )
-        # First insert succeeds
-        result1 = store.evolve_skill(record, [])
-        assert result1.success
-
-        # Second insert with the same ID triggers IntegrityError
-        result2 = store.evolve_skill(record, [])
-        assert result2.success is False
-        assert result2.error is not None
-        assert "collision" in result2.error.lower()
-        assert result2.new_record is None
-
-    def test_duplicate_id_does_not_raise(self, tmp_path: Path) -> None:
-        """Ensure no sqlite3.IntegrityError escapes evolve_skill."""
-        import sqlite3
-
-        store = EvolutionStore(tmp_path / "test.db")
-        record = _make_record("dup-id", "skill")
-        store.evolve_skill(record, [])
-
-        # This must NOT raise sqlite3.IntegrityError
-        try:
-            result = store.evolve_skill(record, [])
-        except sqlite3.IntegrityError:
-            pytest.fail("evolve_skill should catch IntegrityError, not propagate it")
-
-        assert result.success is False
+# NOTE: TestEvolveSkillIntegrityError removed — exact duplicate of
+# TestEvolveSkillIdCollision in test_evolution_store.py (which is more thorough
+# with 3 tests covering collision, no lineage parents, and parent not deactivated)
 
 
 class TestGetMetricsPreciseLikeMatching:
@@ -2178,44 +2038,9 @@ class TestEvolutionStoreCounterValidation:
             store.increment_counters("s1", completed=True, applied=False, selected=True)
 
 
-class TestEvolutionStoreAnalysisSkipEmptySkillId:
-    """Tests for record_analysis skipping judgments with no skill_id (line 387)."""
-
-    def test_judgment_without_skill_id_skipped(self, tmp_path: Path) -> None:
-        """Judgments missing skill_id are silently skipped."""
-        store = _store_with_records(tmp_path, _make_record("s1", "x"))
-        store.record_analysis(
-            task_id="t1",
-            agent_name="a",
-            analysis_text="test",
-            judgments=[
-                {"skill_id": "", "selected": True},
-                {"skill_id": None, "selected": True},
-                {
-                    "skill_id": "s1",
-                    "selected": True,
-                    "applied": True,
-                    "completed": False,
-                    "fell_back": False,
-                },
-            ],
-        )
-        # Only the judgment with skill_id="s1" should be persisted
-        judgments = store.get_judgments_for_skill("s1")
-        assert len(judgments) == 1
-
-    def test_judgment_completely_missing_skill_id_key(self, tmp_path: Path) -> None:
-        """Judgment dict with no skill_id key at all is skipped."""
-        store = _store_with_records(tmp_path)
-        analysis_id = store.record_analysis(
-            task_id="t2",
-            agent_name="a",
-            analysis_text="test",
-            judgments=[
-                {"selected": True, "applied": True},
-            ],
-        )
-        assert analysis_id
+# NOTE: TestEvolutionStoreAnalysisSkipEmptySkillId removed — exact duplicate of
+# TestRecordAnalysisSkipsBadSkillId in test_evolution_store.py (which uses
+# parametrize for None/empty/missing_key and is more thorough)
 
 
 class TestEvolutionStoreAncestryCycleDetection:

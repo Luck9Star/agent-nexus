@@ -1,5 +1,9 @@
 """Tests for TokenCounter, TokenCountResult, PromptSection, StructuredPrompt."""
 
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from agent_nexus.platform.agency.token_counter import (
@@ -10,38 +14,81 @@ from agent_nexus.platform.agency.token_counter import (
 )
 
 # ---------------------------------------------------------------------------
-# TokenCounter
+# TokenCounter — basic + three-tier fallback
 # ---------------------------------------------------------------------------
 
 
 class TestTokenCounter:
     def test_count_empty_string(self):
-        """Empty string returns 0 tokens."""
         tc = TokenCounter()
         assert tc.count("") == 0
 
     def test_count_nonempty_returns_positive(self):
-        """Non-empty string returns a positive token count."""
         tc = TokenCounter()
-        result = tc.count("Hello, world! This is a test.")
-        assert result > 0
+        assert tc.count("Hello, world! This is a test.") > 0
 
     def test_fallback_estimate_len_div_4(self):
-        """Without tiktoken, count uses len/4 heuristic."""
         tc = TokenCounter()
-        # Force fallback by pretending both litellm and tiktoken unavailable
         tc._litellm_available = False
         tc._tiktoken_available = False
-        text = "a" * 100  # 100 chars
-        assert tc.count(text) == 25  # 100 // 4
+        assert tc.count("a" * 100) == 25
 
     def test_fallback_minimum_1(self):
-        """Fallback returns at least 1 token for non-empty text."""
         tc = TokenCounter()
         tc._litellm_available = False
         tc._tiktoken_available = False
-        # 3 chars -> 3//4 = 0 -> max(1, 0) = 1
         assert tc.count("abc") == 1
+
+    def test_litellm_tier_1_success(self):
+        tc = TokenCounter()
+        tc._litellm_available = True
+        tc._litellm_mod = MagicMock()
+        tc._litellm_mod.token_counter.return_value = 42
+        assert tc.count("some text", model="gpt-4o") == 42
+
+    def test_litellm_default_model_when_empty(self):
+        tc = TokenCounter()
+        tc._litellm_available = True
+        tc._litellm_mod = MagicMock()
+        tc._litellm_mod.token_counter.return_value = 10
+        tc.count("some text", model="")
+        tc._litellm_mod.token_counter.assert_called_once_with(model="gpt-4o", text="some text")
+
+    def test_litellm_failure_falls_to_tiktoken(self):
+        tc = TokenCounter()
+        tc._litellm_available = True
+        tc._litellm_mod = MagicMock()
+        tc._litellm_mod.token_counter.side_effect = ValueError("unsupported model")
+        tc._tiktoken_available = True
+
+        mock_enc = MagicMock()
+        mock_enc.encode.return_value = [1, 2, 3, 4, 5]
+        mock_tiktoken = MagicMock()
+        mock_tiktoken.encoding_for_model.return_value = mock_enc
+
+        with patch.dict("sys.modules", {"tiktoken": mock_tiktoken}):
+            assert tc.count("some text", model="gpt-4o") == 5
+
+    def test_no_litellm_uses_tiktoken(self):
+        tc = TokenCounter()
+        tc._litellm_available = False
+        tc._tiktoken_available = True
+
+        mock_enc = MagicMock()
+        mock_enc.encode.return_value = [1, 2, 3]
+        mock_tiktoken = MagicMock()
+        mock_tiktoken.encoding_for_model.return_value = mock_enc
+
+        with patch.dict("sys.modules", {"tiktoken": mock_tiktoken}):
+            assert tc.count("hello", model="gpt-4o") == 3
+
+    def test_both_fail_to_len_div_4(self):
+        tc = TokenCounter()
+        tc._litellm_available = True
+        tc._litellm_mod = MagicMock()
+        tc._litellm_mod.token_counter.side_effect = ValueError("fail")
+        tc._tiktoken_available = False
+        assert tc.count("a" * 100) == 25
 
 
 # ---------------------------------------------------------------------------
