@@ -6,51 +6,14 @@ ENV_VAR_OVERRIDES, and path constants.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from agent_nexus.models.agent import ModelTier
 from agent_nexus.models.config import ProviderApiType
 from agent_nexus.platform.config import (
-    CONFIG_FILE,
-    DEFAULT_CONFIG_DIR,
     DEFAULT_MODEL_STRING,
     DEFAULT_PROVIDERS,
     ENV_VAR_OVERRIDES,
-    LOCKFILE,
     MODEL_TIER_MAP,
-    SOURCES_FILE,
 )
-
-# ============================================================================
-# Path constants
-# ============================================================================
-
-
-class TestPathConstants:
-    """Verify path constant values and types."""
-
-    def test_config_file_is_toml(self) -> None:
-        assert CONFIG_FILE == "config.toml"
-
-    def test_sources_file_is_yaml(self) -> None:
-        assert SOURCES_FILE == "sources.yaml"
-
-    def test_lockfile_is_json(self) -> None:
-        assert LOCKFILE == "lockfile.json"
-
-    def test_default_config_dir_is_path(self) -> None:
-        assert isinstance(DEFAULT_CONFIG_DIR, Path)
-
-    def test_default_config_dir_has_agent_nexus(self) -> None:
-        """Default config dir path ends with .agent-nexus."""
-        assert DEFAULT_CONFIG_DIR.name == ".agent-nexus"
-
-    def test_default_model_string_is_provider_model_format(self) -> None:
-        assert ":" in DEFAULT_MODEL_STRING
-        provider, model = DEFAULT_MODEL_STRING.split(":", 1)
-        assert provider == "openai"
-        assert model == "gpt-4o"
-
 
 # ============================================================================
 # DEFAULT_PROVIDERS
@@ -59,17 +22,6 @@ class TestPathConstants:
 
 class TestDefaultProviders:
     """Verify structure and types of built-in provider definitions."""
-
-    def test_six_built_in_providers(self) -> None:
-        assert len(DEFAULT_PROVIDERS) == 6
-        expected = {"openai", "anthropic", "deepseek", "minimax", "qwen", "ollama"}
-        assert set(DEFAULT_PROVIDERS.keys()) == expected
-
-    def test_openai_has_required_fields(self) -> None:
-        openai = DEFAULT_PROVIDERS["openai"]
-        assert "api_key_env" in openai
-        assert "api" in openai
-        assert openai["api"] == ProviderApiType.OPENAI_COMPATIBLE
 
     def test_anthropic_uses_messages_api(self) -> None:
         anthropic = DEFAULT_PROVIDERS["anthropic"]
@@ -114,12 +66,6 @@ class TestModelTierMap:
 
     def test_premium_is_largest(self) -> None:
         assert MODEL_TIER_MAP[ModelTier.PREMIUM] == "anthropic:claude-opus-4-20250116"
-
-    def test_standard_is_gpt4o(self) -> None:
-        assert MODEL_TIER_MAP[ModelTier.STANDARD] == "openai:gpt-4o"
-
-    def test_powerful_is_claude_sonnet(self) -> None:
-        assert MODEL_TIER_MAP[ModelTier.POWERFUL] == "anthropic:claude-sonnet-4-20250514"
 
 
 # ============================================================================

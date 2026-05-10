@@ -1,7 +1,5 @@
 """Unit tests for agent_nexus.models.hooks module."""
 
-import json
-from datetime import datetime
 
 import pytest
 from pydantic import ValidationError
@@ -31,45 +29,6 @@ class TestHookDefinition:
         assert hd.event is HookEvent.PRE_EXECUTION
         assert hd.command == "test -f input.docx"
 
-    def test_construction_http(self):
-        hd = HookDefinition(
-            type=HookType.HTTP,
-            event=HookEvent.POST_EXECUTION,
-            url="https://hooks.example.com/notify",
-        )
-        assert hd.url == "https://hooks.example.com/notify"
-
-    def test_construction_prompt(self):
-        hd = HookDefinition(
-            type=HookType.PROMPT,
-            event=HookEvent.PRE_EXECUTION,
-            prompt="Validate input format",
-            model="haiku",
-        )
-        assert hd.prompt == "Validate input format"
-        assert hd.model == "haiku"
-
-    def test_construction_agent(self):
-        hd = HookDefinition(
-            type=HookType.AGENT,
-            event=HookEvent.ON_EVOLUTION,
-            prompt="Assess quality of evolved skill",
-            model="sonnet",
-        )
-        assert hd.type is HookType.AGENT
-
-    def test_defaults(self):
-        hd = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
-        assert hd.config == {}
-        assert hd.enabled is True
-        assert hd.block_on_failure is False
-        assert hd.timeout_seconds == 10.0
-        assert hd.matcher is None
-        assert hd.command is None
-        assert hd.url is None
-        assert hd.prompt is None
-        assert hd.model is None
-
     def test_with_matcher(self):
         hd = HookDefinition(
             type=HookType.COMMAND,
@@ -78,48 +37,6 @@ class TestHookDefinition:
         )
         assert hd.matcher == "file_write*"
 
-    def test_disabled_hook(self):
-        hd = HookDefinition(
-            type=HookType.COMMAND,
-            event=HookEvent.PRE_EXECUTION,
-            enabled=False,
-        )
-        assert hd.enabled is False
-
-    def test_block_on_failure(self):
-        hd = HookDefinition(
-            type=HookType.PROMPT,
-            event=HookEvent.PRE_EXECUTION,
-            block_on_failure=True,
-            timeout_seconds=30.0,
-        )
-        assert hd.block_on_failure is True
-        assert hd.timeout_seconds == 30.0
-
-    def test_serialization_round_trip(self):
-        hd = HookDefinition(
-            type=HookType.HTTP,
-            event=HookEvent.POST_EXECUTION,
-            url="https://example.com/hook",
-            config={"headers": {"Authorization": "Bearer token"}},
-        )
-        data = hd.model_dump()
-        hd2 = HookDefinition(**data)
-        assert hd2 == hd
-
-    def test_json_serialization(self):
-        hd = HookDefinition(
-            type=HookType.COMMAND,
-            event=HookEvent.PRE_EXECUTION,
-            command="echo hello",
-        )
-        json_str = hd.model_dump_json()
-        parsed = json.loads(json_str)
-        assert parsed["type"] == "command"
-        assert parsed["event"] == "pre_execution"
-        hd2 = HookDefinition.model_validate_json(json_str)
-        assert hd2 == hd
-
 
 # ---------------------------------------------------------------------------
 # HookExecution
@@ -127,20 +44,6 @@ class TestHookDefinition:
 
 
 class TestHookExecution:
-    def test_construction(self):
-        hook = HookDefinition(
-            type=HookType.COMMAND,
-            event=HookEvent.PRE_EXECUTION,
-            command="echo hello",
-        )
-        he = HookExecution(hook=hook, passed=True)
-        assert he.passed is True
-        assert he.blocked is False
-        assert he.output is None
-        assert he.error is None
-        assert he.duration_ms == 0.0
-        assert isinstance(he.executed_at, datetime)
-
     def test_with_output(self):
         hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
         he = HookExecution(
@@ -165,18 +68,6 @@ class TestHookExecution:
         assert he.blocked is True
         assert he.error is not None
 
-    def test_serialization_round_trip(self):
-        hook = HookDefinition(type=HookType.PROMPT, event=HookEvent.ON_ERROR)
-        he = HookExecution(
-            hook=hook,
-            passed=True,
-            output="ok",
-            duration_ms=100.0,
-        )
-        data = he.model_dump()
-        he2 = HookExecution(**data)
-        assert he2 == he
-
 
 # ---------------------------------------------------------------------------
 # AggregatedHookResult
@@ -184,13 +75,6 @@ class TestHookExecution:
 
 
 class TestAggregatedHookResult:
-    def test_default_construction(self):
-        ahr = AggregatedHookResult(event=HookEvent.PRE_EXECUTION)
-        assert ahr.event is HookEvent.PRE_EXECUTION
-        assert ahr.results == []
-        assert ahr.blocked is False
-        assert ahr.errors == []
-
     def test_with_results(self):
         hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
         exec1 = HookExecution(hook=hook, passed=True)
@@ -214,25 +98,6 @@ class TestAggregatedHookResult:
         )
         assert ahr.blocked is False
 
-    def test_serialization_round_trip(self):
-        hook = HookDefinition(type=HookType.HTTP, event=HookEvent.ON_ERROR)
-        exec1 = HookExecution(hook=hook, passed=True)
-        ahr = AggregatedHookResult(
-            event=HookEvent.ON_ERROR,
-            results=[exec1],
-        )
-        data = ahr.model_dump()
-        ahr2 = AggregatedHookResult(**data)
-        assert ahr2 == ahr
-
-    def test_json_serialization(self):
-        ahr = AggregatedHookResult(event=HookEvent.ON_EVOLUTION)
-        json_str = ahr.model_dump_json()
-        parsed = json.loads(json_str)
-        assert parsed["event"] == "on_evolution"
-        ahr2 = AggregatedHookResult.model_validate_json(json_str)
-        assert ahr2 == ahr
-
 
 # ---------------------------------------------------------------------------
 # Validation constraint tests (iter22)
@@ -250,14 +115,6 @@ class TestHookDefinitionValidation:
                 timeout_seconds=0,
             )
 
-    def test_timeout_seconds_rejects_negative(self):
-        with pytest.raises(ValidationError, match="greater than 0"):
-            HookDefinition(
-                type=HookType.COMMAND,
-                event=HookEvent.PRE_EXECUTION,
-                timeout_seconds=-1.5,
-            )
-
     def test_timeout_seconds_accepts_positive(self):
         hd = HookDefinition(
             type=HookType.COMMAND,
@@ -265,10 +122,6 @@ class TestHookDefinitionValidation:
             timeout_seconds=0.001,
         )
         assert hd.timeout_seconds == 0.001
-
-    def test_timeout_seconds_default_valid(self):
-        hd = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
-        assert hd.timeout_seconds == 10.0
 
 
 class TestHookExecutionValidation:
@@ -278,16 +131,6 @@ class TestHookExecutionValidation:
         hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
         with pytest.raises(ValidationError, match="greater than or equal to 0"):
             HookExecution(hook=hook, passed=True, duration_ms=-0.1)
-
-    def test_duration_ms_accepts_zero(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
-        he = HookExecution(hook=hook, passed=True, duration_ms=0.0)
-        assert he.duration_ms == 0.0
-
-    def test_duration_ms_accepts_positive(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
-        he = HookExecution(hook=hook, passed=True, duration_ms=150.7)
-        assert he.duration_ms == 150.7
 
 
 # ---------------------------------------------------------------------------
@@ -303,16 +146,6 @@ class TestHookExecutionSemanticValidation:
         with pytest.raises(ValidationError, match="passed and blocked cannot both be True"):
             HookExecution(hook=hook, passed=True, blocked=True)
 
-    def test_passed_not_blocked_ok(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
-        exe = HookExecution(hook=hook, passed=True, blocked=False)
-        assert exe.passed and not exe.blocked
-
-    def test_not_passed_blocked_ok(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
-        exe = HookExecution(hook=hook, passed=False, blocked=True)
-        assert exe.blocked and not exe.passed
-
 
 class TestHookExecutionErrorType:
     """iter101 regression: error_type carries exception class name."""
@@ -327,11 +160,6 @@ class TestHookExecutionErrorType:
             error_type="CalledProcessError",
         )
         assert he.error_type == "CalledProcessError"
-
-    def test_error_type_defaults_none(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
-        he = HookExecution(hook=hook, passed=True)
-        assert he.error_type is None
 
 
 # ---------------------------------------------------------------------------

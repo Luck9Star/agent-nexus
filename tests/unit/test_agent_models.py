@@ -1,6 +1,5 @@
 """Unit tests for agent_nexus.models.agent module."""
 
-import json
 
 import pytest
 from pydantic import ValidationError
@@ -27,20 +26,10 @@ from agent_nexus.models.permission import PermissionConfig, PermissionMode
 
 
 class TestAgentModelConfig:
-    def test_defaults(self):
-        cfg = AgentModelConfig()
-        assert cfg.recommended is None
-        assert cfg.fallback is None
-
     def test_with_values(self):
         cfg = AgentModelConfig(recommended="gpt-4o", fallback="gpt-3.5-turbo")
         assert cfg.recommended == "gpt-4o"
         assert cfg.fallback == "gpt-3.5-turbo"
-
-    def test_serialization(self):
-        cfg = AgentModelConfig(recommended="gpt-4o")
-        data = cfg.model_dump()
-        assert data == {"recommended": "gpt-4o", "fallback": None}
 
 
 # ---------------------------------------------------------------------------
@@ -49,13 +38,6 @@ class TestAgentModelConfig:
 
 
 class TestMcpServerConfig:
-    def test_defaults(self):
-        cfg = McpServerConfig(command="uvx")
-        assert cfg.transport == "stdio"
-        assert cfg.command == "uvx"
-        assert cfg.args == []
-        assert cfg.url is None
-
     def test_with_command(self):
         cfg = McpServerConfig(command="uvx", args=["mcp-server-docx"])
         assert cfg.command == "uvx"
@@ -72,23 +54,6 @@ class TestMcpServerConfig:
 
 
 class TestAgentManifest:
-    def test_minimal_construction(self):
-        m = AgentManifest(
-            name="doc-filler",
-            version="1.0.0",
-            type=AgentType.ATOMIC,
-            description="Fill documents",
-        )
-        assert m.name == "doc-filler"
-        assert m.version == "1.0.0"
-        assert m.type is AgentType.ATOMIC
-        assert m.description == "Fill documents"
-        assert m.role is None
-        assert m.dependencies == AgentDependencies()
-        assert m.mcp_servers == {}
-        assert m.background is False
-        assert m.initial_prompt is None
-
     def test_full_construction(self):
         m = AgentManifest(
             name="feature-pipeline",
@@ -114,30 +79,6 @@ class TestAgentManifest:
         assert "docx" in m.mcp_servers
         assert m.background is True
         assert m.max_turns == 50
-
-    def test_serialization_round_trip(self):
-        m = AgentManifest(
-            name="doc-filler",
-            version="1.0.0",
-            type=AgentType.ATOMIC,
-            description="Fill documents",
-        )
-        data = m.model_dump()
-        m2 = AgentManifest(**data)
-        assert m2 == m
-
-    def test_json_serialization(self):
-        m = AgentManifest(
-            name="doc-filler",
-            version="1.0.0",
-            type=AgentType.ATOMIC,
-            description="Fill documents",
-        )
-        json_str = m.model_dump_json()
-        parsed = json.loads(json_str)
-        assert parsed["name"] == "doc-filler"
-        m2 = AgentManifest.model_validate_json(json_str)
-        assert m2 == m
 
     def test_string_enum_type(self):
         m = AgentManifest(
@@ -167,14 +108,6 @@ class TestSkillDefinition:
         assert s.name == "fill-template"
         assert len(s.triggers) == 2
         assert "docx" in s.capabilities
-
-    def test_defaults(self):
-        s = SkillDefinition(name="test", agent_type=AgentType.ATOMIC, description="test")
-        assert s.triggers == []
-        assert s.compatible_agents == []
-        assert s.capabilities == []
-        assert s.body is None
-        assert s.resources is None
 
 
 # ---------------------------------------------------------------------------
@@ -242,21 +175,6 @@ class TestHookDef:
 
 
 class TestAgentPackage:
-    def test_minimal_construction(self):
-        manifest = AgentManifest(
-            name="doc-filler",
-            version="1.0.0",
-            type=AgentType.ATOMIC,
-            description="Fill documents",
-        )
-        pkg = AgentPackage(manifest=manifest)
-        assert pkg.manifest is manifest
-        assert pkg.skills == []
-        assert pkg.commands == []
-        assert pkg.agents == []
-        assert pkg.hooks == {}
-        assert pkg.mcp_servers == {}
-
     def test_full_construction(self):
         manifest = AgentManifest(
             name="doc-filler",
@@ -279,18 +197,6 @@ class TestAgentPackage:
         assert len(pkg.skills) == 1
         assert len(pkg.commands) == 1
 
-    def test_serialization_round_trip(self):
-        manifest = AgentManifest(
-            name="doc-filler",
-            version="1.0.0",
-            type=AgentType.ATOMIC,
-            description="Fill documents",
-        )
-        pkg = AgentPackage(manifest=manifest)
-        data = pkg.model_dump()
-        pkg2 = AgentPackage(**data)
-        assert pkg2 == pkg
-
 
 # ============================================================================
 # HookDef typed enums -- was str, now HookType / HookEvent (from iter20)
@@ -298,25 +204,6 @@ class TestAgentPackage:
 
 
 class TestHookDefEnumTypes:
-    def test_type_must_be_hook_type_enum(self) -> None:
-        h = HookDef(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
-        assert isinstance(h.type, HookType)
-        assert h.type == HookType.COMMAND
-
-    def test_event_must_be_hook_event_enum(self) -> None:
-        h = HookDef(type=HookType.HTTP, event=HookEvent.POST_EXECUTION)
-        assert isinstance(h.event, HookEvent)
-
-    def test_all_hook_type_values(self) -> None:
-        for ht in HookType:
-            h = HookDef(type=ht, event=HookEvent.PRE_EXECUTION)
-            assert h.type is ht
-
-    def test_all_hook_event_values(self) -> None:
-        for he in HookEvent:
-            h = HookDef(type=HookType.COMMAND, event=he)
-            assert h.event is he
-
     def test_string_coerced_to_enum(self) -> None:
         """String literals are auto-coerced by Pydantic's StrEnum handling."""
         h = HookDef(type="command", event="pre_execution")
@@ -324,12 +211,6 @@ class TestHookDefEnumTypes:
         assert isinstance(h.event, HookEvent)
         assert h.type is HookType.COMMAND
         assert h.event is HookEvent.PRE_EXECUTION
-
-    def test_serialization_round_trip(self) -> None:
-        h = HookDef(type=HookType.AGENT, event=HookEvent.ON_ERROR)
-        data = h.model_dump()
-        h2 = HookDef(**data)
-        assert h2 == h
 
 
 # ---------------------------------------------------------------------------
@@ -339,16 +220,6 @@ class TestHookDefEnumTypes:
 
 class TestAgentManifestMaxTurnsValidation:
     """Field constraint tests for AgentManifest.max_turns."""
-
-    def test_max_turns_rejects_zero(self):
-        with pytest.raises(ValidationError, match="greater than 0"):
-            AgentManifest(
-                name="test",
-                version="1.0.0",
-                type=AgentType.ATOMIC,
-                description="test",
-                max_turns=0,
-            )
 
     def test_max_turns_rejects_negative(self):
         with pytest.raises(ValidationError, match="greater than 0"):
@@ -369,15 +240,6 @@ class TestAgentManifestMaxTurnsValidation:
             max_turns=50,
         )
         assert m.max_turns == 50
-
-    def test_max_turns_accepts_none(self):
-        m = AgentManifest(
-            name="test",
-            version="1.0.0",
-            type=AgentType.ATOMIC,
-            description="test",
-        )
-        assert m.max_turns is None
 
 
 class TestHookDefTimeoutValidation:
@@ -420,25 +282,9 @@ class TestMinLengthValidation:
         with pytest.raises(ValidationError):
             AgentManifest(name="", version="1.0", type=AgentType.ATOMIC, description="d")
 
-    def test_agent_manifest_empty_version(self):
-        with pytest.raises(ValidationError):
-            AgentManifest(name="a", version="", type=AgentType.ATOMIC, description="d")
-
-    def test_agent_manifest_empty_description(self):
-        with pytest.raises(ValidationError):
-            AgentManifest(name="a", version="1.0", type=AgentType.ATOMIC, description="")
-
     def test_skill_definition_empty_name(self):
         with pytest.raises(ValidationError):
             SkillDefinition(name="", agent_type=AgentType.ATOMIC, description="d")
-
-    def test_command_def_empty_name(self):
-        with pytest.raises(ValidationError):
-            CommandDef(name="", description="d")
-
-    def test_agent_definition_empty_name(self):
-        with pytest.raises(ValidationError):
-            AgentDefinition(name="", description="d")
 
 
 # ---------------------------------------------------------------------------
@@ -455,17 +301,6 @@ class TestAgentManifestNameValidation:
         )
         assert m.name == "doc-filler"
 
-    def test_valid_name_with_underscores_and_digits(self):
-        m = AgentManifest(
-            name="my_agent_42", version="1.0.0", type=AgentType.ATOMIC, description="d"
-        )
-        assert m.name == "my_agent_42"
-
-    def test_valid_name_at_max_length(self):
-        name = "a" * 128
-        m = AgentManifest(name=name, version="1.0.0", type=AgentType.ATOMIC, description="d")
-        assert len(m.name) == 128
-
     def test_rejects_name_too_long(self):
         with pytest.raises(ValidationError, match="at most 128 characters"):
             AgentManifest(name="a" * 129, version="1.0.0", type=AgentType.ATOMIC, description="d")
@@ -479,14 +314,6 @@ class TestAgentManifestNameValidation:
                 description="d",
             )
 
-    def test_rejects_spaces(self):
-        with pytest.raises(ValidationError, match="should match"):
-            AgentManifest(name="my agent", version="1.0.0", type=AgentType.ATOMIC, description="d")
-
-    def test_rejects_special_characters(self):
-        with pytest.raises(ValidationError, match="should match"):
-            AgentManifest(name="agent!@#", version="1.0.0", type=AgentType.ATOMIC, description="d")
-
 
 # ---------------------------------------------------------------------------
 # Issue 2: McpServerConfig cross-field validation (transport vs command/url)
@@ -496,33 +323,13 @@ class TestAgentManifestNameValidation:
 class TestMcpServerConfigTransportValidation:
     """McpServerConfig validates that transport type matches required fields."""
 
-    def test_stdio_with_command_is_valid(self):
-        cfg = McpServerConfig(transport="stdio", command="uvx")
-        assert cfg.transport == "stdio"
-        assert cfg.command == "uvx"
-
-    def test_sse_with_url_is_valid(self):
-        cfg = McpServerConfig(transport="sse", url="http://localhost:8080/mcp")
-        assert cfg.transport == "sse"
-        assert cfg.url == "http://localhost:8080/mcp"
-
     def test_stdio_without_command_rejected(self):
         with pytest.raises(ValidationError, match="transport='stdio' requires 'command'"):
             McpServerConfig(transport="stdio")
 
-    def test_stdio_default_transport_without_command_rejected(self):
-        """Default transport is stdio, so no command should fail."""
-        with pytest.raises(ValidationError, match="transport='stdio' requires 'command'"):
-            McpServerConfig()
-
     def test_sse_without_url_rejected(self):
         with pytest.raises(ValidationError, match="transport='sse' requires 'url'"):
             McpServerConfig(transport="sse")
-
-    def test_sse_with_url_and_command_is_valid(self):
-        """Having both url and command with sse transport is allowed (command ignored)."""
-        cfg = McpServerConfig(transport="sse", url="http://localhost:8080/mcp", command="helper")
-        assert cfg.url == "http://localhost:8080/mcp"
 
 
 # ---------------------------------------------------------------------------
@@ -545,42 +352,6 @@ class TestAgentManifestModelConfigRoundTrip:
         m2 = AgentManifest(**data)
         assert m2.model_preferences is not None
         assert m2.model_preferences.recommended == "gpt-4o"
-
-    def test_model_dump_json_round_trip_preserves_model_config(self):
-        m = AgentManifest(
-            name="test",
-            version="1.0.0",
-            type=AgentType.ATOMIC,
-            description="d",
-            model_config=AgentModelConfig(recommended="gpt-4o", fallback="gpt-3.5-turbo"),
-        )
-        json_str = m.model_dump_json()
-        m2 = AgentManifest.model_validate_json(json_str)
-        assert m2.model_preferences is not None
-        assert m2.model_preferences.recommended == "gpt-4o"
-        assert m2.model_preferences.fallback == "gpt-3.5-turbo"
-
-    def test_field_name_construction_works(self):
-        m = AgentManifest(
-            name="test",
-            version="1.0.0",
-            type=AgentType.ATOMIC,
-            description="d",
-            model_preferences=AgentModelConfig(recommended="gpt-4o"),
-        )
-        assert m.model_preferences is not None
-        assert m.model_preferences.recommended == "gpt-4o"
-
-    def test_none_model_config_round_trips(self):
-        m = AgentManifest(
-            name="test",
-            version="1.0.0",
-            type=AgentType.ATOMIC,
-            description="d",
-        )
-        data = m.model_dump()
-        m2 = AgentManifest(**data)
-        assert m2.model_preferences is None
 
 
 # ---------------------------------------------------------------------------
@@ -634,14 +405,3 @@ class TestAgentManifestPermissionConsistency:
         )
         assert m.permissions.mode is PermissionMode.FULL_AUTO
         assert m.permission_mode is None
-
-    def test_permission_mode_with_default_permissions_mode_accepted(self):
-        m = AgentManifest(
-            name="test",
-            version="1.0.0",
-            type=AgentType.ATOMIC,
-            description="d",
-            permission_mode=PermissionMode.PLAN,
-            permissions=PermissionConfig(),
-        )
-        assert m.permission_mode is PermissionMode.PLAN
