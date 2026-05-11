@@ -151,6 +151,11 @@ class ExternalMcpAdapter:
                 f"'{self._config.name}'. Allowed: {allowed}"
             )
 
+        # Validate arguments against inputSchema (if available)
+        schema = self._find_tool_schema(tool_name)
+        if schema is not None:
+            self._validate_arguments(tool_name, schema, arguments)
+
         result = await self._session.call_tool(tool_name, arguments)
 
         # Extract text from content blocks; non-text blocks are represented
@@ -357,3 +362,42 @@ class ExternalMcpAdapter:
                 raw_schema = {"type": "object", "properties": {}}
             schema["inputSchema"] = raw_schema
             self._tool_schemas.append(schema)
+
+    def _find_tool_schema(self, tool_name: str) -> dict[str, Any] | None:
+        """Look up cached inputSchema for a tool by name."""
+        for entry in self._tool_schemas:
+            if entry["name"] == tool_name:
+                return entry.get("inputSchema")
+        return None
+
+    @staticmethod
+    def _validate_arguments(
+        tool_name: str,
+        schema: dict[str, Any],
+        arguments: dict[str, Any],
+    ) -> None:
+        """Validate arguments against the tool's inputSchema.
+
+        Checks that all required properties are present and that argument
+        keys are declared in the schema.  This is a safety gate — it does
+        NOT perform deep type validation (the external server handles that).
+        """
+        properties = schema.get("properties", {})
+        required = set(schema.get("required", []))
+
+        # Missing required arguments
+        missing = required - set(arguments.keys())
+        if missing:
+            raise ValueError(
+                f"Tool '{tool_name}' missing required arguments: {sorted(missing)}"
+            )
+
+        # Undeclared argument keys — warn but don't block (external servers
+        # may accept additional properties).
+        extra = set(arguments.keys()) - set(properties.keys())
+        if extra and logger.isEnabledFor(logging.WARNING):
+            logger.warning(
+                "Tool '%s' received undeclared arguments: %s",
+                tool_name,
+                sorted(extra),
+            )

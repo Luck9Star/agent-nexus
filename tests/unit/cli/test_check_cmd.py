@@ -34,7 +34,7 @@ class TestCheckPathExists:
 class TestCheckManifest:
     def test_missing_manifest(self, tmp_path):
         errors, data = _check_manifest(tmp_path, "myagent")
-        assert errors == ["Missing agent-manifest.yaml"]
+        assert errors == ["Missing agent.toml or agent-manifest.yaml"]
         assert data is None
 
     def test_valid_manifest(self, tmp_path):

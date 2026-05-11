@@ -103,7 +103,14 @@ class EvolutionEngine:
         self._store = store
         self._agent_id = agent_id
         self._agents_root = agents_root
-        self._config = config or EvolutionConfig()
+
+        if config is not None:
+            self._config = config
+        else:
+            # Auto-load from config/evolution.toml relative to project root
+            project_root = Path(__file__).resolve().parents[4]
+            config_path = project_root / "config" / "evolution.toml"
+            self._config = EvolutionConfig.load(config_path)
 
         # Create all sub-components
         self._analyzer = ExecutionAnalyzer(store)

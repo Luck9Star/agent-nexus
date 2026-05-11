@@ -165,7 +165,7 @@ class TestCheckInvalidContent:
         (agent_dir / "agent-manifest.yaml").write_text(":: invalid yaml {{{")
         result = runner.invoke(app, ["check", str(agent_dir)])
         assert result.exit_code == 1
-        assert "agent-manifest.yaml" in result.output
+        assert "Manifest" in result.output
 
     def test_manifest_name_mismatch(self, tmp_path: Path) -> None:
         agent_dir = _write_atomic_agent(tmp_path, name="agent-a")

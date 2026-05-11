@@ -327,16 +327,28 @@ async def _info(name: str) -> None:
 
 
 def _display_manifest_info(agent_dir: Path) -> None:
-    """Read and display agent-manifest.yaml metadata."""
-    import yaml
+    """Read and display agent manifest metadata (agent.toml or agent-manifest.yaml)."""
+    manifest: dict | None = None
 
-    manifest_path = agent_dir / "agent-manifest.yaml"
-    if not manifest_path.exists():
-        return
-    try:
-        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-    except Exception:
-        logger.debug("Failed to read manifest for info display", exc_info=True)
+    toml_path = agent_dir / "agent.toml"
+    yaml_path = agent_dir / "agent-manifest.yaml"
+
+    if toml_path.exists():
+        try:
+            import tomllib
+
+            manifest = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.debug("Failed to read agent.toml for info display", exc_info=True)
+    elif yaml_path.exists():
+        try:
+            import yaml
+
+            manifest = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.debug("Failed to read agent-manifest.yaml for info display", exc_info=True)
+
+    if not isinstance(manifest, dict):
         return
     if not isinstance(manifest, dict):
         return

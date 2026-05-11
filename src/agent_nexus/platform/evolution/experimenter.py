@@ -176,6 +176,10 @@ class EvolutionExperimenter:
         total_samples = exp.parent_total + exp.evolved_total
         samples_remaining = max(0, exp.min_samples * 2 - total_samples)
 
+        # Both arms must have data before we can make a recommendation
+        if exp.parent_total == 0 or exp.evolved_total == 0:
+            samples_remaining = max(samples_remaining, 1)
+
         min_ratio = min(exp.parent_total, exp.evolved_total) / max(exp.min_samples, 1)
         confidence = min(1.0, min_ratio)
 
@@ -205,12 +209,7 @@ class EvolutionExperimenter:
         if exp is None:
             raise KeyError(f"Experiment not found: {experiment_id}")
 
-        # Deactivate evolved skill
-        evolved = self._store.get_skill_record(exp.evolved_skill_id)
-        if evolved is not None and evolved.is_active:
-            self._store.deactivate_skill(exp.evolved_skill_id)
-
-        # Validate parent exists before mutating state
+        # Validate parent exists before mutating any state
         parent = self._store.get_skill_record(exp.parent_skill_id)
         if parent is None:
             raise KeyError(f"Parent skill not found: {exp.parent_skill_id}")

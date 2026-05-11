@@ -81,11 +81,11 @@ class TestAgentAddress:
         addr = AgentAddress(agent_id="agent-b", role="coordinator")
         assert addr.role == "coordinator"
 
-    def test_not_frozen(self) -> None:
-        """AgentAddress is a regular BaseModel, not FrozenModel."""
+    def test_frozen(self) -> None:
+        """AgentAddress is immutable (FrozenModel)."""
         addr = AgentAddress(agent_id="agent-a")
-        addr.role = "worker"
-        assert addr.role == "worker"
+        with pytest.raises(Exception):
+            addr.role = "worker"
 
 
 class TestA2AMessage:

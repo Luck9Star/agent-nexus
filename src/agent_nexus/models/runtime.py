@@ -51,7 +51,7 @@ class ExecutionResult(FrozenModel):
     """Result of executing Python code in the Runtime."""
 
     success: bool
-    output: str = ""
+    output: str = Field(default="", max_length=65536)
     error: str | None = None
     variables_created: list[str] = Field(default_factory=list)
 

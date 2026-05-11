@@ -182,10 +182,10 @@ _BUILTIN: dict[str, ModelCapability] = {
         max_output_tokens=8192,
         context_window=128000,
         supports_vision=False,
-        supports_tool_use=True,
-        supports_temperature=True,
+        supports_tool_use=False,
+        supports_temperature=False,
         temperature_min=0.0,
-        temperature_max=2.0,
+        temperature_max=1.0,
         knowledge_cutoff="2025-03",
     ),
     # ---- Qwen (阿里通义千问) ------------------------------------------------

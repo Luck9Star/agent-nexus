@@ -21,11 +21,11 @@ _KNOWN_VULNS: dict[str, list[tuple[str, str, str]]] = {
         ("3.0.0", "CVE-2021-33203", "high"),
     ],
     "requests": [
-        ("2.25.0", "CVE-2023-32681", "medium"),
+        ("2.31.0", "CVE-2023-32681", "medium"),
         ("2.19.0", "CVE-2018-18074", "high"),
     ],
     "pillow": [
-        ("9.0.0", "CVE-2023-44271", "high"),
+        ("10.0.0", "CVE-2023-44271", "high"),
         ("8.3.0", "CVE-2022-22817", "critical"),
     ],
     "pyyaml": [

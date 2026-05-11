@@ -81,7 +81,7 @@ class TestEvolutionE2E:
             lineage=SkillLineage(
                 origin=SkillOrigin.FIXED,
                 generation=1,
-                parent_ids=["parent-001"],
+                parent_skill_ids=["parent-001"],
             ),
             first_seen=now,
             last_updated=now,

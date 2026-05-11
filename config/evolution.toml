@@ -1,0 +1,29 @@
+# Self-Evolution Engine Configuration
+# 自进化引擎配置文件
+#
+# EvolutionConfig reads this file via EvolutionConfig.load().
+# All fields have sensible defaults; uncomment and edit only what you need.
+
+[evolution]
+enabled = true
+auto_promote = false
+max_evolution_per_day = 10
+
+[evolution.thresholds]
+fix_fallback_rate = 0.4
+fix_applied_rate = 0.4
+fix_completion_rate = 0.35
+derived_effective_rate = 0.55
+derived_applied_rate = 0.25
+promotion_effective_rate = 0.8
+promotion_min_selections = 50
+
+[evolution.llm]
+model = "anthropic:claude-sonnet-4-20250514"
+temperature = 0.3
+max_tokens = 4096
+
+[evolution.experiment]
+min_samples = 30
+confidence_level = 0.95
+max_duration_days = 7

@@ -434,14 +434,15 @@ class AgentSigner:
                 error_message="sigstore package not installed; cannot verify",
             )
 
-        # Content hash already passed at this point. Full Sigstore
-        # verification requires certificate + transparency log entry
-        # which are embedded in the bundle. For the hash-based flow,
-        # the content hash is the primary tamper detection mechanism.
+        # Full Sigstore verification requires certificate chain +
+        # transparency log entry which are embedded in the bundle.
+        # Without the sigstore verification library loaded, we cannot
+        # honestly claim the signature is valid.
         return VerificationResult(
-            valid=True,
+            valid=False,
             signer_id=bundle.signer_id,
             method=SigningMethod.SIGSTORE,
+            error_message="Sigstore bundle verification not yet implemented; content hash is the only tamper check",
         )
 
     async def _sigstore_sign_async(self, data: bytes, identity_token: str) -> tuple[str, str]:

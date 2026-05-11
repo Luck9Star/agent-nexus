@@ -518,8 +518,8 @@ class TestInfo:
             patch("pathlib.Path.exists") as exists_mock,
             patch("pathlib.Path.read_text", return_value=manifest_content),
         ):
-            # exists() called for manifest_path then skill_path
-            exists_mock.side_effect = [True, False]
+            # exists() called for agent.toml, agent-manifest.yaml, SKILL.md
+            exists_mock.side_effect = [False, True, False]
 
             await _info("my-agent")
 
@@ -1144,7 +1144,7 @@ class TestInfoManifestExceptionAndSkillMd:
             patch("pathlib.Path.read_text", return_value=manifest_content),
             patch("yaml.safe_load", side_effect=RuntimeError("yaml broke")),
         ):
-            exists_mock.side_effect = [True, False]
+            exists_mock.side_effect = [False, True, False]
             await _info("my-agent")
 
         calls = _echo_calls(echo_mock)
@@ -1165,7 +1165,7 @@ class TestInfoManifestExceptionAndSkillMd:
             patch("pathlib.Path.exists") as exists_mock,
             patch("pathlib.Path.read_text", return_value=skill_content),
         ):
-            exists_mock.side_effect = [False, True]
+            exists_mock.side_effect = [False, True, True]
             await _info("my-agent")
 
         calls = _echo_calls(echo_mock)
@@ -1185,7 +1185,7 @@ class TestInfoManifestExceptionAndSkillMd:
             patch("pathlib.Path.exists") as exists_mock,
             patch("pathlib.Path.read_text", side_effect=OSError("read error")),
         ):
-            exists_mock.side_effect = [False, True]
+            exists_mock.side_effect = [False, True, True]
             await _info("my-agent")
 
         calls = _echo_calls(echo_mock)

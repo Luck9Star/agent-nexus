@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from agent_nexus.models.hooks import HookDefinition, HookEvent, HookType
 from agent_nexus.platform.hooks.executor import HookExecutor, _is_private_url
@@ -183,17 +184,13 @@ class TestValidateCommandArgs:
     """_validate_command_args validates COMMAND hook inputs."""
 
     def test_hook_with_no_command_returns_error(self) -> None:
-        """COMMAND hook missing 'command' field returns an error."""
-        hook = HookDefinition(
-            type=HookType.COMMAND,
-            event=HookEvent.PRE_EXECUTION,
-            command=None,
-        )
-        args, err = HookExecutor._validate_command_args(hook)
-        assert args is None
-        assert err is not None
-        assert err.passed is False
-        assert "missing" in err.error.lower()
+        """COMMAND hook missing 'command' field raises ValidationError at construction."""
+        with pytest.raises(ValidationError, match="command"):
+            HookDefinition(
+                type=HookType.COMMAND,
+                event=HookEvent.PRE_EXECUTION,
+                command=None,
+            )
 
     def test_hook_with_malformed_shell_string_returns_error(self) -> None:
         """Unbalanced quotes cause shlex.split to raise ValueError."""
@@ -276,16 +273,13 @@ class TestValidateHttpUrl:
     """_validate_http_url rejects missing, wrong-scheme, and private URLs."""
 
     def test_missing_url_returns_error(self) -> None:
-        """HTTP hook without url field is rejected."""
-        hook = HookDefinition(
-            type=HookType.HTTP,
-            event=HookEvent.POST_EXECUTION,
-            url=None,
-        )
-        result = HookExecutor._validate_http_url(hook)
-        assert result is not None
-        assert result.passed is False
-        assert "missing" in result.error.lower()
+        """HTTP hook without url field raises ValidationError at construction."""
+        with pytest.raises(ValidationError, match="url"):
+            HookDefinition(
+                type=HookType.HTTP,
+                event=HookEvent.POST_EXECUTION,
+                url=None,
+            )
 
     def test_non_http_scheme_returns_error(self) -> None:
         """Non-http(s) URL scheme is rejected."""

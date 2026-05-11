@@ -161,7 +161,7 @@ class TestAgentDefinition:
 
 class TestHookDef:
     def test_construction(self):
-        h = HookDef(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        h = HookDef(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION, command="echo test")
         assert h.enabled is True
         assert h.block_on_failure is False
         assert h.timeout_seconds == 10.0
@@ -206,7 +206,7 @@ class TestAgentPackage:
 class TestHookDefEnumTypes:
     def test_string_coerced_to_enum(self) -> None:
         """String literals are auto-coerced by Pydantic's StrEnum handling."""
-        h = HookDef(type="command", event="pre_execution")
+        h = HookDef(type="command", event="pre_execution", command="echo test")
         assert isinstance(h.type, HookType)
         assert isinstance(h.event, HookEvent)
         assert h.type is HookType.COMMAND
@@ -250,6 +250,7 @@ class TestHookDefTimeoutValidation:
             HookDef(
                 type=HookType.COMMAND,
                 event=HookEvent.PRE_EXECUTION,
+                command="echo test",
                 timeout_seconds=0,
             )
 
@@ -258,6 +259,7 @@ class TestHookDefTimeoutValidation:
             HookDef(
                 type=HookType.COMMAND,
                 event=HookEvent.PRE_EXECUTION,
+                command="echo test",
                 timeout_seconds=-10,
             )
 
@@ -265,6 +267,7 @@ class TestHookDefTimeoutValidation:
         h = HookDef(
             type=HookType.COMMAND,
             event=HookEvent.PRE_EXECUTION,
+            command="echo test",
             timeout_seconds=5.0,
         )
         assert h.timeout_seconds == 5.0

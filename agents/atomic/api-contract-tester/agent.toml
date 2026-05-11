@@ -10,7 +10,7 @@ fallback = "economy"
 max_turns = 5
 
 [agent.mcp]
-tools = ["validate_contract", "generate_tests"]
+tools = ["validate_contract", "generate_report"]
 
 [agent.permissions]
 mode = "default"

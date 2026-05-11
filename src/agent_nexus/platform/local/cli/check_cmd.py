@@ -18,34 +18,43 @@ def _check_path_exists(path: Path) -> list[str]:
 
 
 def _check_manifest(path: Path, dir_name: str) -> tuple[list[str], dict | None]:
-    """Check agent-manifest.yaml exists, parses, and name matches directory."""
+    """Check agent manifest exists (agent.toml or agent-manifest.yaml), parses, and name matches directory."""
     errors: list[str] = []
-    manifest_path = path / "agent-manifest.yaml"
 
-    if not manifest_path.exists():
-        errors.append("Missing agent-manifest.yaml")
-        return errors, None
+    toml_path = path / "agent.toml"
+    yaml_path = path / "agent-manifest.yaml"
 
-    try:
-        import yaml
+    if toml_path.exists():
+        try:
+            import tomllib
 
-        content = manifest_path.read_text(encoding="utf-8")
-        data = yaml.safe_load(content)
-    except Exception as exc:
-        errors.append(f"agent-manifest.yaml: parse error: {exc}")
+            data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            errors.append(f"agent.toml: parse error: {exc}")
+            return errors, None
+    elif yaml_path.exists():
+        try:
+            import yaml
+
+            data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            errors.append(f"agent-manifest.yaml: parse error: {exc}")
+            return errors, None
+    else:
+        errors.append("Missing agent.toml or agent-manifest.yaml")
         return errors, None
 
     if not isinstance(data, dict):
-        errors.append("agent-manifest.yaml: expected a mapping, got " + type(data).__name__)
+        errors.append("Manifest: expected a mapping, got " + type(data).__name__)
         return errors, None
 
     for field in ("name", "version", "type", "description"):
         if field not in data:
-            errors.append(f"agent-manifest.yaml: missing required field '{field}'")
+            errors.append(f"Manifest: missing required field '{field}'")
 
     if "name" in data and data["name"] != dir_name:
         errors.append(
-            f"agent-manifest.yaml: name '{data['name']}' does not match directory name '{dir_name}'"
+            f"Manifest: name '{data['name']}' does not match directory name '{dir_name}'"
         )
 
     return errors, data

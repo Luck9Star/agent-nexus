@@ -8,6 +8,7 @@ from __future__ import annotations
 
 
 import pytest
+from pydantic import ValidationError
 
 from agent_nexus.models.hooks import HookDefinition, HookEvent, HookType
 from agent_nexus.platform.hooks.executor import HookExecutor
@@ -130,22 +131,13 @@ class TestHttpHook:
 
     @pytest.mark.asyncio
     async def test_missing_url_returns_error(self) -> None:
-        """HTTP hook without a url field returns a validation error."""
-        hook = HookDefinition(
-            type=HookType.HTTP,
-            event=HookEvent.PRE_EXECUTION,
-            url=None,
-        )
-        executor = HookExecutor(hooks=[hook])
-
-        result = await executor.execute_event(HookEvent.PRE_EXECUTION)
-
-        assert len(result.results) == 1
-        exec_result = result.results[0]
-        assert exec_result.passed is False
-        assert "missing" in (exec_result.error or "").lower()
-
-        await executor.close()
+        """HTTP hook without a url field raises ValidationError at construction."""
+        with pytest.raises(ValidationError, match="url"):
+            HookDefinition(
+                type=HookType.HTTP,
+                event=HookEvent.PRE_EXECUTION,
+                url=None,
+            )
 
 
 # ===========================================================================

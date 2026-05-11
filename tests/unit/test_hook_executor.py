@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from agent_nexus.models.hooks import (
     AggregatedHookResult,
@@ -275,18 +276,12 @@ class TestCommandHook:
 
     @pytest.mark.asyncio
     async def test_command_hook_missing_command(self) -> None:
-        hook = HookDefinition(
-            type=HookType.COMMAND,
-            event=HookEvent.PRE_EXECUTION,
-            block_on_failure=True,
-        )
-        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
-
-        result = await executor.execute_event(HookEvent.PRE_EXECUTION)
-        assert result.blocked is True
-        assert result.results[0].passed is False
-        assert result.results[0].error is not None
-        assert "missing" in result.results[0].error.lower()
+        with pytest.raises(ValidationError, match="command"):
+            HookDefinition(
+                type=HookType.COMMAND,
+                event=HookEvent.PRE_EXECUTION,
+                block_on_failure=True,
+            )
 
     @pytest.mark.asyncio
     async def test_command_hook_receives_context_via_stdin(self) -> None:
@@ -395,18 +390,12 @@ class TestHttpHook:
 
     @pytest.mark.asyncio
     async def test_http_hook_missing_url(self) -> None:
-        hook = HookDefinition(
-            type=HookType.HTTP,
-            event=HookEvent.POST_EXECUTION,
-            block_on_failure=True,
-        )
-        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
-
-        result = await executor.execute_event(HookEvent.POST_EXECUTION)
-        assert result.blocked is True
-        assert result.results[0].passed is False
-        assert result.results[0].error is not None
-        assert "missing" in result.results[0].error.lower()
+        with pytest.raises(ValidationError, match="url"):
+            HookDefinition(
+                type=HookType.HTTP,
+                event=HookEvent.POST_EXECUTION,
+                block_on_failure=True,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -437,15 +426,11 @@ class TestStubHooks:
 
     @pytest.mark.asyncio
     async def test_prompt_hook_no_prompt_text(self) -> None:
-        hook = HookDefinition(
-            type=HookType.PROMPT,
-            event=HookEvent.PRE_EXECUTION,
-        )
-        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
-
-        result = await executor.execute_event(HookEvent.PRE_EXECUTION)
-        assert result.results[0].passed is True
-        assert result.results[0].output is not None
+        with pytest.raises(ValidationError, match="prompt"):
+            HookDefinition(
+                type=HookType.PROMPT,
+                event=HookEvent.PRE_EXECUTION,
+            )
 
 
 # ---------------------------------------------------------------------------

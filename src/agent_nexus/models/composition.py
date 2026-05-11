@@ -45,7 +45,11 @@ class Composition:
         return [t for t in self.tasks.values() if task_id in t.blocked_by]
 
     def get_execution_order(self) -> list[list[str]]:
-        """Compute parallel execution groups (BFS by dependency depth)."""
+        """Compute parallel execution groups (BFS by dependency depth).
+
+        Raises CompositionError if some tasks cannot be scheduled (cyclic
+        or unresolved dependencies).
+        """
         groups: list[list[str]] = []
         completed: set[str] = set()
         remaining = set(self.tasks.keys())
@@ -57,7 +61,10 @@ class Composition:
                 if all(dep in completed for dep in self.tasks[tid].blocked_by)
             ]
             if not ready:
-                break
+                unscheduled = sorted(remaining)
+                raise CompositionError(
+                    f"Cannot schedule tasks (cyclic or unresolved deps): {unscheduled}"
+                )
             groups.append(sorted(ready))
             completed.update(ready)
             remaining -= set(ready)

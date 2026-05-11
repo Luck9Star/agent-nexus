@@ -33,6 +33,7 @@ class TestHookDefinition:
         hd = HookDefinition(
             type=HookType.COMMAND,
             event=HookEvent.PRE_TOOL_USE,
+            command="echo test",
             matcher="file_write*",
         )
         assert hd.matcher == "file_write*"
@@ -45,7 +46,7 @@ class TestHookDefinition:
 
 class TestHookExecution:
     def test_with_output(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION, command="echo test")
         he = HookExecution(
             hook=hook,
             passed=True,
@@ -56,7 +57,7 @@ class TestHookExecution:
         assert he.duration_ms == 12.5
 
     def test_failed_execution(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION, command="echo test")
         he = HookExecution(
             hook=hook,
             passed=False,
@@ -76,7 +77,7 @@ class TestHookExecution:
 
 class TestAggregatedHookResult:
     def test_with_results(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION, command="echo test")
         exec1 = HookExecution(hook=hook, passed=True)
         exec2 = HookExecution(hook=hook, passed=False, blocked=True, error="fail")
         ahr = AggregatedHookResult(
@@ -90,7 +91,7 @@ class TestAggregatedHookResult:
         assert len(ahr.errors) == 1
 
     def test_not_blocked_when_all_pass(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION, command="echo test")
         exec1 = HookExecution(hook=hook, passed=True)
         ahr = AggregatedHookResult(
             event=HookEvent.POST_EXECUTION,
@@ -119,6 +120,7 @@ class TestHookDefinitionValidation:
         hd = HookDefinition(
             type=HookType.COMMAND,
             event=HookEvent.PRE_EXECUTION,
+            command="echo test",
             timeout_seconds=0.001,
         )
         assert hd.timeout_seconds == 0.001
@@ -128,7 +130,7 @@ class TestHookExecutionValidation:
     """Field constraint tests for HookExecution.duration_ms."""
 
     def test_duration_ms_rejects_negative(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION, command="echo test")
         with pytest.raises(ValidationError, match="greater than or equal to 0"):
             HookExecution(hook=hook, passed=True, duration_ms=-0.1)
 
@@ -142,7 +144,7 @@ class TestHookExecutionSemanticValidation:
     """HookExecution rejects contradictory passed+blocked state."""
 
     def test_passed_and_blocked_raises(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION, command="echo test")
         with pytest.raises(ValidationError, match="passed and blocked cannot both be True"):
             HookExecution(hook=hook, passed=True, blocked=True)
 
@@ -151,7 +153,7 @@ class TestHookExecutionErrorType:
     """iter101 regression: error_type carries exception class name."""
 
     def test_error_type_on_failure(self):
-        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION)
+        hook = HookDefinition(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION, command="echo test")
         he = HookExecution(
             hook=hook,
             passed=False,

@@ -6,7 +6,7 @@ import json
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from agent_nexus.models._common import FrozenModel
 
@@ -92,16 +92,18 @@ class AgentToPlatform(FrozenModel):
         if v is not None:
             # Fast path: strings are the most common output type
             if isinstance(v, str):
-                if len(v) > 65536:
-                    raise ValueError("output exceeds maximum serialized size of 65536 bytes")
+                byte_len = len(v.encode("utf-8"))
+                if byte_len > 65536:
+                    raise ValueError(f"output exceeds maximum serialized size of 65536 bytes ({byte_len} bytes)")
                 return v
             # Complex types: measure serialized size directly
             try:
                 serialized = json.dumps(v, default=str)
             except (TypeError, ValueError):
                 serialized = str(v)
-            if len(serialized) > 65536:
-                raise ValueError("output exceeds maximum serialized size of 65536 bytes")
+            byte_len = len(serialized.encode("utf-8"))
+            if byte_len > 65536:
+                raise ValueError(f"output exceeds maximum serialized size of 65536 bytes ({byte_len} bytes)")
         return v
 
 
@@ -143,7 +145,7 @@ class IPCMessage(FrozenModel):
 # See: docs/roadmap/ for A2A design document.
 
 
-class AgentAddress(BaseModel):
+class AgentAddress(FrozenModel):
     """Network-layer address for an agent in A2A communication.
 
     Used to identify senders and recipients in agent-to-agent messages.
@@ -155,7 +157,7 @@ class AgentAddress(BaseModel):
     composition: str | None = None
 
 
-class A2AMessage(BaseModel):
+class A2AMessage(FrozenModel):
     """Agent-to-Agent message carried over the Platform-as-Broker relay.
 
     This is the high-level message model. It is serialized into a
@@ -178,5 +180,5 @@ class A2AMessage(BaseModel):
     msg_type: Literal["chat", "request", "broadcast", "reply"]
     in_reply_to: str | None = None
     content: str
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = Field(default_factory=dict)
     timestamp: float

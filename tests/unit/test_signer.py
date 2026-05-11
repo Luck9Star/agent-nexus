@@ -181,8 +181,12 @@ class TestSignVerifyRoundtrip:
             # Verify inside the same patch context so _sigstore_is_available
             # still returns True during verification.
             result = await signer.verify(agent_dir, bundle)
-            assert result.valid is True
+            # Full sigstore verification is not yet implemented, so even
+            # with sigstore available, verification returns valid=False
+            # with an informational error message.
+            assert result.valid is False
             assert result.method == SigningMethod.SIGSTORE
+            assert "not yet implemented" in result.error_message
 
 
 # ---------------------------------------------------------------------------

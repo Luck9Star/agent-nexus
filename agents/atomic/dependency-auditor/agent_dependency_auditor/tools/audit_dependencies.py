@@ -114,7 +114,7 @@ _KNOWN_VULNS: dict[str, list[tuple[str, str, str, str, str]]] = {
             "CVE-2019-7164",
             "high",
             "SQL injection via order_by",
-            "1.3.0",
+            "1.4.3",
         ),
     ],
     "numpy": [
@@ -123,7 +123,7 @@ _KNOWN_VULNS: dict[str, list[tuple[str, str, str, str, str]]] = {
             "CVE-2021-41495",
             "medium",
             "Buffer overflow in numpy.core",
-            "1.22.0",
+            "1.22.1",
         ),
     ],
 }

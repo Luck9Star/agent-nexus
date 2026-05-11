@@ -78,6 +78,17 @@ class HookDefinition(FrozenModel):
     prompt: str | None = None  # PROMPT/AGENT type: LLM prompt text
     model: str | None = None  # PROMPT/AGENT type: model to use (e.g. "haiku", "sonnet")
 
+    @model_validator(mode="after")
+    def _validate_type_fields(self) -> HookDefinition:
+        """Ensure type-specific fields are present for the declared hook type."""
+        if self.type == HookType.COMMAND and not self.command:
+            raise ValueError("COMMAND hook requires 'command' field")
+        if self.type == HookType.HTTP and not self.url:
+            raise ValueError("HTTP hook requires 'url' field")
+        if self.type in (HookType.PROMPT, HookType.AGENT) and not self.prompt:
+            raise ValueError(f"{self.type.value} hook requires 'prompt' field")
+        return self
+
 
 class HookExecution(FrozenModel):
     """Result of executing a single hook.
