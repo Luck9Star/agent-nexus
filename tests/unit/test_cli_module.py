@@ -518,8 +518,8 @@ class TestInfo:
             patch("pathlib.Path.exists") as exists_mock,
             patch("pathlib.Path.read_text", return_value=manifest_content),
         ):
-            # exists() called for agent.toml, agent-manifest.yaml, SKILL.md
-            exists_mock.side_effect = [False, True, False]
+            # exists() called for scores.json, agent.toml, agent-manifest.yaml, SKILL.md
+            exists_mock.side_effect = [False, False, True, False]
 
             await _info("my-agent")
 
@@ -1508,6 +1508,10 @@ class TestJsonOutput:
             idx_entry.version = "1.0.0"
             idx_entry.type = MagicMock(value="atomic")
             idx_entry.description = "Doc filler"
+            idx_entry.capabilities = None
+            idx_entry.category = None
+            idx_entry.download_count = None
+            idx_entry.score = None
             sources_mock.search_agents.return_value = [(src_entry, idx_entry)]
 
             with patch(

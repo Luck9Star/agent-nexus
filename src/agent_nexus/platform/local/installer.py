@@ -33,6 +33,7 @@ from .sources import SourceManager
 if TYPE_CHECKING:
     from .dependency_resolver import DependencyResolver
     from .quality_gate import QualityGate
+    from .scoring import ScoreManager
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ class GitInstaller:
         *,
         quality_gate: QualityGate | None = None,
         dependency_resolver: DependencyResolver | None = None,
+        score_manager: ScoreManager | None = None,
     ) -> None:
         self._sources = source_manager
         self._lockfile = lockfile_manager
@@ -104,6 +106,7 @@ class GitInstaller:
         self._cache_dir = config_dir / "cache" / "repos"
         self._quality_gate = quality_gate
         self._dependency_resolver = dependency_resolver
+        self._score_manager = score_manager
 
     # ------------------------------------------------------------------
     # Public API
@@ -275,6 +278,9 @@ class GitInstaller:
             )
             self._lockfile.add_entry_by_name(agent_name, entry)
 
+            if self._score_manager is not None:
+                self._score_manager.record_download(agent_name)
+
             logger.info(
                 "Agent installed: %s@%s (sha=%s, venv=%s)",
                 agent_name,
@@ -398,6 +404,9 @@ class GitInstaller:
                 venv_path=venv_path,
             )
             self._lockfile.add_entry_by_name(agent_name, entry)
+
+            if self._score_manager is not None:
+                self._score_manager.record_download(agent_name)
 
             logger.info(
                 "Local agent installed: %s@%s (source=local)",
@@ -543,10 +552,7 @@ class GitInstaller:
         if self._dependency_resolver is None:
             return
         deps = self._dependency_resolver.resolve(agent_dir)
-        missing = [
-            d.name for d in deps
-            if d.dep_type == "agent" and d.resolved_path is None
-        ]
+        missing = [d.name for d in deps if d.dep_type == "agent" and d.resolved_path is None]
         if missing:
             raise InstallationError(
                 f"Agent '{agent_name}' has unmet agent dependencies: {', '.join(missing)}. "
@@ -603,9 +609,7 @@ class GitInstaller:
             raw = _read_raw_manifest(manifest_path)
             return raw if raw is not None else {}
         except (ManifestError, Exception) as exc:
-            raise InstallationError(
-                f"Failed to read manifest from {manifest_path}: {exc}"
-            ) from exc
+            raise InstallationError(f"Failed to read manifest from {manifest_path}: {exc}") from exc
 
     # ------------------------------------------------------------------
     # Internal: venv management

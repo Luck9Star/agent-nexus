@@ -24,6 +24,7 @@ from agent_nexus.platform.orchestration.process_manager import (
     ProcessManager,
 )
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
+from agent_nexus.platform.orchestration.team_manager import TeamManager
 
 __all__ = [
     "AgentDirectory",
@@ -44,4 +45,5 @@ __all__ = [
     "OrchestrationDefinition",
     "ProcessManager",
     "TaskGraph",
+    "TeamManager",
 ]

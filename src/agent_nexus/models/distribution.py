@@ -92,6 +92,7 @@ class LockfileEntry(FrozenModel):
     installed_at: datetime = Field(default_factory=_utc_now)
     venv_path: str = ""
     dependencies: list[str] = Field(default_factory=list)
+    quality_score: float | None = None
 
 
 class Lockfile(FrozenModel):
@@ -115,6 +116,16 @@ class PackageSource(SourceEntry):
     local_cache: str = ""
 
 
+class AgentScore(FrozenModel):
+    """Persisted quality/rating score for an agent."""
+
+    quality_gate_score: float | None = None
+    download_count: int = 0
+    average_rating: float | None = None
+    rating_count: int = 0
+    last_updated: datetime | None = None
+
+
 class IndexEntry(FrozenModel):
     """A single Agent entry from a source's index.yaml.
 
@@ -135,6 +146,10 @@ class IndexEntry(FrozenModel):
         default="",
         description="Override for non-standard repo layouts (e.g. 'agents/doc-filler')",
     )
+    capabilities: list[str] = Field(default_factory=list)
+    category: str | None = None
+    download_count: int = 0
+    score: AgentScore | None = None
 
     @model_validator(mode="after")
     def _reject_path_traversal(self) -> IndexEntry:

@@ -74,10 +74,15 @@ def list_agents(
 
 def search(
     query: str = typer.Argument(help="Search query"),
+    capability: str | None = typer.Option(None, "--capability", "-c", help="Filter by capability"),
+    category: str | None = typer.Option(None, "--category", "-C", help="Filter by category"),
+    sort_by: str = typer.Option(
+        "relevance", "--sort", "-s", help="Sort by: relevance, downloads, name, rating"
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Search for available agents."""
-    asyncio.run(_search(query, json_output))
+    asyncio.run(_search(query, capability, category, sort_by, json_output))
 
 
 def info(name: str = typer.Argument(help="Agent name")) -> None:
@@ -116,7 +121,10 @@ async def _install(name: str, version: str | None, source_url: str | None, local
 
     _loader, lockfile, sources, config_dir = _init_managers()
     installer = GitInstaller(
-        sources, lockfile, config_dir, quality_gate=QualityGate(),
+        sources,
+        lockfile,
+        config_dir,
+        quality_gate=QualityGate(),
     )
 
     try:
@@ -204,7 +212,10 @@ async def _update(name: str | None, all_agents: bool) -> None:
 
     _loader, lockfile, sources, config_dir = _init_managers()
     installer = GitInstaller(
-        sources, lockfile, config_dir, quality_gate=QualityGate(),
+        sources,
+        lockfile,
+        config_dir,
+        quality_gate=QualityGate(),
     )
 
     agents_to_update = _resolve_update_targets(name, all_agents, lockfile)
@@ -229,37 +240,64 @@ async def _list_agents(json_output: bool = False) -> None:
     """Async list implementation."""
     import json
 
-    _loader, lockfile, _sources, _config_dir = _init_managers()
+    from agent_nexus.platform.local.scoring import ScoreManager
+
+    _loader, lockfile, _sources, config_dir = _init_managers()
     lockfile_data = lockfile.load()
 
     agents = lockfile_data.agents
+    score_mgr = ScoreManager(config_dir / "scores.json")
+
     if json_output:
-        result = [
-            {
+        result = []
+        for agent_name, entry in agents.items():
+            score = score_mgr.get_score(agent_name)
+            item = {
                 "name": agent_name,
                 "version": entry.version,
                 "type": entry.agent_type.value,
                 "source": entry.source,
             }
-            for agent_name, entry in agents.items()
-        ]
+            if score.download_count > 0:
+                item["downloads"] = score.download_count
+            if score.average_rating is not None:
+                item["rating"] = score.average_rating
+            if score.quality_gate_score is not None:
+                item["quality"] = score.quality_gate_score
+            result.append(item)
         typer.echo(json.dumps(result, indent=2))
         return
     if not agents:
         typer.echo("No agents installed.")
         return
 
-    typer.echo(f"{'Name':<25} {'Version':<12} {'Type':<12} {'Source'}")
-    typer.echo("-" * 65)
+    typer.echo(f"{'Name':<25} {'Version':<12} {'Type':<12} {'Source':<20} {'Score'}")
+    typer.echo("-" * 85)
     for agent_name, entry in agents.items():
+        score = score_mgr.get_score(agent_name)
+        parts: list[str] = []
+        if score.quality_gate_score is not None:
+            parts.append(f"Q:{score.quality_gate_score:.2f}")
+        if score.download_count:
+            parts.append(f"D:{score.download_count}")
+        if score.average_rating is not None:
+            parts.append(f"R:{score.average_rating}/5")
+        score_str = " ".join(parts) if parts else "-"
         typer.echo(
-            f"{agent_name:<25} {entry.version:<12} {entry.agent_type.value:<12} {entry.source}"
+            f"{agent_name:<25} {entry.version:<12} "
+            f"{entry.agent_type.value:<12} {entry.source:<20} {score_str}"
         )
 
     typer.echo(f"\n{len(agents)} agent(s) installed.")
 
 
-async def _search(query: str, json_output: bool = False) -> None:
+async def _search(
+    query: str,
+    capability: str | None = None,
+    category: str | None = None,
+    sort_by: str = "relevance",
+    json_output: bool = False,
+) -> None:
     """Async search implementation."""
     import json
 
@@ -269,16 +307,25 @@ async def _search(query: str, json_output: bool = False) -> None:
     sources = SourceManager(config_dir / "sources.yaml")
 
     results: list[dict] = []
-    for source, entry in sources.search_agents(query):
-        results.append(
-            {
-                "name": entry.name,
-                "version": entry.version,
-                "type": entry.type.value,
-                "description": entry.description,
-                "source": source.name,
-            }
-        )
+    for source, entry in sources.search_agents(
+        query, capability=capability, category=category, sort_by=sort_by
+    ):
+        item: dict = {
+            "name": entry.name,
+            "version": entry.version,
+            "type": entry.type.value,
+            "description": entry.description,
+            "source": source.name,
+        }
+        if entry.capabilities:
+            item["capabilities"] = entry.capabilities
+        if entry.category:
+            item["category"] = entry.category
+        if entry.download_count:
+            item["downloads"] = entry.download_count
+        if entry.score and entry.score.average_rating is not None:
+            item["rating"] = entry.score.average_rating
+        results.append(item)
 
     if json_output:
         typer.echo(json.dumps(results, indent=2))
@@ -293,6 +340,14 @@ async def _search(query: str, json_output: bool = False) -> None:
         typer.echo(f"  {r['name']} ({r['type']}) @ {r['version']}")
         typer.echo(f"    {r['description']}")
         typer.echo(f"    Source: {r['source']}")
+        if r.get("capabilities"):
+            typer.echo(f"    Capabilities: {', '.join(r['capabilities'])}")
+        if r.get("category"):
+            typer.echo(f"    Category: {r['category']}")
+        if r.get("downloads"):
+            typer.echo(f"    Downloads: {r['downloads']}")
+        if r.get("rating") is not None:
+            typer.echo(f"    Rating: {r['rating']}/5")
 
     typer.echo(f"\n{len(results)} result(s).")
 
@@ -302,6 +357,8 @@ async def _info(name: str) -> None:
     if not AGENT_NAME_RE.match(name):
         typer.echo(f"Invalid agent name: {name!r}", err=True)
         raise typer.Exit(code=1)
+
+    from agent_nexus.platform.local.scoring import ScoreManager
 
     _loader, lockfile, _sources, config_dir = _init_managers()
     entry = lockfile.get_entry(name)
@@ -320,6 +377,17 @@ async def _info(name: str) -> None:
         typer.echo(f"  Venv:         {entry.venv_path}")
     if entry.dependencies:
         typer.echo(f"  Dependencies: {', '.join(entry.dependencies)}")
+
+    score_mgr = ScoreManager(config_dir / "scores.json")
+    score = score_mgr.get_score(name)
+    if score.quality_gate_score is not None or score.download_count or score.rating_count:
+        typer.echo()
+        if score.quality_gate_score is not None:
+            typer.echo(f"  Quality:      {score.quality_gate_score:.2f}")
+        if score.download_count:
+            typer.echo(f"  Downloads:    {score.download_count}")
+        if score.average_rating is not None:
+            typer.echo(f"  Rating:       {score.average_rating}/5 ({score.rating_count} reviews)")
 
     agent_dir = config_dir / "agents" / name
     _display_manifest_info(agent_dir)

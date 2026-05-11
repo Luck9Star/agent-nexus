@@ -66,6 +66,20 @@ def _parse_index_entry(item: dict[str, Any]) -> IndexEntry | None:
             raise ValueError("Index entry missing required 'version' field")
         if not raw_type:
             raise ValueError("Index entry missing required 'type' field")
+        # Parse optional score sub-dict
+        score = None
+        raw_score = item.get("score")
+        if isinstance(raw_score, dict):
+            from agent_nexus.models.distribution import AgentScore
+
+            score = AgentScore(
+                quality_gate_score=raw_score.get("quality_gate_score"),
+                download_count=raw_score.get("download_count", 0),
+                average_rating=raw_score.get("average_rating"),
+                rating_count=raw_score.get("rating_count", 0),
+                last_updated=raw_score.get("last_updated"),
+            )
+
         return IndexEntry(
             name=raw_name,
             version=raw_version,
@@ -74,6 +88,10 @@ def _parse_index_entry(item: dict[str, Any]) -> IndexEntry | None:
             tags=item.get("tags", []),
             dependencies=item.get("dependencies", []),
             path=item.get("path", ""),
+            capabilities=item.get("capabilities", []),
+            category=item.get("category"),
+            download_count=item.get("download_count", 0),
+            score=score,
         )
     except Exception as exc:
         logger.warning("Skipping invalid index entry %s: %s", item, exc)
@@ -171,10 +189,23 @@ class SourceManager:
             return
         self._save_to_yaml()
 
-    def search_agents(self, query: str) -> list[tuple[SourceEntry, IndexEntry]]:
+    def search_agents(
+        self,
+        query: str,
+        *,
+        capability: str | None = None,
+        category: str | None = None,
+        sort_by: str = "relevance",
+    ) -> list[tuple[SourceEntry, IndexEntry]]:
         """Search all source indexes for agents matching *query*.
 
         Matches against agent name, description, and tags (case-insensitive).
+        Optional filters:
+
+        - *capability*: only return agents with this capability.
+        - *category*: only return agents in this category.
+        - *sort_by*: ``"relevance"`` (keyword match order), ``"downloads"``,
+          ``"name"``, or ``"rating"``.
 
         Returns a list of ``(source, index_entry)`` tuples for each match.
         """
@@ -185,9 +216,34 @@ class SourceManager:
             if index is None:
                 continue
             for entry in index:
+                # --- keyword filter (existing) ---
                 searchable = " ".join([entry.name, entry.description] + entry.tags).lower()
-                if query.lower() in searchable:
-                    results.append((source, entry))
+                if query.lower() not in searchable:
+                    continue
+                # --- capability filter (new) ---
+                if capability is not None and capability not in entry.capabilities:
+                    continue
+                # --- category filter (new) ---
+                if category is not None and entry.category != category:
+                    continue
+                results.append((source, entry))
+
+        # --- sorting (new) ---
+        if sort_by == "downloads":
+            results.sort(key=lambda pair: pair[1].download_count, reverse=True)
+        elif sort_by == "name":
+            results.sort(key=lambda pair: pair[1].name.lower())
+        elif sort_by == "rating":
+            results.sort(
+                key=lambda pair: (
+                    pair[1].score.average_rating
+                    if pair[1].score and pair[1].score.average_rating is not None
+                    else -1.0
+                ),
+                reverse=True,
+            )
+        # "relevance" → keep keyword match order (default)
+
         return results
 
     def resolve_agent_source(self, agent_name: str) -> tuple[SourceEntry, str] | None:
