@@ -8,6 +8,8 @@ Provides three MCP tools:
 
 from __future__ import annotations
 
+import json
+
 from agent_api_doc_generator.models import EndpointInfo, SchemaInfo
 from agent_api_doc_generator.tools.extract_endpoints import (
     extract_endpoints as _extract,
@@ -66,19 +68,22 @@ def create_mcp_server() -> object:
 
     @mcp.tool()
     def generate_openapi(
-        endpoints: list[dict],
-        info: dict | None = None,
-        schemas: list[dict] | None = None,
+        endpoints: str,
+        info: str | None = None,
+        schemas: str | None = None,
     ) -> dict:
         """Generate an OpenAPI 3.1 specification document.
 
         Assembles endpoints and schemas into a complete OpenAPI spec.
         """
-        parsed_endpoints = [EndpointInfo.model_validate(e) for e in endpoints]
+        # MCP inputSchema: str avoids ambiguous anyOf.
+        # Accept JSON strings, parse internally.
+        parsed_endpoints = [EndpointInfo.model_validate(e) for e in json.loads(endpoints)]
+        parsed_info = json.loads(info) if info else None
         parsed_schemas = None
         if schemas:
-            parsed_schemas = [SchemaInfo.model_validate(s) for s in schemas]
-        result = _generate(parsed_endpoints, info, parsed_schemas)
+            parsed_schemas = [SchemaInfo.model_validate(s) for s in json.loads(schemas)]
+        result = _generate(parsed_endpoints, parsed_info, parsed_schemas)
         return result.model_dump()
 
     return mcp

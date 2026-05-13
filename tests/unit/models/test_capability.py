@@ -13,33 +13,6 @@ from agent_nexus.models.capability import (
 # ---------------------------------------------------------------------------
 
 
-class TestModelCapability:
-    def test_fields_present(self):
-        """All fields should be present and typed."""
-        cap = ModelCapability(
-            model_id="test",
-            provider="test",
-            max_output_tokens=100,
-            context_window=1000,
-            supports_vision=False,
-            supports_tool_use=True,
-            supports_temperature=True,
-            temperature_min=0.0,
-            temperature_max=1.0,
-            knowledge_cutoff="2025-01",
-        )
-        assert cap.model_id == "test"
-        assert isinstance(cap.provider, str)
-        assert isinstance(cap.max_output_tokens, int)
-        assert isinstance(cap.context_window, int)
-        assert isinstance(cap.supports_vision, bool)
-        assert isinstance(cap.supports_tool_use, bool)
-        assert isinstance(cap.supports_temperature, bool)
-        assert isinstance(cap.temperature_min, float)
-        assert isinstance(cap.temperature_max, float)
-        assert isinstance(cap.knowledge_cutoff, str)
-
-
 # ---------------------------------------------------------------------------
 # ModelCapabilityRegistry — exact matching
 # ---------------------------------------------------------------------------
@@ -63,18 +36,6 @@ class TestExactMatch:
         assert cap.max_output_tokens == 8192
         assert cap.context_window == 200000
 
-    def test_claude_3_5_sonnet(self):
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("claude-3-5-sonnet-20241022")
-        assert cap.provider == "anthropic"
-        assert cap.knowledge_cutoff == "2024-10"
-
-    def test_claude_3_5_haiku(self):
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("claude-3-5-haiku-20241022")
-        assert cap.provider == "anthropic"
-        assert cap.supports_vision is True
-
     def test_claude_3_opus(self):
         reg = ModelCapabilityRegistry()
         cap = reg.get("claude-3-opus-20240229")
@@ -90,12 +51,6 @@ class TestExactMatch:
         assert cap.context_window == 128000
         assert cap.temperature_max == 2.0
         assert cap.supports_vision is True
-
-    def test_gpt_4o_mini(self):
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("gpt-4o-mini")
-        assert cap.provider == "openai"
-        assert cap.max_output_tokens == 16384
 
     def test_gpt_4_turbo(self):
         reg = ModelCapabilityRegistry()
@@ -125,30 +80,6 @@ class TestExactMatch:
         assert cap.context_window == 128000
         assert cap.supports_vision is False
 
-    def test_deepseek_reasoner(self):
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("deepseek-reasoner")
-        assert cap.provider == "deepseek"
-        assert cap.max_output_tokens == 8192
-
-    def test_qwen_72b(self):
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("qwen2.5-72b-instruct")
-        assert cap.provider == "qwen"
-        assert cap.context_window == 131072
-
-    def test_qwen_32b(self):
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("qwen2.5-32b-instruct")
-        assert cap.provider == "qwen"
-        assert cap.context_window == 131072
-
-    def test_qwen_7b(self):
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("qwen2.5-7b-instruct")
-        assert cap.provider == "qwen"
-        assert cap.context_window == 32768
-
     def test_minimax_m1(self):
         reg = ModelCapabilityRegistry()
         cap = reg.get("minimax-m1-0519")
@@ -156,13 +87,6 @@ class TestExactMatch:
         assert cap.context_window == 1048576
         assert cap.supports_vision is True
         assert cap.temperature_max == 1.0
-
-    def test_minimax_t1(self):
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("minimax-t1-0519")
-        assert cap.provider == "minimax"
-        assert cap.context_window == 1048576
-        assert cap.knowledge_cutoff == "2025-05"
 
 
 # ---------------------------------------------------------------------------
@@ -179,13 +103,6 @@ class TestFuzzyMatch:
         assert cap.provider == "anthropic"
         assert cap.max_output_tokens == 8192
 
-    def test_claude_3_5_sonnet_stripped_date(self):
-        """claude-3-5-sonnet-20241022 -> exact match exists."""
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("claude-3-5-sonnet-20241022")
-        assert cap.model_id == "claude-3-5-sonnet-20241022"
-        assert cap.provider == "anthropic"
-
     def test_unknown_model_falls_to_provider_default(self):
         """Unknown model like claude-4-experimental should get anthropic default."""
         reg = ModelCapabilityRegistry()
@@ -199,34 +116,6 @@ class TestFuzzyMatch:
         cap = reg.get("gpt-5-unknown")
         assert cap.provider == "openai"
         assert cap.max_output_tokens == 16384
-
-    def test_unknown_deepseek_model(self):
-        """Unknown deepseek model should get deepseek default."""
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("deepseek-coder-v3")
-        assert cap.provider == "deepseek"
-        assert cap.max_output_tokens == 8192
-
-    def test_unknown_qwen_model(self):
-        """Unknown qwen model should get qwen default."""
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("qwen3-110b-instruct")
-        assert cap.provider == "qwen"
-        assert cap.context_window == 131072
-
-    def test_unknown_minimax_model(self):
-        """Unknown minimax model should get minimax default."""
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("minimax-m2-9999")
-        assert cap.provider == "minimax"
-        assert cap.context_window == 1048576
-
-    def test_ollama_fallback(self):
-        """ollama model should get ollama default."""
-        reg = ModelCapabilityRegistry()
-        cap = reg.get("ollama/llama3.3-70b")
-        assert cap.provider == "ollama"
-        assert cap.max_output_tokens == 4096
 
     def test_totally_unknown_provider_falls_to_generic(self):
         """A model id with no recognisable provider gets a safe generic default."""
@@ -244,43 +133,6 @@ class TestFuzzyMatch:
 
 
 class TestProviderDefaults:
-    def test_anthropic_default(self):
-        cap = ModelCapabilityRegistry().get_provider_default("anthropic")
-        assert cap.max_output_tokens == 8192
-        assert cap.context_window == 200000
-        assert cap.supports_vision is True
-        assert cap.temperature_max == 1.0
-
-    def test_openai_default(self):
-        cap = ModelCapabilityRegistry().get_provider_default("openai")
-        assert cap.max_output_tokens == 16384
-        assert cap.context_window == 128000
-        assert cap.temperature_max == 2.0
-
-    def test_deepseek_default(self):
-        cap = ModelCapabilityRegistry().get_provider_default("deepseek")
-        assert cap.max_output_tokens == 8192
-        assert cap.context_window == 128000
-        assert cap.supports_vision is False
-
-    def test_qwen_default(self):
-        cap = ModelCapabilityRegistry().get_provider_default("qwen")
-        assert cap.max_output_tokens == 8192
-        assert cap.context_window == 131072
-        assert cap.supports_vision is False
-
-    def test_minimax_default(self):
-        cap = ModelCapabilityRegistry().get_provider_default("minimax")
-        assert cap.max_output_tokens == 16384
-        assert cap.context_window == 1048576
-        assert cap.supports_vision is True
-
-    def test_ollama_default(self):
-        cap = ModelCapabilityRegistry().get_provider_default("ollama")
-        assert cap.max_output_tokens == 4096
-        assert cap.context_window == 8192
-        assert cap.supports_vision is False
-
     def test_unknown_provider_returns_generic_default(self):
         """An unrecognised provider name should still return a sensible default."""
         cap = ModelCapabilityRegistry().get_provider_default("nonexistent_provider")

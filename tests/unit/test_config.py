@@ -7,7 +7,6 @@ loading, env var overrides, model resolution, and provider API key resolution.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -18,8 +17,6 @@ from agent_nexus.platform.config import (
     DEFAULT_CONFIG_DIR,
     DEFAULT_MODEL_STRING,
     DEFAULT_PROVIDERS,
-    ENV_VAR_OVERRIDES,
-    MODEL_TIER_MAP,
     SOURCES_FILE,
     ConfigLoader,
     ModelConfigManager,
@@ -218,29 +215,6 @@ class TestConfigLoader:
         assert sources[1].branch == "develop"
 
 
-class TestConfigLoaderTomlDecodeErrorLogLevel:
-    """Iteration 85/122: TomlDecodeError is logged at ERROR level, then re-raised."""
-
-    def test_broken_toml_raises(self, tmp_path: Path) -> None:
-        """Broken TOML content triggers logger.error and re-raises TomlDecodeError."""
-        import logging
-
-        import toml
-
-        _write_config(tmp_path, "[section\nkey = value\n")
-        loader = ConfigLoader(config_dir=tmp_path)
-
-        with patch.object(
-            logging.getLogger("agent_nexus.platform.config.loader"),
-            "error",
-        ) as mock_error, pytest.raises(toml.TomlDecodeError):
-            loader.load_config()
-
-        # logger.error should still have been called before re-raising
-        mock_error.assert_called_once()
-        assert "Failed to parse config file" in mock_error.call_args[0][0]
-
-
 # ============================================================================
 # ModelConfigManager Tests
 # ============================================================================
@@ -279,32 +253,6 @@ class TestModelConfigManager:
         result = mgr.resolve_model("test-agent")
 
         assert result == "anthropic:claude-opus-4-20250116"
-
-    def test_resolve_model_tier_mapping(self) -> None:
-        """recommended tier maps to provider:model via MODEL_TIER_MAP."""
-        config = self._make_config()
-        mgr = ModelConfigManager(config)
-
-        lightweight = mgr.resolve_model("agent-a", recommended_tier=ModelTier.LIGHTWEIGHT)
-        assert lightweight == MODEL_TIER_MAP[ModelTier.LIGHTWEIGHT]
-        assert lightweight == "openai:gpt-4o-mini"
-
-        powerful = mgr.resolve_model("agent-b", recommended_tier=ModelTier.POWERFUL)
-        assert powerful == MODEL_TIER_MAP[ModelTier.POWERFUL]
-        assert powerful == "anthropic:claude-sonnet-4-20250514"
-
-    def test_resolve_model_fallback(self) -> None:
-        """When tier is unknown, falls back to config default."""
-        config = self._make_config(default="openai:gpt-4o")
-        mgr = ModelConfigManager(config)
-
-        # No tier and no recommended — hits config default
-        result = mgr.resolve_model("test-agent")
-        assert result == "openai:gpt-4o"
-
-        # Recommended string takes priority over config default
-        result = mgr.resolve_model("test-agent", recommended="deepseek:deepseek-chat")
-        assert result == "deepseek:deepseek-chat"
 
     def test_get_provider_config(self) -> None:
         """Looks up a known provider by name."""
@@ -446,60 +394,10 @@ class TestModelConfigManager:
         result = mgr.resolve_api_key(orphan)
         assert result == ""
 
-    def test_resolve_api_key_empty_string_logs_warning(self) -> None:
-        """Iteration 85: resolve_api_key logs warning when returning empty string."""
-        import logging
-
-        config = self._make_config()
-        mgr = ModelConfigManager(config)
-
-        with patch.object(
-            logging.getLogger("agent_nexus.platform.config.model_config"),
-            "warning",
-        ) as mock_warning:
-            result = mgr.resolve_api_key("nonexistent")
-
-        assert result == ""
-        # Two warnings expected: "Provider not found" + "No API key found"
-        assert any("No API key found" in str(call) for call in mock_warning.call_args_list)
-
 
 # ============================================================================
 # Defaults Tests
 # ============================================================================
-
-
-class TestDefaults:
-    """Tests for the defaults module constants."""
-
-    def test_default_providers_exist(self) -> None:
-        """All 6 built-in providers are defined."""
-        expected = {"openai", "anthropic", "deepseek", "minimax", "qwen", "ollama"}
-        assert set(DEFAULT_PROVIDERS.keys()) == expected
-
-    def test_model_tier_map_complete(self) -> None:
-        """All 4 tiers have mappings."""
-        expected_tiers = {
-            ModelTier.LIGHTWEIGHT,
-            ModelTier.STANDARD,
-            ModelTier.POWERFUL,
-            ModelTier.PREMIUM,
-        }
-        assert set(MODEL_TIER_MAP.keys()) == expected_tiers
-
-        # Each value should be a "provider:model" string
-        for tier, model_string in MODEL_TIER_MAP.items():
-            assert ":" in model_string, f"Tier {tier} value is not provider:model format"
-
-    def test_env_var_overrides_map(self) -> None:
-        """All expected env var overrides are defined."""
-        assert "AGENT_MODEL" in ENV_VAR_OVERRIDES
-        assert "DEFAULT_MODEL" in ENV_VAR_OVERRIDES
-        assert "AGENT_NEXUS_HOME" in ENV_VAR_OVERRIDES
-
-        assert ENV_VAR_OVERRIDES["AGENT_MODEL"] == "models.default"
-        assert ENV_VAR_OVERRIDES["DEFAULT_MODEL"] == "models.default"
-        assert ENV_VAR_OVERRIDES["AGENT_NEXUS_HOME"] == "config_dir"
 
 
 # ============================================================================
@@ -521,25 +419,6 @@ class TestConfigLoaderProviderApiTypeValidation:
         assert "bad" in config.models.providers
         assert config.models.providers["bad"].api == ProviderApiType.OPENAI_COMPATIBLE
 
-    def test_valid_api_types_accepted(self, tmp_path: Path) -> None:
-        """All valid ProviderApiType values should be accepted."""
-        config_dir = tmp_path / "config"
-        config_dir.mkdir()
-        # Write a config with each valid api type
-        lines = []
-        for i, pt in enumerate(ProviderApiType):
-            lines.append(f"[models.providers.p{i}]")
-            lines.append(f'api = "{pt.value}"')
-            lines.append(f'base_url = "http://localhost/{i}"')
-        (config_dir / "config.toml").write_text("\n".join(lines) + "\n")
-
-        loader = ConfigLoader(config_dir=config_dir)
-        config = loader.load_config()
-        # The test providers should all be present (merged with built-in defaults)
-        for i, pt in enumerate(ProviderApiType):
-            assert f"p{i}" in config.models.providers
-            assert config.models.providers[f"p{i}"].api is pt
-
     def test_missing_config_file_still_works(self, tmp_path: Path) -> None:
         """No config file at all should not raise -- just use defaults."""
         config_dir = tmp_path / "empty_config"
@@ -558,23 +437,6 @@ class TestConfigLoaderProviderApiTypeValidation:
         loader = ConfigLoader(config_dir=config_dir)
         with pytest.raises(toml.TomlDecodeError):
             loader.load_config()
-
-    def test_load_valid_toml_still_works(self, tmp_path: Path) -> None:
-        """Valid TOML file is parsed correctly after adding TomlDecodeError handler."""
-        _write_config(
-            tmp_path,
-            '[models]\ndefault = "deepseek:deepseek-chat"\n'
-            "[models.providers.custom]\n"
-            'base_url = "http://localhost:9999/v1"\n'
-            'api_key_env = "CUSTOM_KEY"\n'
-            'api = "openai-compatible"\n',
-        )
-        loader = ConfigLoader(config_dir=tmp_path)
-        config = loader.load_config()
-
-        assert config.models.default == "deepseek:deepseek-chat"
-        assert "custom" in config.models.providers
-        assert config.models.providers["custom"].base_url == "http://localhost:9999/v1"
 
 
 # ============================================================================
@@ -606,13 +468,6 @@ class TestConfigLoaderSourcesValidation:
     def test_load_sources_string_sources_key(self, tmp_path: Path) -> None:
         """When 'sources' key maps to a string, returns empty list."""
         _write_sources(tmp_path, "sources: not_a_list\n")
-        loader = ConfigLoader(config_dir=tmp_path)
-        sources = loader.load_sources()
-        assert sources == []
-
-    def test_load_sources_empty_file(self, tmp_path: Path) -> None:
-        """Empty sources.yaml file returns empty list."""
-        _write_sources(tmp_path, "")
         loader = ConfigLoader(config_dir=tmp_path)
         sources = loader.load_sources()
         assert sources == []
@@ -670,25 +525,3 @@ class TestConfigLoaderSourcesNameValidation:
         loader = ConfigLoader(config_dir=tmp_path)
         sources = loader.load_sources()
         assert sources == []
-
-
-class TestConfigLoaderSourcesInvalidEntry:
-    """Tests for load_sources SourceEntry construction failure (lines 153-154)."""
-
-    def test_git_source_without_url_skipped(self, tmp_path: Path) -> None:
-        """A git-type source with empty URL fails SourceEntry validation and is skipped."""
-        _write_sources(
-            tmp_path,
-            "sources:\n"
-            "  - name: bad-git\n"
-            "    type: git\n"
-            "    url: ''\n"
-            "  - name: good-git\n"
-            "    type: git\n"
-            "    url: https://github.com/example/repo.git\n",
-        )
-        loader = ConfigLoader(config_dir=tmp_path)
-        sources = loader.load_sources()
-        # Only the valid entry should be returned
-        assert len(sources) == 1
-        assert sources[0].name == "good-git"

@@ -28,6 +28,28 @@ _PROVIDER_ENV_FALLBACKS: dict[str, list[str]] = {
     "qwen": ["DASHSCOPE_API_KEY"],
 }
 
+# Well-known provider defaults when not explicitly configured.
+# Mirrors Rust's fallback behavior for unregistered providers.
+_WELL_KNOWN_PROVIDERS: dict[str, ProviderConfig] = {
+    "openai": ProviderConfig(
+        base_url="https://api.openai.com/v1",
+        api_key_env="OPENAI_API_KEY",
+    ),
+    "anthropic": ProviderConfig(
+        base_url="https://api.anthropic.com",
+        api_key_env="ANTHROPIC_API_KEY",
+        api=ProviderApiType.ANTHROPIC_MESSAGES,
+    ),
+    "deepseek": ProviderConfig(
+        base_url="https://api.deepseek.com/v1",
+        api_key_env="DEEPSEEK_API_KEY",
+    ),
+    "ollama": ProviderConfig(
+        base_url="http://localhost:11434",
+        api=ProviderApiType.OLLAMA,
+    ),
+}
+
 
 class ModelConfigManager:
     """Resolve model string for a given agent based on tier and config.
@@ -150,8 +172,9 @@ class ModelConfigManager:
     def get_provider_config(self, provider_name: str) -> ProviderConfig:
         """Get provider configuration by name.
 
-        Looks up the provider in the config's provider registry.  Returns
-        an empty default if the provider is not registered.
+        Looks up the provider in the config's provider registry.  Falls back
+        to well-known defaults for common providers (openai, anthropic, etc.)
+        when not explicitly configured.
 
         Parameters
         ----------
@@ -167,8 +190,16 @@ class ModelConfigManager:
         if provider:
             return provider
 
+        well_known = _WELL_KNOWN_PROVIDERS.get(provider_name.lower())
+        if well_known:
+            logger.debug(
+                "Provider '%s' not in config, using well-known defaults",
+                provider_name,
+            )
+            return well_known
+
         logger.warning(
-            "Provider '%s' not found in config, returning empty default",
+            "Provider '%s' not found in config and no well-known default",
             provider_name,
         )
         return ProviderConfig()
@@ -206,9 +237,8 @@ class ModelConfigManager:
                 return key
 
         logger.warning(
-            "No API key found for provider '%s' (checked env: %s)",
+            "No API key found for provider '%s'",
             provider_name,
-            [provider_cfg.api_key_env] + _PROVIDER_ENV_FALLBACKS.get(provider_name.lower(), []),
         )
         return ""
 

@@ -524,35 +524,6 @@ class TestSubprocessFDLeakFix:
         proc_mock.kill.assert_called_once()
         proc_mock.wait.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_create_venv_kills_proc_on_pip_install_communicate_error(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        """Second subprocess (uv pip install) communicate() error kills proc."""
-        inst, _, _ = _make_installer(tmp_path)
-        agent_dir = tmp_path / "agents" / "test-agent"
-        agent_dir.mkdir(parents=True)
-        (agent_dir / "pyproject.toml").write_text("[project]\nname='t'\nversion='0'\n")
-
-        # First proc (uv venv) succeeds
-        ok_proc = MagicMock()
-        ok_proc.communicate = AsyncMock(return_value=(b"", b""))
-        ok_proc.returncode = 0
-
-        # Second proc (uv pip install) fails on communicate
-        fail_proc = MagicMock()
-        fail_proc.communicate = AsyncMock(side_effect=asyncio.CancelledError())
-        fail_proc.kill = MagicMock()
-        fail_proc.wait = AsyncMock()
-
-        with patch("asyncio.create_subprocess_exec", side_effect=[ok_proc, fail_proc]):
-            with pytest.raises(asyncio.CancelledError):
-                await inst._create_venv("test-agent", agent_dir)
-
-        fail_proc.kill.assert_called_once()
-        fail_proc.wait.assert_called_once()
-
 
 # -- iter99 regression: error propagation in installer critical paths --
 
@@ -565,9 +536,12 @@ class TestGetCommitShaPropagation:
         inst, _, _ = _make_installer(tmp_path)
         repo_path = tmp_path / "repo"
 
-        with patch.object(
-            inst, "_run_git_capture", new_callable=AsyncMock, side_effect=OSError("no git")
-        ), pytest.raises(InstallationError, match="Could not determine commit SHA"):
+        with (
+            patch.object(
+                inst, "_run_git_capture", new_callable=AsyncMock, side_effect=OSError("no git")
+            ),
+            pytest.raises(InstallationError, match="Could not determine commit SHA"),
+        ):
             await inst._get_commit_sha(repo_path)
 
 

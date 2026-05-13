@@ -41,6 +41,7 @@ class MessagingConfig:
     request_timeout: float = 30.0
     allowed_channels: list[str] = field(default_factory=lambda: list(_DEFAULT_CHANNELS))
 
+
 # ---------------------------------------------------------------------------
 # DSL data types (immutable)
 # ---------------------------------------------------------------------------

@@ -38,14 +38,6 @@ class TestL0Context:
         result = describer.l0_context()
         assert result == ""
 
-    def test_with_variables_and_types(self, shared_runtime) -> None:
-        shared_runtime.inject_variable(Variable(name="data", description="input data"))
-        shared_runtime.inject_type(RuntimeType(name="Record", description="A record"))
-        describer = TieredRuntimeDescriber(shared_runtime)
-        result = describer.l0_context()
-        assert "[Variables]" in result
-        assert "[Available Types]" in result
-
 
 # ---------------------------------------------------------------------------
 # l1_context

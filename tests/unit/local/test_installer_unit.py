@@ -14,7 +14,6 @@ from agent_nexus.platform.local.installer import (
     _validate_git_url,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -103,7 +102,8 @@ class TestRunGitCapture:
         )
         with patch("asyncio.create_subprocess_exec", return_value=proc):
             result = await GitInstaller._run_git_capture(
-                ["rev-parse", "HEAD"], cwd=tmp_path,
+                ["rev-parse", "HEAD"],
+                cwd=tmp_path,
             )
 
         assert result == "abc123def456\n"
@@ -118,7 +118,8 @@ class TestRunGitCapture:
         with patch("asyncio.create_subprocess_exec", return_value=proc):
             with pytest.raises(InstallationError, match="rc=128"):
                 await GitInstaller._run_git_capture(
-                    ["rev-parse", "HEAD"], cwd=tmp_path,
+                    ["rev-parse", "HEAD"],
+                    cwd=tmp_path,
                 )
 
     @pytest.mark.asyncio

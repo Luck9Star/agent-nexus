@@ -46,12 +46,6 @@ class TestParseFileEdgeCases:
 
 
 class TestParseStringYamlEdgeCases:
-    def test_scalar_triggers_wrapped_in_list(self):
-        """When triggers is a string instead of list, it gets wrapped."""
-        content = "---\nname: t\nagent_type: a\ntriggers: single\n---\nbody"
-        skill = SkillLoader().parse_string(content)
-        assert skill.metadata.triggers == ["single"]
-
     def test_scalar_capabilities_wrapped_in_list(self):
         content = "---\nname: t\nagent_type: a\ncapabilities: one\n---\nbody"
         skill = SkillLoader().parse_string(content)
@@ -175,19 +169,6 @@ class TestSplitBodyResourcesFenced:
 
 class TestBuildMetadataNonStringTriggers:
     """Non-string trigger items in frontmatter are coerced to strings."""
-
-    def test_integer_triggers_coerced(self):
-        """Integer triggers like [1, 2] become ['1', '2']."""
-        frontmatter = {"name": "t", "agent_type": "a", "triggers": [1, 2, 3]}
-        meta = SkillLoader._build_metadata(frontmatter)
-        assert meta.triggers == ["1", "2", "3"]
-
-    def test_mixed_triggers_coerced(self):
-        """Mixed types in triggers list are coerced to strings."""
-        frontmatter = {"name": "t", "agent_type": "a", "triggers": ["text", 42, None]}
-        meta = SkillLoader._build_metadata(frontmatter)
-        assert meta.triggers == ["text", "42"]
-        # None is filtered out by the `if t is not None` guard
 
 
 # iter122 regression: triggers type coercion

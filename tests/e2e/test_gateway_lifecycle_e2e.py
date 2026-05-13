@@ -31,7 +31,6 @@ from agent_nexus.platform.orchestration.process_manager import (
     ProcessManager,
 )
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -230,9 +229,7 @@ class TestDeferredRegistryLifecycle:
         for name in full_names:
             assert registry.get_tool_adapter(name) is not None
 
-    async def test_activate_then_remove_cleans_up(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    async def test_activate_then_remove_cleans_up(self, registry: DeferredAgentRegistry) -> None:
         """Remove after activation cleans adapters and reverse index."""
         manifest = _make_manifest("temporary-agent", "Temporary")
         tool = _make_tool_schema("temp-tool", "Temporary tool")
@@ -363,9 +360,7 @@ class TestDeferredRegistryLifecycle:
         assert schemas[0]["name"] == "no-cmd-agent__chat"
         assert "message" in schemas[0]["inputSchema"]["properties"]
 
-    async def test_activate_nonexistent_agent_raises(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    async def test_activate_nonexistent_agent_raises(self, registry: DeferredAgentRegistry) -> None:
         """Activating an unregistered agent raises KeyError."""
         with pytest.raises(KeyError, match="not registered"):
             await registry.activate_agent("ghost")
@@ -910,15 +905,11 @@ class TestFullGatewayChain:
 
         # Activate deferred agents
         with patch.object(registry._pm, "start_agent", new=AsyncMock(return_value=mock_h1)):
-            with patch.object(
-                registry, "_fetch_agent_tools", new=AsyncMock(return_value=d1_tools)
-            ):
+            with patch.object(registry, "_fetch_agent_tools", new=AsyncMock(return_value=d1_tools)):
                 await registry.activate_agent("deferred-svc-1")
 
         with patch.object(registry._pm, "start_agent", new=AsyncMock(return_value=mock_h2)):
-            with patch.object(
-                registry, "_fetch_agent_tools", new=AsyncMock(return_value=d2_tools)
-            ):
+            with patch.object(registry, "_fetch_agent_tools", new=AsyncMock(return_value=d2_tools)):
                 await registry.activate_agent("deferred-svc-2")
 
         # All tools available

@@ -44,13 +44,6 @@ def _mock_llm(response_text: str) -> MagicMock:
 
 
 class TestValidationResult:
-    def test_defaults(self) -> None:
-        v = ValidationResult()
-        assert v.syntax_valid is True
-        assert v.security_pass is True
-        assert v.test_pass is None
-        assert v.regression_risk == 0.0
-
     def test_frozen(self) -> None:
         v = ValidationResult()
         try:

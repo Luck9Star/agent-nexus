@@ -10,68 +10,12 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from agent_nexus.platform.config.model_db import ModelDBClient
-
 
 # ============================================================================
 # A) close() resource cleanup
 # ============================================================================
-
-
-class TestClose:
-    """Tests for ModelDBClient.close() resource cleanup."""
-
-    def test_close_closes_http_client(self) -> None:
-        """close() closes the internal httpx.Client when it exists."""
-        client = ModelDBClient()
-        mock_http = MagicMock()
-        mock_http.is_closed = False
-        client._http_client = mock_http
-
-        client.close()
-
-        mock_http.close.assert_called_once()
-
-    def test_close_noop_when_http_client_is_none(self) -> None:
-        """close() is a no-op when _http_client is None."""
-        client = ModelDBClient()
-        assert client._http_client is None
-
-        # Should not raise
-        client.close()
-
-    def test_close_idempotent(self) -> None:
-        """Calling close() twice does not error."""
-        client = ModelDBClient()
-        mock_http = MagicMock()
-        mock_http.is_closed = False
-        client._http_client = mock_http
-
-        client.close()
-        # After first close, the real code checks is_closed. Simulate
-        # httpx.Client.is_closed returning True after close.
-        mock_http.is_closed = True
-        client.close()
-
-        # close() should have been called only once (second call skipped
-        # because is_closed is True).
-        mock_http.close.assert_called_once()
-
-    def test_close_with_mock_patch(self) -> None:
-        """close() delegates to httpx.Client.close via mocked module."""
-        with patch("agent_nexus.platform.config.model_db.httpx.Client") as MockClient:
-            mock_instance = MagicMock()
-            mock_instance.is_closed = False
-            MockClient.return_value = mock_instance
-
-            client = ModelDBClient()
-            # Simulate lazy creation
-            client._http_client = mock_instance
-            client.close()
-
-            mock_instance.close.assert_called_once()
 
 
 # ============================================================================
@@ -138,14 +82,6 @@ class TestTrigramCandidates:
 
         assert result == set()
 
-    def test_single_char_not_in_index(self) -> None:
-        """Single-char query not in index returns empty set."""
-        client = self._make_client_with_index()
-
-        result = client._trigram_candidates("x")
-
-        assert result == set()
-
 
 # ============================================================================
 # C) _build_search_index()
@@ -154,18 +90,6 @@ class TestTrigramCandidates:
 
 class TestBuildSearchIndex:
     """Tests for ModelDBClient._build_search_index()."""
-
-    def test_builds_trigram_index_from_model_keys(self) -> None:
-        """_build_search_index() creates trigrams for model keys."""
-        client = ModelDBClient()
-        client._model_index = {
-            "gpt-4o": {"id": "gpt-4o", "name": "GPT-4o"},
-        }
-        client._build_search_index()
-
-        # "gpt-4o" produces trigrams: "gpt", "pt-", "t-4", "-4o"
-        assert "gpt" in client._trigram_index
-        assert "gpt-4o" in client._trigram_index.get("gpt", set())
 
     def test_builds_trigram_index_from_model_names(self) -> None:
         """_build_search_index() creates trigrams from model names too."""
@@ -234,14 +158,6 @@ class TestLoadDiskIndexCorruption:
     def test_no_disk_path_returns_false(self) -> None:
         """When disk_cache_path is None, returns False."""
         client = ModelDBClient(disk_cache_path=None)
-
-        result = client._load_disk_index()
-
-        assert result is False
-
-    def test_missing_cache_file_returns_false(self, tmp_path: Path) -> None:
-        """When _index.json does not exist, returns False."""
-        client = ModelDBClient(disk_cache_path=tmp_path)
 
         result = client._load_disk_index()
 

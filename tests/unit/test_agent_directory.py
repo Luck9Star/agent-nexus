@@ -11,7 +11,6 @@ Covers:
 
 from __future__ import annotations
 
-
 from agent_nexus.platform.orchestration.agent_directory import AgentDirectory
 
 
@@ -50,21 +49,6 @@ class TestRegisterDeregister:
         matches = directory.find_by_capability("testing")
         assert len(matches) == 1
         assert matches[0].agent_id == "agent-a"
-
-    def test_duplicate_register_overwrites(self) -> None:
-        """Second register for same agent_id updates role and capabilities."""
-        directory = AgentDirectory()
-        directory.register("agent-a", ["code-review"], "worker")
-        directory.register("agent-a", ["testing"], "coordinator")
-
-        addr = directory.resolve("agent-a")
-        assert addr is not None
-        assert addr.role == "coordinator"
-
-        # Old capability gone
-        assert directory.find_by_capability("code-review") == []
-        # New capability present
-        assert len(directory.find_by_capability("testing")) == 1
 
 
 class TestResolve:

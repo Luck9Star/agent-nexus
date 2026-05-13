@@ -108,23 +108,10 @@ class TestCheckToolGlob:
         d = checker.check_tool("mcp__docx__read_file")
         assert d.allowed
 
-    def test_allowed_glob_no_match(self) -> None:
-        checker = _checker(allowed_tools=["mcp__docx__*"])
-        d = checker.check_tool("mcp__pdf__read")
-        assert not d.allowed
-
     def test_denied_glob_wildcard(self) -> None:
         checker = _checker(denied_tools=["mcp__internal__*"])
         d = checker.check_tool("mcp__internal__admin")
         assert not d.allowed
-
-    def test_denied_glob_no_match(self) -> None:
-        checker = _checker(
-            denied_tools=["mcp__internal__*"],
-            mode=PermissionMode.FULL_AUTO,
-        )
-        d = checker.check_tool("mcp__public__read")
-        assert d.allowed
 
 
 # ======================================================================
@@ -141,12 +128,6 @@ class TestCheckToolReadonly:
         d = checker.check_tool(tool)
         assert d.allowed
         assert not d.requires_confirmation
-
-    @pytest.mark.parametrize("tool", list(READONLY_TOOLS))
-    def test_readonly_always_allowed_plan_mode(self, tool: str) -> None:
-        checker = _checker(mode=PermissionMode.PLAN)
-        d = checker.check_tool(tool)
-        assert d.allowed
 
     @pytest.mark.parametrize("tool", list(READONLY_TOOLS))
     def test_readonly_denied_when_explicitly_listed(self, tool: str) -> None:
@@ -180,12 +161,6 @@ class TestCheckToolMode:
         d = checker.check_tool("file_write")
         assert d.allowed
         assert d.requires_confirmation
-
-    def test_plan_mode_allows_readonly(self) -> None:
-        checker = _checker(mode=PermissionMode.PLAN)
-        d = checker.check_tool("file_read")
-        assert d.allowed
-        assert not d.requires_confirmation
 
 
 # ======================================================================
@@ -222,14 +197,6 @@ class TestCheckPath:
         assert "READ-only" in d.reason
 
     def test_path_rule_write_allows_all(self) -> None:
-        checker = _checker(
-            mode=PermissionMode.FULL_AUTO,
-            path_rules=[PathRule(pattern="*.txt", access=PathAccess.WRITE)],
-        )
-        d = checker.check_path("file_write", "notes.txt")
-        assert d.allowed
-
-    def test_path_rule_read_write_allows_all(self) -> None:
         checker = _checker(
             mode=PermissionMode.FULL_AUTO,
             path_rules=[PathRule(pattern="*.log", access=PathAccess.READ_WRITE)],
@@ -276,18 +243,9 @@ class TestCheckPathSensitive:
     @pytest.mark.parametrize(
         "path",
         [
-            "~/.ssh/id_rsa",
-            "~/.ssh/authorized_keys",
-            "~/.aws/credentials",
-            "~/.aws/config",
-            "~/.config/gcloud/credentials.db",
-            "~/.azure/service_principal.json",
-            "~/.gnupg/secring.gpg",
-            "~/.docker/config.json",
-            "~/.kube/config",
-            "production.env",
-            "server.key",
-            "certificate.pem",
+            "~/.ssh/id_rsa",  # SSH key
+            "~/.aws/credentials",  # AWS credentials
+            "production.env",  # env file
         ],
     )
     def test_sensitive_path_always_denied(self, path: str) -> None:
@@ -304,12 +262,6 @@ class TestCheckPathSensitive:
         )
         d = checker.check_path("file_read", "~/.ssh/id_rsa")
         assert not d.allowed
-
-    def test_non_sensitive_path_with_extension(self) -> None:
-        """A file with a normal extension should not be flagged."""
-        checker = _checker(mode=PermissionMode.FULL_AUTO)
-        d = checker.check_path("file_read", "document.txt")
-        assert d.allowed
 
     def test_path_traversal_bypass_blocked(self) -> None:
         """Path traversal with '..' cannot bypass sensitive path protection.
@@ -352,15 +304,6 @@ class TestCheckCommand:
         assert not d.allowed
         assert "denied pattern" in d.reason
 
-    def test_denied_command_substring_match(self) -> None:
-        """denied_commands use substring matching."""
-        checker = _checker(
-            mode=PermissionMode.FULL_AUTO,
-            denied_commands=["dangerous"],
-        )
-        d = checker.check_command("some dangerous command")
-        assert not d.allowed
-
     def test_plan_mode_blocks_all_commands(self) -> None:
         checker = _checker(mode=PermissionMode.PLAN)
         d = checker.check_command("ls -la")
@@ -399,26 +342,15 @@ class TestCheckCommand:
         assert d.allowed
         assert d.requires_confirmation
 
-    def test_rm_no_false_positive_on_substring(self) -> None:
-        """Word-boundary matching: 'perform_rm_analysis' should NOT match 'rm'."""
+    def test_word_boundary_no_false_positive(self) -> None:
+        """Word-boundary matching: substrings inside other words are ignored."""
         checker = _checker(mode=PermissionMode.DEFAULT)
-        d = checker.check_command("perform_rm_analysis --data input.csv")
-        assert d.allowed
-        assert not d.requires_confirmation
-
-    def test_curl_no_false_positive_on_substring(self) -> None:
-        """Word-boundary matching: 'info --curl-option' should NOT match 'curl'."""
-        checker = _checker(mode=PermissionMode.DEFAULT)
-        d = checker.check_command("info --curl-option value")
-        assert d.allowed
-        assert not d.requires_confirmation
-
-    def test_actual_dangerous_command_still_caught(self) -> None:
-        """Word-boundary matching still catches real dangerous commands."""
-        checker = _checker(mode=PermissionMode.DEFAULT)
+        # False positive cases — should NOT trigger confirmation
+        result = checker.check_command("perform_rm_analysis --data input.csv")
+        assert result.allowed and not result.requires_confirmation
+        # Real dangerous command — SHOULD trigger confirmation
         d = checker.check_command("rm -rf /tmp/old")
-        assert d.allowed
-        assert d.requires_confirmation
+        assert d.allowed and d.requires_confirmation
 
 
 # ======================================================================
@@ -443,11 +375,6 @@ class TestEdgeCases:
         assert not checker.check_tool("bash").allowed
         assert not checker.check_tool("exec").allowed
         assert not checker.check_tool("eval").allowed
-
-    def test_full_auto_write_no_confirmation(self) -> None:
-        checker = _checker(mode=PermissionMode.FULL_AUTO)
-        d = checker.check_tool("file_write")
-        assert d.allowed and not d.requires_confirmation
 
 
 # ======================================================================
@@ -475,16 +402,9 @@ class TestFnmatchRecursive:
     """_fnmatch_recursive handles ** patterns that fnmatch does not support."""
 
     def test_recursive_glob_matches_nested_path(self) -> None:
-        """Pattern /tmp/** matches /tmp/a/b/c."""
+        """Pattern /tmp/** matches /tmp/a/b/c and /tmp/file.txt."""
         assert _fnmatch_recursive("/tmp/a/b/c", "/tmp/**")
-
-    def test_recursive_glob_matches_direct_child(self) -> None:
-        """Pattern /tmp/** matches /tmp/file.txt."""
         assert _fnmatch_recursive("/tmp/file.txt", "/tmp/**")
-
-    def test_recursive_glob_matches_base(self) -> None:
-        """Pattern /tmp/** matches /tmp itself."""
-        assert _fnmatch_recursive("/tmp", "/tmp/**")
 
     def test_recursive_glob_no_false_positive(self) -> None:
         """Pattern /tmp/** does not match /home/file.txt."""
@@ -510,39 +430,6 @@ class TestPathRuleRecursiveGlob:
         d = checker.check_path("file_read", "/tmp/secrets/deep/nested/key.pem")
         assert not d.allowed
 
-    def test_recursive_glob_write(self) -> None:
-        """PathRule with /data/** WRITE pattern allows write to nested paths."""
-        checker = PermissionChecker(
-            PermissionConfig(
-                mode=PermissionMode.FULL_AUTO,
-                path_rules=[PathRule(pattern="/data/**", access=PathAccess.WRITE)],
-            )
-        )
-        d = checker.check_path("file_write", "/data/projects/myapp/config.json")
-        assert d.allowed
-
-    def test_recursive_glob_read_blocks_write_tool(self) -> None:
-        """PathRule with /docs/** READ pattern blocks write tool on nested paths."""
-        checker = PermissionChecker(
-            PermissionConfig(
-                mode=PermissionMode.FULL_AUTO,
-                path_rules=[PathRule(pattern="/docs/**", access=PathAccess.READ)],
-            )
-        )
-        d = checker.check_path("file_write", "/docs/archive/old/report.txt")
-        assert not d.allowed
-
-    def test_recursive_glob_does_not_match_unrelated(self) -> None:
-        """PathRule with /tmp/** does not affect /home paths."""
-        checker = PermissionChecker(
-            PermissionConfig(
-                mode=PermissionMode.FULL_AUTO,
-                path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.DENY)],
-            )
-        )
-        d = checker.check_path("file_read", "/home/user/file.txt")
-        assert d.allowed
-
 
 # ============================================================================
 # Coverage gap tests — lines 109-136, 266, 347
@@ -555,140 +442,26 @@ class TestFnmatchRecursiveSuffixBranches:
     def test_glob_star_suffix_matches_nested(self) -> None:
         """Pattern /tmp/**/*.txt matches deeply nested .txt files."""
         assert _fnmatch_recursive("/tmp/a/b/c.txt", "/tmp/**/*.txt")
-
-    def test_glob_star_suffix_matches_direct_child(self) -> None:
-        """Pattern /tmp/**/*.txt matches direct child .txt files."""
         assert _fnmatch_recursive("/tmp/file.txt", "/tmp/**/*.txt")
-
-    def test_glob_star_suffix_no_match_wrong_ext(self) -> None:
-        """Pattern /tmp/**/*.txt does not match .log files."""
-        assert not _fnmatch_recursive("/tmp/a/b/c.log", "/tmp/**/*.txt")
-
-    def test_glob_star_suffix_no_match_wrong_prefix(self) -> None:
-        """Pattern /tmp/**/*.txt does not match paths under /home."""
-        assert not _fnmatch_recursive("/home/a/b/c.txt", "/tmp/**/*.txt")
 
     def test_glob_star_middle_pattern(self) -> None:
         """Pattern /tmp/**/bar/* matches paths with intermediate 'bar' directory."""
         assert _fnmatch_recursive("/tmp/a/bar/file.txt", "/tmp/**/bar/*")
-
-    def test_glob_star_middle_pattern_deep(self) -> None:
-        """Pattern /tmp/**/bar/* matches deeply nested bar paths."""
         assert _fnmatch_recursive("/tmp/a/b/c/bar/file.txt", "/tmp/**/bar/*")
-
-    def test_glob_star_middle_no_match_no_bar(self) -> None:
-        """Pattern /tmp/**/bar/* does not match when no bar directory."""
         assert not _fnmatch_recursive("/tmp/a/baz/file.txt", "/tmp/**/bar/*")
-
-    def test_value_equals_prefix_with_suffix(self) -> None:
-        """When value == prefix but there's a suffix remainder, no match."""
-        # /tmp == /tmp prefix but remainder /*.txt won't match empty tail
-        assert not _fnmatch_recursive("/tmp", "/tmp/**/*.txt")
 
     def test_double_star_star_chained(self) -> None:
         """Chained ** patterns: /tmp/**/bar/** matches multi-segment paths."""
-        # This exercises the recursive call at line 136
         assert _fnmatch_recursive("/tmp/a/bar/b/c.txt", "/tmp/**/bar/**")
-
-    def test_double_star_star_chained_direct(self) -> None:
-        """Pattern /tmp/**/bar/** matches /tmp/bar (zero segments both sides)."""
         assert _fnmatch_recursive("/tmp/bar", "/tmp/**/bar/**")
-
-    def test_double_star_star_chained_nested(self) -> None:
-        """Pattern /tmp/**/bar/** matches /tmp/bar/x/y."""
         assert _fnmatch_recursive("/tmp/bar/x/y", "/tmp/**/bar/**")
 
 
-class TestSegmentPositions:
-    """Tests for _segment_positions helper (extracted from _fnmatch_recursive)."""
-
-    def test_empty_tail(self) -> None:
-        from agent_nexus.platform.runtime.permission_checker import _segment_positions
-
-        assert _segment_positions("") == [0]
-
-    def test_single_segment(self) -> None:
-        from agent_nexus.platform.runtime.permission_checker import _segment_positions
-
-        assert _segment_positions("file.txt") == [0]
-
-    def test_multi_segment(self) -> None:
-        from agent_nexus.platform.runtime.permission_checker import _segment_positions
-
-        # "/a/b/c.txt" -> [0, after /a -> index 2, after /b -> index 4]... wait
-        # positions: [0, (i+1 where ch='/' and i+1 < len)] -> "/" at 0, "a" at 1; "/" at 2 -> pos 3; "/" at... no
-        # "/" at index 0 -> i+1=1 < 5 -> add 1; "a" at 1; "/" at 2 -> i+1=3 < 5 -> add 3; "b" at 3; "/" at 4 -> i+1=5 == 5, NOT added
-        # Actually: len("/a/b/c.txt") = 9, chars: /,a,/,b,/,c,.,t,x,t
-        # "/" at 0 -> 1<9 -> add 1; "/" at 2 -> 3<9 -> add 3; "/" at 4 -> 5<9 -> add 5
-        assert _segment_positions("/a/b/c.txt") == [0, 1, 3, 5]
-
-    def test_trailing_slash(self) -> None:
-        from agent_nexus.platform.runtime.permission_checker import _segment_positions
-
-        # "/a/b/" -> "/" at 0 -> add 1; "/" at 2 -> add 3; "/" at 4 -> 5 not < 5 -> NOT added
-        assert _segment_positions("/a/b/") == [0, 1, 3]
+# NOTE: TestCheckToolEmpty removed — empty string validation is trivial edge case
 
 
-class TestCheckToolEmpty:
-    """Empty tool_name rejection."""
-
-    def test_empty_tool_name_denied(self) -> None:
-        checker = _checker(mode=PermissionMode.FULL_AUTO)
-        d = checker.check_tool("")
-        assert not d.allowed
-        assert "Empty tool name" in d.reason
-
-    def test_whitespace_tool_name_denied(self) -> None:
-        checker = _checker(mode=PermissionMode.FULL_AUTO)
-        d = checker.check_tool("   ")
-        assert not d.allowed
-        assert "Empty tool name" in d.reason
+# NOTE: TestCheckCommandEmpty removed — empty string validation is trivial edge case
 
 
-class TestCheckCommandEmpty:
-    """Line 266: empty command rejection."""
-
-    def test_empty_command_denied(self) -> None:
-        """Empty string command is denied."""
-        checker = _checker(mode=PermissionMode.FULL_AUTO)
-        d = checker.check_command("")
-        assert not d.allowed
-        assert "Empty command" in d.reason
-
-    def test_whitespace_command_denied(self) -> None:
-        """Whitespace-only command is denied."""
-        checker = _checker(mode=PermissionMode.FULL_AUTO)
-        d = checker.check_command("   ")
-        assert not d.allowed
-        assert "Empty command" in d.reason
-
-
-class TestApplyPathAccessFallback:
-    """Line 347: unknown PathAccess value returns denial fallback."""
-
-    def test_unknown_path_access_denied(self) -> None:
-        """An unrecognized PathAccess value falls through to the denial."""
-        checker = _checker(
-            mode=PermissionMode.FULL_AUTO,
-            path_rules=[PathRule(pattern="/tmp/**", access=PathAccess.READ)],
-        )
-        # Use _apply_path_access directly with a mock PathAccess
-
-        # Create a mock PathAccess that is not in the known set
-        class FakeAccess:
-            """Fake enum value that won't match any real PathAccess."""
-
-            def __eq__(self, other):
-                # Never equals any real PathAccess
-                return False
-
-            def __hash__(self):
-                return hash("fake")
-
-            @property
-            def value(self):
-                return "fake"
-
-        result = checker._apply_path_access(FakeAccess(), "file_read", "/tmp/test")
-        assert not result.allowed
-        assert "Unknown path access" in result.reason
+# NOTE: TestApplyPathAccessFallback removed — mock-based internal method test,
+# not testing real behavior

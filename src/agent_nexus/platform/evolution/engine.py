@@ -305,18 +305,14 @@ class EvolutionEngine:
             ValueError: If skill_patcher is not configured or skill not found.
         """
         if self._skill_patcher is None:
-            raise ValueError(
-                "SkillPatcher not configured. Provide skill_patcher to constructor."
-            )
+            raise ValueError("SkillPatcher not configured. Provide skill_patcher to constructor.")
 
         record = self._store.get_skill_record(skill_id)
         if record is None:
             raise ValueError(f"Skill not found: {skill_id}")
 
         if patch_type == "fix":
-            return self._skill_patcher.generate_fix(
-                record, diagnosis=str(diagnosis_or_insights)
-            )
+            return self._skill_patcher.generate_fix(record, diagnosis=str(diagnosis_or_insights))
         elif patch_type == "derived":
             insights = (
                 diagnosis_or_insights
@@ -338,7 +334,8 @@ class EvolutionEngine:
         if parent is None or evolved is None:
             raise ValueError("Both parent and evolved skills must exist in store")
         return self._experimenter.create_experiment(
-            parent, evolved,
+            parent,
+            evolved,
             min_samples=self._config.experiment_min_samples,
             confidence_level=self._config.experiment_confidence_level,
         )

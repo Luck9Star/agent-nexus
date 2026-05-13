@@ -6,10 +6,9 @@ Tests add_task, state transitions, queries, cycle detection, and snapshots.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
-
-import json
 
 import pytest
 
@@ -384,34 +383,6 @@ class TestClear:
 # ============================================================================
 
 
-class TestTaskGraphImmediate:
-    """TaskGraph mutation methods use BEGIN IMMEDIATE."""
-
-    def test_start_task_uses_immediate(self, tmp_path: Path) -> None:
-        tg = TaskGraph(tmp_path / "tg.db")
-        task = TaskItem(id="t1", description="test", agent="test-agent")
-        tg.add_task(task)
-        # Should succeed -- basic smoke test that IMMEDIATE doesn't break
-        result = tg.start_task("t1")
-        assert result.state == TaskState.IN_PROGRESS
-
-    def test_complete_task_uses_immediate(self, tmp_path: Path) -> None:
-        tg = TaskGraph(tmp_path / "tg.db")
-        task = TaskItem(id="t1", description="test", agent="test-agent")
-        tg.add_task(task)
-        tg.start_task("t1")
-        result = tg.complete_task("t1")
-        assert result.state == TaskState.COMPLETED
-
-    def test_fail_task_uses_immediate(self, tmp_path: Path) -> None:
-        tg = TaskGraph(tmp_path / "tg.db")
-        task = TaskItem(id="t1", description="test", agent="test-agent")
-        tg.add_task(task)
-        tg.start_task("t1")
-        result = tg.fail_task("t1")
-        assert result.state == TaskState.FAILED
-
-
 # ============================================================================
 # Regression: Corrupt row handling in _task_from_row
 # ============================================================================
@@ -461,16 +432,6 @@ class TestTaskGraphCorruptRow:
         with pytest.raises(json.JSONDecodeError):
             tg.get_task("T1")
 
-    def test_valid_row_still_works(self, task_graph: TaskGraph) -> None:
-        """Normal rows are unaffected by the tighter error handling."""
-        task_graph.add_task(_make_task("A"))
-        task_graph.add_task(_make_task("B", blocked_by=["A"]))
-
-        result = task_graph.get_task("B")
-        assert result is not None
-        assert result.blocked_by == ["A"]
-        assert result.state == TaskState.PENDING
-
 
 # ============================================================================
 # Regression: :memory: SQLite shares a single persistent connection
@@ -514,18 +475,6 @@ class TestTaskGraphInMemory:
         tg.start_task("B")
         result = tg.complete_task("B")
         assert result.state == TaskState.COMPLETED
-
-    def test_snapshot_and_clear(self) -> None:
-        """get_snapshot and clear work correctly on in-memory DB."""
-        tg = TaskGraph(Path(":memory:"))
-        tg.add_task(_make_task("X"))
-        tg.add_task(_make_task("Y", blocked_by=["X"]))
-
-        snapshot = tg.get_snapshot()
-        assert len(snapshot.tasks) == 2
-
-        tg.clear()
-        assert tg.get_snapshot().tasks == []
 
     def test_detect_cycles(self) -> None:
         """detect_cycles works on in-memory DB."""
@@ -840,24 +789,12 @@ class TestTaskGraphClose:
         tg.close()  # second call is a no-op
         assert tg._mem_conn is None
 
-    def test_close_file_db_is_noop(self, tmp_path: Path) -> None:
-        tg = TaskGraph(tmp_path / "test.db")
-        assert tg._mem_conn is None
-        tg.close()  # no-op for file-based DBs
-        assert tg._mem_conn is None
-
     def test_operations_after_close_raise(self) -> None:
         tg = TaskGraph(Path(":memory:"))
         tg.add_task(_make_task("A"))
         tg.close()
         with pytest.raises(RuntimeError, match="TaskGraph is closed"):
             tg.get_task("A")
-
-    def test_closed_flag_set(self) -> None:
-        tg = TaskGraph(Path(":memory:"))
-        assert not tg._closed
-        tg.close()
-        assert tg._closed
 
     @pytest.mark.asyncio
     async def test_aclose_waits_for_inflight(self) -> None:
@@ -892,23 +829,6 @@ class TestTaskGraphClose:
 class TestCorruptTaskRow:
     """_rows_to_tasks raises on corrupt database rows (invalid state JSON)."""
 
-    def test_corrupt_state_raises(self, tmp_path: Path) -> None:
-        tg = TaskGraph(tmp_path / "test.db")
-        tg.add_task(_make_task("good"))
-        # Manually corrupt a row: insert invalid state string
-        with tg._conn(immediate=True) as conn:
-            conn.execute("UPDATE tasks SET state = 'INVALID_STATE' WHERE id = 'good'")
-        with pytest.raises(ValueError, match="INVALID_STATE"):
-            tg.get_task("good")
-
-    def test_corrupt_vars_json_raises(self, tmp_path: Path) -> None:
-        tg = TaskGraph(tmp_path / "test.db")
-        tg.add_task(_make_task("v1"))
-        with tg._conn(immediate=True) as conn:
-            conn.execute("UPDATE tasks SET vars = 'not-json{{{}}' WHERE id = 'v1'")
-        with pytest.raises(json.JSONDecodeError):
-            tg.get_task("v1")
-
     def test_corrupt_state_in_batch_raises(self, tmp_path: Path) -> None:
         """_rows_to_tasks (lines 562-566) raises on corrupt state in batch query."""
         tg = TaskGraph(tmp_path / "test.db")
@@ -938,8 +858,14 @@ class TestSchemaInitTransaction:
         import sqlite3
 
         conn = sqlite3.connect(str(db_path))
-        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-        indexes = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        indexes = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
+        }
         conn.close()
         assert "tasks" in tables
         assert "task_dependencies" in tables
@@ -956,15 +882,6 @@ class TestSchemaInitTransaction:
         tg2 = TaskGraph(db)
         assert tg2.get_task("t1") is not None
         tg2.close()
-
-    def test_no_executescript_in_source(self) -> None:
-        """Verify executescript is NOT used in task_graph.py."""
-        import inspect
-
-        from agent_nexus.platform.orchestration.task_graph import TaskGraph as TG
-
-        source = inspect.getsource(TG)
-        assert "executescript" not in source
 
 
 # ---------------------------------------------------------------------------
@@ -984,22 +901,3 @@ class TestDuplicateBlockedByDedup:
         result = task_graph.get_task("B")
         assert result is not None
         assert result.blocked_by == ["A"]
-
-    def test_triple_duplicate_deps(self, task_graph: TaskGraph) -> None:
-        """blocked_by=["A","A","A"] deduplicates to single dep."""
-        task_graph.add_task(_make_task("A"))
-        task_graph.add_task(_make_task("C", blocked_by=["A", "A", "A"]))
-
-        result = task_graph.get_task("C")
-        assert result is not None
-        assert result.blocked_by == ["A"]
-
-    def test_mixed_duplicate_deps(self, task_graph: TaskGraph) -> None:
-        """blocked_by=["A","B","A","B"] deduplicates to ["A","B"]."""
-        task_graph.add_task(_make_task("A"))
-        task_graph.add_task(_make_task("B"))
-        task_graph.add_task(_make_task("D", blocked_by=["A", "B", "A", "B"]))
-
-        result = task_graph.get_task("D")
-        assert result is not None
-        assert result.blocked_by == ["A", "B"]

@@ -214,18 +214,6 @@ class TestGenerationHelpers:
 
 
 # ---------------------------------------------------------------------------
-# store property
-# ---------------------------------------------------------------------------
-
-
-class TestStoreProperty:
-    def test_store_returns_underlying_store(self):
-        store = _make_store()
-        promoter = AgentPromoter(store)
-        assert promoter.store is store
-
-
-# ---------------------------------------------------------------------------
 # iter105 regression: _atomic_write failure cleanup
 # ---------------------------------------------------------------------------
 

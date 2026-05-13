@@ -3,7 +3,7 @@
 > Agent Nexus Design Doc — 附录 A-D：OrchestrationDSL TOML Schema、Agent 类型对比表、模型分层配置、参考项目与本地路径
 
 > **Status**: ✅ Implemented
-> **Code**: `src/agent_nexus/models/` (12 model files, 1,577 lines), `src/agent_nexus/platform/config/` (defaults, loader, model_config)
+> **Code**: `src/agent_nexus/models/` (17 files), `src/agent_nexus/platform/config/` (defaults, loader, model_config)
 
 ## 附录
 
@@ -62,3 +62,60 @@
 | **OpenHarness** | MIT | Permission/Hook/Plugin 架构参考 | `/Users/yangyitian/Documents/dev/Agents/OpenHarness/` | `src/openharness/plugins/` Plugin 系统, `src/openharness/permissions/` 权限, `src/openharness/hooks/` Hook, `src/openharness/coordinator/agent_definitions.py` Agent 定义, `src/openharness/swarm/` 进程管理 |
 | **nanobot** | MIT | 轻量级 Agent + MCP 集成参考 | `/Users/yangyitian/Documents/dev/Agents/nanobot/` | `nanobot/agent/tools/mcp.py` MCP 客户端, `nanobot/agent/loop.py` Agent 循环, `nanobot/agent/skills.py` Skill 加载 |
 | **agent-nexus** | — | 本项目 | `/Users/yangyitian/Documents/dev/Agents/agent-nexus/` | — |
+
+### 附录 E：共享数据模型
+
+> **Code**: `src/agent_nexus/models/` (17 files)
+
+#### E.1 模型层次结构
+
+所有值对象模型继承自 `FrozenModel`（`_common.py`），它基于 Pydantic `BaseModel` 启用 `frozen=True`，提供不可变性和可哈希性。
+
+```
+FrozenModel (BaseModel, frozen=True)
+  ├── AgentDefinition, AgentManifest, AgentPackage
+  ├── ModelConfig, PlatformConfig, ProviderConfig
+  ├── ContextBudget, ContextBudgetLogEntry, TokenUsage
+  ├── CompositionTask, Composition
+  ├── HookDefinition, HookExecution, AggregatedHookResult
+  ├── IPCMessage, PlatformToAgent, AgentToPlatform
+  ├── A2AMessage, AgentAddress
+  ├── LockfileEntry, IndexEntry, SourceEntry
+  ├── EvolutionMetrics, SkillRecord
+  ├── TaskItem, TaskGraphSnapshot
+  ├── TeamStatus
+  ├── PermissionConfig, PathRule
+  ├── ExecutionResult, Variable, Function
+  └── ExternalServerConfig
+```
+
+#### E.2 核心模型分类
+
+| 分类 | 文件 | 关键类型 | 用途 |
+|------|------|---------|------|
+| **Agent** | `agent.py` | `AgentManifest`, `AgentDefinition`, `RunMode`, `AgentType` | Agent 元数据和运行配置 |
+| **IPC** | `ipc.py` | `IPCMessage`, `PlatformToAgent`, `AgentToPlatform`, `MessageDirection` | 子进程间通信协议（stdin/stdout JSON-lines） |
+| **A2A** | `ipc.py` | `A2AMessage`, `AgentAddress` | Agent-to-Agent 消息（Platform 作为 Broker 中继） |
+| **Hooks** | `hooks.py` | `HookDefinition`, `HookEvent`, `HookType`, `AggregatedHookResult` | 生命周期钩子定义与执行结果 |
+| **Context** | `context.py` | `ContextBudget`, `TokenUsage`, `ContextLevel`, `BudgetAlertLevel` | Token 预算管理与分层加载 |
+| **Config** | `config.py` | `PlatformConfig`, `ModelConfig`, `ProviderConfig`, `RuntimeConfig` | 平台配置模型 |
+| **Distribution** | `distribution.py` | `LockfileEntry`, `SourceEntry`, `IndexEntry`, `InstallationStatus` | Git 分发与安装状态 |
+| **Evolution** | `evolution.py` | `EvolutionMetrics`, `SkillRecord`, `EvolutionType`, `SkillLineage` | 自进化引擎数据模型 |
+| **Composition** | `composition.py` | `Composition`, `CompositionTask`, `CompositionError` | Composite Agent 编排图 |
+| **Permission** | `permission.py` | `PermissionMode`, `PermissionConfig`, `PathRule`, `PermissionDecision` | 三模式权限系统 |
+| **Runtime** | `runtime.py` | `ExecutionResult`, `Variable`, `Function`, `SecurityViolation` | Python Runtime 执行模型 |
+| **Task** | `task.py` | `TaskItem`, `TaskState`, `TaskGraphSnapshot` | TaskGraph 任务模型 |
+| **Team** | `team.py` | `TeamState`, `TeamStatus`, `TeamEvent` | 团队生命周期管理 |
+| **External MCP** | `external_mcp.py` | `ExternalServerConfig`, `TransportType`, `ExternalServerAuth` | 外部 MCP Server 桥接配置 |
+| **Capability** | `capability.py` | `ModelCapability`, `ModelCapabilityRegistry` | 模型能力查询（17 模型 × 5 Provider: Anthropic 5 + OpenAI 5 + DeepSeek 2 + Qwen 3 + MiniMax 2） |
+| **Errors** | `errors.py` | `AgentNexusError` | 统一异常基类 |
+
+#### E.3 IPC 消息协议
+
+IPC 使用 JSON-lines 格式通过 stdin/stdout 通信，消息类型通过枚举约束：
+
+**Platform → Agent**（`PlatformToAgentType`）：`chat`, `task`, `data_reference`, `receive_message`, `receive_request`, `receive_broadcast`, `receive_reply`
+
+**Agent → Platform**（`AgentToPlatformType`）：`result`, `progress`, `error`, `send_message`, `send_request`, `broadcast`, `reply`
+
+所有消息封装在 `IPCMessage` 信封中，通过 `MessageDirection` 字段区分方向。`A2AMessage` 用于 Agent 间通信，由 Platform 作为 Broker 中继。

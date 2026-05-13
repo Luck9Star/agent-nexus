@@ -28,7 +28,6 @@ from agent_nexus.platform.evolution.promotion import AgentPromoter, PromotionCan
 from agent_nexus.platform.evolution.store import EvolutionStore
 from agent_nexus.platform.evolution.thresholds import EvolutionSuggestion
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -95,8 +94,10 @@ class TestMetricsAggregationLifecycle:
 
     def test_metrics_after_skill_creation(self, store: EvolutionStore) -> None:
         """Create skills, verify metrics aggregate correctly."""
-        s1 = _make_skill("s1", selections=10, applied=8, completions=6, fallbacks=1)
-        s2 = _make_skill("s2", selections=20, applied=15, completions=12, fallbacks=2)
+        s1 = _make_skill("s1", name="skill-a", selections=10, applied=8, completions=6, fallbacks=1)
+        s2 = _make_skill(
+            "s2", name="skill-b", selections=20, applied=15, completions=12, fallbacks=2
+        )
         store.save_skill_record(s1)
         store.save_skill_record(s2)
 
@@ -127,8 +128,10 @@ class TestMetricsAggregationLifecycle:
 
     def test_metrics_after_deactivation(self, store: EvolutionStore) -> None:
         """Deactivate a skill and verify it's excluded from metrics."""
-        s1 = _make_skill("s1", selections=10, applied=8, completions=6, fallbacks=1)
-        s2 = _make_skill("s2", selections=20, applied=15, completions=12, fallbacks=2)
+        s1 = _make_skill("s1", name="skill-a", selections=10, applied=8, completions=6, fallbacks=1)
+        s2 = _make_skill(
+            "s2", name="skill-b", selections=20, applied=15, completions=12, fallbacks=2
+        )
         store.save_skill_record(s1)
         store.save_skill_record(s2)
 
@@ -204,9 +207,7 @@ class TestHealthAnalysisLifecycle:
         fix_suggestions = [s for s in suggestions if s.evolution_type == EvolutionType.FIX]
         assert len(fix_suggestions) >= 1
 
-    def test_moderate_effective_triggers_derived(
-        self, health_checker: HealthChecker
-    ) -> None:
+    def test_moderate_effective_triggers_derived(self, health_checker: HealthChecker) -> None:
         """Skill with effective_rate < 0.55 and applied_rate > 0.25 triggers DERIVED."""
         # applied_rate = 40/100 = 0.4 > 0.25
         # completion_rate = 30/40 = 0.75 (not < 0.35, so no FIX rule 2)
@@ -225,9 +226,7 @@ class TestHealthAnalysisLifecycle:
         derived = [s for s in suggestions if s.evolution_type == EvolutionType.DERIVED]
         assert len(derived) >= 1
 
-    def test_moderate_effective_triggers_derived_valid(
-        self, health_checker: HealthChecker
-    ) -> None:
+    def test_moderate_effective_triggers_derived_valid(self, health_checker: HealthChecker) -> None:
         """Skill with effective_rate < 0.55 and applied_rate > 0.25 triggers DERIVED."""
         # applied_rate = 40/100 = 0.4
         # completion_rate = 30/40 = 0.75 (not < 0.35, so no FIX rule 2)
@@ -258,13 +257,17 @@ class TestHealthAnalysisLifecycle:
         """get_health_summary returns correct structure with unhealthy skills."""
         # Healthy skill
         store.save_skill_record(
-            _make_skill("good", name="good-skill", selections=100, applied=80, completions=70, fallbacks=5)
+            _make_skill(
+                "good", name="good-skill", selections=100, applied=80, completions=70, fallbacks=5
+            )
         )
         # Unhealthy skill (high fallback)
         # fallback_rate = 45/100 = 0.45 > 0.4
         # applied=80, completions=35, fallbacks=45: 35+45=80 OK
         store.save_skill_record(
-            _make_skill("bad", name="bad-skill", selections=100, applied=80, completions=35, fallbacks=45)
+            _make_skill(
+                "bad", name="bad-skill", selections=100, applied=80, completions=35, fallbacks=45
+            )
         )
 
         summary = health_checker.get_health_summary()
@@ -291,16 +294,20 @@ class TestHealthAnalysisLifecycle:
         """get_unhealthy only returns skills with suggestions."""
         # Healthy
         store.save_skill_record(
-            _make_skill("good", selections=100, applied=80, completions=70, fallbacks=5)
+            _make_skill(
+                "good", name="good-skill", selections=100, applied=80, completions=70, fallbacks=5
+            )
         )
         # Unhealthy (high fallback)
         # fallback_rate = 45/100 = 0.45 > 0.4
         # applied=80, completions=10, fallbacks=45: 10+45=55 <= 80 OK
         store.save_skill_record(
-            _make_skill("sick", selections=100, applied=80, completions=10, fallbacks=45)
+            _make_skill(
+                "sick", name="sick-skill", selections=100, applied=80, completions=10, fallbacks=45
+            )
         )
         # Zero selections -> filtered out by get_unhealthy
-        store.save_skill_record(_make_skill("unused", selections=0))
+        store.save_skill_record(_make_skill("unused", name="unused-skill", selections=0))
 
         unhealthy = health_checker.get_unhealthy()
         assert "sick" in unhealthy
@@ -481,8 +488,8 @@ class TestSkillRecordBatchLifecycle:
 
     def test_batch_load_with_missing_ids(self, store: EvolutionStore) -> None:
         """Batch load gracefully handles missing IDs."""
-        store.save_skill_record(_make_skill("exists-1"))
-        store.save_skill_record(_make_skill("exists-2"))
+        store.save_skill_record(_make_skill("exists-1", name="skill-e1"))
+        store.save_skill_record(_make_skill("exists-2", name="skill-e2"))
 
         batch = store.get_skill_records_batch(["exists-1", "missing-1", "exists-2"])
         assert len(batch) == 2
@@ -508,9 +515,7 @@ class TestSkillRecordBatchLifecycle:
         assert result.new_record is not None
         assert result.new_record.id in children
 
-    def test_multiple_children_tracking(
-        self, store: EvolutionStore, evolver: SkillEvolver
-    ) -> None:
+    def test_multiple_children_tracking(self, store: EvolutionStore, evolver: SkillEvolver) -> None:
         """Evolve same parent twice, get_children returns both."""
         parent = _make_skill("multi-parent", name="base", selections=5)
         store.save_skill_record(parent)
@@ -524,6 +529,10 @@ class TestSkillRecordBatchLifecycle:
             )
         )
         assert r1.success
+        assert r1.new_record is not None
+
+        # Deactivate first child so the second child can use the same name
+        store.deactivate_skill(r1.new_record.id)
 
         # Second evolution (parent still active for DERIVED)
         r2 = evolver.evolve(
@@ -537,7 +546,6 @@ class TestSkillRecordBatchLifecycle:
 
         children = store.get_children("multi-parent")
         assert len(children) == 2
-        assert r1.new_record is not None
         assert r2.new_record is not None
         assert r1.new_record.id in children
         assert r2.new_record.id in children
@@ -551,7 +559,9 @@ class TestSkillRecordBatchLifecycle:
 class TestEvolverToolDegradation:
     """Tool degradation anti-loop and evolution pipeline."""
 
-    def test_tool_degradation_creates_fix(self, store: EvolutionStore, evolver: SkillEvolver) -> None:
+    def test_tool_degradation_creates_fix(
+        self, store: EvolutionStore, evolver: SkillEvolver
+    ) -> None:
         """process_tool_degradation creates FIX evolution for affected skill."""
         store.save_skill_record(_make_skill("td-1", name="tool-user", selections=5))
 
@@ -655,15 +665,31 @@ class TestAgentPromoterLifecycle:
         """find_candidates on empty store returns empty list."""
         assert promoter.find_candidates() == []
 
-    def test_find_candidates_below_threshold(self, store: EvolutionStore, promoter: AgentPromoter) -> None:
+    def test_find_candidates_below_threshold(
+        self, store: EvolutionStore, promoter: AgentPromoter
+    ) -> None:
         """Skills below thresholds are not candidates."""
         # Below total_selections threshold (50)
         store.save_skill_record(
-            _make_skill("low-sel", selections=10, applied=9, completions=9, fallbacks=0)
+            _make_skill(
+                "low-sel",
+                name="low-sel-skill",
+                selections=10,
+                applied=9,
+                completions=9,
+                fallbacks=0,
+            )
         )
         # High selections but low effective_rate
         store.save_skill_record(
-            _make_skill("low-eff", selections=100, applied=80, completions=30, fallbacks=10)
+            _make_skill(
+                "low-eff",
+                name="low-eff-skill",
+                selections=100,
+                applied=80,
+                completions=30,
+                fallbacks=10,
+            )
         )
         candidates = promoter.find_candidates()
         assert len(candidates) == 0
@@ -690,9 +716,7 @@ class TestAgentPromoterLifecycle:
         assert candidates[0].skill_id == "star"
         assert candidates[0].effective_rate >= 0.8
 
-    def test_promote_creates_files(
-        self, store: EvolutionStore, promoter: AgentPromoter
-    ) -> None:
+    def test_promote_creates_files(self, store: EvolutionStore, promoter: AgentPromoter) -> None:
         """Promotion generates agent package files."""
         candidate = PromotionCandidate(
             skill_id="promotable",

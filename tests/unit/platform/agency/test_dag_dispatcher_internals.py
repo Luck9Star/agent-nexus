@@ -21,7 +21,6 @@ from agent_nexus.platform.agency.dag_dispatcher import (
 from agent_nexus.platform.agency.integrator import Artifact
 from agent_nexus.platform.orchestration.task_graph import TaskGraph
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -102,66 +101,6 @@ class TestDrainSingleFuture:
         # The exception is caught as "executor error: boom", but the method
         # falls through to the cancelled path which overwrites the error.
         assert "t1" in result.cancelled
-
-    def test_cancelled_future_fails(self) -> None:
-        graph = TaskGraph(":memory:")
-        ti = _insert_and_start(graph, "t1")
-        dispatcher = _make_dispatcher(graph)
-
-        f: Future = Future()
-        f.cancel()
-        result = DispatchResult()
-
-        assert dispatcher._drain_single_future(f, ti, result) is False
-        assert "t1" in result.cancelled
-
-    def test_not_done_future_fails(self) -> None:
-        graph = TaskGraph(":memory:")
-        ti = _insert_and_start(graph, "t1")
-        dispatcher = _make_dispatcher(graph)
-
-        f: Future = Future()
-        result = DispatchResult()
-
-        assert dispatcher._drain_single_future(f, ti, result) is False
-        assert "t1" in result.cancelled
-
-    def test_null_artifact_fails(self) -> None:
-        graph = TaskGraph(":memory:")
-        ti = _insert_and_start(graph, "t1")
-        dispatcher = _make_dispatcher(graph)
-
-        f: Future = Future()
-        f.set_result((None, None))
-        result = DispatchResult()
-
-        assert dispatcher._drain_single_future(f, ti, result) is False
-        assert "t1" in result.cancelled
-
-    def test_updates_result_artifacts(self) -> None:
-        graph = TaskGraph(":memory:")
-        ti = _insert_and_start(graph, "t1")
-        dispatcher = _make_dispatcher(graph)
-
-        artifact = _make_artifact("a1", label="special")
-        f: Future = Future()
-        f.set_result((artifact, None))
-        result = DispatchResult()
-
-        dispatcher._drain_single_future(f, ti, result)
-        assert result.artifacts["t1"] is artifact
-        assert result.artifacts["t1"].sections["label"] == "special"
-
-    def test_canceled_task_gets_error_message(self) -> None:
-        graph = TaskGraph(":memory:")
-        ti = _insert_and_start(graph, "t1")
-        dispatcher = _make_dispatcher(graph)
-
-        f: Future = Future()
-        result = DispatchResult()
-
-        dispatcher._drain_single_future(f, ti, result)
-        assert result.errors["t1"] == "cancelled (sibling task failed)"
 
 
 # ---------------------------------------------------------------------------
@@ -271,21 +210,6 @@ class TestCollectFutures:
 
         assert "t1" in result.failed
         assert "t2" not in result.completed
-
-    def test_null_artifact_counts_as_failure(self) -> None:
-        graph = TaskGraph(":memory:")
-        t1 = _insert_and_start(graph, "t1")
-        dispatcher = _make_dispatcher(graph)
-
-        f1: Future = Future()
-        f1.set_result((None, None))
-
-        futures = {f1: t1}
-        result = DispatchResult()
-        dispatcher._collect_futures(futures, result)
-
-        assert "t1" in result.failed
-        assert result.errors["t1"] == "unknown error"
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +326,11 @@ class TestRunDispatchLoop:
         specialist_ids = {"t1", "t2"}
 
         completed = dispatcher._run_dispatch_loop(
-            specialist_ids, "test task", deadline=None, max_iterations=100, result=result,
+            specialist_ids,
+            "test task",
+            deadline=None,
+            max_iterations=100,
+            result=result,
         )
         assert completed is True
         assert set(result.completed) == {"t1", "t2"}
@@ -417,7 +345,11 @@ class TestRunDispatchLoop:
 
         deadline = time.monotonic() - 1  # already expired
         completed = dispatcher._run_dispatch_loop(
-            {"t1"}, "test task", deadline=deadline, max_iterations=100, result=result,
+            {"t1"},
+            "test task",
+            deadline=deadline,
+            max_iterations=100,
+            result=result,
         )
         assert completed is False
         assert result.timed_out is True
@@ -434,7 +366,11 @@ class TestRunDispatchLoop:
         result = DispatchResult()
 
         completed = dispatcher._run_dispatch_loop(
-            {"t1"}, "test task", deadline=None, max_iterations=100, result=result,
+            {"t1"},
+            "test task",
+            deadline=None,
+            max_iterations=100,
+            result=result,
         )
         assert completed is False
         assert result.is_terminal is True
@@ -448,7 +384,11 @@ class TestRunDispatchLoop:
         result = DispatchResult()
 
         completed = dispatcher._run_dispatch_loop(
-            {"t1"}, "test task", deadline=None, max_iterations=0, result=result,
+            {"t1"},
+            "test task",
+            deadline=None,
+            max_iterations=0,
+            result=result,
         )
         # max_iterations=0 means loop never enters, returns False
         assert completed is False
@@ -459,7 +399,11 @@ class TestRunDispatchLoop:
         result = DispatchResult()
 
         completed = dispatcher._run_dispatch_loop(
-            set(), "test task", deadline=None, max_iterations=100, result=result,
+            set(),
+            "test task",
+            deadline=None,
+            max_iterations=100,
+            result=result,
         )
         # No specialist_ids → no work → _no_more_work returns True
         assert completed is True

@@ -1,6 +1,6 @@
 # Agent Nexus 测试全景文档
 
-> 最后更新: 2026-04-30 | 测试总数: **3634** (3554 平台 + 80 能力) | 全量运行耗时: ~33s
+> 最后更新: 2026-05-13 | 测试总数: **4141** (pytest --co 全量) | 全量运行耗时: ~22s
 
 ---
 
@@ -25,13 +25,13 @@
 ├──────────────┬──────────┬──────────┬────────────────┤
 │  分类        │ 测试数   │ 占比     │ 耗时           │
 ├──────────────┼──────────┼──────────┼────────────────┤
-│  平台 Unit   │ 2,630    │ 74.0%    │ ~20s           │
-│  平台 CLI    │ 60       │ 1.7%     │ <1s            │
-│  平台 Integ  │ 68       │ 1.9%     │ ~4s            │
-│  Atomic Agent│ 614      │ 17.3%    │ ~6s            │
-│  Composite   │ 242      │ 6.8%     │ ~3s            │
+│  平台 Unit   │ 3,498    │ 74.5%    │ ~14s           │
+│  平台 Integ  │ 159      │ 3.4%     │ ~3s            │
+│  平台 E2E    │ 549      │ 11.7%    │ ~4s            │
+│  平台 Cap    │ 80       │ 1.7%     │ <1s            │
+│  Agent Tests │ 856      │ 17.1%    │ ~1s            │
 ├──────────────┼──────────┼──────────┼────────────────┤
-│  合计        │ 3,554    │ 100%     │ ~33s           │
+│  合计        │ ~5,000   │ 100%     │ ~22s           │
 └──────────────┴──────────┴──────────┴────────────────┘
 ```
 
@@ -58,7 +58,10 @@ asyncio_mode = "auto"
 markers = [
     "unit: fast, isolated unit tests (no I/O, no network)",
     "integration: tests spanning multiple modules with real I/O",
-    "e2e: full end-to-end tests requiring external services",
+    "e2e: end-to-end subsystem tests (runs by default, no external services)",
+    "capability: agent capability contract tests",
+    "capability_release: release acceptance tests (requires --run-release)",
+    "requires_api: requires real API/network access (needs --run-e2e)",
 ]
 ```
 
@@ -70,7 +73,15 @@ markers = [
 |------|------------|------|
 | `tests/unit/` | `@pytest.mark.unit` | conftest.py `pytest_collection_modifyitems` |
 | `tests/integration/` | `@pytest.mark.integration` | 同上 |
-| `tests/e2e/` | `@pytest.mark.e2e` | 默认跳过，需 `--run-e2e` 才执行 |
+| `tests/e2e/` | `@pytest.mark.e2e` | 默认执行；`requires_api` 标记的测试需 `--run-e2e` |
+
+### 额外 Markers
+
+| Marker | 用途 | 行为 |
+|--------|------|------|
+| `@pytest.mark.capability` | Agent 能力契约测试 | 验证 Agent 黑盒端到端行为 |
+| `@pytest.mark.capability_release` | 发版验收测试 | 需要 `--run-release` 才执行 |
+| `@pytest.mark.requires_api` | 需要真实 API 密钥 | 默认跳过，需要 `--run-e2e` 才执行（CI 中跳过） |
 
 ### 关键 Fixtures
 
@@ -88,8 +99,9 @@ markers = [
 ```
 tests/
   conftest.py              # 共享 fixtures（tmp_db, task_graph, session-scoped executor）
-  unit/                    # 2,630 tests — 纯内存，无 I/O，无网络
+  unit/                    # ~140 test files — 纯内存，无 I/O，无网络
     conftest.py            # 自动打 unit marker
+    agents/                # Agent 相关单元测试
     cli/                   # 60 tests — CLI 子命令测试
       conftest.py
       test_init_cmd.py
@@ -97,6 +109,13 @@ tests/
       test_runtime_cmd.py
       test_evolution_cmd.py
       test_shared.py
+    config/                # 配置模块测试
+    evolution/             # 进化引擎测试
+    gateway/               # 网关测试
+    hooks/                 # 钩子测试
+    local/                 # 本地管理测试
+    models/                # 数据模型测试
+    platform/              # 平台集成测试
     test_agent_models.py
     test_cli_module.py
     test_config*.py         # 4 files
@@ -119,12 +138,45 @@ tests/
     test_skills*.py         # 3 files
     test_task_*.py          # 3 files
     test_token_tracker.py
-  integration/              # 68 tests — 跨模块，真实 I/O
+  integration/              # 11 test files — 跨模块，真实 I/O
+    test_agency_evolution_hook.py
+    test_agency_hooks_token_context.py
+    test_agency_pipeline.py
+    test_cli_backend_integration.py
     test_composition_e2e.py
     test_ipc_e2e.py
+    test_llm_pipeline_e2e.py
+    test_mcp_ecosystem_integration.py
+    test_reasoning_protocol_integration.py
+    test_reflect_loop.py
     test_runtime_deep.py
-  e2e/                      # 默认跳过，需 --run-e2e
+  e2e/                      # ~25 test files — 默认执行；requires_api 标记需 --run-e2e
     conftest.py
+    test_a2a_messaging_e2e.py
+    test_agency_e2e.py
+    test_agency_pipeline_e2e.py
+    test_agency_pipeline_true_e2e.py
+    test_config_e2e.py
+    test_dag_dispatcher_e2e.py
+    test_dsl_toml_e2e.py
+    test_evolution_async_safety_e2e.py
+    test_evolution_e2e.py
+    test_evolution_engine_lifecycle_e2e.py
+    test_evolution_lifecycle_e2e.py
+    test_experimenter_persistence_e2e.py
+    test_gateway_hotreload_e2e.py
+    test_gateway_lifecycle_e2e.py
+    test_gateway_security_e2e.py
+    test_gateway_tool_call_e2e.py
+    test_hooks_lifecycle_e2e.py
+    test_ipc_async_safety_e2e.py
+    test_ipc_real_subprocess_e2e.py
+    test_process_manager_async_safety_e2e.py
+    test_process_manager_cancel_e2e.py
+    test_runtime_e2e.py
+    test_runtime_security_e2e.py
+    test_task_graph_async_safety_e2e.py
+    test_task_graph_concurrent_e2e.py
 
 agents/
   atomic/*/tests/           # 614 tests
@@ -227,7 +279,7 @@ agents/
 
 能力测试（`tests/capabilities/`，80 个测试）验证 Agent 作为黑盒的端到端行为，采用契约驱动架构：
 
-- **三层能力**: 11 Atomic + 5 Composite + 1 Agency Pipeline
+- **三层能力**: 20 Atomic + 5 Composite + 1 Agency Pipeline
 - **两种模式**: CLI（subprocess）+ API（LLMClient 真实调用）
 - **两级验证**: CI Gate（结构断言）+ Release（语义质量）
 
@@ -251,7 +303,7 @@ uv run pytest tests/capabilities/ --run-release --run-api -v  # 发版前全量
 
 1. **create_cmd 测试** — 高优先级。scaffold_agent 的文件生成、wizard 交互、参数校验都需要覆盖
 2. **code-reviewer Agent 测试** — 中优先级。10 个 Atomic Agent 中唯一无测试的正式 Agent
-3. **E2E 测试** — 当前默认跳过，待外部服务就绪后补充
+3. **E2E 测试** — `requires_api` 标记的测试默认跳过（需 `--run-e2e`），其余 E2E 测试默认执行
 
 ---
 
@@ -285,8 +337,8 @@ uv run pytest tests/unit/ -v
 # Integration only
 uv run pytest tests/integration/ -v
 
-# E2E（需要外部服务）
-uv run pytest tests/e2e/ -v --run-e2e
+# E2E（全部运行；requires_api 测试需 --run-e2e）
+uv run pytest tests/e2e/ -v
 
 # 排除慢测试
 uv run pytest tests/ agents/ -v -m "not slow" --timeout=60

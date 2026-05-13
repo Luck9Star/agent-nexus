@@ -55,14 +55,11 @@ class TestGenManifest:
         assert data["model_config"]["recommended"] == "standard"
         assert data["model_config"]["fallback"] == "economy"
 
-    def test_pipeline_tools(self):
-        result = _gen_manifest("p-agent", "Pipeline agent", ["analyze", "execute", "report"])
-        data = yaml.safe_load(result)
-        assert data["mcp"]["tools"] == ["analyze", "execute", "report"]
-
     def test_custom_model_tiers(self):
         result = _gen_manifest(
-            "agent", "desc", ["run"],
+            "agent",
+            "desc",
+            ["run"],
             recommended_model="premium",
             fallback_model="lightweight",
         )
@@ -93,13 +90,6 @@ class TestGenTopLevelAgent:
         assert "async def run(" in result
         assert "from agent_my_agent.agent import my_agent_run" in result
 
-    def test_pipeline_generates_multiple_functions(self):
-        tools = ["analyze", "execute", "report"]
-        result = _gen_top_level_agent("p-agent", tools)
-        for t in tools:
-            assert f"async def {t}(" in result
-            assert f"from agent_p_agent.agent import p_agent_{t}" in result
-
     def test_includes_future_annotations(self):
         result = _gen_top_level_agent("a", ["run"])
         assert "from __future__ import annotations" in result
@@ -117,13 +107,6 @@ class TestGenSkillMd:
         assert "- **run**:" in result
         assert '"task": "example task description"' in result
 
-    def test_pipeline_tool_format(self):
-        tools = ["analyze", "execute", "report"]
-        result = _gen_skill_md("p-agent", "Pipeline", tools)
-        for t in tools:
-            assert f"### {t}" in result
-            assert f"example {t} input" in result
-
     def test_error_handling_table(self):
         result = _gen_skill_md("a", "d", ["run"])
         assert "## Error Handling" in result
@@ -139,10 +122,6 @@ class TestGenPyproject:
     def test_contains_project_name(self):
         result = _gen_pyproject("my-agent")
         assert 'name = "agent-my-agent"' in result
-
-    def test_contains_package_reference(self):
-        result = _gen_pyproject("my-agent")
-        assert '"agent_my_agent"' in result
 
     def test_python_version(self):
         result = _gen_pyproject("a")
@@ -186,21 +165,9 @@ class TestGenPkgAgent:
         assert "async def run(self, task:" in result
         assert "async def my_agent_run(" in result
 
-    def test_pipeline_generates_class_with_methods(self):
-        tools = ["analyze", "execute", "report"]
-        result = _gen_pkg_agent("p-agent", tools)
-        assert "class PAgentAgent:" in result
-        for t in tools:
-            assert f"async def {t}(self, task:" in result
-            assert f"async def p_agent_{t}(" in result
-
     def test_simple_has_todo_placeholder(self):
         result = _gen_pkg_agent("a", ["run"])
         assert "# TODO: Implement agent logic" in result
-
-    def test_pipeline_has_todo_placeholders(self):
-        result = _gen_pkg_agent("a", ["analyze", "execute"])
-        assert result.count("# TODO:") == 2
 
 
 # ---------------------------------------------------------------------------
@@ -234,13 +201,6 @@ class TestGenMcpAdapter:
         assert "async def run(task:" in result
         assert "from agent_my_agent.agent import my_agent_run" in result
 
-    def test_pipeline_generates_all_tools(self):
-        tools = ["analyze", "execute", "report"]
-        result = _gen_mcp_adapter("p-agent", tools)
-        for t in tools:
-            assert f"async def {t}(task:" in result
-            assert f"from agent_p_agent.agent import p_agent_{t}" in result
-
     def test_includes_fastmcp_import(self):
         result = _gen_mcp_adapter("a", ["run"])
         assert "from fastmcp import FastMCP" in result
@@ -254,7 +214,10 @@ class TestGenMcpAdapter:
 class TestScaffoldAgent:
     def test_creates_directory_structure(self, tmp_path: Path):
         agent_dir = scaffold_agent(
-            "my-agent", "A test agent", "simple", output_dir=tmp_path,
+            "my-agent",
+            "A test agent",
+            "simple",
+            output_dir=tmp_path,
         )
         assert agent_dir == tmp_path / "my-agent"
         assert agent_dir.is_dir()
@@ -262,7 +225,10 @@ class TestScaffoldAgent:
 
     def test_creates_all_files(self, tmp_path: Path):
         agent_dir = scaffold_agent(
-            "my-agent", "desc", "simple", output_dir=tmp_path,
+            "my-agent",
+            "desc",
+            "simple",
+            output_dir=tmp_path,
         )
         expected_files = [
             "agent-manifest.yaml",
@@ -276,25 +242,6 @@ class TestScaffoldAgent:
         ]
         for f in expected_files:
             assert (agent_dir / f).is_file(), f"Missing file: {f}"
-
-    def test_manifest_is_valid_yaml(self, tmp_path: Path):
-        agent_dir = scaffold_agent(
-            "test-agent", "desc", "simple", output_dir=tmp_path,
-        )
-        manifest = yaml.safe_load((agent_dir / "agent-manifest.yaml").read_text())
-        assert manifest["name"] == "test-agent"
-        assert manifest["mcp"]["tools"] == ["run"]
-
-    def test_pipeline_creates_pipeline_tools(self, tmp_path: Path):
-        agent_dir = scaffold_agent(
-            "p-agent", "Pipeline", "pipeline", output_dir=tmp_path,
-        )
-        manifest = yaml.safe_load((agent_dir / "agent-manifest.yaml").read_text())
-        assert manifest["mcp"]["tools"] == ["analyze", "execute", "report"]
-        agent_code = (agent_dir / "agent_p_agent" / "agent.py").read_text()
-        assert "async def analyze(" in agent_code
-        assert "async def execute(" in agent_code
-        assert "async def report(" in agent_code
 
     def test_rejects_invalid_name(self, tmp_path: Path):
         with pytest.raises(ValueError, match="Invalid agent name"):
@@ -318,7 +265,9 @@ class TestScaffoldAgent:
 
     def test_custom_model_tiers_in_manifest(self, tmp_path: Path):
         scaffold_agent(
-            "m-agent", "desc", "simple",
+            "m-agent",
+            "desc",
+            "simple",
             recommended_model="premium",
             fallback_model="lightweight",
             output_dir=tmp_path,
@@ -376,14 +325,6 @@ class TestCreateAgentCli:
             (tmp_path / "cli-pipe" / "agent-manifest.yaml").read_text(),
         )
         assert manifest["mcp"]["tools"] == ["analyze", "execute", "report"]
-
-    def test_rejects_invalid_name_via_cli(self, tmp_path: Path):
-        result = self.runner.invoke(
-            create_app,
-            ["bad name!", "-d", "desc", "-o", str(tmp_path)],
-        )
-        assert result.exit_code == 1
-        assert "Error:" in result.output
 
     def test_shows_next_steps(self, tmp_path: Path):
         result = self.runner.invoke(

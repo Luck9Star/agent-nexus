@@ -94,7 +94,9 @@ class AgentToPlatform(FrozenModel):
             if isinstance(v, str):
                 byte_len = len(v.encode("utf-8"))
                 if byte_len > 65536:
-                    raise ValueError(f"output exceeds maximum serialized size of 65536 bytes ({byte_len} bytes)")
+                    raise ValueError(
+                        f"output exceeds maximum serialized size of 65536 bytes ({byte_len} bytes)"
+                    )
                 return v
             # Complex types: measure serialized size directly
             try:
@@ -103,7 +105,9 @@ class AgentToPlatform(FrozenModel):
                 serialized = str(v)
             byte_len = len(serialized.encode("utf-8"))
             if byte_len > 65536:
-                raise ValueError(f"output exceeds maximum serialized size of 65536 bytes ({byte_len} bytes)")
+                raise ValueError(
+                    f"output exceeds maximum serialized size of 65536 bytes ({byte_len} bytes)"
+                )
         return v
 
 

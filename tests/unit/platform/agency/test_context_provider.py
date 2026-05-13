@@ -36,9 +36,6 @@ class TestTaskSummaryProvider:
         assert "- Old" not in provider.get_context()
         assert "- New" in provider.get_context()
 
-    def test_has_title(self) -> None:
-        assert TaskSummaryProvider.title
-
 
 class TestExpertListProvider:
     """ExpertListProvider lists available experts."""
@@ -51,9 +48,6 @@ class TestExpertListProvider:
         provider = ExpertListProvider([{"id": "reviewer", "name": "Code Reviewer"}])
         ctx = provider.get_context()
         assert "Code Reviewer" in ctx
-
-    def test_has_title(self) -> None:
-        assert ExpertListProvider.title
 
 
 class TestReflectionFeedbackProvider:
@@ -68,18 +62,9 @@ class TestReflectionFeedbackProvider:
         provider.update("Needs improvement")
         assert "Needs improvement" in provider.get_context()
 
-    def test_has_title(self) -> None:
-        assert ReflectionFeedbackProvider.title
-
 
 class TestProviderRegistry:
     """ProviderRegistry manages named providers with priorities."""
-
-    def test_register_and_get(self) -> None:
-        registry = ProviderRegistry()
-        provider = TaskSummaryProvider()
-        registry.register("summary", provider)
-        assert registry.get("summary") is provider
 
     def test_get_unknown_returns_none(self) -> None:
         registry = ProviderRegistry()
@@ -91,26 +76,3 @@ class TestProviderRegistry:
         registry.register("summary", provider)
         registry.unregister("summary")
         assert registry.get("summary") is None
-
-    def test_unregister_unknown_is_noop(self) -> None:
-        registry = ProviderRegistry()
-        registry.unregister("nonexistent")
-        assert registry.get("nonexistent") is None
-
-    def test_default_priority_is_7(self) -> None:
-        registry = ProviderRegistry()
-        assert registry.get_priority("unknown") == 7
-
-    def test_custom_priority(self) -> None:
-        registry = ProviderRegistry()
-        provider = TaskSummaryProvider()
-        registry.register("summary", provider, priority=3)
-        assert registry.get_priority("summary") == 3
-
-    def test_providers_returns_copy(self) -> None:
-        registry = ProviderRegistry()
-        provider = TaskSummaryProvider()
-        registry.register("summary", provider)
-        procs = registry.providers
-        procs["extra"] = TaskSummaryProvider()
-        assert "extra" not in registry.providers

@@ -463,9 +463,7 @@ class TestRouteDispatch:
         assert len(fake_pm.get_sent_messages("agent-b")) == 1
         assert len(fake_pm.get_sent_messages("agent-c")) == 1
 
-    async def test_route_chat_without_to_agent_raises(
-        self, broker: MessageBroker
-    ) -> None:
+    async def test_route_chat_without_to_agent_raises(self, broker: MessageBroker) -> None:
         """route raises ValueError for chat message without to_agent."""
         msg = A2AMessage(
             message_id="msg-bad",
@@ -478,9 +476,7 @@ class TestRouteDispatch:
         with pytest.raises(ValueError, match="requires to_agent"):
             await broker.route("agent-a", msg)
 
-    async def test_route_unknown_type_dropped(
-        self, broker: MessageBroker
-    ) -> None:
+    async def test_route_unknown_type_dropped(self, broker: MessageBroker) -> None:
         """route silently drops unknown msg_type (no exception)."""
         msg = A2AMessage(
             message_id="msg-unknown",

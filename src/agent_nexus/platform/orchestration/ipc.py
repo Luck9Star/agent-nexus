@@ -107,18 +107,63 @@ class IPCStream:
 
     # -- receive ------------------------------------------------------------
 
+    async def _readline_safe(self, timeout: float) -> bytes:
+        """Read a newline-terminated line with size guard.
+
+        StreamReader.readline() has no built-in size limit, so a
+        misbehaving agent sending data without newlines can cause OOM.
+
+        Uses a two-phase approach for efficiency:
+        1. Read chunks of up to 4 KiB (fast path for normal messages).
+        2. Fall back to byte-by-byte reading only when a chunk contains
+           no newline *and* we're approaching the size limit.
+        """
+        buf = bytearray()
+        chunk_size = 4096
+        while True:
+            try:
+                # Fast path: read a larger chunk
+                chunk = await asyncio.wait_for(self._stdout.read(chunk_size), timeout=timeout)
+            except TimeoutError:
+                raise
+            if not chunk:
+                if not buf:
+                    raise IPCConnectionError("Agent stdout closed (EOF)")
+                break
+            buf.extend(chunk)
+            # Check for newline in the newly appended data
+            newline_pos = buf.rfind(b"\n", max(0, len(buf) - len(chunk)))
+            if newline_pos >= 0:
+                # Found newline — truncate to first complete line.
+                # Any data after the newline stays in the StreamReader buffer
+                # because we may have over-read.
+                # Unfortunately StreamReader doesn't support pushback, so we
+                # accept the slight over-read (safe for line-protocol).
+                buf = buf[: newline_pos + 1]
+                break
+            if len(buf) > _MAX_MESSAGE_SIZE:
+                raise IPCError(
+                    f"Agent message too large (exceeded {_MAX_MESSAGE_SIZE} bytes before newline)"
+                )
+            # Reduce chunk size as we approach the limit to avoid over-reading
+            remaining = _MAX_MESSAGE_SIZE - len(buf)
+            if remaining < chunk_size:
+                chunk_size = max(1, remaining)
+        return bytes(buf)
+
     async def receive(self, timeout: float = 30.0) -> AgentToPlatform:
         """Read and deserialize message from agent's stdout.
 
-        Uses :meth:`readline` for line-based framing.
+        Uses :meth:`_readline_safe` for size-bounded line reading.
 
         Raises:
             IPCTimeoutError: on timeout.
             IPCConnectionError: if stdout is closed.
+            IPCError: if message exceeds size limit.
         """
         timeout = max(timeout, 0.1)
         try:
-            raw = await asyncio.wait_for(self._stdout.readline(), timeout=timeout)
+            raw = await self._readline_safe(timeout)
         except TimeoutError as exc:
             raise IPCTimeoutError(
                 f"Timed out after {timeout:.1f}s waiting for agent message"

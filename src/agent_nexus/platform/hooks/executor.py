@@ -229,18 +229,32 @@ class HookExecutor:
         event: HookEvent,
         context: dict[str, Any] | None = None,
         matcher: str | None = None,
+        *,
+        aggregate_timeout: float = 60.0,
     ) -> AggregatedHookResult:
         """Execute all hooks for *event* sequentially.
 
         If any hook with ``block_on_failure=True`` fails, remaining
         hooks are skipped and the result is marked as blocked.
+
+        The total execution time is bounded by *aggregate_timeout*
+        (default 60 s).  Remaining hooks are skipped on timeout.
         """
+        import time
+
         hooks = self.get_hooks_for_event(event, matcher=matcher)
         results: list[HookExecution] = []
         errors: list[str] = []
         blocked = False
+        deadline = time.monotonic() + aggregate_timeout
 
         for hook in hooks:
+            if time.monotonic() >= deadline:
+                errors.append(
+                    f"Aggregate timeout ({aggregate_timeout}s) exceeded for {event.value}"
+                )
+                break
+
             execution = await self._execute_hook(hook, context)
             results.append(execution)
 
@@ -248,7 +262,7 @@ class HookExecutor:
                 errors.append(execution.error or f"Hook failed: {hook.type}:{hook.event}")
                 if hook.block_on_failure:
                     blocked = True
-                    break  # stop executing remaining hooks
+                    break
 
         return AggregatedHookResult(
             event=event,

@@ -16,6 +16,7 @@ def create_mcp_server() -> object:
     async def run(task: str, context: dict | None = None) -> str:
         """Execute the good-skill agent task."""
         from agent_good_skill.agent import good_skill_run
+
         return await good_skill_run(task, context)
 
     return mcp

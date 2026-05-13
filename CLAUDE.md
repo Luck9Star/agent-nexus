@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Agent Nexus is an MCP-native Agent Platform with self-built orchestration. It provides Git-based Agent distribution, Python Runtime execution layer, and Self-Evolution Engine. Agents are distributed via Git repos (Homebrew tap model), run locally, and use user-configured models. **Dual implementation**: Python platform complete (Phases 1-6), Rust platform rewrite in progress (6 crates, ~18K LOC).
+Agent Nexus is an MCP-native Agent Platform with self-built orchestration. It provides Git-based Agent distribution, Python Runtime execution layer, and Self-Evolution Engine. Agents are distributed via Git repos (Homebrew tap model), run locally, and use user-configured models. **Dual implementation**: Python platform complete (Phases 1-6), Rust platform rewrite complete (7 crates, ~18K LOC).
 
 - **Tech stack**: Python (production platform) + Rust (platform rewrite in progress), MCP protocol, self-built orchestration
 - **License**: MIT
@@ -31,7 +31,7 @@ uv run python -m agent_nexus.platform.agency.cli run-composition \
   --use-llm --temperature 0.7 --max-parallel 3
 
 # Rust platform (workspace at repo root)
-cargo build                   # Build all 6 crates
+cargo build                   # Build all 7 crates
 cargo test                    # Test all crates
 cargo test -p ap-core         # Test single crate
 cargo clippy                  # Lint
@@ -66,7 +66,7 @@ Four-layer architecture (top to bottom):
 3. **Python Runtime Layer** — CaveAgent-based IPythonRuntime (in-process, since Agents are already subprocesses). SecurityChecker at AST level
 4. **Self-Evolution Engine** — OpenSpace-based. Three layers: Atomic Skill Evolution → Composite Orchestration Evolution → Agent Promotion
 
-**Agent types**: Atomic (11, e.g. doc-filler, code-reviewer) and Composite (5, e.g. feature-delivery-pipeline). Three run modes: MCP standalone / Platform Router / CLI standalone.
+**Agent types**: Atomic (20, e.g. doc-filler, code-reviewer) and Composite (5, e.g. feature-delivery-pipeline). Three run modes: MCP standalone / Platform Router / CLI standalone.
 
 **Agency Pipeline** — LLM-powered expert orchestration: LLMPlanner (task decomposition) → LLMExecutor (per-expert LLM calls) → LLMIntegrator (semantic synthesis) → LLMQualityGate (quality evaluation). All stages share a ModelCapabilityRegistry that provides per-model max_tokens, temperature range, and vision support data.
 
@@ -74,11 +74,11 @@ Four-layer architecture (top to bottom):
 
 ## Key Design Decisions
 
-- **Self-built orchestration** — Reference ClawTeam's proven patterns (TaskStore, MailboxManager, SpawnBackend), build simplified versions. No external pip dependency.
+- **Self-built orchestration** — Reference ClawTeam's proven patterns (TaskStore, MailboxManager, SpawnBackend), build simplified versions. Orchestration layer (TaskGraph, ProcessManager, IPC, DSL) 零外部依赖（仅用 asyncio + aiosqlite + stdlib）。项目整体依赖：FastMCP, pydantic, pydantic-ai, httpx, typer, toml, pyyaml, litellm, ipython, questionary, anthropic, openai。
 - **Runtime-First Hybrid** — Python Runtime is primary execution, MCP for external communication
 - **MCP protocol boundary = language boundary** — Rust platform communicates with Python Agent subprocesses via MCP stdio/SSE. Agent internals stay Python forever.
 - **Git-based distribution** — Agents distributed via Git repos (Official monorepo + Private repos + Direct URL). No cloud infrastructure needed. Homebrew tap model.
-- **Rust rewrite scope** — Upper layers only (Gateway, Fetcher, Evolution, CLI). Agent Runtime stays Python. 6 crates already implemented: ap-core, ap-runtime, ap-gateway, ap-fetcher, ap-evolution, ap-cli. Interfaces must remain format-compatible during migration.
+- **Rust rewrite scope** — Upper layers only (Gateway, Fetcher, Evolution, CLI). Agent Runtime stays Python. 7 crates already implemented: ap-core, ap-runtime, ap-gateway, ap-fetcher, ap-evolution, ap-cli-backend, ap-cli. Interfaces must remain format-compatible during migration.
 
 ## Reference Projects (local clones)
 
@@ -106,7 +106,7 @@ agent-nexus/
 │   │   └── runtime/          # Python Runtime (CaveAgent-based)
 │   └── models/               # Shared data models + ModelCapability registry
 ├── agents/                   # Official Agent packages (independent pyproject.toml each)
-│   ├── atomic/               # 11 Atomic Agents
+│   ├── atomic/               # 20 Atomic Agents
 │   └── composite/            # 5 Composite Agents
 ├── tests/                    # Platform tests
 │   ├── unit/
@@ -120,6 +120,7 @@ agent-nexus/
 │   ├── ap-gateway/           # MCP Gateway: deferred agent loading, tool aggregation
 │   ├── ap-fetcher/           # Git-based agent distribution (clone, update, verify)
 │   ├── ap-evolution/         # Self-Evolution Engine: SQLite store, analyzer, evolver, promotion
+│   ├── ap-cli-backend/       # CLI Backend: types, parser, routing, session store
 │   └── ap-runtime/           # Python subprocess bridge (spawn, IPC, health check)
 ├── Cargo.toml                # Rust workspace config
 └── pyproject.toml            # Python platform config
@@ -133,7 +134,7 @@ agent-nexus/
 
 ## Implementation Phases
 
-Phase 1 (W1-2): Self-built orchestration basics + first Agent → Phase 2 (W3-4): Platform Router → Phase 3 (W5): MCP Gateway → Phase 4 (W6-7): Git-based Distribution + CLI → Phase 5 (W8-10): Runtime + Evolution → Phase 6 (W11-12): Polish → **Phase 7 (W13-20): Rust rewrite — IN PROGRESS** (ap-core ✅ ap-runtime ✅ ap-gateway ✅ ap-fetcher ✅ ap-evolution ✅ ap-cli ✅)
+Phase 1 (W1-2): Self-built orchestration basics + first Agent → Phase 2 (W3-4): Platform Router → Phase 3 (W5): MCP Gateway → Phase 4 (W6-7): Git-based Distribution + CLI → Phase 5 (W8-10): Runtime + Evolution → Phase 6 (W11-12): Polish → **Phase 7 (W13-20): Rust rewrite — IN PROGRESS** (ap-core ✅ ap-runtime ✅ ap-gateway ✅ ap-fetcher ✅ ap-evolution ✅ ap-cli-backend ✅ ap-cli ✅)
 
 See `docs/09-implementation-plan.md` for full phase details and risk matrix.
 

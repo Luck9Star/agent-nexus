@@ -281,8 +281,12 @@ class TestSourceManagerE2E:
         from agent_nexus.platform.local.sources import SourceEntry, SourceManager
 
         sources = SourceManager(tmp_path / "sources.yaml")
-        sources.add_source(SourceEntry(name="official", type="git", url="https://github.com/official/agents"))
-        sources.add_source(SourceEntry(name="community", type="git", url="https://github.com/community/agents"))
+        sources.add_source(
+            SourceEntry(name="official", type="git", url="https://github.com/official/agents")
+        )
+        sources.add_source(
+            SourceEntry(name="community", type="git", url="https://github.com/community/agents")
+        )
 
         result = sources.list_sources()
         assert len(result) == 2
@@ -295,7 +299,9 @@ class TestSourceManagerE2E:
         from agent_nexus.platform.local.sources import SourceEntry, SourceManager
 
         sources = SourceManager(tmp_path / "sources.yaml")
-        sources.add_source(SourceEntry(name="temp", type="git", url="https://github.com/temp/agents"))
+        sources.add_source(
+            SourceEntry(name="temp", type="git", url="https://github.com/temp/agents")
+        )
 
         assert sources.remove_source("temp")
         result = sources.list_sources()
@@ -309,7 +315,9 @@ class TestSourceManagerE2E:
 
         path = tmp_path / "sources.yaml"
         sources1 = SourceManager(path)
-        sources1.add_source(SourceEntry(name="persist-test", type="git", url="https://github.com/test/agents"))
+        sources1.add_source(
+            SourceEntry(name="persist-test", type="git", url="https://github.com/test/agents")
+        )
 
         # Reload from same file
         sources2 = SourceManager(path)

@@ -35,6 +35,11 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
         }
     }
 
+    /// Mutable reference to the underlying stream (for raw message access).
+    pub fn stream_mut(&mut self) -> &mut IpcStream<R, W> {
+        &mut self.stream
+    }
+
     /// Send a chat message to an agent.
     ///
     /// # Errors
@@ -141,6 +146,17 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> IpcProtocol<R, W> {
                 AgentToPlatformType::Progress => {
                     // Progress messages are informational; skip and wait for the final result.
                     tracing::debug!("Skipping progress message, waiting for final result");
+                }
+                // A2A types are relayed by the platform, not consumed in IPC protocol.
+                // They should not appear in a direct agent response, but handle gracefully.
+                AgentToPlatformType::SendMessage
+                | AgentToPlatformType::SendRequest
+                | AgentToPlatformType::Broadcast
+                | AgentToPlatformType::Reply => {
+                    tracing::warn!(
+                        "Unexpected A2A message type {:?} in direct IPC response, treating as progress",
+                        msg.msg_type
+                    );
                 }
             }
         }

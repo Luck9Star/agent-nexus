@@ -48,3 +48,5 @@ class ExternalServerConfig:
     auth: ExternalServerAuth = field(default_factory=ExternalServerAuth)
     tls_verify: bool = True
     allowed_tools: list[str] | None = None
+    connect_retries: int = 0
+    tool_timeout: float = 30.0

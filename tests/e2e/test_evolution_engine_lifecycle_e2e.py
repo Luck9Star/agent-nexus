@@ -288,8 +288,12 @@ class TestHealthDrivenEvolutionCycle:
         # fallback_rate = 45/100 = 0.45 > 0.4
         store.save_skill_record(
             _make_skill(
-                "fall", name="fall-skill",
-                selections=100, applied=80, completions=35, fallbacks=45,
+                "fall",
+                name="fall-skill",
+                selections=100,
+                applied=80,
+                completions=35,
+                fallbacks=45,
             )
         )
 
@@ -325,8 +329,12 @@ class TestHealthDrivenEvolutionCycle:
         # completion_rate = 10/50 = 0.2 < 0.35
         store.save_skill_record(
             _make_skill(
-                "stall", name="stall-skill",
-                selections=100, applied=50, completions=10, fallbacks=0,
+                "stall",
+                name="stall-skill",
+                selections=100,
+                applied=50,
+                completions=10,
+                fallbacks=0,
             )
         )
 
@@ -348,8 +356,12 @@ class TestHealthDrivenEvolutionCycle:
         # No FIX rules match (fallback=0, completion=30/40=0.75)
         store.save_skill_record(
             _make_skill(
-                "moderate", name="mod-skill",
-                selections=100, applied=40, completions=30, fallbacks=0,
+                "moderate",
+                name="mod-skill",
+                selections=100,
+                applied=40,
+                completions=30,
+                fallbacks=0,
             )
         )
 
@@ -467,9 +479,7 @@ class TestDegradationRecoveryCycle:
         self, engine: EvolutionEngine, store: EvolutionStore
     ) -> None:
         """Reporting tool degradation creates FIX evolution for affected skills."""
-        store.save_skill_record(
-            _make_skill("deg-1", name="deg-skill", selections=10)
-        )
+        store.save_skill_record(_make_skill("deg-1", name="deg-skill", selections=10))
 
         results = engine.evolve(
             trigger=EvolutionTrigger.TOOL_DEGRADATION,
@@ -493,9 +503,7 @@ class TestDegradationRecoveryCycle:
         self, engine: EvolutionEngine, store: EvolutionStore
     ) -> None:
         """Same tool_key + skill_id is not evolved twice (anti-loop)."""
-        store.save_skill_record(
-            _make_skill("anti-1", name="anti-skill", selections=10)
-        )
+        store.save_skill_record(_make_skill("anti-1", name="anti-skill", selections=10))
 
         # First degradation
         r1 = engine.evolve(
@@ -532,9 +540,7 @@ class TestDegradationRecoveryCycle:
         self, engine: EvolutionEngine, store: EvolutionStore
     ) -> None:
         """After pruning recovered tools, skills can be evolved again for that tool."""
-        store.save_skill_record(
-            _make_skill("recov-1", name="recov-skill", selections=10)
-        )
+        store.save_skill_record(_make_skill("recov-1", name="recov-skill", selections=10))
 
         # Degrade tool-a and tool-b
         engine.evolve(
@@ -557,9 +563,7 @@ class TestDegradationRecoveryCycle:
         assert "tool-b" not in engine.evolver._addressed
 
         # Create a new skill for tool-b to evolve (the original is deactivated)
-        store.save_skill_record(
-            _make_skill("recov-2", name="recov-skill-2", selections=10)
-        )
+        store.save_skill_record(_make_skill("recov-2", name="recov-skill-2", selections=10))
         r = engine.evolve(
             trigger=EvolutionTrigger.TOOL_DEGRADATION,
             tool_key="tool-b",
@@ -608,9 +612,7 @@ class TestDegradationRecoveryCycle:
 class TestPromotionLifecycle:
     """Skill meeting promotion criteria -> find candidates -> promote -> verify files."""
 
-    def test_find_no_candidates_empty_store(
-        self, engine_with_fs: EvolutionEngine
-    ) -> None:
+    def test_find_no_candidates_empty_store(self, engine_with_fs: EvolutionEngine) -> None:
         """No candidates in empty store."""
         candidates = engine_with_fs.promoter.find_candidates()
         assert candidates == []
@@ -704,13 +706,24 @@ class TestPromotionLifecycle:
         """Skills not meeting thresholds are excluded from candidates."""
         # Below selections threshold
         store.save_skill_record(
-            _make_skill("low-sel", selections=10, applied=9, completions=9, directory="skills/low")
+            _make_skill(
+                "low-sel",
+                name="low-sel-skill",
+                selections=10,
+                applied=9,
+                completions=9,
+                directory="skills/low",
+            )
         )
         # Below effective_rate threshold
         store.save_skill_record(
             _make_skill(
-                "low-eff", selections=100,
-                applied=80, completions=30, directory="skills/eff",
+                "low-eff",
+                name="low-eff-skill",
+                selections=100,
+                applied=80,
+                completions=30,
+                directory="skills/eff",
             )
         )
 
@@ -784,9 +797,7 @@ class TestCrossLifecycleIntegration:
         # record_analysis already added +1 to selections/applied/completions
         # from the judgment, so we need 54 more to reach 55 total increments.
         for _ in range(54):
-            store.increment_counters(
-                "captured-1", selected=True, applied=True, completed=True
-            )
+            store.increment_counters("captured-1", selected=True, applied=True, completed=True)
 
         # Verify counters: 1 (from analysis) + 54 (manual) = 55
         skill = store.get_skill_record("captured-1")
@@ -826,8 +837,12 @@ class TestCrossLifecycleIntegration:
         # Seed skill
         store.save_skill_record(
             _make_skill(
-                "cycle-sk", name="cycle-skill",
-                selections=100, applied=80, completions=35, fallbacks=44,
+                "cycle-sk",
+                name="cycle-skill",
+                selections=100,
+                applied=80,
+                completions=35,
+                fallbacks=44,
             )
         )
 
@@ -866,4 +881,4 @@ class TestCrossLifecycleIntegration:
         ancestry = store.get_ancestry(r3[0].new_record.id)
         assert len(ancestry) == 2
         assert ancestry[0].id == "cycle-sk"  # Oldest ancestor
-        assert ancestry[1].id == new_id      # Middle generation
+        assert ancestry[1].id == new_id  # Middle generation

@@ -54,7 +54,9 @@ def _linear_dag(name: str = "test", n_tasks: int = 3) -> CompositionDAG:
     for i in range(n_tasks):
         blocked = [f"t{i}"] if i > 0 else []
         tasks.append(
-            DAGTask(id=f"t{i+1}", agent=f"agent-{i+1}", output=f"out-{i+1}", blocked_by=blocked)
+            DAGTask(
+                id=f"t{i + 1}", agent=f"agent-{i + 1}", output=f"out-{i + 1}", blocked_by=blocked
+            )
         )
     return CompositionDAG(name=name, max_parallel=3, tasks=tasks)
 
@@ -176,9 +178,7 @@ class TestDAGDispatcherAdispatch:
             time.sleep(10)  # Way beyond timeout
             return _make_artifact(agent=profile_id)
 
-        dispatcher = DAGDispatcher(
-            graph=graph, executor=slow_executor, timeout_seconds=0.2
-        )
+        dispatcher = DAGDispatcher(graph=graph, executor=slow_executor, timeout_seconds=0.2)
 
         result = await dispatcher.adispatch(dag, "timeout test")
 

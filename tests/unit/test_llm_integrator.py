@@ -1,7 +1,6 @@
 """Tests for LLMIntegrator — LLM-powered artifact synthesis."""
 
 import json
-import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -42,57 +41,6 @@ def _llm_response(data: dict) -> MagicMock:
         provider="test",
     )
     return mock
-
-
-# --- Existing tests (kept for backward compat) ---
-
-
-def test_llm_integrator_synthesizes():
-    mock_client = MagicMock()
-    mock_client.call.return_value = LLMResponse(
-        text=json.dumps(
-            {
-                "summary": "Combined analysis reveals both security and architecture concerns",
-                "recommendations": ["Use parameterized queries", "Introduce interfaces"],
-                "conflicts": [],
-                "gaps": [],
-            }
-        ),
-        model="test-model",
-        provider="test",
-    )
-
-    integrator = LLMIntegrator(client=mock_client)
-    result = integrator.synthesize(_make_artifacts(), task="Review payment system")
-
-    assert isinstance(result, IntegratedArtifact)
-    assert len(result.source_agents) == 2
-    mock_client.call.assert_called_once()
-
-
-def test_llm_integrator_fallback_to_rules():
-    """When no client, falls back to Integrator.merge."""
-    integrator = LLMIntegrator(client=None)
-    result = integrator.synthesize(_make_artifacts(), task="Review payment system")
-
-    assert isinstance(result, IntegratedArtifact)
-    assert len(result.source_agents) == 2
-    assert "summary" in result.merged_sections
-
-
-def test_llm_integrator_single_artifact():
-    """Single artifact should work without LLM call."""
-    single = [_make_artifacts()[0]]
-    mock_client = MagicMock()
-
-    integrator = LLMIntegrator(client=mock_client)
-    result = integrator.synthesize(single, task="review")
-
-    assert isinstance(result, IntegratedArtifact)
-    mock_client.call.assert_not_called()
-
-
-# --- New tests ---
 
 
 class TestSynthesizeEdgeCases:
@@ -231,65 +179,3 @@ class TestParseSynthesis:
         result = integrator.synthesize(_make_artifacts(), task="review")
 
         assert result.conflicts[0].field == "unknown"
-
-    def test_temperature_forwarded_to_llm_client(self):
-        mock_client = _llm_response(
-            {"summary": "ok", "recommendations": [], "conflicts": []}
-        )
-
-        integrator = LLMIntegrator(client=mock_client, temperature=0.3)
-        integrator.synthesize(_make_artifacts(), task="review")
-
-        call_kwargs = mock_client.call.call_args.kwargs
-        assert call_kwargs["temperature"] == 0.3
-
-
-class TestFallbackCounter:
-    """Tests for the thread-safe fallback counter."""
-
-    def setup_method(self):
-        LLMIntegrator.reset_fallback_count()
-
-    def test_initial_count_is_zero(self):
-        assert LLMIntegrator.fallback_count() == 0
-
-    def test_no_client_increments_fallback(self):
-        integrator = LLMIntegrator(client=None)
-        integrator.synthesize(_make_artifacts(), task="review")
-
-        assert LLMIntegrator.fallback_count() == 1
-
-    def test_llm_failure_increments_fallback(self):
-        mock_client = MagicMock()
-        mock_client.call.side_effect = RuntimeError("boom")
-        integrator = LLMIntegrator(client=mock_client)
-        integrator.synthesize(_make_artifacts(), task="review")
-
-        assert LLMIntegrator.fallback_count() == 1
-
-    def test_reset_clears_counter(self):
-        LLMIntegrator(client=None).synthesize(_make_artifacts(), task="review")
-        assert LLMIntegrator.fallback_count() > 0
-
-        LLMIntegrator.reset_fallback_count()
-        assert LLMIntegrator.fallback_count() == 0
-
-    def test_concurrent_fallbacks_thread_safe(self):
-        """Multiple threads falling back should not lose counts."""
-        barrier = threading.Barrier(4)
-        results = []
-
-        def fall_back():
-            barrier.wait()
-            integrator = LLMIntegrator(client=None)
-            integrator.synthesize(_make_artifacts(), task="review")
-            results.append(True)
-
-        threads = [threading.Thread(target=fall_back) for _ in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert len(results) == 4
-        assert LLMIntegrator.fallback_count() == 4

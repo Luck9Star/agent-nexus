@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import logging
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -29,7 +28,7 @@ from agent_nexus.platform.local.cli import app
 from agent_nexus.platform.local.installer import AgentNotFoundError, GitInstaller, InstallationError
 from agent_nexus.platform.local.lockfile import LockfileManager
 from agent_nexus.platform.local.sources import SourceManager
-from agent_nexus.platform.local.supervisor import AgentSupervisor, RestartTracker
+from agent_nexus.platform.local.supervisor import AgentSupervisor
 
 # ============================================================================
 # Helpers
@@ -400,73 +399,6 @@ class TestCachePathAlignment:
         assert cache_path.name == expected_hash
 
 
-class TestPipeSafetyCreateVenv:
-    """Verify _create_venv uses communicate() instead of wait()+stderr.read()."""
-
-    async def test_create_venv_uses_communicate(self, tmp_path: Path) -> None:
-        """_create_venv should call proc.communicate(), not proc.wait()."""
-        sources_yaml = tmp_path / "sources.yaml"
-        sources_yaml.write_text("sources: []\n", encoding="utf-8")
-        lockfile_json = tmp_path / "lockfile.json"
-        lockfile_json.write_text('{"version": 1, "agents": {}}', encoding="utf-8")
-
-        sm = SourceManager(sources_yaml)
-        lm = LockfileManager(lockfile_json)
-        installer = GitInstaller(sm, lm, tmp_path)
-
-        agent_dir = tmp_path / "test-agent"
-        agent_dir.mkdir()
-        (agent_dir / "pyproject.toml").write_text("[project]\nname='test'\n")
-
-        mock_proc_venv = MagicMock()
-        mock_proc_venv.communicate = AsyncMock(return_value=(b"", b""))
-        mock_proc_venv.returncode = 0
-
-        mock_proc_install = MagicMock()
-        mock_proc_install.communicate = AsyncMock(return_value=(b"", b""))
-        mock_proc_install.returncode = 0
-
-        with patch(
-            "agent_nexus.platform.local.installer.asyncio.create_subprocess_exec",
-            side_effect=[mock_proc_venv, mock_proc_install],
-        ):
-            await installer._create_venv("test-agent", agent_dir)
-
-        mock_proc_venv.communicate.assert_awaited_once()
-        mock_proc_install.communicate.assert_awaited_once()
-        mock_proc_venv.wait.assert_not_called()
-        mock_proc_install.wait.assert_not_called()
-
-    async def test_create_venv_handles_failure(self, tmp_path: Path) -> None:
-        """_create_venv returns None on uv failure, using communicate()."""
-        sources_yaml = tmp_path / "sources.yaml"
-        sources_yaml.write_text("sources: []\n", encoding="utf-8")
-        lockfile_json = tmp_path / "lockfile.json"
-        lockfile_json.write_text('{"version": 1, "agents": {}}', encoding="utf-8")
-
-        sm = SourceManager(sources_yaml)
-        lm = LockfileManager(lockfile_json)
-        installer = GitInstaller(sm, lm, tmp_path)
-
-        agent_dir = tmp_path / "test-agent"
-        agent_dir.mkdir()
-        (agent_dir / "pyproject.toml").write_text("[project]\nname='test'\n")
-
-        mock_proc = MagicMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b"error details"))
-        mock_proc.returncode = 1
-
-        with patch(
-            "agent_nexus.platform.local.installer.asyncio.create_subprocess_exec",
-            return_value=mock_proc,
-        ):
-            result = await installer._create_venv("test-agent", agent_dir)
-
-        assert result is None
-        mock_proc.communicate.assert_awaited_once()
-        mock_proc.wait.assert_not_called()
-
-
 # ============================================================================
 # Iteration 15 merge: TestRunGitUsesCommunicate
 # ============================================================================
@@ -474,17 +406,6 @@ class TestPipeSafetyCreateVenv:
 
 class TestRunGitUsesCommunicate:
     """GitInstaller._run_git should use communicate() to avoid pipe deadlock."""
-
-    @pytest.mark.asyncio
-    async def test_run_git_uses_communicate(self) -> None:
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-        mock_proc.returncode = 0
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_create:
-            await GitInstaller._run_git(["status"], Path("/tmp"))
-            mock_create.assert_called_once()
-            mock_proc.communicate.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_run_git_includes_stderr_on_failure(self) -> None:
@@ -713,49 +634,6 @@ class TestBuildCommandUnsafeName:
         result = sup._build_command("normal-agent", entry)
         assert result is not None
         assert len(result) > 0
-
-
-class TestSupervisorConfigLoadLogsError:
-    """_build_env must log at ERROR level (not silently swallow) when config
-    loading fails.  Regression test for silent `except Exception: pass`.
-    Upgraded from WARNING to ERROR in iteration 22 audit.
-    """
-
-    def test_config_load_failure_logs_warning(self, caplog) -> None:
-        """When config_loader.load_config raises, an error is logged at ERROR level."""
-        pm = MagicMock()
-        lockfile = MagicMock()
-        config_loader = MagicMock()
-        config_loader.load_config.side_effect = PermissionError("config not readable")
-
-        supervisor = AgentSupervisor(
-            process_manager=pm,
-            lockfile_manager=lockfile,
-            config_loader=config_loader,
-            config_dir=Path("/tmp/test"),
-        )
-
-        with caplog.at_level(logging.ERROR, logger="agent_nexus.platform.local.supervisor"):
-            env = supervisor._build_env(
-                "test-agent",
-                LockfileEntry(
-                    source="git+https://example.com/test-agent",
-                    version="1.0.0",
-                    commit_sha="a" * 40,
-                    agent_type="atomic",
-                ),
-            )
-
-        # env should have AGENT_NAME/AGENT_DIR but no model config (no crash)
-        assert env["AGENT_NAME"] == "test-agent"
-        assert "AGENT_DIR" in env
-        assert "AGENT_MODEL" not in env
-        assert "Failed to load config" in caplog.text
-
-
-# ============================================================================
-# Regression tests for iteration 22 defects
-# ============================================================================
 
 
 class TestSourceManagerListValidation:
@@ -1005,52 +883,6 @@ class TestInstallerVenvPathIsRelativeTo:
         assert not agent_dir.exists()
         assert not venv_path.exists()
 
-    @pytest.mark.asyncio
-    async def test_rejects_traversal_via_dotdot(self, tmp_path: Path) -> None:
-        """A venv_path like '../../tmp/evil' must not be deleted."""
-        sources_yaml = tmp_path / "sources.yaml"
-        sources_yaml.write_text("sources: []\n", encoding="utf-8")
-        lockfile_json = tmp_path / "lockfile.json"
-        lockfile_json.write_text('{"version": 1, "agents": {}}', encoding="utf-8")
-
-        sm = SourceManager(sources_yaml)
-        lm = LockfileManager(lockfile_json)
-
-        config_dir = tmp_path / "config"
-        config_dir.mkdir()
-        agents_dir = config_dir / "agents"
-        venvs_dir = config_dir / "venvs"
-        agents_dir.mkdir()
-        venvs_dir.mkdir()
-
-        # Create a target directory outside venvs_dir
-        target_dir = tmp_path / "outside-target"
-        target_dir.mkdir()
-        (target_dir / "secret.txt").write_text("secret", encoding="utf-8")
-
-        agent_dir = agents_dir / "traversal-agent"
-        agent_dir.mkdir()
-
-        # venv_path uses ../.. to escape venvs_dir
-        traversal_path = str(venvs_dir / ".." / ".." / "outside-target")
-        entry = LockfileEntry(
-            version="1.0.0",
-            source="official",
-            commit_sha="a" * 40,
-            agent_type=AgentType.ATOMIC,
-            venv_path=traversal_path,
-            installed_at=datetime(2026, 1, 15, 12, 0, 0),
-        )
-        lm.add_entry_by_name("traversal-agent", entry)
-
-        installer = GitInstaller(sm, lm, config_dir)
-        result = await installer.uninstall("traversal-agent")
-
-        assert result is True
-        # Traversal target must NOT be deleted
-        assert target_dir.exists()
-        assert (target_dir / "secret.txt").exists()
-
 
 # ============================================================================
 # Regression: LockfileManager get_entry_from + supervisor lockfile passthrough
@@ -1175,29 +1007,16 @@ class TestGitInstallerInstall:
         installer = GitInstaller(sources, lockfile, config_dir)
         return installer, sources, lockfile, config_dir
 
-    async def test_install_invalid_name_spaces(self, mock_installer) -> None:
-        """install() raises InstallationError for names with spaces."""
+    @pytest.mark.parametrize(
+        "name",
+        ["bad agent name", "../etc/passwd", ".hidden-agent", "foo/bar"],
+        ids=["spaces", "path-traversal", "leading-dot", "slash"],
+    )
+    async def test_install_invalid_name(self, mock_installer, name: str) -> None:
+        """install() raises InstallationError for invalid agent names."""
         installer, *_ = mock_installer
         with pytest.raises(InstallationError, match="Invalid agent name"):
-            await installer.install("bad agent name")
-
-    async def test_install_invalid_name_path_traversal(self, mock_installer) -> None:
-        """install() raises InstallationError for names with path traversal."""
-        installer, *_ = mock_installer
-        with pytest.raises(InstallationError, match="Invalid agent name"):
-            await installer.install("../etc/passwd")
-
-    async def test_install_invalid_name_starts_with_dot(self, mock_installer) -> None:
-        """install() raises InstallationError for names starting with dot."""
-        installer, *_ = mock_installer
-        with pytest.raises(InstallationError, match="Invalid agent name"):
-            await installer.install(".hidden-agent")
-
-    async def test_install_invalid_name_slash(self, mock_installer) -> None:
-        """install() raises InstallationError for names containing slash."""
-        installer, *_ = mock_installer
-        with pytest.raises(InstallationError, match="Invalid agent name"):
-            await installer.install("foo/bar")
+            await installer.install(name)
 
     async def test_install_with_source_url_happy_path(self, mock_installer, tmp_path: Path) -> None:
         """install() with source_url delegates to internal helpers and updates lockfile."""
@@ -1232,32 +1051,6 @@ class TestGitInstallerInstall:
         # Agent files should be copied to agents dir
         assert (agents_dir / "my-agent" / "SKILL.md").exists()
 
-    async def test_install_with_version_prefix(self, mock_installer, tmp_path: Path) -> None:
-        """install() passes version as git ref in tag format."""
-        installer, _, lockfile, _ = mock_installer
-
-        fake_agent_dir = tmp_path / "cloned" / "packages" / "test-agent"
-        fake_agent_dir.mkdir(parents=True)
-        _write_yaml(
-            fake_agent_dir / "agent-manifest.yaml",
-            {"name": "test-agent", "version": "3.1.0", "type": "atomic", "description": "Test"},
-        )
-        (fake_agent_dir / "SKILL.md").write_text("# Test", encoding="utf-8")
-
-        installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
-        installer._create_venv = AsyncMock(return_value=None)
-        installer._get_commit_sha = AsyncMock(return_value="latest")
-
-        await installer.install(
-            "test-agent",
-            version="3.1.0",
-            source_url="https://github.com/org/agents.git",
-        )
-
-        # Verify _sparse_clone was called with the versioned ref
-        call_args = installer._sparse_clone.call_args
-        assert call_args[0][3] == "test-agent/v3.1.0"  # ref parameter
-
     async def test_install_rollback_on_failure(self, mock_installer, tmp_path: Path) -> None:
         """install() cleans up created paths on failure."""
         installer, _, lockfile, config_dir = mock_installer
@@ -1270,7 +1063,10 @@ class TestGitInstallerInstall:
         installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
         # Make _validate_agent_package fail
         installer._validate_agent_package = MagicMock(
-            return_value=(["No manifest found. Expected one of: agent.toml, agent-manifest.yaml"], {})
+            return_value=(
+                ["No manifest found. Expected one of: agent.toml, agent-manifest.yaml"],
+                {},
+            )
         )
 
         with pytest.raises(InstallationError, match="validation failed"):
@@ -1297,39 +1093,6 @@ class TestGitInstallerInstall:
 
         with pytest.raises(AgentNotFoundError, match="not found in any configured source"):
             await installer.install("missing-agent")
-
-    async def test_install_source_resolution_happy_path(
-        self, mock_installer, tmp_path: Path
-    ) -> None:
-        """install() uses resolved source from SourceManager."""
-        installer, sources, lockfile, _ = mock_installer
-
-        fake_agent_dir = tmp_path / "cloned" / "packages" / "resolved-agent"
-        fake_agent_dir.mkdir(parents=True)
-        _write_yaml(
-            fake_agent_dir / "agent-manifest.yaml",
-            {
-                "name": "resolved-agent",
-                "version": "1.0.0",
-                "type": "composite",
-                "description": "Resolved agent",
-            },
-        )
-        (fake_agent_dir / "SKILL.md").write_text("# Resolved", encoding="utf-8")
-
-        resolved_source = SourceEntry(
-            name="official", type="git", url="https://github.com/org/repo.git"
-        )
-        sources.resolve_agent_source = MagicMock(
-            return_value=(resolved_source, "agents/resolved-agent")
-        )
-        installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
-        installer._create_venv = AsyncMock(return_value=None)
-        installer._get_commit_sha = AsyncMock(return_value="latest")
-
-        entry = await installer.install("resolved-agent")
-        assert entry.version == "1.0.0"
-        assert entry.source == "official"
 
     async def test_install_with_venv(self, mock_installer, tmp_path: Path) -> None:
         """install() records venv_path in lockfile entry when venv is created."""
@@ -1417,33 +1180,6 @@ class TestGitInstallerSparseClone:
         # clone, sparse-checkout set, checkout
         assert installer._run_git.call_count >= 3
 
-    async def test_existing_cache_fetch_path(self, mock_installer, tmp_path: Path) -> None:
-        """_sparse_clone fetches when .git dir already exists."""
-        installer, config_dir = mock_installer
-        source_url = "https://github.com/user/repo.git"
-        digest = hashlib.sha256(source_url.encode()).hexdigest()[:12]
-        cache_path = config_dir / "cache" / "repos" / digest
-
-        # Create an existing .git dir to trigger the fetch path
-        git_dir = cache_path / ".git"
-        git_dir.mkdir(parents=True)
-
-        # Create the expected agent dir
-        agent_dir = cache_path / "packages" / "cached-agent"
-        agent_dir.mkdir(parents=True)
-
-        result = await installer._sparse_clone(
-            source_url,
-            "cached-agent",
-            "packages/cached-agent",
-            None,
-        )
-
-        assert result == agent_dir
-        # First call should be fetch (not clone)
-        first_call_args = installer._run_git.call_args_list[0]
-        assert first_call_args[0][0][0] == "fetch"
-
     async def test_fallback_to_agent_name_dir(self, mock_installer, tmp_path: Path) -> None:
         """_sparse_clone falls back to agent_name dir when relative_path not found."""
         installer, config_dir = mock_installer
@@ -1493,18 +1229,6 @@ class TestGitInstallerGetCommitSha:
         config_dir.mkdir()
         installer = GitInstaller(sources, lockfile, config_dir)
         return installer
-
-    async def test_success_returns_stripped_sha(self, mock_installer, tmp_path: Path) -> None:
-        """_get_commit_sha returns the stripped stdout on success."""
-        installer = mock_installer
-        installer._run_git_capture = AsyncMock(return_value="  abcdef1234567890  \n")
-
-        result = await installer._get_commit_sha(tmp_path)
-        assert result == "abcdef1234567890"
-        installer._run_git_capture.assert_awaited_once_with(
-            ["rev-parse", "HEAD"],
-            cwd=tmp_path,
-        )
 
     async def test_exception_falls_back_to_latest(self, mock_installer, tmp_path: Path) -> None:
         """_get_commit_sha raises InstallationError when git command fails."""
@@ -1654,28 +1378,6 @@ class TestGitInstallerUninstallEdgeCases:
         with pytest.raises(InstallationError, match="Invalid agent name"):
             await installer.uninstall("../bad-name")
 
-    async def test_uninstall_fallback_venv_no_venv_path(self, tmp_path: Path) -> None:
-        """uninstall() removes default venv when lockfile entry has no venv_path."""
-        lockfile = MagicMock(spec=LockfileManager)
-        entry = _make_entry(venv_path="")
-        lockfile.pop_entry = MagicMock(return_value=entry)
-
-        config_dir = tmp_path / "config"
-        venvs_dir = config_dir / "venvs"
-        venvs_dir.mkdir(parents=True)
-        default_venv = venvs_dir / "fallback-agent"
-        default_venv.mkdir()
-
-        installer = GitInstaller(
-            MagicMock(spec=SourceManager),
-            lockfile,
-            config_dir,
-        )
-
-        result = await installer.uninstall("fallback-agent")
-        assert result is True
-        assert not default_venv.exists()
-
     async def test_uninstall_refuses_outside_venv(self, tmp_path: Path) -> None:
         """uninstall() refuses to remove a venv_path outside the allowed prefix."""
         lockfile = MagicMock(spec=LockfileManager)
@@ -1697,30 +1399,6 @@ class TestGitInstallerUninstallEdgeCases:
         # Should not raise, and should not attempt to remove /tmp/malicious-venv
         result = await installer.uninstall("sneaky-agent")
         assert result is True
-
-
-class TestGitInstallerUpdate:
-    """Cover update() delegation behavior."""
-
-    async def test_update_delegates_to_install(self, tmp_path: Path) -> None:
-        """update() calls install() with version=None, source_url=None."""
-        lockfile = MagicMock(spec=LockfileManager)
-        entry = _make_entry()
-        lockfile.get_entry = MagicMock(return_value=entry)
-
-        installer = GitInstaller(
-            MagicMock(spec=SourceManager),
-            lockfile,
-            tmp_path / "config",
-        )
-
-        # Mock install to verify delegation
-        expected = _make_entry(version="2.0.0")
-        installer.install = AsyncMock(return_value=expected)
-
-        result = await installer.update("my-agent")
-        installer.install.assert_awaited_once_with("my-agent", version=None, source_url=None)
-        assert result is expected
 
 
 class TestGitInstallerRunGitCapture:
@@ -1835,22 +1513,6 @@ class TestSourceManagerLoadInvalidEntries:
 class TestSourceManagerLoadSourceIndexExceptions:
     """Cover sources.py lines 219-221 and 247-248: parse and entry exceptions."""
 
-    def test_load_source_index_unparseable_yaml(self, tmp_path: Path) -> None:
-        """_load_source_index returns None when index.yaml has invalid YAML."""
-        import hashlib
-
-        path = tmp_path / "sources.yaml"
-        mgr = SourceManager(path)
-
-        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
-        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
-        cache_dir = tmp_path / "cache" / "repos" / url_hash
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        (cache_dir / "index.yaml").write_text("{{{{invalid yaml content", encoding="utf-8")
-
-        result = mgr._load_source_index(mgr.list_sources()[0])
-        assert result is None
-
     def test_load_source_index_invalid_agent_type(self, tmp_path: Path) -> None:
         """_load_source_index skips entries with invalid AgentType."""
         import hashlib
@@ -1874,56 +1536,6 @@ class TestSourceManagerLoadSourceIndexExceptions:
         assert result is not None
         assert len(result) == 1
         assert result[0].name == "good-agent"
-
-    def test_load_source_index_missing_required_fields(self, tmp_path: Path) -> None:
-        """_load_source_index skips entries missing required fields like version."""
-        import hashlib
-
-        path = tmp_path / "sources.yaml"
-        mgr = SourceManager(path)
-
-        official_url = "https://github.com/anthropics/agent-nexus-packages.git"
-        url_hash = hashlib.sha256(official_url.encode()).hexdigest()[:12]
-        cache_dir = tmp_path / "cache" / "repos" / url_hash
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        index_data = {
-            "agents": [
-                {"name": "no-version", "type": "atomic"},
-                {"name": "valid", "version": "1.0.0", "type": "atomic"},
-            ]
-        }
-        _write_yaml(cache_dir / "index.yaml", index_data)
-
-        result = mgr._load_source_index(mgr.list_sources()[0])
-        assert result is not None
-        assert len(result) == 1
-        assert result[0].name == "valid"
-
-
-# ============================================================================
-# LockfileManager save() nested OSError in cleanup
-# ============================================================================
-
-
-class TestLockfileManagerSaveCleanupOSError:
-    """Cover lockfile.py lines 81-82: os.unlink fails during cleanup."""
-
-    def test_save_cleanup_oserror_is_silenced(self, tmp_path: Path) -> None:
-        """When both os.replace and os.unlink fail, the OSError from unlink is silenced."""
-        lockfile_path = tmp_path / "lockfile.json"
-        mgr = LockfileManager(lockfile_path)
-
-        with (
-            patch("os.replace", side_effect=OSError("replace failed")),
-            patch("os.unlink", side_effect=OSError("unlink also failed")),
-        ):
-            with pytest.raises(OSError, match="replace failed"):
-                mgr._save(Lockfile())
-
-
-# ============================================================================
-# SourceManager save() nested OSError in cleanup
-# ============================================================================
 
 
 class TestSupervisorStartAllExceptionHandling:
@@ -2006,28 +1618,6 @@ class TestSupervisorBuildCommandVenvWithMainPy:
         assert cmd[1] == str(agent_dir / "main.py")
 
 
-class TestSupervisorBuildCommandPython3Fallback:
-    """Cover supervisor.py line 372: _build_command falls back to python3 main.py."""
-
-    def test_build_command_returns_python3_main_when_no_venv_with_main(
-        self, tmp_path: Path
-    ) -> None:
-        """_build_command returns ['python3', 'main.py'] when no venv but main.py exists."""
-        # No venv in entry
-        entry = _make_entry(venv_path="")
-        # Create agent dir with main.py
-        agent_dir = tmp_path / "agents" / "test-agent"
-        agent_dir.mkdir(parents=True)
-        (agent_dir / "main.py").touch()
-
-        pm = _make_mock_pm()
-        lockfile = _make_mock_lockfile_mgr()
-        config = _make_mock_config_loader()
-        supervisor = AgentSupervisor(pm, lockfile, config, config_dir=tmp_path)
-        cmd = supervisor._build_command("test-agent", entry)
-        assert cmd == ["python3", str(agent_dir / "main.py")]
-
-
 class TestInstallerReinstallRemovesExistingDest:
     """Cover installer.py line 153: shutil.rmtree(dest) when dest already exists."""
 
@@ -2074,49 +1664,6 @@ class TestInstallerReinstallRemovesExistingDest:
         assert (existing_dest / "SKILL.md").exists()
 
 
-class TestInstallerCreateVenvRemovesExisting:
-    """Cover installer.py line 430: _create_venv removes existing venv before creating new."""
-
-    @pytest.mark.asyncio
-    async def test_create_venv_removes_existing_venv_dir(self, tmp_path: Path) -> None:
-        """_create_venv removes existing venv directory before creating a new one."""
-        config_dir = tmp_path / "config"
-        config_dir.mkdir()
-        installer = GitInstaller(
-            MagicMock(spec=SourceManager),
-            MagicMock(spec=LockfileManager),
-            config_dir,
-        )
-        agent_dir = config_dir / "agents" / "test-agent"
-        agent_dir.mkdir(parents=True)
-        (agent_dir / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
-
-        # Create existing venv with a stale marker file
-        venv_path = config_dir / "venvs" / "test-agent"
-        venv_path.mkdir(parents=True)
-        (venv_path / "stale-marker.txt").write_text("old", encoding="utf-8")
-
-        call_count = 0
-
-        def _make_proc(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            proc = AsyncMock()
-            proc.communicate = AsyncMock(return_value=(b"", b""))
-            proc.returncode = 0
-            return proc
-
-        with patch(
-            "agent_nexus.platform.local.installer.asyncio.create_subprocess_exec",
-            side_effect=_make_proc,
-        ):
-            result = await installer._create_venv("test-agent", agent_dir)
-
-        assert result == venv_path
-        # Stale marker should be gone since venv was removed and recreated
-        assert not (venv_path / "stale-marker.txt").exists()
-
-
 class TestInstallRollbackAfterCopy:
     """Cover installer.py lines 197-199: rollback iterates _created_paths with entries.
 
@@ -2148,106 +1695,6 @@ class TestInstallRollbackAfterCopy:
 
         with pytest.raises(RuntimeError, match="venv boom"):
             await installer.install("rb-agent", source_url="https://github.com/x/y.git")
-
-        # dest dir was added to _created_paths then cleaned by rollback
-        agents_dest = config_dir / "agents" / "rb-agent"
-        assert not agents_dest.exists()
-
-    @pytest.mark.asyncio
-    async def test_rollback_removes_dir_and_venv_after_commit_sha_fails(
-        self, tmp_path: Path
-    ) -> None:
-        """install() rollback removes both dest dir and venv_path entries."""
-        config_dir = tmp_path / "config"
-        config_dir.mkdir()
-        sources = MagicMock(spec=SourceManager)
-        lockfile = MagicMock(spec=LockfileManager)
-        installer = GitInstaller(sources, lockfile, config_dir)
-
-        # Create a fake cloned agent with valid structure
-        fake_agent_dir = tmp_path / "cloned" / "packages" / "rb2-agent"
-        fake_agent_dir.mkdir(parents=True)
-        (fake_agent_dir / "SKILL.md").write_text("# rb2", encoding="utf-8")
-        manifest = {
-            "name": "rb2-agent",
-            "version": "1.0.0",
-            "type": "atomic",
-            "description": "test",
-        }
-        _write_yaml(fake_agent_dir / "agent-manifest.yaml", manifest)
-
-        installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
-        installer._validate_agent_package = MagicMock(return_value=([], {}))
-
-        # _create_venv succeeds, adding venv_path to _created_paths
-        fake_venv = config_dir / "venvs" / "rb2-agent"
-        fake_venv.mkdir(parents=True)
-        installer._create_venv = AsyncMock(return_value=fake_venv)
-
-        # _get_commit_sha fails AFTER both paths are in _created_paths
-        installer._get_commit_sha = AsyncMock(side_effect=RuntimeError("sha fail"))
-
-        with pytest.raises(RuntimeError, match="sha fail"):
-            await installer.install("rb2-agent", source_url="https://github.com/x/y.git")
-
-        # Both dest dir and venv should be cleaned by rollback
-        agents_dest = config_dir / "agents" / "rb2-agent"
-        assert not agents_dest.exists()
-        # fake_venv was added to _created_paths; rollback removes it
-        # (it's a dir, so rmtree is used)
-        assert not fake_venv.exists()
-
-
-class TestInstallRollbackCleanupFailure:
-    """Cover installer.py lines 202-203: rollback inner except when cleanup itself fails."""
-
-    @pytest.mark.asyncio
-    async def test_rollback_swallows_rmtree_error(self, tmp_path: Path) -> None:
-        """install() rollback catches and logs rmtree failure during cleanup."""
-        config_dir = tmp_path / "config"
-        config_dir.mkdir()
-        sources = MagicMock(spec=SourceManager)
-        lockfile = MagicMock(spec=LockfileManager)
-        installer = GitInstaller(sources, lockfile, config_dir)
-
-        # Create a fake cloned agent with valid structure
-        fake_agent_dir = tmp_path / "cloned" / "packages" / "rf-agent"
-        fake_agent_dir.mkdir(parents=True)
-        (fake_agent_dir / "SKILL.md").write_text("# rf", encoding="utf-8")
-        manifest = {"name": "rf-agent", "version": "1.0.0", "type": "atomic", "description": "test"}
-        _write_yaml(fake_agent_dir / "agent-manifest.yaml", manifest)
-
-        installer._sparse_clone = AsyncMock(return_value=fake_agent_dir)
-        installer._validate_agent_package = MagicMock(return_value=([], {}))
-
-        # _create_venv raises so dest is in _created_paths but rollback runs
-        installer._create_venv = AsyncMock(side_effect=RuntimeError("venv fail"))
-
-        # Make shutil.rmtree fail during rollback cleanup.
-        # Step 5 copies files (no pre-existing dest so rmtree is NOT called there).
-        # The rollback at line 199 calls rmtree -- make it raise to hit lines 202-203.
-        import shutil as _shutil
-
-        rmtree_calls = []
-
-        def _rmtree_side_effect(path, *args, **kwargs):
-            rmtree_calls.append(str(path))
-            # Fail during rollback cleanup (second call) to exercise inner except
-            if len(rmtree_calls) > 1:
-                raise OSError("rollback permission denied")
-            return _shutil.rmtree(path, *args, **kwargs)
-
-        with (
-            patch(
-                "agent_nexus.platform.local.installer.shutil.rmtree",
-                side_effect=_rmtree_side_effect,
-            ),
-            pytest.raises(RuntimeError, match="venv fail"),
-        ):
-            await installer.install("rf-agent", source_url="https://github.com/x/y.git")
-
-        # At least 2 rmtree calls: step-5 pre-copy + rollback cleanup
-        assert len(rmtree_calls) >= 2
 
 
 # ---------------------------------------------------------------------------

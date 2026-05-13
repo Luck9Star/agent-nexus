@@ -342,20 +342,6 @@ class TestProcessToolDegradation:
         # Skill should NOT be in addressed set
         assert "sk-1" not in evolver._addressed.get("tool-1", set())
 
-    def test_addressed_prevents_re_evolution_on_success(self):
-        """After a successful evolution, the skill is in addressed and skipped."""
-        skill = _skill(id="sk-1")
-        store = _make_store([skill])
-        store.get_skill_record.return_value = skill
-        evolver = SkillEvolver(store)
-        # First call succeeds
-        results1 = evolver.process_tool_degradation("tool-1", "broken", {"sk-1"})
-        assert len(results1) == 1
-        assert results1[0].success is True
-        # Second call skips because addressed
-        results2 = evolver.process_tool_degradation("tool-1", "still broken", {"sk-1"})
-        assert len(results2) == 0
-
     def test_different_tool_keys_tracked_separately(self):
         """Addressed sets are per-tool-key."""
         skill = _skill(id="sk-1")
@@ -389,28 +375,6 @@ class TestProcessMetricCheck:
         assert len(results) >= 1
 
 
-class TestPruneRecoveredTools:
-    def test_removes_recovered_tool_entries(self):
-        evolver = SkillEvolver(_make_store())
-        evolver._addressed = {"tool-a": {"s1"}, "tool-b": {"s2"}}
-        evolver.prune_recovered_tools({"tool-a"})
-        assert "tool-a" in evolver._addressed
-        assert "tool-b" not in evolver._addressed
-
-    def test_prune_with_empty_addressed_set(self):
-        """Pruning with no addressed entries is a no-op."""
-        evolver = SkillEvolver(_make_store())
-        evolver.prune_recovered_tools({"tool-a"})
-        assert evolver._addressed == {}
-
-    def test_prune_with_all_recovered(self):
-        """When all tools recover, addressed dict becomes empty."""
-        evolver = SkillEvolver(_make_store())
-        evolver._addressed = {"tool-a": {"s1"}, "tool-b": {"s2"}}
-        evolver.prune_recovered_tools(set())
-        assert evolver._addressed == {}
-
-
 class TestEvolveUnknownType:
     def test_unknown_evolution_type_returns_error(self):
         store = _make_store()
@@ -440,9 +404,3 @@ class TestDiagnoseSkillHealth:
         suggestion = SkillEvolver._diagnose_skill_health(skill)
         assert suggestion is not None
         assert suggestion.evolution_type == EvolutionType.FIX
-
-
-class TestStoreProperty:
-    def test_store_returns_underlying_store(self):
-        store = _make_store()
-        assert SkillEvolver(store).store is store

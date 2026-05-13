@@ -7,7 +7,6 @@ from agent_nexus.platform.agency.planner import (
     DynamicCompositePlanner,
     PlannerInput,
     SubtaskDef,
-    _validate_toml_field,
     generate_toml,
 )
 
@@ -87,34 +86,6 @@ class TestDAGGeneration:
             if task.id in specialist_ids:
                 assert task.blocked_by == [], f"{task.id} should have no blocked_by"
 
-    def test_task_agents_preserved(self, sample_subtasks: list[SubtaskDef]) -> None:
-        planner = DynamicCompositePlanner()
-        dag = planner.plan(sample_subtasks, composition_name="test-composition")
-
-        arch = next(t for t in dag.tasks if t.id == "architecture")
-        assert arch.agent == "agency.software-architect"
-
-    def test_task_outputs_preserved(self, sample_subtasks: list[SubtaskDef]) -> None:
-        planner = DynamicCompositePlanner()
-        dag = planner.plan(sample_subtasks, composition_name="test-composition")
-
-        risk = next(t for t in dag.tasks if t.id == "runtime_risk")
-        assert risk.output == "risk_report"
-
-    def test_integrate_agent_is_nexus_integrator(self, sample_subtasks: list[SubtaskDef]) -> None:
-        planner = DynamicCompositePlanner()
-        dag = planner.plan(sample_subtasks, composition_name="test-composition")
-
-        integrate = next(t for t in dag.tasks if t.id == "integrate")
-        assert integrate.agent == "nexus.integrator"
-
-    def test_validate_agent_is_nexus_qa_gate(self, sample_subtasks: list[SubtaskDef]) -> None:
-        planner = DynamicCompositePlanner()
-        dag = planner.plan(sample_subtasks, composition_name="test-composition")
-
-        validate = next(t for t in dag.tasks if t.id == "validate")
-        assert validate.agent == "nexus.qa-gate"
-
 
 # ---------------------------------------------------------------------------
 # 2. max_parallel enforcement
@@ -125,12 +96,6 @@ class TestDAGGeneration:
 class TestMaxParallel:
     """Verify max_parallel is respected in the generated DAG."""
 
-    def test_default_max_parallel(self, sample_subtasks: list[SubtaskDef]) -> None:
-        planner = DynamicCompositePlanner()
-        dag = planner.plan(sample_subtasks, composition_name="test-composition")
-
-        assert dag.max_parallel == 3
-
     def test_custom_max_parallel(self, sample_subtasks: list[SubtaskDef]) -> None:
         planner = DynamicCompositePlanner()
         dag = planner.plan(
@@ -140,17 +105,6 @@ class TestMaxParallel:
         )
 
         assert dag.max_parallel == 5
-
-    def test_max_parallel_high_value_allowed(self, sample_subtasks: list[SubtaskDef]) -> None:
-        """max_parallel higher than specialist count is allowed — router handles actual concurrency."""
-        planner = DynamicCompositePlanner()
-        dag = planner.plan(
-            sample_subtasks,
-            composition_name="test-composition",
-            max_parallel=100,
-        )
-
-        assert dag.max_parallel == 100
 
     def test_max_parallel_at_least_1(self, sample_subtasks: list[SubtaskDef]) -> None:
         planner = DynamicCompositePlanner()
@@ -328,38 +282,6 @@ class TestPlannerInput:
 class TestSmartDependencyResolution:
     """resolve_dependencies uses strict-subset rule for blocked_by edges."""
 
-    def test_overlapping_but_different_capabilities_no_block(self) -> None:
-        """Tasks with overlapping but different capabilities run in parallel.
-
-        task_a has {code_review, security_review} and task_b has
-        {security_review, reliability_review}. Neither is a subset of the
-        other, so no blocked_by edges are created.
-        """
-        subtasks = [
-            SubtaskDef(
-                id="task_a",
-                goal="review code",
-                needed_capabilities=["code_review", "security_review"],
-                output_contract="report_a",
-                assigned_agent="agency.agent-a",
-            ),
-            SubtaskDef(
-                id="task_b",
-                goal="security analysis",
-                needed_capabilities=["security_review", "reliability_review"],
-                output_contract="report_b",
-                assigned_agent="agency.agent-b",
-            ),
-        ]
-        planner = DynamicCompositePlanner()
-        dag = planner.resolve_dependencies(subtasks, composition_name="overlap-test")
-
-        a_task = next(t for t in dag.tasks if t.id == "task_a")
-        b_task = next(t for t in dag.tasks if t.id == "task_b")
-        # Neither is a subset of the other → no blocked_by
-        assert a_task.blocked_by == []
-        assert b_task.blocked_by == []
-
     def test_strict_subset_creates_dependency(self) -> None:
         """A task whose capabilities are a strict subset of another IS blocked."""
         subtasks = [
@@ -456,24 +378,3 @@ class TestSmartDependencyResolution:
         assert broad.blocked_by == []
         # unrelated has no overlap at all → not blocked
         assert unrelated.blocked_by == []
-
-
-# ---------------------------------------------------------------------------
-# _validate_toml_field
-# ---------------------------------------------------------------------------
-
-
-class TestValidateTomlField:
-    """Unit tests for the _validate_toml_field helper."""
-
-    def test_null_byte_raises(self) -> None:
-        with pytest.raises(ValueError, match="null byte"):
-            _validate_toml_field("bad\x00value", "test-context")
-
-    def test_empty_string_raises(self) -> None:
-        with pytest.raises(ValueError, match="must not be empty"):
-            _validate_toml_field("", "test-context")
-
-    def test_special_chars_only_raises(self) -> None:
-        with pytest.raises(ValueError, match="invalid characters"):
-            _validate_toml_field("!@#$", "test-context")

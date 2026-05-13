@@ -56,7 +56,7 @@ agent-nexus install security-scanner
 ## 6. Run Your First Agent
 
 ```bash
-agent-nexus run security-scanner --file src/main.py
+agent-nexus run security-scanner --mode mcp
 ```
 
 ## Next Steps

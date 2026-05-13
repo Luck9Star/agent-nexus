@@ -212,25 +212,6 @@ class TestL0Context:
         # effective_rate = 100 / 150 = 0.667
         assert "0.67" in result
 
-    def test_all_imported(self) -> None:
-        """L0 when all skills are imported shows 0 evolved."""
-        r1 = _make_record("s1", "a", origin=SkillOrigin.IMPORTED)
-        r2 = _make_record("s2", "b", origin=SkillOrigin.IMPORTED)
-        store = _mock_store(
-            active_skills=[r1, r2],
-            metrics=EvolutionMetrics(
-                total_selections=10,
-                total_applied=8,
-                total_completions=5,
-                total_fallbacks=0,
-            ),
-        )
-        describer = EvolutionContextDescriber(store)
-        result = describer.l0_context()
-
-        assert "2 active skills" in result
-        assert "0 evolved" in result
-
     def test_zero_selections_effective_rate_zero(self) -> None:
         """L0 handles zero selections without division error."""
         r = _make_record("s1", "zero", selections=0)

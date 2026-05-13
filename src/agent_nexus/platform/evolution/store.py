@@ -96,6 +96,8 @@ class EvolutionStore:
             self.close()
 
     def _init_db(self) -> None:
+        if not self._is_memory and self._db_path.exists():
+            self._check_integrity()
         with self._conn() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
@@ -103,6 +105,25 @@ class EvolutionStore:
                 stmt = stmt.strip()
                 if stmt:
                     conn.execute(stmt)
+
+    def _check_integrity(self) -> None:
+        """Check SQLite integrity; backup and remove corrupt files."""
+        import shutil
+
+        try:
+            conn = sqlite3.connect(str(self._db_path))
+            ok = conn.execute("PRAGMA integrity_check").fetchone()
+            conn.close()
+        except sqlite3.DatabaseError:
+            ok = None
+        if not ok or ok[0] != "ok":
+            backup = self._db_path.with_suffix(".corrupt")
+            logger.warning(
+                "Corrupt SQLite database %s — backing up to %s and recreating",
+                self._db_path,
+                backup,
+            )
+            shutil.move(str(self._db_path), str(backup))
 
     @contextmanager
     def _conn(self, *, immediate: bool = False) -> Generator[sqlite3.Connection, None, None]:

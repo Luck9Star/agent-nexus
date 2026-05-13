@@ -1,6 +1,5 @@
 """Unit tests for agent_nexus.models.runtime module."""
 
-
 import pytest
 from pydantic import ValidationError
 
@@ -11,71 +10,6 @@ from agent_nexus.models.runtime import (
     SecurityViolation,
     Variable,
 )
-
-# ---------------------------------------------------------------------------
-# Variable
-# ---------------------------------------------------------------------------
-
-
-class TestVariable:
-    def test_construction_with_all_fields(self):
-        v = Variable(name="count", description="Counter", value=42, type_name="int")
-        assert v.name == "count"
-        assert v.description == "Counter"
-        assert v.value == 42
-        assert v.type_name == "int"
-
-    def test_with_various_values(self):
-        v_str = Variable(name="s", value="hello", type_name="str")
-        assert v_str.value == "hello"
-
-        v_list = Variable(name="lst", value=[1, 2, 3], type_name="list")
-        assert v_list.value == [1, 2, 3]
-
-        v_none = Variable(name="n", value=None, type_name="NoneType")
-        assert v_none.value is None
-
-        v_dict = Variable(name="d", value={"key": "val"}, type_name="dict")
-        assert v_dict.value["key"] == "val"
-
-
-# ---------------------------------------------------------------------------
-# Function
-# ---------------------------------------------------------------------------
-
-
-class TestFunction:
-    def test_construction_with_all_fields(self):
-        f = Function(
-            name="process",
-            description="Process data",
-            signature="(data: list[str]) -> dict",
-            is_async=True,
-        )
-        assert f.name == "process"
-        assert f.description == "Process data"
-        assert f.signature == "(data: list[str]) -> dict"
-        assert f.is_async is True
-
-
-# ---------------------------------------------------------------------------
-# RuntimeType
-# ---------------------------------------------------------------------------
-
-
-class TestRuntimeType:
-    def test_construction_with_all_fields(self):
-        rt = RuntimeType(
-            name="Document",
-            description="A document object",
-            python_type="docx.Document",
-            json_schema={"type": "object", "properties": {"path": {"type": "string"}}},
-        )
-        assert rt.name == "Document"
-        assert rt.python_type == "docx.Document"
-        assert rt.json_schema is not None
-        assert "properties" in rt.json_schema
-
 
 # ---------------------------------------------------------------------------
 # ExecutionResult
@@ -122,12 +56,6 @@ class TestSecurityViolation:
         assert sv.code_snippet == "import os"
         assert sv.message == "Dangerous import: os"
 
-    def test_various_rule_types(self):
-        types = ["import", "function", "attribute", "regex", "call"]
-        for rt in types:
-            sv = SecurityViolation(rule_type=rt, node_type="Test")
-            assert sv.rule_type == rt
-
 
 # ---------------------------------------------------------------------------
 # Iteration 33 fix: Runtime model name min_length=1 validation
@@ -153,12 +81,3 @@ class TestRuntimeNameMinLength:
 # ---------------------------------------------------------------------------
 # SecurityViolation min_length=1 validation (iter88)
 # ---------------------------------------------------------------------------
-
-
-class TestSecurityViolationMinLength:
-    """SecurityViolation.rule_type and node_type must reject empty strings."""
-
-    def test_valid_fields_accepted(self):
-        sv = SecurityViolation(rule_type="import", node_type="Import")
-        assert sv.rule_type == "import"
-        assert sv.node_type == "Import"

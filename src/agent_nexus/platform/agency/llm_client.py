@@ -531,6 +531,8 @@ class LLMClient:
                 )
 
                 response = litellm.completion(**kwargs)
+                if not response.choices:
+                    raise ValueError(f"LLM returned empty choices for model={kwargs['model']}")
                 text = response.choices[0].message.content or ""  # type: ignore[union-attr]
                 actual_model = response.model or self._model_name
 

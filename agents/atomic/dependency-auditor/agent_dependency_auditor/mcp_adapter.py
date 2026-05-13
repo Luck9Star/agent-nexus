@@ -6,6 +6,8 @@ Provides one MCP tool:
 
 from __future__ import annotations
 
+import json
+
 from agent_dependency_auditor.tools.audit_dependencies import (
     audit_dependencies as _audit,
 )
@@ -34,13 +36,21 @@ def create_mcp_server() -> object:
     mcp = FastMCP("dependency-auditor")
 
     @mcp.tool()
-    def audit_dependencies(source: str | dict, fmt: str = "auto") -> dict:
+    def audit_dependencies(source: str, fmt: str = "auto") -> dict:
         """Parse dependency files and check for known CVEs.
 
-        Accepts dict {package: version} or string content from
-        requirements.txt / pyproject.toml. Returns structured audit report.
+        Accepts a JSON string (will be parsed to dict {package: version})
+        or plain string content from requirements.txt / pyproject.toml.
+        Returns structured audit report.
         """
-        result = _audit(source, fmt)
+        # MCP inputSchema: str avoids ambiguous anyOf.
+        # Try JSON parse first; fall back to raw string.
+        parsed_source: str | dict
+        try:
+            parsed_source = json.loads(source)
+        except (json.JSONDecodeError, TypeError):
+            parsed_source = source
+        result = _audit(parsed_source, fmt)
         return result.model_dump()
 
     return mcp

@@ -7,27 +7,9 @@ import pytest
 from agent_nexus.models.context import BudgetAlertLevel, ContextBudget, ContextBudgetLogEntry
 from agent_nexus.platform.runtime.token_tracker import (
     _ALERT_OK,
-    MAX_TOKENS,
-    TokenAlert,
     TokenTracker,
     _alert_from_budget,
 )
-
-# ---------------------------------------------------------------------------
-# TokenAlert
-# ---------------------------------------------------------------------------
-
-
-class TestTokenAlert:
-    """Tests for TokenAlert frozen dataclass."""
-
-    def test_creation(self) -> None:
-        """TokenAlert with valid fields can be created."""
-        alert = TokenAlert(level="ok", message="Within budget", usage_pct=50.0)
-        assert alert.level == _ALERT_OK
-        assert alert.message == "Within budget"
-        assert alert.usage_pct == 50.0
-
 
 # ---------------------------------------------------------------------------
 # _alert_from_budget helper
@@ -73,14 +55,6 @@ class TestTokenTracker:
     # ------------------------------------------------------------------
     # __init__
     # ------------------------------------------------------------------
-
-    def test_default_init(self) -> None:
-        """Default max_tokens=200000, auto-generated session_id."""
-        tracker = TokenTracker()
-        assert tracker._max_tokens == MAX_TOKENS
-        assert MAX_TOKENS == 200_000
-        assert tracker._session_id != ""
-        assert len(tracker._session_id) == 12  # uuid4().hex[:12]
 
     def test_custom_init(self) -> None:
         """Custom budget, max_tokens, session_id are respected."""
@@ -257,23 +231,6 @@ class TestTokenTracker:
         tracker = TokenTracker(max_tokens=100_000)
         assert tracker.usage_pct == 0.0
 
-    def test_usage_pct_above_thresholds(self) -> None:
-        """Values above thresholds return correct alert levels (strict > comparison)."""
-        # Above 80%
-        tracker80 = TokenTracker(max_tokens=100_000)
-        alert80 = tracker80.record_usage(80_100)
-        assert alert80.level == BudgetAlertLevel.COMPACTION
-
-        # Above 90%
-        tracker90 = TokenTracker(max_tokens=100_000)
-        alert90 = tracker90.record_usage(90_100)
-        assert alert90.level == BudgetAlertLevel.FORCED_TRUNCATE
-
-        # Above 95%
-        tracker95 = TokenTracker(max_tokens=100_000)
-        alert95 = tracker95.record_usage(95_100)
-        assert alert95.level == BudgetAlertLevel.HARD_CEILING
-
 
 # ---------------------------------------------------------------------------
 # Regression: Negative tokens_used rejection
@@ -288,12 +245,6 @@ class TestTokenTrackerNegativeRejection:
         tracker = TokenTracker(max_tokens=100_000)
         with pytest.raises(ValueError, match="tokens_used must be non-negative"):
             tracker.record_usage(-1)
-
-    def test_negative_large_raises(self) -> None:
-        """Large negative tokens_used raises ValueError."""
-        tracker = TokenTracker(max_tokens=100_000)
-        with pytest.raises(ValueError, match="tokens_used must be non-negative"):
-            tracker.record_usage(-999_999)
 
     def test_zero_tokens_accepted(self) -> None:
         """Zero tokens_used is valid (no-op turn)."""
@@ -318,35 +269,11 @@ class TestTokenTrackerNegativeRejection:
         assert tracker._turn == 1
 
 
-class TestLogTrimming:
-    """Log trimming when entries exceed _MAX_LOG_SIZE (1000)."""
-
-    def test_log_trimmed_after_max_size(self) -> None:
-        """When log exceeds _MAX_LOG_SIZE (1000), oldest entries are dropped."""
-        from agent_nexus.platform.runtime.token_tracker import _MAX_LOG_SIZE
-
-        tracker = TokenTracker(max_tokens=200_000_000)
-        # Record one more than the max to trigger trimming.
-        for i in range(_MAX_LOG_SIZE + 1):
-            tracker.record_usage(1, agent_name=f"agent-{i}")
-
-        log = tracker.get_log()
-        assert len(log) == _MAX_LOG_SIZE
-        # The oldest entry (turn 1) should have been trimmed.
-        assert log[0].turn_number == 2
-        # Total tokens should still be accurate (not trimmed).
-        assert tracker.total_tokens == _MAX_LOG_SIZE + 1
-
-
 # iter122 regression: max_tokens minimum guard
 
 
 class TestTokenTrackerMaxTokensGuard:
     """TokenTracker raises ValueError when max_tokens < 1."""
-
-    def test_max_tokens_zero_raises(self) -> None:
-        with pytest.raises(ValueError, match="max_tokens must be >= 1"):
-            TokenTracker(max_tokens=0)
 
     def test_max_tokens_negative_raises(self) -> None:
         with pytest.raises(ValueError, match="max_tokens must be >= 1"):

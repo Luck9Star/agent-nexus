@@ -1,8 +1,25 @@
 # Agency-Agents Integration Code Review Report
 
-**Date**: 2026-04-25
+**Date**: 2026-04-25 (Updated: 2026-05-13)
 **Scope**: Phases A-F implementation — schemas, allowlist, importer, generic-expert-agent, selector, planner, integrator, QA gate
 **Reviewer**: harness-dev-agent (automated review)
+
+> **Note (2026-05-13)**: 本报告覆盖 Agency Pipeline 初始实现（Phases A-F）。后续迭代新增了以下子模块，不在本报告范围内：
+> - `cli_backend/` — CLI 后端集成（session store + command routing）
+> - `dag_dispatcher.py` — 并行 DAG 调度引擎
+> - `llm_planner.py` — LLM 驱动的任务分解（替代规则 planner）
+> - `executor.py` — per-expert LLM 调用层（LLMExecutor，含 reasoning protocol 支持）
+> - `llm_integrator.py` — 语义合成器（替代规则 integrator）
+> - `llm_qa_gate.py` — LLM 质量评估门禁
+> - `token_counter.py` — CJK 感知的 Token 计数
+> - `llm_client.py` — 统一 LLM 客户端（litellm + streaming）
+> - `model_capability.py` — ModelCapabilityRegistry（17 模型能力数据）
+> - `context_provider.py` — 上下文提供者（TokenBudget 感知）
+> - `hooks.py` — Agency 生命周期钩子
+> - `json_parse.py` — LLM 输出 JSON 解析（容错提取）
+> - `prompt_loader.py` — 外部 prompt 模板加载器
+> - `reflector.py` — 自反思模块（输出质量自检）
+> 这些模块的测试覆盖在 `tests/unit/` 和 `tests/integration/test_agency_*.py` 中。
 
 ---
 

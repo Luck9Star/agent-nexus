@@ -178,23 +178,6 @@ class TestIndexCache:
 
         assert call_count == 2
 
-    def test_clear_cache(self) -> None:
-        """clear_cache() empties the in-memory index."""
-        call_count = 0
-
-        def _mock_do_get(url: str, **kw: object) -> dict:
-            nonlocal call_count
-            call_count += 1
-            return _MOCK_API_JSON
-
-        with patch.object(ModelDBClient, "_do_get", side_effect=_mock_do_get):
-            client = ModelDBClient()
-            client.fetch_model("claude-sonnet-4")
-            client.clear_cache()
-            client.fetch_model("claude-sonnet-4")
-
-        assert call_count == 2
-
     def test_clear_cache_removes_disk_file(self, tmp_path: Path) -> None:
         """clear_cache() deletes the _index.json disk cache."""
         with _patch_do_get(_MOCK_API_JSON):

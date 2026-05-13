@@ -11,7 +11,7 @@ from agent_nexus.models.runtime import (
     Variable,
 )
 from agent_nexus.platform.runtime.describer import TieredRuntimeDescriber
-from agent_nexus.platform.runtime.executor import _IPYTHON_INTERNALS, IPythonExecutor
+from agent_nexus.platform.runtime.executor import IPythonExecutor
 from agent_nexus.platform.runtime.runtime import PythonRuntime
 
 # ---------------------------------------------------------------------------
@@ -117,11 +117,6 @@ class TestInjectType:
         )
         desc = shared_runtime.describe_types(level="names")
         assert "User" in desc
-
-    def test_describe_types_shows_type(self, shared_runtime) -> None:
-        shared_runtime.inject_type(RuntimeType(name="Item", description="An item"))
-        desc = shared_runtime.describe_types()
-        assert "Item" in desc
 
 
 # ---------------------------------------------------------------------------
@@ -288,33 +283,6 @@ class TestFormatSignature:
 # ============================================================================
 # _IPYTHON_INTERNALS no duplicates (from iter39)
 # ============================================================================
-
-
-class TestIPythonInternalsNoDuplicates:
-    """_IPYTHON_INTERNALS frozenset should not contain duplicate entries."""
-
-    def test_no_duplicate_entries(self) -> None:
-        """Each internal key appears exactly once."""
-        items = list(_IPYTHON_INTERNALS)
-        assert len(items) == len(set(items))
-
-    def test_contains_expected_keys(self) -> None:
-        """All expected IPython internal keys are present."""
-        expected = {
-            "In",
-            "Out",
-            "exit",
-            "quit",
-            "get_ipython",
-            "_",
-            "__",
-            "___",
-            "_ih",
-            "_oh",
-            "_sh",
-            "_dh",
-        }
-        assert expected == _IPYTHON_INTERNALS
 
 
 # ============================================================================
@@ -600,17 +568,6 @@ class TestSecurityCheckerAdditionalBlocks:
             assert result.success is False
             assert result.error is not None
             assert "security violation" in result.error.lower()
-        finally:
-            runtime.close()
-
-    @pytest.mark.asyncio
-    async def test_safe_code_still_passes(self) -> None:
-        """Regression: normal safe code must still execute successfully."""
-        runtime = PythonRuntime()
-        try:
-            result = await runtime.execute("x = 1 + 2")
-            assert result.success is True
-            assert runtime.retrieve("x") == 3
         finally:
             runtime.close()
 

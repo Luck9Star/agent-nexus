@@ -62,9 +62,7 @@ class TestConfigureSecurityHotReload:
         assert client is not None
         assert client.client_id == "anonymous"
 
-    async def test_add_authenticator_blocks_anonymous(
-        self, gateway: MCPGateway
-    ) -> None:
+    async def test_add_authenticator_blocks_anonymous(self, gateway: MCPGateway) -> None:
         """After configure_security(authenticator), anonymous access is denied."""
         auth = _make_authenticator("secret-1")
         gateway.configure_security(authenticator=auth)
@@ -74,9 +72,7 @@ class TestConfigureSecurityHotReload:
         assert error is not None
         assert "authentication required" in error
 
-    async def test_add_authenticator_accepts_valid_key(
-        self, gateway: MCPGateway
-    ) -> None:
+    async def test_add_authenticator_accepts_valid_key(self, gateway: MCPGateway) -> None:
         """After configure_security(authenticator), valid key authenticates."""
         auth = _make_authenticator("secret-1")
         gateway.configure_security(authenticator=auth)
@@ -86,9 +82,7 @@ class TestConfigureSecurityHotReload:
         assert client is not None
         assert client.client_id.startswith("key-")
 
-    async def test_swap_authenticator_immediately(
-        self, gateway: MCPGateway
-    ) -> None:
+    async def test_swap_authenticator_immediately(self, gateway: MCPGateway) -> None:
         """Second configure_security() call replaces the authenticator instantly."""
         auth_v1 = _make_authenticator("old-key")
         gateway.configure_security(authenticator=auth_v1)
@@ -132,9 +126,7 @@ class TestConfigureSecurityHotReload:
         assert error is not None
         assert "authentication required" in error
 
-    async def test_add_access_checker_enforces_policy(
-        self, gateway: MCPGateway
-    ) -> None:
+    async def test_add_access_checker_enforces_policy(self, gateway: MCPGateway) -> None:
         """configure_security(access_checker) enforces tool-level deny."""
         policy = ToolAccessPolicy(
             client_roles=["default"],

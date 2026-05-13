@@ -50,7 +50,9 @@ class AgentDirectory:
 
         # Store address and capabilities separately
         self._registry[agent_id] = AgentAddress(
-            agent_id=agent_id, role=role, composition=composition,
+            agent_id=agent_id,
+            role=role,
+            composition=composition,
         )
         self._capabilities[agent_id] = list(capabilities)
 

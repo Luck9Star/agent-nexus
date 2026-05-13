@@ -159,9 +159,7 @@ class DependencyResolver:
         for agent_name, deps in deps_by_agent.items():
             for dep in deps:
                 if dep.dep_type == "pip" and dep.version_spec:
-                    pip_map.setdefault(dep.name, []).append(
-                        (agent_name, dep.version_spec)
-                    )
+                    pip_map.setdefault(dep.name, []).append((agent_name, dep.version_spec))
 
         # Check each pip package that appears in multiple agents
         for pip_name, entries in pip_map.items():

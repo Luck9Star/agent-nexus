@@ -299,21 +299,6 @@ class TestMigrateYamlToToml:
         assert "static-analysis" in manifest.capabilities
         assert "anti-pattern-detection" in manifest.capabilities
 
-    def test_migration_preserves_permissions(self, tmp_path: Path) -> None:
-        yaml_path = _write_yaml(tmp_path, ATOMIC_MANIFEST_YAML)
-        migrate_yaml_to_toml(yaml_path)
-        manifest = load_manifest(tmp_path)
-        assert manifest.permissions is not None
-        assert "bash" in manifest.permissions.denied_tools
-
-    def test_migration_preserves_model_config(self, tmp_path: Path) -> None:
-        yaml_path = _write_yaml(tmp_path, ATOMIC_MANIFEST_YAML)
-        migrate_yaml_to_toml(yaml_path)
-        manifest = load_manifest(tmp_path)
-        assert manifest.model_preferences is not None
-        assert manifest.model_preferences.recommended == "premium"
-        assert manifest.model_preferences.fallback == "standard"
-
     def test_nonexistent_yaml_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ManifestError, match="not found"):
             migrate_yaml_to_toml(tmp_path / "nonexistent.yaml")

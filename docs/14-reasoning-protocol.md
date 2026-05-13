@@ -119,16 +119,13 @@ def _strip_reasoning_tags(text: str) -> str:
 ## 6. CLI 集成
 
 ```python
-# cli.py run_composition 命令新增参数
+# cli.py run_composition 命令新增参数（使用 typer）
+@app.command()
 @click.option("--reasoning-protocol", is_flag=True, default=False,
               help="Enable structured reasoning protocol for expert execution")
 def run_composition(..., reasoning_protocol: bool):
     ...
-    executor = LLMExecutor(
-        registry=registry,
-        ...,
-        reasoning_protocol=reasoning_protocol,
-    )
+    # reasoning_protocol 通过 TaskComposerInput 透传到 LLMExecutor
 ```
 
 ## 7. 测试策略

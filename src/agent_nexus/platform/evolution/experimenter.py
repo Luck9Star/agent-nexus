@@ -273,10 +273,17 @@ class EvolutionExperimenter:
                 "evolved_successes=excluded.evolved_successes, "
                 "evolved_total=excluded.evolved_total",
                 (
-                    exp.experiment_id, exp.parent_skill_id, exp.evolved_skill_id,
-                    exp.status.value, exp.created_at, exp.min_samples,
-                    exp.confidence_level, exp.parent_successes, exp.parent_total,
-                    exp.evolved_successes, exp.evolved_total,
+                    exp.experiment_id,
+                    exp.parent_skill_id,
+                    exp.evolved_skill_id,
+                    exp.status.value,
+                    exp.created_at,
+                    exp.min_samples,
+                    exp.confidence_level,
+                    exp.parent_successes,
+                    exp.parent_total,
+                    exp.evolved_successes,
+                    exp.evolved_total,
                 ),
             )
 

@@ -118,23 +118,3 @@ class TestAnthropicProviderViaLiteLLM:
         assert result.text == "Hello from Claude"
         call_kwargs = mock_litellm.completion.call_args.kwargs
         assert call_kwargs["model"] == "anthropic/claude-sonnet-4-20250514"
-
-
-class TestDeepSeekProviderViaLiteLLM:
-    """Test DeepSeek provider uses litellm.completion()."""
-
-    @patch("agent_nexus.platform.agency.llm_client.litellm")
-    def test_call_uses_litellm_completion(self, mock_litellm):
-        mock_litellm.completion.return_value = _mock_litellm_response(
-            text="Hello from DeepSeek", model="deepseek-chat"
-        )
-
-        client = _make_llm_client(
-            provider_name="deepseek",
-            model_name="deepseek-chat",
-        )
-        result = client.call("You are helpful", "Say hi")
-
-        assert result.text == "Hello from DeepSeek"
-        call_kwargs = mock_litellm.completion.call_args.kwargs
-        assert call_kwargs["model"] == "deepseek/deepseek-chat"

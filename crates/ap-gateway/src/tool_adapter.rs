@@ -1,33 +1,32 @@
-//! MCP tool name namespacing: `agent_name___tool_name` format.
+//! MCP tool name namespacing: `mcp__{sanitized_agent}__{tool}` format.
 //!
-//! Uses `___` (triple underscore) as separator so that agent names containing
-//! hyphens (e.g. `code-reviewer`) round-trip correctly without any character
-//! conversion. Agent/tool names with triple underscores will NOT round-trip
-//! correctly — such names are considered invalid for this system.
+//! Matches the Python gateway's naming convention: `mcp__` prefix + double
+//! underscore separator + sanitized names (non-alphanumeric chars → `_`).
 
-/// Namespaces MCP tools using the pattern `agent_name___tool_name`.
+/// Namespaces MCP tools using the pattern `mcp__{agent}__{tool}`.
 ///
-/// No hyphen conversion is performed. The `___` separator is distinctive enough
-/// that it will not appear in typical agent or tool names.
+/// Names are sanitized: non-alphanumeric characters are replaced with `_`.
+/// This matches the Python gateway's `_sanitize()` + `mcp__` naming convention.
 pub struct McpToolAdapter;
 
 impl McpToolAdapter {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
 
-    /// Create namespaced tool name: "code-reviewer" + "review" -> "code-reviewer___review"
-    #[must_use] 
+    /// Create namespaced tool name: "code-reviewer" + "review" -> "mcp__code_reviewer__review"
+    #[must_use]
     pub fn namespace_tool(&self, agent: &str, tool: &str) -> String {
-        format!("{agent}{SEPARATOR}{tool}")
+        format!("mcp__{}{}{}", sanitize(agent), SEPARATOR, sanitize(tool))
     }
 
-    /// Parse namespaced name: "code-reviewer___review" -> ("code-reviewer", "review")
+    /// Parse namespaced name: "mcp__code_reviewer__review" -> ("code_reviewer", "review")
     /// Returns None if format doesn't match.
-    #[must_use] 
+    #[must_use]
     pub fn parse_namespaced(&self, name: &str) -> Option<(String, String)> {
-        let (agent, tool) = name.split_once(SEPARATOR)?;
+        let stripped = name.strip_prefix("mcp__")?;
+        let (agent, tool) = stripped.split_once(SEPARATOR)?;
         if agent.is_empty() || tool.is_empty() {
             return None;
         }
@@ -41,10 +40,23 @@ impl Default for McpToolAdapter {
     }
 }
 
-/// Separator used between agent name and tool name in the namespaced identifier.
-/// Triple underscore is chosen to avoid collisions with hyphens or single underscores
-/// in agent/tool names.
-const SEPARATOR: &str = "___";
+/// Sanitize a name: replace non-alphanumeric characters with `_`.
+///
+/// # Collision warning
+///
+/// This is a lossy transformation — `code-reviewer` and `code_reviewer`
+/// both produce `code_reviewer`.  The gateway resolves this via
+/// `DeferredAgentRegistry::find_by_sanitized_name`, which iterates registered
+/// agents to find the original name.  Registering two agents whose names
+/// differ only by non-alphanumeric characters will cause a collision.
+pub fn sanitize(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+/// Separator used between sanitized agent name and tool name.
+const SEPARATOR: &str = "__";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -59,7 +71,7 @@ mod tests {
         let adapter = McpToolAdapter::new();
         assert_eq!(
             adapter.namespace_tool("code-reviewer", "review"),
-            "code-reviewer___review"
+            "mcp__code_reviewer__review"
         );
     }
 
@@ -68,15 +80,15 @@ mod tests {
         let adapter = McpToolAdapter::new();
         assert_eq!(
             adapter.namespace_tool("codereviewer", "review"),
-            "codereviewer___review"
+            "mcp__codereviewer__review"
         );
     }
 
     #[test]
     fn parse_namespaced_basic() {
         let adapter = McpToolAdapter::new();
-        let result = adapter.parse_namespaced("code-reviewer___review");
-        assert_eq!(result, Some(("code-reviewer".to_string(), "review".to_string())));
+        let result = adapter.parse_namespaced("mcp__code_reviewer__review");
+        assert_eq!(result, Some(("code_reviewer".to_string(), "review".to_string())));
     }
 
     #[test]
@@ -86,12 +98,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_namespaced_no_prefix_returns_none() {
+        let adapter = McpToolAdapter::new();
+        assert_eq!(adapter.parse_namespaced("code_reviewer__review"), None);
+    }
+
+    #[test]
     fn roundtrip() {
         let adapter = McpToolAdapter::new();
         let namespaced = adapter.namespace_tool("my-agent", "my-tool");
         let (agent, tool) = adapter.parse_namespaced(&namespaced).unwrap();
-        assert_eq!(agent, "my-agent");
-        assert_eq!(tool, "my-tool");
+        assert_eq!(agent, "my_agent");
+        assert_eq!(tool, "my_tool");
     }
 
     #[test]
@@ -99,57 +117,40 @@ mod tests {
         let adapter = McpToolAdapter::new();
         let namespaced = adapter.namespace_tool("code-review-v2", "run-checks");
         let (agent, tool) = adapter.parse_namespaced(&namespaced).unwrap();
-        assert_eq!(agent, "code-review-v2");
-        assert_eq!(tool, "run-checks");
+        assert_eq!(agent, "code_review_v2");
+        assert_eq!(tool, "run_checks");
     }
 
     #[test]
     fn parse_namespaced_empty_agent_returns_none() {
         let adapter = McpToolAdapter::new();
-        assert_eq!(adapter.parse_namespaced("___tool"), None);
+        assert_eq!(adapter.parse_namespaced("mcp____tool"), None);
     }
 
     #[test]
     fn parse_namespaced_empty_tool_returns_none() {
         let adapter = McpToolAdapter::new();
-        assert_eq!(adapter.parse_namespaced("agent___"), None);
-    }
-
-    #[test]
-    fn parse_multiple_separators_takes_first() {
-        let adapter = McpToolAdapter::new();
-        // "agent___tool___extra" -> agent="agent", tool="tool___extra"
-        let result = adapter.parse_namespaced("agent___tool___extra");
-        assert_eq!(
-            result,
-            Some(("agent".to_string(), "tool___extra".to_string()))
-        );
+        assert_eq!(adapter.parse_namespaced("mcp__agent__"), None);
     }
 
     #[test]
     fn default_trait_works() {
         let adapter = McpToolAdapter;
-        assert_eq!(adapter.namespace_tool("foo", "bar"), "foo___bar");
+        assert_eq!(adapter.namespace_tool("foo", "bar"), "mcp__foo__bar");
     }
 
     #[test]
-    fn underscore_names_roundtrip_correctly() {
-        // Agent names with underscores (not hyphens) round-trip correctly
-        let adapter = McpToolAdapter::new();
-        let namespaced = adapter.namespace_tool("my_agent", "my_tool");
-        let (agent, tool) = adapter.parse_namespaced(&namespaced).unwrap();
-        assert_eq!(agent, "my_agent");
-        assert_eq!(tool, "my_tool");
+    fn sanitize_replaces_hyphens() {
+        assert_eq!(sanitize("code-reviewer"), "code_reviewer");
     }
 
     #[test]
-    fn double_underscore_in_name_not_confused_with_separator() {
-        // "some__agent" should NOT be split on the "__" — only "___" is the separator
-        let adapter = McpToolAdapter::new();
-        let namespaced = adapter.namespace_tool("some__agent", "review");
-        assert_eq!(namespaced, "some__agent___review");
-        let (agent, tool) = adapter.parse_namespaced(&namespaced).unwrap();
-        assert_eq!(agent, "some__agent");
-        assert_eq!(tool, "review");
+    fn sanitize_replaces_dots() {
+        assert_eq!(sanitize("agent.v2"), "agent_v2");
+    }
+
+    #[test]
+    fn sanitize_leaves_alphanumeric() {
+        assert_eq!(sanitize("abc123"), "abc123");
     }
 }

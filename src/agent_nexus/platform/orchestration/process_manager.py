@@ -515,11 +515,10 @@ class ProcessManager:
         Also cleans up dead handles to prevent unbounded growth of
         ``_agents`` when :meth:`health_check` is not called regularly.
 
-        Note: ``_cleanup_dead`` mutates ``_agents`` without ``_lock``.
-        Under CPython's GIL, individual dict operations (``pop``, ``items``)
-        are atomic, so data corruption is impossible.  The logical race —
-        returning a name that was just cleaned up — is benign because
-        callers handle stale handles gracefully.
+        Note: ``_cleanup_dead`` mutates ``_agents`` under ``_cleanup_lock``.
+        Individual dict operations (``pop``, ``items``) are serialized by
+        the lock.  The logical race — returning a name that was just cleaned
+        up — is benign because callers handle stale handles gracefully.
         """
         self._cleanup_dead()
         return [name for name, handle in list(self._agents.items()) if handle.is_alive]

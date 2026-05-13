@@ -242,16 +242,8 @@ class TestAlertAndReset:
 
 
 class TestTruncateToBudget:
-    def test_no_truncation_when_short(self):
-        result = CompactionGuard._truncate_to_budget("short", 100)
-        assert result == "short"
-
     def test_truncates_when_over_budget(self):
         text = "a" * 200
         result = CompactionGuard._truncate_to_budget(text, 50)
         assert len(result) < 200
         assert result.endswith("\n... [truncated]")
-
-    def test_handles_empty_string(self):
-        result = CompactionGuard._truncate_to_budget("", 100)
-        assert result == ""

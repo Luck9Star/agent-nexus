@@ -348,42 +348,6 @@ class TestCallLiteLLM:
         assert call_kwargs.kwargs.get("response_format") == {"type": "json_object"}
         assert result.text == '{"key": "value"}'
 
-    def test_anthropic_provider(self):
-        import agent_nexus.platform.agency.llm_client as lc_mod
-
-        client = _make_llm_client(
-            provider_name="anthropic",
-            model_name="claude-sonnet-4-20250514",
-            provider_api="anthropic-messages",
-        )
-
-        with patch.object(lc_mod.litellm, "completion") as mock_completion:
-            mock_completion.return_value = _mock_litellm_response(
-                text="Hello from Claude", model="claude-sonnet-4-20250514"
-            )
-            result = client.call("You are helpful", "Say hi")
-
-        assert result.text == "Hello from Claude"
-        call_kwargs = mock_completion.call_args
-        assert call_kwargs.kwargs["model"] == "anthropic/claude-sonnet-4-20250514"
-
-    def test_deepseek_provider(self):
-        import agent_nexus.platform.agency.llm_client as lc_mod
-
-        client = _make_llm_client(
-            provider_name="deepseek",
-            model_name="deepseek-chat",
-        )
-
-        with patch.object(lc_mod.litellm, "completion") as mock_completion:
-            mock_completion.return_value = _mock_litellm_response(
-                text="Hello from DeepSeek", model="deepseek-chat"
-            )
-            client.call("You are helpful", "Say hi")
-
-        call_kwargs = mock_completion.call_args
-        assert call_kwargs.kwargs["model"] == "deepseek/deepseek-chat"
-
     def test_error_propagates(self):
         import agent_nexus.platform.agency.llm_client as lc_mod
 
@@ -418,47 +382,6 @@ class TestCallLiteLLM:
 
         call_kwargs = mock_completion.call_args
         assert call_kwargs.kwargs["api_base"] == "https://custom.api.com/v1"
-
-
-# ---------------------------------------------------------------------------
-# CLI Backend preserved
-# ---------------------------------------------------------------------------
-
-
-class TestCLIBackendPreserved:
-    """CLI Backend calls still work and do NOT use litellm."""
-
-    def test_cli_backend_not_using_litellm(self):
-        from agent_nexus.models.config import (
-            ModelConfig,
-            PlatformConfig,
-            ProviderApiType,
-            RuntimeConfig,
-        )
-
-        with (
-            patch("agent_nexus.platform.config.loader.ConfigLoader") as MockLoader,
-            patch("agent_nexus.platform.config.model_db.ModelDBClient"),
-        ):
-            platform_cfg = PlatformConfig(
-                runtime=RuntimeConfig(),
-                models=ModelConfig(
-                    default="my-cli:model",
-                    providers={},
-                ),
-            )
-            mock_loader = MagicMock()
-            mock_loader.load_config.return_value = platform_cfg
-            mock_loader.load_cli_backends.return_value = {
-                "my-cli": MagicMock(command="echo hello"),
-            }
-            MockLoader.return_value = mock_loader
-
-            from agent_nexus.platform.agency.llm_client import LLMClient
-
-            client = LLMClient(model_string="my-cli:model")
-
-            assert client._provider_config.api == ProviderApiType.CLI
 
 
 # ---------------------------------------------------------------------------

@@ -52,8 +52,8 @@ Four-layer architecture (top-down) | 四层架构（自上而下）：
 | **Atomic** | 11 | doc-filler, code-reviewer, security-scanner, test-suite-generator |
 | **Composite** | 5 | feature-delivery-pipeline, product-documentation-suite |
 
-Three run modes: **MCP standalone** / **Platform Router** / **CLI standalone**
-三种运行模式：**MCP 独立运行** / **Platform Router 调度** / **CLI 独立运行**
+Four run modes: **MCP standalone** / **Platform Router** / **CLI standalone** / **Agency Pipeline**
+四种运行模式：**MCP 独立运行** / **Platform Router 调度** / **CLI 独立运行** / **Agency Pipeline**
 
 ### Model Capability System | 模型能力系统
 
@@ -141,7 +141,7 @@ agent-nexus/
 │   │   └── local/                # CLI + Git Installer + Supervisor
 │   └── models/                   # Shared data models | 共享数据模型
 ├── agents/                       # Official Agent packages | 官方 Agent 包
-│   ├── atomic/                   # 11 Atomic Agents
+│   ├── atomic/                   # 20 Atomic Agents
 │   └── composite/                # 5 Composite Agents
 ├── crates/                       # Rust platform rewrite | Rust 平台重写
 │   ├── ap-core/                  # Core: TaskGraph, StateMachine, IPC, Hooks, DSL

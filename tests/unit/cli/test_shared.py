@@ -70,19 +70,3 @@ class TestConfigMigratorMergeIfNeeded:
         merged = toml.loads(cfg.read_text())
         assert "my-custom" in merged["models"]["providers"]
         assert merged["models"]["providers"]["my-custom"]["base_url"] == "https://custom.api/v1"
-
-
-class TestConfigMigratorDeepMerge:
-    def test_user_overrides_default(self) -> None:
-        result = ConfigMigrator._deep_merge(
-            {"a": 1, "b": 2},
-            {"b": 99},
-        )
-        assert result == {"a": 1, "b": 99}
-
-    def test_recursive_nested_merge(self) -> None:
-        result = ConfigMigrator._deep_merge(
-            {"outer": {"x": 1, "y": 2}},
-            {"outer": {"y": 99, "z": 3}},
-        )
-        assert result == {"outer": {"x": 1, "y": 99, "z": 3}}

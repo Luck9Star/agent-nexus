@@ -140,13 +140,17 @@ class SkillPatcher:
         )
 
     def _call_llm(self, prompt: str) -> str:
-        response = self._llm.call(
-            system_prompt="You are an expert skill content engineer.",
-            user_message=prompt,
-            max_tokens=self._max_tokens,
-            temperature=0.3,
-        )
-        return response.text
+        try:
+            response = self._llm.call(
+                system_prompt="You are an expert skill content engineer.",
+                user_message=prompt,
+                max_tokens=self._max_tokens,
+                temperature=0.3,
+            )
+            return response.text
+        except Exception:
+            logger.exception("LLM call failed in SkillPatcher")
+            return ""
 
     def _build_result(
         self,

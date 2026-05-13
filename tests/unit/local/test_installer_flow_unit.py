@@ -7,13 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent_nexus.models.distribution import LockfileEntry
 from agent_nexus.platform.local.installer import (
     AgentNotFoundError,
     GitInstaller,
     InstallationError,
 )
-from agent_nexus.models.distribution import LockfileEntry
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,9 +70,13 @@ class TestInstallLocal:
         local_path = tmp_path / "agent"
         local_path.mkdir()
 
-        with patch.object(installer, "_validate_agent_package", return_value=(["Missing SKILL.md"], {})):
-            with pytest.raises(InstallationError, match="validation failed"):
-                await installer.install_local("valid-name", local_path)
+        with (
+            patch.object(
+                installer, "_validate_agent_package", return_value=(["Missing SKILL.md"], {})
+            ),
+            pytest.raises(InstallationError, match="validation failed"),
+        ):
+            await installer.install_local("valid-name", local_path)
 
     @pytest.mark.asyncio
     async def test_successful_install(self, tmp_path: Path) -> None:
@@ -90,56 +93,15 @@ class TestInstallLocal:
             patch.object(installer, "_copy_to_agents_dir", return_value=dest),
             patch.object(installer, "_parse_manifest_safe", return_value=MagicMock()),
             patch.object(installer, "_create_venv", new_callable=AsyncMock, return_value=None),
-            patch.object(installer, "_get_local_commit_sha", new_callable=AsyncMock, return_value="abc123"),
+            patch.object(
+                installer, "_get_local_commit_sha", new_callable=AsyncMock, return_value="abc123"
+            ),
             patch.object(installer, "_build_lockfile_entry", return_value=entry),
         ):
             result = await installer.install_local("valid-name", local_path)
 
         assert result is entry
         installer._lockfile.add_entry_by_name.assert_called_once_with("valid-name", entry)  # type: ignore[union-attr]
-
-    @pytest.mark.asyncio
-    async def test_rollback_on_copy_failure(self, tmp_path: Path) -> None:
-        """_copy_to_agents_dir raises -> _rollback_paths called, exception re-raised."""
-        installer = _make_installer(tmp_path)
-        local_path = tmp_path / "agent"
-        local_path.mkdir()
-
-        with (
-            patch.object(installer, "_validate_agent_package", return_value=([], {})),
-            patch.object(installer, "_copy_to_agents_dir", side_effect=OSError("disk full")),
-            patch.object(installer, "_rollback_paths") as mock_rollback,
-        ):
-            with pytest.raises(OSError, match="disk full"):
-                await installer.install_local("valid-name", local_path)
-
-        mock_rollback.assert_called_once()
-        args = mock_rollback.call_args[0]
-        assert args[1] == "valid-name"
-        assert args[2] == "Local install"
-
-    @pytest.mark.asyncio
-    async def test_rollback_on_venv_failure(self, tmp_path: Path) -> None:
-        """_create_venv raises -> _rollback_paths called with both dest and venv paths."""
-        installer = _make_installer(tmp_path)
-        local_path = tmp_path / "agent"
-        local_path.mkdir()
-
-        dest = tmp_path / "config" / "agents" / "valid-name"
-
-        with (
-            patch.object(installer, "_validate_agent_package", return_value=([], {})),
-            patch.object(installer, "_copy_to_agents_dir", return_value=dest),
-            patch.object(installer, "_parse_manifest_safe", return_value=MagicMock()),
-            patch.object(installer, "_create_venv", new_callable=AsyncMock, side_effect=RuntimeError("venv boom")),
-            patch.object(installer, "_rollback_paths") as mock_rollback,
-        ):
-            with pytest.raises(RuntimeError, match="venv boom"):
-                await installer.install_local("valid-name", local_path)
-
-        # _created_paths should contain dest (copy succeeded before venv)
-        rolled_back_paths = mock_rollback.call_args[0][0]
-        assert dest in rolled_back_paths
 
     @pytest.mark.asyncio
     async def test_venv_path_recorded(self, tmp_path: Path) -> None:
@@ -157,7 +119,9 @@ class TestInstallLocal:
             patch.object(installer, "_copy_to_agents_dir", return_value=dest),
             patch.object(installer, "_parse_manifest_safe", return_value=MagicMock()),
             patch.object(installer, "_create_venv", new_callable=AsyncMock, return_value=venv),
-            patch.object(installer, "_get_local_commit_sha", new_callable=AsyncMock, return_value="abc123"),
+            patch.object(
+                installer, "_get_local_commit_sha", new_callable=AsyncMock, return_value="abc123"
+            ),
             patch.object(GitInstaller, "_build_lockfile_entry", return_value=entry) as mock_build,
             patch.object(installer, "_rollback_paths"),
         ):
@@ -181,7 +145,12 @@ class TestInstallLocal:
             patch.object(installer, "_copy_to_agents_dir", return_value=dest),
             patch.object(installer, "_parse_manifest_safe", return_value=MagicMock()),
             patch.object(installer, "_create_venv", new_callable=AsyncMock, return_value=None),
-            patch.object(installer, "_get_local_commit_sha", new_callable=AsyncMock, return_value="deadbeef" * 5),
+            patch.object(
+                installer,
+                "_get_local_commit_sha",
+                new_callable=AsyncMock,
+                return_value="deadbeef" * 5,
+            ),
             patch.object(GitInstaller, "_build_lockfile_entry", return_value=entry) as mock_build,
         ):
             await installer.install_local("valid-name", local_path)

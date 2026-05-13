@@ -70,8 +70,7 @@ def load_manifest(agent_dir: Path) -> AgentManifest:
     manifest_path = find_manifest(agent_dir)
     if manifest_path is None:
         raise ManifestError(
-            f"No manifest found in {agent_dir}. "
-            f"Expected one of: {', '.join(_MANIFEST_FILES)}"
+            f"No manifest found in {agent_dir}. Expected one of: {', '.join(_MANIFEST_FILES)}"
         )
     return load_manifest_from_file(manifest_path)
 

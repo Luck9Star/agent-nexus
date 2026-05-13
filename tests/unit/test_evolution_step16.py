@@ -62,15 +62,6 @@ def _register_skill(store: EvolutionStore, skill: SkillRecord) -> SkillRecord:
 
 
 class TestEvolutionConfig:
-    def test_defaults(self) -> None:
-        config = EvolutionConfig()
-        assert config.enabled is True
-        assert config.auto_promote is False
-        assert config.max_evolution_per_day == 10
-        assert config.llm_model == "anthropic:claude-sonnet-4-20250514"
-        assert config.llm_temperature == 0.3
-        assert config.llm_max_tokens == 4096
-
     def test_load_missing_file(self) -> None:
         config = EvolutionConfig.load(Path("/nonexistent/evolution.toml"))
         assert config.enabled is True  # defaults

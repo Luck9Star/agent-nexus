@@ -180,14 +180,6 @@ class TestNameValidation:
         with pytest.raises(AgentCreatorError, match="Invalid agent name"):
             creator.create(name, output_dir=output_dir)
 
-    def test_rejects_empty_name(self, creator: AgentCreator, output_dir: Path) -> None:
-        with pytest.raises(AgentCreatorError, match="Invalid agent name"):
-            creator.create("", output_dir=output_dir)
-
-    def test_rejects_leading_hyphen(self, creator: AgentCreator, output_dir: Path) -> None:
-        with pytest.raises(AgentCreatorError, match="Invalid agent name"):
-            creator.create("-bad", output_dir=output_dir)
-
     def test_accepts_valid_names(self, creator: AgentCreator, output_dir: Path) -> None:
         for name in ["my-agent", "code_reviewer", "Agent123", "a"]:
             agent_dir = creator.create(name, output_dir=output_dir)

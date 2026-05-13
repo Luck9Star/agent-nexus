@@ -68,9 +68,7 @@ def output_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def importer(
-    vendor_dir: Path, allowlist_file: Path, output_dir: Path
-) -> AgencyImporter:
+def importer(vendor_dir: Path, allowlist_file: Path, output_dir: Path) -> AgencyImporter:
     return AgencyImporter(
         vendor_path=str(vendor_dir),
         allowlist_path=str(allowlist_file),
@@ -126,9 +124,7 @@ class TestDryRun:
                 },
             ],
         }
-        allowlist_file.write_text(
-            yaml.dump(bad, default_flow_style=False), encoding="utf-8"
-        )
+        allowlist_file.write_text(yaml.dump(bad, default_flow_style=False), encoding="utf-8")
         imp = AgencyImporter(str(vendor_dir), str(allowlist_file), str(output_dir))
         with pytest.raises(FileNotFoundError, match="Vendor file not found"):
             imp.dry_run()
@@ -149,9 +145,7 @@ class TestDryRun:
                 },
             ],
         }
-        allowlist_file.write_text(
-            yaml.dump(bad, default_flow_style=False), encoding="utf-8"
-        )
+        allowlist_file.write_text(yaml.dump(bad, default_flow_style=False), encoding="utf-8")
         imp = AgencyImporter(str(vendor_dir), str(allowlist_file), str(output_dir))
         with pytest.raises(ValueError, match="source_path"):
             imp.dry_run()
@@ -163,9 +157,7 @@ class TestDryRun:
 
 
 class TestImportAll:
-    def test_import_all_creates_files(
-        self, importer: AgencyImporter, output_dir: Path
-    ) -> None:
+    def test_import_all_creates_files(self, importer: AgencyImporter, output_dir: Path) -> None:
         importer.import_all()
         # Check profile JSON
         profile_path = output_dir / "agency.test-agent.json"
@@ -183,28 +175,20 @@ class TestImportAll:
         assert (output_dir / "index.yaml").is_file()
         assert (output_dir / "source.lock.yaml").is_file()
 
-    def test_import_all_index_content(
-        self, importer: AgencyImporter, output_dir: Path
-    ) -> None:
+    def test_import_all_index_content(self, importer: AgencyImporter, output_dir: Path) -> None:
         import yaml
 
         importer.import_all()
-        index = yaml.safe_load(
-            (output_dir / "index.yaml").read_text(encoding="utf-8")
-        )
+        index = yaml.safe_load((output_dir / "index.yaml").read_text(encoding="utf-8"))
         assert index["version"] == 1
         assert len(index["agents"]) == 1
         assert index["agents"][0]["id"] == "agency.test-agent"
 
-    def test_import_all_source_lock(
-        self, importer: AgencyImporter, output_dir: Path
-    ) -> None:
+    def test_import_all_source_lock(self, importer: AgencyImporter, output_dir: Path) -> None:
         import yaml
 
         importer.import_all()
-        lock = yaml.safe_load(
-            (output_dir / "source.lock.yaml").read_text(encoding="utf-8")
-        )
+        lock = yaml.safe_load((output_dir / "source.lock.yaml").read_text(encoding="utf-8"))
         assert lock["version"] == 1
         assert lock["source"]["repo"] == "https://example.com/agents.git"
 
@@ -214,14 +198,10 @@ class TestImportAll:
         import yaml
 
         empty = {"source": {"repo": "x", "ref": "main"}, "agents": []}
-        allowlist_file.write_text(
-            yaml.dump(empty, default_flow_style=False), encoding="utf-8"
-        )
+        allowlist_file.write_text(yaml.dump(empty, default_flow_style=False), encoding="utf-8")
         imp = AgencyImporter(str(vendor_dir), str(allowlist_file), str(output_dir))
         imp.import_all()
-        index = yaml.safe_load(
-            (output_dir / "index.yaml").read_text(encoding="utf-8")
-        )
+        index = yaml.safe_load((output_dir / "index.yaml").read_text(encoding="utf-8"))
         assert index.get("agents") in ([], None)
 
 
@@ -286,9 +266,7 @@ class TestBuildProfilePackage:
                 },
             ],
         }
-        allowlist_file.write_text(
-            yaml.dump(minimal, default_flow_style=False), encoding="utf-8"
-        )
+        allowlist_file.write_text(yaml.dump(minimal, default_flow_style=False), encoding="utf-8")
         imp = AgencyImporter(str(vendor_dir), str(allowlist_file), str(output_dir))
         profiles = imp.dry_run()
         perms = profiles[0]["expert_profile"]["permissions"]
@@ -312,9 +290,7 @@ class TestBuildProfilePackage:
                 },
             ],
         }
-        allowlist_file.write_text(
-            yaml.dump(custom, default_flow_style=False), encoding="utf-8"
-        )
+        allowlist_file.write_text(yaml.dump(custom, default_flow_style=False), encoding="utf-8")
         imp = AgencyImporter(str(vendor_dir), str(allowlist_file), str(output_dir))
         profiles = imp.dry_run()
         perms = profiles[0]["expert_profile"]["permissions"]

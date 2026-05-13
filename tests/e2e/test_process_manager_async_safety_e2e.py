@@ -240,6 +240,7 @@ class TestProcessManagerStopAllWithConcurrency:
 
             async def health_checks():
                 import contextlib
+
                 for i in range(3):
                     with contextlib.suppress(KeyError):
                         await pm.health_check(f"echo-shc-{i}")

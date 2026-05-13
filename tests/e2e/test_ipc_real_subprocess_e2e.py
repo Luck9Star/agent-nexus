@@ -273,9 +273,7 @@ class TestIPCRealSubprocessErrorPaths:
         proc, stream = await _start_subprocess(_CRASH_AFTER_FIRST)
         try:
             # Send trigger directly via stream (bypasses IPCProtocol wrapper)
-            await stream.send(
-                PlatformToAgent(type=PlatformToAgentType.CHAT, content="trigger")
-            )
+            await stream.send(PlatformToAgent(type=PlatformToAgentType.CHAT, content="trigger"))
 
             # Read the one message the process sends before exiting
             msg = await stream.receive(timeout=5.0)
@@ -301,9 +299,7 @@ class TestIPCRealSubprocessErrorPaths:
         proc, stream = await _start_subprocess(_GARBAGE_AGENT)
         try:
             # Trigger the garbage output
-            await stream.send(
-                PlatformToAgent(type=PlatformToAgentType.CHAT, content="trigger")
-            )
+            await stream.send(PlatformToAgent(type=PlatformToAgentType.CHAT, content="trigger"))
 
             with pytest.raises(IPCError):
                 await stream.receive(timeout=5.0)

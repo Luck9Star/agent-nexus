@@ -135,9 +135,7 @@ class DeterministicLLMClient(LLMClient):
         response_format: str | None = None,
     ) -> LLMResponse:
         self._call_count += 1
-        self._call_history.append(
-            {"system_prompt": system_prompt, "user_message": user_message}
-        )
+        self._call_history.append({"system_prompt": system_prompt, "user_message": user_message})
 
         text = self._route(system_prompt, user_message)
         return LLMResponse(
@@ -304,7 +302,9 @@ def _reset_fallback_counters():
 class TestDeterministicPlannerIntegration:
     """LLMPlanner with deterministic client returns valid selections."""
 
-    def test_analyze_task_returns_capabilities(self, registry: ExpertRegistry, det_client: DeterministicLLMClient) -> None:
+    def test_analyze_task_returns_capabilities(
+        self, registry: ExpertRegistry, det_client: DeterministicLLMClient
+    ) -> None:
         planner = LLMPlanner(registry, client=det_client)
         result = planner.analyze_task("Design a secure microservice architecture")
 
@@ -312,7 +312,9 @@ class TestDeterministicPlannerIntegration:
         assert len(result.capabilities) > 0
         assert result.decomposition_strategy in ("parallel", "sequential")
 
-    def test_planner_returns_expert_selections(self, registry: ExpertRegistry, det_client: DeterministicLLMClient) -> None:
+    def test_planner_returns_expert_selections(
+        self, registry: ExpertRegistry, det_client: DeterministicLLMClient
+    ) -> None:
         planner = LLMPlanner(registry, client=det_client)
         result = planner.analyze_task("Review system reliability")
 
@@ -326,17 +328,23 @@ class TestDeterministicPlannerIntegration:
 
         assert isinstance(result, PlannerOutput)
         # Keyword-based fallback should still produce capabilities
-        assert "architecture_review" in result.capabilities or "security_review" in result.capabilities
+        assert (
+            "architecture_review" in result.capabilities or "security_review" in result.capabilities
+        )
         assert LLMPlanner.fallback_count() >= 1
 
-    def test_planner_makes_llm_call(self, registry: ExpertRegistry, det_client: DeterministicLLMClient) -> None:
+    def test_planner_makes_llm_call(
+        self, registry: ExpertRegistry, det_client: DeterministicLLMClient
+    ) -> None:
         planner = LLMPlanner(registry, client=det_client)
         planner.analyze_task("Design a reliable API")
 
         assert det_client._call_count == 1
         assert "task decomposition" in det_client._call_history[0]["system_prompt"].lower()
 
-    def test_planner_focus_hints_populated(self, registry: ExpertRegistry, det_client: DeterministicLLMClient) -> None:
+    def test_planner_focus_hints_populated(
+        self, registry: ExpertRegistry, det_client: DeterministicLLMClient
+    ) -> None:
         planner = LLMPlanner(registry, client=det_client)
         result = planner.analyze_task("Analyze architecture")
 
@@ -374,7 +382,9 @@ class TestDeterministicIntegratorIntegration:
         assert "agency.architect" in result.source_agents
         assert "agency.security-reviewer" in result.source_agents
 
-    def test_synthesize_single_artifact_passthrough(self, det_client: DeterministicLLMClient) -> None:
+    def test_synthesize_single_artifact_passthrough(
+        self, det_client: DeterministicLLMClient
+    ) -> None:
         integrator = LLMIntegrator(client=det_client)
         artifact = Artifact(
             source_agent="agency.architect",
@@ -478,15 +488,15 @@ class TestDeterministicQAGateIntegration:
             merged_sections={"summary": "Good"},
         )
 
-        result = gate.evaluate(
-            integrated, task="Review", required_sections=["summary"]
-        )
+        result = gate.evaluate(integrated, task="Review", required_sections=["summary"])
 
         # Structural check should pass since "summary" is present
         assert result.passed
         assert LLMQualityGate.fallback_count() >= 1
 
-    def test_evaluate_structural_failure_blocks_semantic(self, det_client: DeterministicLLMClient) -> None:
+    def test_evaluate_structural_failure_blocks_semantic(
+        self, det_client: DeterministicLLMClient
+    ) -> None:
         gate = LLMQualityGate(client=det_client)
         integrated = IntegratedArtifact(
             source_agents=["agency.architect"],
@@ -513,7 +523,9 @@ class TestDeterministicQAGateIntegration:
 class TestDeterministicPipelineFullFlow:
     """Full pipeline: registry -> plan -> execute -> integrate -> QA -> verify."""
 
-    def test_full_pipeline_passes(self, registry: ExpertRegistry, det_client: DeterministicLLMClient) -> None:
+    def test_full_pipeline_passes(
+        self, registry: ExpertRegistry, det_client: DeterministicLLMClient
+    ) -> None:
         composer = TaskComposer(registry)
         planner = LLMPlanner(registry, client=det_client)
         integrator = LLMIntegrator(client=det_client)
@@ -543,7 +555,9 @@ class TestDeterministicPipelineFullFlow:
         # Without LLM, uses ProfileBasedExecutor + Integrator.merge + QAGate
         assert result.integrated is not None
 
-    def test_full_pipeline_multiple_experts_selected(self, registry: ExpertRegistry, det_client: DeterministicLLMClient) -> None:
+    def test_full_pipeline_multiple_experts_selected(
+        self, registry: ExpertRegistry, det_client: DeterministicLLMClient
+    ) -> None:
         composer = TaskComposer(registry)
         planner = LLMPlanner(registry, client=det_client)
         integrator = LLMIntegrator(client=det_client)
@@ -562,7 +576,9 @@ class TestDeterministicPipelineFullFlow:
         # Multiple keywords should match multiple experts
         assert len(result.selected_agents) >= 2
 
-    def test_pipeline_detects_output_target(self, registry: ExpertRegistry, det_client: DeterministicLLMClient) -> None:
+    def test_pipeline_detects_output_target(
+        self, registry: ExpertRegistry, det_client: DeterministicLLMClient
+    ) -> None:
         composer = TaskComposer(registry)
 
         result = composer.run(
@@ -587,7 +603,9 @@ class TestDeterministicPipelineFullFlow:
         assert result.integrated is None
         assert result.qa_passed is None
 
-    def test_pipeline_llm_call_count(self, registry: ExpertRegistry, det_client: DeterministicLLMClient) -> None:
+    def test_pipeline_llm_call_count(
+        self, registry: ExpertRegistry, det_client: DeterministicLLMClient
+    ) -> None:
         composer = TaskComposer(registry)
         planner = LLMPlanner(registry, client=det_client)
         integrator = LLMIntegrator(client=det_client)
@@ -603,7 +621,9 @@ class TestDeterministicPipelineFullFlow:
         # Expect: 1 planner call + 1 integrator call + 1 QA call = 3
         assert det_client._call_count == 3
 
-    def test_pipeline_with_profile_based_executor(self, registry: ExpertRegistry, det_client: DeterministicLLMClient) -> None:
+    def test_pipeline_with_profile_based_executor(
+        self, registry: ExpertRegistry, det_client: DeterministicLLMClient
+    ) -> None:
         executor = ProfileBasedExecutor(registry)
         composer = TaskComposer(registry)
 

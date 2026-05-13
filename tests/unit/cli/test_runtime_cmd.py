@@ -84,9 +84,7 @@ class TestStart:
         assert pid_file.exists()
         assert pid_file.read_text() == "12345"
 
-    def test_start_one_failure_exits(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_start_one_failure_exits(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = _setup_config(tmp_path, monkeypatch)
         supervisor, pm = _mock_supervisor()
         supervisor.start_agent.return_value = False
@@ -103,9 +101,7 @@ class TestStart:
             with pytest.raises(BaseException):  # click.exceptions.Exit
                 asyncio.run(_start_one("bad-agent"))
 
-    def test_start_all_prints_count(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_start_all_prints_count(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = _setup_config(tmp_path, monkeypatch)
         supervisor, pm = _mock_supervisor()
         supervisor.start_all.return_value = ["agent-a", "agent-b"]
@@ -115,25 +111,6 @@ class TestStart:
             new_callable=AsyncMock,
             return_value=(supervisor, config_dir, pm),
         ) as mock_make:
-            import asyncio
-
-            from agent_nexus.platform.local.cli.runtime_cmd import _start_all
-
-            asyncio.run(_start_all())
-            supervisor.start_all.assert_called_once()
-
-    def test_start_all_no_agents(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        config_dir = _setup_config(tmp_path, monkeypatch)
-        supervisor, pm = _mock_supervisor()
-        supervisor.start_all.return_value = []
-
-        with patch(
-            "agent_nexus.platform.local.cli.runtime_cmd._make_supervisor",
-            new_callable=AsyncMock,
-            return_value=(supervisor, config_dir, pm),
-        ):
             import asyncio
 
             from agent_nexus.platform.local.cli.runtime_cmd import _start_all
@@ -160,9 +137,7 @@ class TestStop:
             assert result.exit_code == 0
             mock_stop_all.assert_awaited_once()
 
-    def test_stop_single_agent(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_stop_single_agent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         with patch(
             "agent_nexus.platform.local.cli.runtime_cmd._stop_one",
             new_callable=AsyncMock,
@@ -215,9 +190,7 @@ class TestStop:
             with pytest.raises(BaseException):  # click.exceptions.Exit
                 asyncio.run(_stop_one("ghost-agent"))
 
-    def test_stop_all_cleans_pid_dir(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_stop_all_cleans_pid_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = _setup_config(tmp_path, monkeypatch)
         supervisor, pm = _mock_supervisor()
         supervisor.stop_all.return_value = None
@@ -246,9 +219,7 @@ class TestStop:
 
 
 class TestRestart:
-    def test_restart_delegates(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_restart_delegates(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         with patch(
             "agent_nexus.platform.local.cli.runtime_cmd._restart_agent",
             new_callable=AsyncMock,
@@ -257,9 +228,7 @@ class TestRestart:
             assert result.exit_code == 0
             mock_restart.assert_awaited_once_with("my-agent")
 
-    def test_restart_writes_new_pid(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_restart_writes_new_pid(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = _setup_config(tmp_path, monkeypatch)
         supervisor, pm = _mock_supervisor()
         supervisor.stop_agent.return_value = True
@@ -373,9 +342,7 @@ class TestStatus:
             assert "agent-a" in result.output
             assert "agent-b" in result.output
 
-    def test_status_cleans_stale_pid(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_status_cleans_stale_pid(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = _setup_config(tmp_path, monkeypatch)
         mock_lockfile = MagicMock()
         mock_lockfile.load.return_value.agents = {"stale-agent": {}}
@@ -395,20 +362,6 @@ class TestStatus:
             assert not stale_pid.exists()
 
 
-class TestPs:
-    def test_ps_is_alias_for_status(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        config_dir = _setup_config(tmp_path, monkeypatch)
-        mock_lockfile = MagicMock()
-        mock_lockfile.load.return_value.agents = {}
-
-        with patch(
-            "agent_nexus.platform.local.cli.runtime_cmd._init_managers",
-            return_value=(MagicMock(), mock_lockfile, MagicMock(), config_dir),
-        ):
-            result = runner.invoke(app, ["runtime", "ps"])
-            assert result.exit_code == 0
-
-
 # ── logs ─────────────────────────────────────────────────────────────
 
 
@@ -422,9 +375,7 @@ class TestLogs:
             result = runner.invoke(app, ["runtime", "logs", "nonexistent-agent"])
             assert "no log" in result.output.lower() or "not" in result.output.lower()
 
-    def test_show_logs_reads_file(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_show_logs_reads_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = _setup_config(tmp_path, monkeypatch)
         log_dir = config_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)

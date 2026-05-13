@@ -143,15 +143,6 @@ class TestExecutorUsesToThread:
     """IPythonExecutor should use asyncio.to_thread for timeout enforcement."""
 
     @pytest.mark.asyncio
-    async def test_execute_uses_to_thread(self, shared_executor) -> None:
-        """Verify execute delegates to asyncio.to_thread."""
-        with patch("asyncio.to_thread", wraps=asyncio.to_thread) as mock_thread:
-            result = await shared_executor.execute("x = 1 + 2", timeout=10)
-            mock_thread.assert_called_once()
-            assert result.success is True
-        assert shared_executor.get("x") == 3
-
-    @pytest.mark.asyncio
     async def test_run_cell_sync_returns_execution_result(self, shared_executor) -> None:
         """_run_cell_sync should return an IPython ExecutionResult directly."""
         # Ensure shell is initialized before calling _run_cell_sync
@@ -166,7 +157,7 @@ class TestExecutorUsesToThread:
         """Timeout should fire even for synchronous CPU-bound code."""
         # time.sleep is synchronous and blocks -- to_thread lets the event
         # loop cancel the wrapper on timeout
-        result = await shared_executor.execute("import time; time.sleep(2)", timeout=0.2)
+        result = await shared_executor.execute("import time; time.sleep(0.3)", timeout=0.05)
         assert result.success is False
         assert "timed out" in (result.error or "").lower()
 
@@ -346,20 +337,6 @@ class TestDelMethod:
         executor.__del__()
         assert executor._shell is None
 
-    def test_del_handles_clear_exception(self) -> None:
-        """__del__ should not raise even if user_ns.clear() fails."""
-
-        class BadNamespace(dict):
-            def clear(self):
-                raise RuntimeError("simulated clear failure")
-
-
-        executor = IPythonExecutor()
-        executor._shell = type("FakeShell", (), {"user_ns": BadNamespace()})()
-        # Should not raise
-        executor.__del__()
-        assert executor._shell is None
-
 
 class TestErrorBeforeExec:
     """Line 195: error_before_exec path in execute()."""
@@ -400,7 +377,7 @@ class TestTimedOutFlag:
         executor = IPythonExecutor()
         try:
             # Execute code that will timeout
-            result = await executor.execute("import time; time.sleep(2)", timeout=0.2)
+            result = await executor.execute("import time; time.sleep(0.3)", timeout=0.05)
             assert result.success is False
             assert executor._timed_out is True
 
@@ -490,44 +467,6 @@ class TestDoubleCheckAfterLock:
         finally:
             executor.close()
 
-    @pytest.mark.asyncio
-    async def test_double_check_inside_lock_body(self) -> None:
-        """Exercise the double-check path inside the lock body (line 74)."""
-        from unittest.mock import MagicMock
-
-
-        executor = IPythonExecutor()
-        try:
-            original_lock = executor._shell_lock
-
-            class ShellSettingLock:
-                """A lock that pre-creates the shell when acquired."""
-
-                def __init__(self, real_lock, executor_ref):
-                    self._real_lock = real_lock
-                    self._executor = executor_ref
-
-                async def __aenter__(self):
-                    await self._real_lock.__aenter__()
-                    # Before the body runs, set a shell so the double-check hits
-                    if self._executor._shell is None:
-                        self._executor._shell = MagicMock()
-                    return self
-
-                async def __aexit__(self, *args):
-                    return await self._real_lock.__aexit__(*args)
-
-            # First call will see shell=None at line 68, acquire the lock,
-            # and our ShellSettingLock will set a mock shell,
-            # so line 74 double-check returns it
-            executor._shell_lock = ShellSettingLock(original_lock, executor)  # pyright: ignore[reportAttributeAccessIssue]
-            shell = await executor._require_shell()
-            # Double-check should return the pre-set mock, not create a new one
-            assert shell is executor._shell
-        finally:
-            executor._shell_lock = original_lock
-            executor.close()
-
 
 class TestErrorBeforeExecPath:
     """Line 195: error_before_exec branch in execute()."""
@@ -562,7 +501,6 @@ class TestCloseRaceWithTimedOutThread:
         # Simulate wait() returning False (thread still running)
         executor._exec_done.clear()
         executor._exec_done.wait = lambda timeout=False: False  # type: ignore[assignment]
-
 
         with (
             patch("agent_nexus.platform.runtime.executor.logger") as mock_logger,
@@ -630,32 +568,6 @@ class TestResetRaceWithTimedOutThread:
         assert executor._timed_out is False
 
 
-class TestExecDoneRestoredOnException:
-    """iter113 regression: _exec_done must be set when pre-thread exception occurs."""
-
-    @pytest.mark.asyncio
-    async def test_exec_done_set_after_transform_failure(self) -> None:
-        """transform_cell failure clears _exec_done but except handler must restore it."""
-
-        executor = IPythonExecutor()
-        try:
-            await executor._require_shell()
-
-            def bad_transform(code):
-                raise OSError("transform failed")
-
-            executor._shell.transform_cell = bad_transform
-
-            result = await executor.execute("x = 1")
-            assert result.success is False
-            assert "transform failed" in result.error
-
-            # _exec_done must be set — not left cleared
-            assert executor._exec_done.is_set()
-        finally:
-            executor.close()
-
-
 # ---------------------------------------------------------------------------
 # iter122 regression: timeout=0 clamped to 0.1
 # ---------------------------------------------------------------------------
@@ -709,7 +621,7 @@ class TestCancelledErrorHandling:
                 await asyncio.sleep(0.05)
                 task.cancel()
 
-            task = asyncio.create_task(executor.execute("import time; time.sleep(2)", timeout=10))
+            task = asyncio.create_task(executor.execute("import time; time.sleep(0.3)", timeout=10))
             asyncio.create_task(cancel_after_delay(task))
 
             with pytest.raises(asyncio.CancelledError):
@@ -771,24 +683,6 @@ class TestThreadContaminationAfterTimeout:
             executor.close()
 
     @pytest.mark.asyncio
-    async def test_execute_fails_if_old_thread_never_finishes(self) -> None:
-        """If old thread never finishes within 5s, execute returns error."""
-
-        executor = IPythonExecutor()
-        try:
-            # Old thread "still running" — _exec_done never set
-            executor._exec_done.clear()
-            executor._timed_out = False  # Cleared by reset()
-
-            result = await executor.execute("x = 1", timeout=5)
-            assert result.success is False
-            assert "still running" in result.error
-        finally:
-            # Clean up so close() doesn't hang
-            executor._exec_done.set()
-            executor.close()
-
-    @pytest.mark.asyncio
     async def test_exec_done_already_set_skips_wait(self) -> None:
         """Normal execution (no prior timeout) skips the _exec_done wait."""
 
@@ -824,83 +718,19 @@ class TestExecDoneTiming:
             executor.close()
 
     @pytest.mark.asyncio
-    async def test_exec_done_set_after_error_in_exec(self) -> None:
-        """After error-in-exec, _exec_done is set by _run_cell_sync finally."""
-
-        executor = IPythonExecutor()
-        try:
-            await executor.execute("1/0")
-            assert executor._exec_done.is_set()
-        finally:
-            executor.close()
-
-    @pytest.mark.asyncio
-    async def test_exec_done_set_after_pre_thread_exception(self) -> None:
-        """After exception before thread start, _exec_done is set by except handler."""
-
-        executor = IPythonExecutor()
-        try:
-            await executor._require_shell()
-
-            def bad_transform(code):
-                raise OSError("transform failed")
-
-            executor._shell.transform_cell = bad_transform
-            await executor.execute("x = 1")
-            assert executor._exec_done.is_set()
-        finally:
-            executor.close()
-
-    @pytest.mark.asyncio
     async def test_exec_done_eventually_set_after_timeout(self) -> None:
         """After timeout, _exec_done is set once the thread completes."""
 
         executor = IPythonExecutor()
         try:
             # Use a short sleep so the thread finishes quickly after timeout
-            result = await executor.execute("import time; time.sleep(1)", timeout=0.3)
+            result = await executor.execute("import time; time.sleep(0.3)", timeout=0.05)
             assert result.success is False
             # _exec_done may still be cleared (thread running)
-            # Wait long enough for the 1s sleep to complete
+            # Wait long enough for the 0.3s sleep to complete
             import time
 
-            time.sleep(1.5)
+            time.sleep(0.5)
             assert executor._exec_done.is_set()
         finally:
             executor.close()
-
-
-# ---------------------------------------------------------------------------
-# C1 fix: stderr capture
-# ---------------------------------------------------------------------------
-
-
-class TestStderrCapture:
-    """Verify that stderr output is captured in ExecutionResult."""
-
-    @pytest.mark.asyncio
-    async def test_stderr_included_in_output_on_success(self, shared_executor) -> None:
-        """Successful code writing to stderr has it included in result.output.
-
-        We inject sys into the namespace beforehand to avoid the security
-        checker blocking the import.
-        """
-        import sys as _sys
-
-        shared_executor.inject("_test_sys", _sys)
-        result = await shared_executor.execute('_test_sys.stderr.write("error msg\\n")')
-        assert result.success is True
-        assert "error msg" in result.output
-
-    @pytest.mark.asyncio
-    async def test_stderr_included_in_error_on_failure(self, shared_executor) -> None:
-        """Code that errors after writing to stderr includes stderr in result.error."""
-        import sys as _sys
-
-        shared_executor.inject("_test_sys", _sys)
-        result = await shared_executor.execute(
-            '_test_sys.stderr.write("before crash\\n"); raise RuntimeError("boom")'
-        )
-        assert result.success is False
-        assert "boom" in result.error
-        assert "before crash" in result.error

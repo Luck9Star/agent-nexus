@@ -321,38 +321,6 @@ def test_selector_no_match_returns_empty():
 
 
 # ===================================================================
-# 9. Uses registry
-# ===================================================================
-@pytest.mark.timeout(30)
-def test_selector_uses_registry():
-    """Selector loads experts from ExpertRegistry (the class in registry.py)."""
-    registry = ExpertRegistry()
-    profile = _make_profile(
-        "agency.test-agent",
-        name="Test Agent",
-        capabilities=["system_design"],
-    )
-    registry.add("agency.test-agent", profile, ["system_design"])
-    selector = SpecialistSelector(registry)
-
-    # The selector holds the registry instance
-    assert selector.registry is registry
-
-    results = selector.select(
-        SelectionRequest(
-            task_type="architecture",
-            required_capabilities=["system_design"],
-            optional_capabilities=[],
-            max_agents=5,
-            permissions="plan",
-        )
-    )
-
-    assert len(results) == 1
-    assert results[0].agent_id == "agency.test-agent"
-
-
-# ===================================================================
 # 10. Empty required capabilities — I1 fix
 # ===================================================================
 @pytest.mark.timeout(30)

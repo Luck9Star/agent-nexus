@@ -49,6 +49,8 @@ Composite Agent = OrchestrationDSL（TOML DAG）
 
 ### 7.4 三种运行模式
 
+> **Note**: Agency Pipeline 是独立的编排管道（`platform/agency/`），不是 Agent 的 RunMode。Agent 本身只有 3 种运行模式。
+
 | 模式 | TOML/YAML 值 | Python Enum | 说明 | 用途 |
 |------|-------------|-------------|------|------|
 | **MCP Standalone** | `mcp` | `RunMode.MCP_STANDALONE` | 直接作为 MCP Server 运行（`uvx agent-name`） | 外部框架（nanobot/Hermes）直接调用 |
@@ -229,7 +231,7 @@ hooks:
 
 ### 7.7 Agent 目录
 
-**Atomic Agents（11，含 1 个自进化晋升的 good-skill）：**
+**Atomic Agents（20，含 1 个自进化晋升的 good-skill）：**
 
 | Name | Domain | Model Tier | Key Differentiator |
 |------|--------|------------|-------------------|
@@ -244,6 +246,15 @@ hooks:
 | Market Intelligence Analyst | 研究/分析 - 市场研究 | Standard | Porter/SWOT/PESTEL 方法论 |
 | Test Suite Generator | 软件工程 - 测试 | Standard | 每范式测试策略 |
 | Good Skill * | 通用 | Standard | 自进化自动晋升示例（from sk-1, effective_rate=0.9）|
+| API Contract Tester | 软件工程 - API 测试 | Standard | OpenAPI 契约验证，请求/响应断言 |
+| Config Linter | 运维/基础设施 - 配置管理 | Lightweight | 多格式配置校验（YAML/TOML/JSON），schema 推断 |
+| Data Pipeline Validator | 数据工程 - 管道验证 | Standard | 数据血缘追踪，schema 漂移检测 |
+| DB Schema Analyzer | 数据工程 - 数据库 | Standard | DDL 解析，索引优化建议，迁移影响分析 |
+| Dependency Auditor | 质量/安全 - 依赖管理 | Lightweight | 许可证合规扫描，版本冲突检测 |
+| Error Analyzer | 运维/SRE - 错误分析 | Standard | 堆栈轨迹解析，根因聚类，修复建议 |
+| Generic Expert Agent | 通用 - 专家模拟 | Standard | 领域专家角色扮演，可配置知识边界 |
+| i18n Validator | 质量/安全 - 国际化 | Lightweight | ICU MessageFormat 校验，缺失翻译检测 |
+| Performance Profiler | 质量/安全 - 性能 | Standard | 热点函数定位，内存/时间复杂度分析 |
 
 **Composite Agents（5）：**
 

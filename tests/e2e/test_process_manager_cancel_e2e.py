@@ -257,8 +257,10 @@ class TestProcessManagerHealthFailureE2E:
 
             # Kill externally
             import signal
+
             handle.process.send_signal(signal.SIGKILL)
             import asyncio
+
             await asyncio.sleep(0.3)
 
             assert not handle.is_alive
@@ -285,8 +287,10 @@ class TestProcessManagerHealthFailureE2E:
 
             # Kill externally
             import signal
+
             handle.process.send_signal(signal.SIGKILL)
             import asyncio
+
             await asyncio.sleep(0.3)
 
             # list_running prunes dead handles

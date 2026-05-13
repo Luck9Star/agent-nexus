@@ -8,6 +8,8 @@ Provides three MCP tools:
 
 from __future__ import annotations
 
+import json
+
 from agent_localization_specialist.tools.analyze_text import analyze_text as _analyze
 from agent_localization_specialist.tools.localize import localize as _localize
 from agent_localization_specialist.tools.manage_glossary import (
@@ -47,18 +49,24 @@ def create_mcp_server() -> object:
     @mcp.tool()
     def manage_glossary(
         action: str,
-        entries: list | None = None,
+        entries: str | None = None,
         source_lang: str = "en",
         target_lang: str = "zh",
     ) -> dict:
-        """Manage terminology glossary — add, list, search, delete, or clear entries."""
-        result = _manage(action, entries, source_lang=source_lang, target_lang=target_lang)
+        """Manage terminology glossary -- add, list, search, delete, or clear entries."""
+        # MCP inputSchema: str avoids ambiguous anyOf.
+        # Accept JSON string, parse internally.
+        parsed_entries = json.loads(entries) if entries else None
+        result = _manage(action, parsed_entries, source_lang=source_lang, target_lang=target_lang)
         return result.model_dump()
 
     @mcp.tool()
-    def localize(text: str, target_lang: str, glossary: dict | None = None) -> dict:
+    def localize(text: str, target_lang: str, glossary: str | None = None) -> dict:
         """Translate text using glossary for term consistency."""
-        result = _localize(text, target_lang, glossary)
+        # MCP inputSchema: str avoids ambiguous anyOf.
+        # Accept JSON string, parse internally.
+        parsed_glossary = json.loads(glossary) if glossary else None
+        result = _localize(text, target_lang, parsed_glossary)
         return result.model_dump()
 
     return mcp

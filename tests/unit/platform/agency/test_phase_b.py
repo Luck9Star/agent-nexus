@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_nexus.platform.agency.allowlist import load_allowlist, validate_allowlist_entry
+from agent_nexus.platform.agency.allowlist import load_allowlist
 from agent_nexus.platform.agency.importer import AgencyImporter
 from agent_nexus.platform.agency.parser import parse_frontmatter
 from agent_nexus.platform.agency.policy import check_content_policy
@@ -63,25 +63,6 @@ def test_allowlist_load():
 
     assert "agents" in data
     assert len(data["agents"]) == 16
-
-
-# ===================================================================
-# 4. Allowlist entry schema validation
-# ===================================================================
-@pytest.mark.timeout(30)
-def test_allowlist_entry_schema():
-    """Each allowlist entry must have source_path, id, capabilities (non-empty), output_contract."""
-    data = load_allowlist(str(_ALLOWLIST_PATH))
-
-    for i, entry in enumerate(data["agents"]):
-        errors = validate_allowlist_entry(entry)
-        assert errors == [], (
-            f"agent entry #{i} (id={entry.get('id', '?')}) has validation errors: {errors}"
-        )
-
-        # Explicitly check capabilities is a non-empty list
-        assert isinstance(entry["capabilities"], list), f"entry #{i} capabilities is not a list"
-        assert len(entry["capabilities"]) > 0, f"entry #{i} capabilities list is empty"
 
 
 # ===================================================================

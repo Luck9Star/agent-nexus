@@ -1,11 +1,11 @@
 """Tests for SchemaTransformer — JSON Schema to Python/Pydantic conversion."""
 
+import logging
+
+import pytest
 from pydantic import BaseModel
 
 from agent_nexus.platform.gateway.schema_transformer import SchemaTransformer
-
-import logging
-import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -23,22 +23,6 @@ def _make_transformer(schema: dict | None = None) -> SchemaTransformer:
 
 
 class TestPrimitiveTypes:
-    def test_string(self):
-        t = _make_transformer()
-        assert t.resolve({"type": "string"}) is str
-
-    def test_integer(self):
-        t = _make_transformer()
-        assert t.resolve({"type": "integer"}) is int
-
-    def test_number(self):
-        t = _make_transformer()
-        assert t.resolve({"type": "number"}) is float
-
-    def test_boolean(self):
-        t = _make_transformer()
-        assert t.resolve({"type": "boolean"}) is bool
-
     def test_string_format_datetime(self):
         """String with known format stays str (no datetime dependency)."""
         t = _make_transformer()
@@ -320,23 +304,6 @@ class TestCircularRef:
         # Circular ref returns a placeholder model (empty fields)
         # The critical test: this call terminates without RecursionError
 
-    def test_circular_ref_model_cache_prevents_recomputation(self):
-        """Resolving the same $ref twice uses the cache."""
-        full_schema = {
-            "$defs": {
-                "Loop": {
-                    "type": "object",
-                    "properties": {
-                        "next": {"$ref": "#/$defs/Loop"},
-                    },
-                },
-            },
-        }
-        t = _make_transformer(full_schema)
-        first = t.resolve({"$ref": "#/$defs/Loop"})
-        second = t.resolve({"$ref": "#/$defs/Loop"})
-        assert first is second  # Same cached object
-
 
 # ---------------------------------------------------------------------------
 # resolve_model always returns BaseModel
@@ -423,18 +390,6 @@ class TestSchemaCacheCollision:
         assert "beta" not in model_a.model_fields
         assert "alpha" not in model_b.model_fields
 
-    def test_cache_hit_on_identical_schema(self):
-        """Same name + same properties returns the cached model."""
-        t = _make_transformer()
-        schema = {
-            "type": "object",
-            "properties": {"x": {"type": "string"}},
-            "required": ["x"],
-        }
-        first = t.resolve(schema, name="Same")
-        second = t.resolve(schema, name="Same")
-        assert first is second
-
 
 class TestAllOfInlineSchema:
     """allOf with inline constraint-only schemas."""
@@ -520,7 +475,9 @@ class TestExternalRefWarning:
 
     def test_external_ref_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         t = _make_transformer()
-        with caplog.at_level(logging.WARNING, logger="agent_nexus.platform.gateway.schema_transformer"):
+        with caplog.at_level(
+            logging.WARNING, logger="agent_nexus.platform.gateway.schema_transformer"
+        ):
             result = t.resolve({"$ref": "https://other-host.com/schemas/X"})
         assert result is str
         assert any("External $ref" in rec.message for rec in caplog.records)

@@ -120,6 +120,12 @@ def _gen_top_level_agent(name: str, tools: list[str]) -> str:
 
 def _gen_skill_md(name: str, description: str, tools: list[str]) -> str:
     lines = [
+        "---",
+        f"name: {name}",
+        f"description: {description}",
+        "agent_type: atomic",
+        "---",
+        "",
         f"# {name} -- {description}",
         "",
         "## Role",

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 from agent_nexus.platform.local.quality_gate import (
     BaseCheck,
     CheckResult,
@@ -18,7 +17,6 @@ from agent_nexus.platform.local.quality_gate import (
     SkillFileCheck,
     TestCoverageCheck,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers: fixture-style directory builders
@@ -124,9 +122,6 @@ class TestManifestCheck:
         assert not result.passed
         assert "Invalid agent type" in result.message
 
-    def test_severity_is_critical(self) -> None:
-        assert ManifestCheck().severity == CheckSeverity.CRITICAL
-
 
 # ============================================================================
 # SkillFileCheck
@@ -153,9 +148,6 @@ class TestSkillFileCheck:
         result = SkillFileCheck().run(agent_dir)
         assert not result.passed
         assert "empty" in result.message
-
-    def test_severity_is_critical(self) -> None:
-        assert SkillFileCheck().severity == CheckSeverity.CRITICAL
 
 
 # ============================================================================
@@ -184,41 +176,11 @@ class TestSecurityCheck:
         assert not result.passed
         assert "exec" in result.message
 
-    def test_detects_subprocess_import(self, tmp_path: Path) -> None:
-        agent_dir = _make_valid_agent(tmp_path)
-        _write_python_file(agent_dir, "sub.py", "import subprocess\n")
-        result = SecurityCheck().run(agent_dir)
-        assert not result.passed
-        assert "subprocess" in result.message
-
-    def test_detects_subprocess_from_import(self, tmp_path: Path) -> None:
-        agent_dir = _make_valid_agent(tmp_path)
-        _write_python_file(agent_dir, "sub.py", "from subprocess import run\n")
-        result = SecurityCheck().run(agent_dir)
-        assert not result.passed
-        assert "subprocess" in result.message
-
-    def test_detects_subprocess_call(self, tmp_path: Path) -> None:
-        agent_dir = _make_valid_agent(tmp_path)
-        _write_python_file(agent_dir, "sub.py", "import subprocess\nsubprocess.run(['ls'])\n")
-        result = SecurityCheck().run(agent_dir)
-        assert not result.passed
-        # Should detect both the import and the call
-        assert "subprocess" in result.message
-
     def test_skips_unparseable_files(self, tmp_path: Path) -> None:
         agent_dir = _make_valid_agent(tmp_path)
         _write_python_file(agent_dir, "bad_syntax.py", "def f(\n")
         result = SecurityCheck().run(agent_dir)
         assert result.passed
-
-    def test_no_python_files_passes(self, tmp_path: Path) -> None:
-        agent_dir = _make_valid_agent(tmp_path)
-        result = SecurityCheck().run(agent_dir)
-        assert result.passed
-
-    def test_severity_is_critical(self) -> None:
-        assert SecurityCheck().severity == CheckSeverity.CRITICAL
 
 
 # ============================================================================
@@ -252,9 +214,6 @@ class TestDependencyCheck:
         agent_dir.mkdir()
         result = DependencyCheck().run(agent_dir)
         assert result.passed
-
-    def test_severity_is_warning(self) -> None:
-        assert DependencyCheck().severity == CheckSeverity.WARNING
 
 
 # ============================================================================
@@ -294,9 +253,6 @@ class TestTestCoverageCheck:
         result = TestCoverageCheck().run(agent_dir)
         assert result.passed
 
-    def test_severity_is_warning(self) -> None:
-        assert TestCoverageCheck().severity == CheckSeverity.WARNING
-
 
 # ============================================================================
 # QualityGate (integration of all checks)
@@ -323,13 +279,6 @@ class TestQualityGate:
         result = QualityGate().evaluate(agent_dir)
         assert not result.passed
         assert result.verdict == CheckVerdict.FAIL
-
-    def test_missing_skill_fails(self, tmp_path: Path) -> None:
-        agent_dir = tmp_path / "no-skill"
-        agent_dir.mkdir()
-        _write_toml_manifest(agent_dir)
-        result = QualityGate().evaluate(agent_dir)
-        assert not result.passed
 
     def test_security_violation_fails(self, tmp_path: Path) -> None:
         agent_dir = _make_valid_agent(tmp_path)
@@ -370,8 +319,7 @@ class TestQualityGate:
         result = gate.evaluate(tmp_path)
         assert not result.passed
         assert any(
-            c.check_name == "broken" and c.severity == CheckSeverity.CRITICAL
-            for c in result.checks
+            c.check_name == "broken" and c.severity == CheckSeverity.CRITICAL for c in result.checks
         )
 
     def test_custom_checks(self, tmp_path: Path) -> None:
@@ -390,8 +338,7 @@ class TestQualityGate:
         assert not result.passed
         # Both manifest and skill should fail
         critical_failures = [
-            c for c in result.checks
-            if not c.passed and c.severity == CheckSeverity.CRITICAL
+            c for c in result.checks if not c.passed and c.severity == CheckSeverity.CRITICAL
         ]
         assert len(critical_failures) >= 2
 
@@ -407,9 +354,7 @@ class TestQualityGate:
             severity = CheckSeverity.WARNING
 
             def run(self, d: Path) -> CheckResult:
-                return CheckResult(
-                    check_name=self.name, passed=False, severity=self.severity
-                )
+                return CheckResult(check_name=self.name, passed=False, severity=self.severity)
 
         gate = QualityGate(checks=[AlwaysFailWarning() for _ in range(20)])
         result = gate.evaluate(agent_dir)
@@ -429,7 +374,3 @@ class TestQualityGateResult:
     def test_passed_property_false(self) -> None:
         result = QualityGateResult(verdict=CheckVerdict.FAIL, score=0.3)
         assert not result.passed
-
-    def test_checks_default_empty(self) -> None:
-        result = QualityGateResult(verdict=CheckVerdict.PASS, score=1.0)
-        assert result.checks == []

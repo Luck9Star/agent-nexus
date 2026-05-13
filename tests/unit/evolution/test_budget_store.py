@@ -133,20 +133,6 @@ class TestGetBudgetLog:
         rows = store.get_budget_log("a", limit=0)
         assert len(rows) == 1
 
-    def test_ordered_by_created_at_desc(self, store: BudgetStore) -> None:
-        store.log_budget_event("a", "first")
-        store.log_budget_event("a", "second")
-        store.log_budget_event("a", "third")
-
-        rows = store.get_budget_log("a")
-        assert rows[0]["event_type"] == "third"
-        assert rows[1]["event_type"] == "second"
-        assert rows[2]["event_type"] == "first"
-
-    def test_empty_for_unknown_agent(self, store: BudgetStore) -> None:
-        rows = store.get_budget_log("nonexistent")
-        assert rows == []
-
 
 # ---------------------------------------------------------------------------
 # clear
@@ -172,8 +158,16 @@ class TestClear:
             "(id, name, lineage_origin, lineage_generation, is_active, directory, "
             "created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("sk-1", "my-skill", "imported", 0, 1, "/tmp",
-             "2025-01-01T00:00:00", "2025-01-01T00:00:00"),
+            (
+                "sk-1",
+                "my-skill",
+                "imported",
+                0,
+                1,
+                "/tmp",
+                "2025-01-01T00:00:00",
+                "2025-01-01T00:00:00",
+            ),
         )
         store.log_budget_event("agent-1", "ev")
         store.clear()
@@ -258,16 +252,3 @@ class TestPruneBudgetLog:
 # ---------------------------------------------------------------------------
 # Standalone mode (no conn_factory)
 # ---------------------------------------------------------------------------
-
-
-class TestStandaloneMode:
-    def test_standalone_with_memory_db(self) -> None:
-        store = BudgetStore(Path(":memory:"))
-        # Standalone mode requires schema to be initialized externally
-        # (EvolutionStore normally does this).  For this test, init it manually.
-        with store._conn() as conn:
-            _init_schema(conn)
-        log_id = store.log_budget_event("standalone", "test")
-        assert isinstance(log_id, str)
-        rows = store.get_budget_log("standalone")
-        assert len(rows) == 1

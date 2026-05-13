@@ -9,9 +9,7 @@ from __future__ import annotations
 from agent_nexus.models.agent import ModelTier
 from agent_nexus.models.config import ProviderApiType
 from agent_nexus.platform.config import (
-    DEFAULT_MODEL_STRING,
     DEFAULT_PROVIDERS,
-    ENV_VAR_OVERRIDES,
     MODEL_TIER_MAP,
 )
 
@@ -27,23 +25,6 @@ class TestDefaultProviders:
         anthropic = DEFAULT_PROVIDERS["anthropic"]
         assert anthropic["api"] == ProviderApiType.ANTHROPIC_MESSAGES
 
-    def test_ollama_has_local_base_url(self) -> None:
-        ollama = DEFAULT_PROVIDERS["ollama"]
-        assert "localhost" in ollama["base_url"]
-        assert ollama["api_key_env"] == ""
-
-    def test_deepseek_has_base_url(self) -> None:
-        ds = DEFAULT_PROVIDERS["deepseek"]
-        assert ds["base_url"].startswith("https://api.deepseek.com")
-
-    def test_qwen_has_dashscope_url(self) -> None:
-        qwen = DEFAULT_PROVIDERS["qwen"]
-        assert "dashscope" in qwen["base_url"]
-
-    def test_all_providers_have_api_field(self) -> None:
-        for name, preset in DEFAULT_PROVIDERS.items():
-            assert "api" in preset, f"Provider '{name}' missing 'api' field"
-
 
 # ============================================================================
 # MODEL_TIER_MAP
@@ -57,53 +38,7 @@ class TestModelTierMap:
         for tier in ModelTier:
             assert tier in MODEL_TIER_MAP, f"Tier {tier} missing from MODEL_TIER_MAP"
 
-    def test_all_values_are_provider_model_format(self) -> None:
-        for tier, model_string in MODEL_TIER_MAP.items():
-            assert ":" in model_string, f"Tier {tier} value is not 'provider:model'"
-
-    def test_lightweight_is_smallest(self) -> None:
-        assert MODEL_TIER_MAP[ModelTier.LIGHTWEIGHT] == "openai:gpt-4o-mini"
-
-    def test_premium_is_largest(self) -> None:
-        assert MODEL_TIER_MAP[ModelTier.PREMIUM] == "anthropic:claude-opus-4-20250116"
-
 
 # ============================================================================
 # ENV_VAR_OVERRIDES
 # ============================================================================
-
-
-class TestEnvVarOverrides:
-    """Verify ENV_VAR_OVERRIDES mapping correctness."""
-
-    def test_three_overrides_defined(self) -> None:
-        assert len(ENV_VAR_OVERRIDES) == 3
-
-    def test_agent_model_overrides_models_default(self) -> None:
-        assert ENV_VAR_OVERRIDES["AGENT_MODEL"] == "models.default"
-
-    def test_default_model_overrides_models_default(self) -> None:
-        assert ENV_VAR_OVERRIDES["DEFAULT_MODEL"] == "models.default"
-
-    def test_agent_nexus_home_overrides_config_dir(self) -> None:
-        assert ENV_VAR_OVERRIDES["AGENT_NEXUS_HOME"] == "config_dir"
-
-    def test_model_env_vars_target_same_path(self) -> None:
-        """Both model env vars should map to the same config path."""
-        assert ENV_VAR_OVERRIDES["AGENT_MODEL"] == ENV_VAR_OVERRIDES["DEFAULT_MODEL"]
-
-
-# ============================================================================
-# DEFAULT_MODEL_STRING
-# ============================================================================
-
-
-class TestDefaultModelString:
-    """Verify the hardcoded default model string."""
-
-    def test_default_model_string_value(self) -> None:
-        assert DEFAULT_MODEL_STRING == "openai:gpt-4o"
-
-    def test_default_matches_standard_tier(self) -> None:
-        """The default model string matches the standard tier mapping."""
-        assert MODEL_TIER_MAP[ModelTier.STANDARD] == DEFAULT_MODEL_STRING

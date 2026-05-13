@@ -8,11 +8,11 @@ use ap_gateway::tool_adapter::McpToolAdapter;
 fn gateway_tool_namespacing() {
     let adapter = McpToolAdapter::new();
     let namespaced = adapter.namespace_tool("code-reviewer", "review-code");
-    assert_eq!(namespaced, "code-reviewer___review-code");
+    assert_eq!(namespaced, "mcp__code_reviewer__review_code");
 
     let (agent, tool) = adapter.parse_namespaced(&namespaced).unwrap();
-    assert_eq!(agent, "code-reviewer");
-    assert_eq!(tool, "review-code");
+    assert_eq!(agent, "code_reviewer");
+    assert_eq!(tool, "review_code");
 }
 
 #[test]
@@ -20,8 +20,8 @@ fn gateway_tool_roundtrip() {
     let adapter = McpToolAdapter::new();
     let namespaced = adapter.namespace_tool("my-agent", "my-tool");
     let (agent, tool) = adapter.parse_namespaced(&namespaced).unwrap();
-    assert_eq!(agent, "my-agent");
-    assert_eq!(tool, "my-tool");
+    assert_eq!(agent, "my_agent");
+    assert_eq!(tool, "my_tool");
 }
 
 #[test]

@@ -22,6 +22,7 @@ import toml
 
 from agent_nexus.models.distribution import Lockfile, LockfileEntry
 from agent_nexus.platform.config.loader import ConfigLoader
+from agent_nexus.platform.local.manifest import load_manifest
 from agent_nexus.platform.orchestration.process_manager import (
     ProcessManager,
 )
@@ -43,10 +44,16 @@ class RestartTracker:
 
     count: int = 0
     max_restarts: int = 3
+    _backoff_base: float = 1.0
+    _backoff_cap: float = 30.0
 
     def should_retry(self) -> bool:
         """Return ``True`` if the agent has not exceeded ``max_restarts``."""
         return self.count < self.max_restarts
+
+    def backoff_seconds(self) -> float:
+        """Return exponential backoff delay before next restart attempt."""
+        return min(self._backoff_base * (2**self.count), self._backoff_cap)
 
     def record(self) -> None:
         """Increment the restart counter."""
@@ -321,6 +328,15 @@ class AgentSupervisor:
         if not dead_agents:
             return []
 
+        # Apply per-agent backoff delay before restarting
+        for agent_name in dead_agents:
+            tracker = self._restart_trackers.get(agent_name)
+            if tracker is not None:
+                delay = tracker.backoff_seconds()
+                if delay > 0:
+                    logger.info("Backoff %.1fs before restarting '%s'", delay, agent_name)
+                    await asyncio.sleep(delay)
+
         results = await asyncio.gather(
             *(self.start_agent(name) for name in dead_agents),
             return_exceptions=True,
@@ -562,9 +578,37 @@ class AgentSupervisor:
             if config.models.default:
                 env["AGENT_MODEL"] = config.models.default
 
-            # Forward API keys for each configured provider
+            # Forward API keys — restrict to agent's declared provider when possible
+            allowed_providers: set[str] | None = None
+            try:
+                manifest = load_manifest(agent_dir or self._resolve_agent_dir(agent_name))
+                recommended = manifest.model_preferences
+                if recommended and recommended.recommended:
+                    provider = recommended.recommended.split(":")[0]
+                    allowed_providers = {provider}
+                    # Also allow fallback provider if different
+                    if recommended.fallback:
+                        fb_provider = recommended.fallback.split(":")[0]
+                        allowed_providers.add(fb_provider)
+            except FileNotFoundError:
+                logger.debug(
+                    "Manifest not found for '%s' — injecting all provider keys",
+                    agent_name,
+                )
+            except Exception:
+                # Manifest parse error — be conservative and inject all keys
+                # to avoid breaking existing agents. A malformed manifest
+                # should be caught by quality_gate at install time, not here.
+                logger.warning(
+                    "Manifest parse error for '%s' — injecting all provider keys as fallback",
+                    agent_name,
+                    exc_info=True,
+                )
+
             for _name, provider in config.models.providers.items():
                 if provider.api_key_env:
+                    if allowed_providers is not None and _name not in allowed_providers:
+                        continue
                     key = os.environ.get(provider.api_key_env, "")
                     if key:
                         env[provider.api_key_env] = key

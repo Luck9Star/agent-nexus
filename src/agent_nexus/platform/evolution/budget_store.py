@@ -138,6 +138,7 @@ class BudgetStore:
     def clear(self) -> None:
         """Clear all tables. For testing only — crosses sub-store boundaries by design."""
         with self._conn(immediate=True) as conn:
+            conn.execute("DELETE FROM experiments")
             conn.execute("DELETE FROM skill_judgments")
             conn.execute("DELETE FROM execution_analyses")
             conn.execute("DELETE FROM skill_lineage_parents")

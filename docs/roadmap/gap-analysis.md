@@ -8,11 +8,11 @@
 
 | 模块 | Roadmap 声称完成度 | 实际完成度 | 主要缺口 |
 |------|-------------------|-----------|----------|
-| P0-1 P2P 协作 | ~40% | **~93%** | Team lifecycle |
+| P0-1 P2P 协作 | ~40% | **~100%** | Rust 同步 |
 | P0-2 Gateway 安全 | ~44% | **~100%** | 无实质缺口 |
-| P1-3 Marketplace | ~56% | **~75%** | 增强搜索、评分系统、部分 Rust 同步 |
+| P1-3 Marketplace | ~56% | **~85%** | 增强搜索、部分 Rust 同步 |
 | P1-4 Agent 扩展 | ~38% | **~80%** | 第二批 10 个 agent、社区流程 |
-| P2-5 进化产品化 | ~33% | **~80%** | config/evolution.toml 落盘、Agency hook 集成验证 |
+| P2-5 进化产品化 | ~33% | **~90%** | Agency hook 集成验证、Rust 同步 |
 
 **结论：Roadmap「当前状态」表严重过时。大量标记为 ❌ 的组件已经实现。核心剩余工作集中在增量扩展（新 agent、Rust 同步）和边缘完善。**
 
@@ -33,13 +33,13 @@
 | 7 | Agent 发现 | ❌ | ✅ **已实现** | `platform/orchestration/agent_directory.py` — 按能力/角色查找 |
 | 8 | A2A 消息类型 | ❌ | ✅ **已实现** | `models/ipc.py` — A2AMessage + AgentAddress 模型 |
 | 9 | 消息路由/广播 | ❌ | ✅ **已实现** | `platform/orchestration/message_broker.py` — Platform-as-Broker |
-| 10 | Team lifecycle | ❌ | ❌ 确认缺失 | 无专门团队生命周期管理 |
+| 10 | Team lifecycle | ❌ | ✅ **已实现** | `platform/orchestration/team_manager.py` — TeamManager 含 form/activate/suspend/dissolve 生命周期 + 状态机 |
 
 ### 缺口清单
 
 | 缺口 | 严重度 | 说明 |
 |------|--------|------|
-| Team lifecycle | 低 | 无团队创建/管理/协调原语，当前通过 OrchestrationDSL 隐式管理 |
+| ~~Team lifecycle~~ | ~~低~~ | ~~已实现~~：`team_manager.py` 含完整生命周期管理 |
 | DSL `[messaging]` 测试 | 低 | 代码中已有 MessagingConfig，但 E2E 测试覆盖待确认 |
 
 ### TODO 标记校验
@@ -105,14 +105,14 @@
 | 13 | 签名验证 (Rust) | ❌ | ❌ 确认缺失 | Rust 端无签名验证 |
 | 14 | 依赖解析 (Python) | ❌ | ✅ **已实现** | `dependency_resolver.py` — 含冲突检测 |
 | 15 | 依赖解析 (Rust) | ❌ | ❌ 确认缺失 | Rust 端无依赖解析 |
-| 16 | 评分系统 | ❌ | ❌ 确认缺失 | 无 agent 质量评分/下载量排序 |
+| 16 | 评分系统 | ❌ | ✅ **已实现** | `platform/local/scoring.py` — ScoreManager 含 record_download/record_quality_score/record_user_rating/list_scores |
 
 ### 缺口清单
 
 | 缺口 | 严重度 | 说明 |
 |------|--------|------|
 | 增强搜索 API | 中 | 缺少按能力/领域搜索、按下载量排序 |
-| 评分系统 | 中 | 无 agent 质量评分、无下载量追踪 |
+| ~~评分系统~~ | ~~中~~ | ~~已实现~~：`scoring.py` 含下载量/质量评分/用户评分 |
 | Rust 签名验证 | 低 | Python 端已实现，Rust 端未同步 |
 | Rust 依赖解析 | 低 | Python 端已实现，Rust 端未同步 |
 | Marketplace 集成测试 | 低 | signer/resolver 与安装流程的端到端集成待验证 |
@@ -203,13 +203,13 @@
 | 9 | 可观测性 | ❌ | ✅ **已实现** | `metrics.py` — EvolutionMetrics + EvolutionDashboard |
 | 10 | A/B 测试 | ❌ | ✅ **已实现** | `experimenter.py` — EvolutionExperimenter 完整实现 |
 | 11 | 回滚机制 | ❌ | ✅ **已实现** | `experimenter.py` — rollback() 方法 |
-| 12 | 配置化 | ❌ | ⚠️ **部分** | `evolution_config.py` 存在，但 `config/evolution.toml` 文件未落盘 |
+| 12 | 配置化 | ❌ | ✅ **已实现** | `evolution_config.py` + `config/evolution.toml` 已落盘，含完整配置 |
 
 ### 缺口清单
 
 | 缺口 | 严重度 | 说明 |
 |------|--------|------|
-| config/evolution.toml 落盘 | 中 | 配置系统已实现（EvolutionConfig），但默认配置文件未写入 config/ |
+| ~~config/evolution.toml 落盘~~ | ~~中~~ | ~~已实现~~：`config/evolution.toml` 已存在，含 evolution.enabled/thresholds/llm/experiment 配置 |
 | Agency Pipeline hook 集成 | 中 | SkillPatcher 组件存在，但 Agency Pipeline 中的 post_analysis hook 是否完整接入待确认 |
 | Rust 同步 | 低 | Phase 5 内容，Python 完成后一次性同步 |
 
@@ -231,22 +231,22 @@
 |---|------|------|--------|-----------|
 | G1 | 第二批 10 个 Agent 未实现 | P1-4 | 🔴 高 | 每个 2-3 天，共 ~25 天 |
 | G2 | Agency Pipeline → Evolution hook 集成验证 | P2-5 | 🟠 中 | 1-2 天验证 + 修复 |
-| G3 | config/evolution.toml 落盘 | P2-5 | 🟠 中 | 0.5 天 |
+| ~~G3~~ | ~~config/evolution.toml 落盘~~ | ~~P2-5~~ | ~~✅ 已关闭~~ | config/evolution.toml 已存在 |
 | G4 | 增强搜索 API（能力/领域/下载量） | P1-3 | 🟠 中 | 3-5 天 |
-| G5 | 评分系统 | P1-3 | 🟠 中 | 3-5 天 |
+| ~~G5~~ | ~~评分系统~~ | ~~P1-3~~ | ~~✅ 已关闭~~ | scoring.py 已实现 |
 | G6 | Rust 签名验证同步 | P1-3 | 🟡 低 | 2-3 天 |
 | G7 | Rust 依赖解析同步 | P1-3 | 🟡 低 | 2-3 天 |
 | G8 | Rust A2A 消息同步 | P0-1 | 🟡 低 | 3-5 天 |
 | G9 | Rust Gateway auth/audit 同步 | P0-2 | 🟡 低 | 3-5 天 |
 | G10 | Rust Evolution 同步 | P2-5 | 🟡 低 | 5-7 天 |
-| G11 | Team lifecycle（P0-1） | P0-1 | 🟡 低 | 2-3 天 |
+| ~~G11~~ | ~~Team lifecycle~~ | ~~P0-1~~ | ~~✅ 已关闭~~ | team_manager.py 已实现 |
 | G12 | 社区贡献流程 | P1-4 | 🟡 低 | 3-5 天 |
 | G13 | Marketplace 端到端集成测试 | P1-3 | 🟡 低 | 1-2 天 |
 
 ### 建议优先级
 
-1. **立即可做**（0.5-2 天）：G3 config/evolution.toml 落盘、G2 Agency hook 验证
-2. **短期**（W1-4）：G4 搜索增强、G5 评分系统、G11 Team lifecycle
+1. **立即可做**（0.5-2 天）：G2 Agency hook 验证
+2. **短期**（W1-4）：G4 搜索增强
 3. **中期**（W5-10）：G1 第二批 agent（可按需挑选高价值 agent 优先）
 4. **长期**（W10+）：G6-G10 Rust 同步（遵循 D27 决策：Python 全部完成后一次性同步）
 5. **低优先级**：G12 社区流程、G13 集成测试

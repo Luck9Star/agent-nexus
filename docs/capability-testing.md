@@ -29,7 +29,7 @@
 
 核心特点：
 
-- **三层能力覆盖**: Atomic（11 个）、Composite（5 个）、Agency Pipeline（1 个）
+- **三层能力覆盖**: Atomic（20 个）、Composite（5 个）、Agency Pipeline（1 个）
 - **两种运行模式**: CLI（subprocess local_adapter）、API（LLMClient 真实调用）
 - **两级验证深度**: CI Gate（纯结构）和 Release（语义质量）
 

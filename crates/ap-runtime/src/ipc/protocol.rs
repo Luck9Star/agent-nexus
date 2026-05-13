@@ -4,13 +4,15 @@
 //! Typed send/receive (`send_chat`, `send_task`, `receive_result`) are
 //! delegated to `IpcProtocol` — no duplication.
 
+use ap_core::models::ipc::AgentToPlatform;
+use ap_core::models::ipc::AgentToPlatformType;
 use ap_core::orchestration::ipc::IpcError;
 use ap_core::orchestration::ipc_protocol::IpcProtocol;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-/// Default heartbeat timeout (reserved for future use).
-const _HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Heartbeat timeout — matches Python's _HEARTBEAT_TIMEOUT (10s).
+const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10);
 
 // ---------------------------------------------------------------------------
 // Re-exports
@@ -82,21 +84,45 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> AgentProtocol<R, W> {
         self.inner.receive_result(timeout).await
     }
 
-    /// Heartbeat: send ping, expect pong within 10 seconds.
+    /// Heartbeat: send `__heartbeat__`, expect pong within timeout.
     ///
-    /// This is the only method that is *not* a simple delegation — it
-    /// uses `send_chat` / `receive_result` from `IpcProtocol` to implement
-    /// a ping-pong check specific to agent health monitoring.
+    /// Sends `__heartbeat__` with `conversation_id="__hb__"` (matching the Python
+    /// IPC protocol) and waits up to `HEARTBEAT_TIMEOUT` for a progress response
+    /// containing "pong". Non-pong progress messages are skipped. Result/Error
+    /// messages are treated as terminal (not a pong).
     ///
     /// # Errors
-    /// Returns an error if the underlying operation fails.
-    pub async fn heartbeat(&mut self) -> Result<(), IpcError> {
-        // DESIGN: We only verify stdin is writable, not that the agent responds.
-        // This is intentional — waiting for a response would consume a legitimate
-        // agent message from the result stream. Process-level health monitoring
-        // (separate from heartbeat) should be done via ProcessManager health checks.
-        self.inner.send_chat("__ping__", None).await?;
-        Ok(())
+    /// Returns an error if the underlying send/receive operation fails.
+    pub async fn heartbeat(&mut self) -> Result<bool, IpcError> {
+        self.inner.send_chat("__heartbeat__", Some("__hb__")).await?;
+        let deadline = std::time::Instant::now() + HEARTBEAT_TIMEOUT;
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return Ok(false);
+            }
+            let recv_fut = self.inner.stream_mut().receive::<AgentToPlatform>();
+            tokio::pin!(recv_fut);
+            match tokio::time::timeout(remaining, &mut recv_fut).await {
+                Ok(Ok(msg)) => {
+                    if msg.msg_type == AgentToPlatformType::Progress
+                        && msg.content.to_lowercase().contains("pong")
+                    {
+                        return Ok(true);
+                    }
+                    // Result/Error messages are terminal — not a pong.
+                    if msg.msg_type == AgentToPlatformType::Result
+                        || msg.msg_type == AgentToPlatformType::Error
+                    {
+                        return Ok(false);
+                    }
+                    // Other types (A2A etc.) — skip and keep waiting.
+                    continue;
+                }
+                Ok(Err(e)) => return Err(e),
+                Err(_) => return Ok(false), // timeout
+            }
+        }
     }
 }
 
@@ -211,14 +237,16 @@ mod tests {
             let mut reader = BufReader::new(sr);
             reader.read_line(&mut line).await.unwrap();
 
-            let resp = agent_response("__pong__", None);
+            // Heartbeat expects a "progress" type response containing "pong"
+            let resp = r#"{"type":"progress","content":"pong","task_id":null,"message":null,"progress_pct":null,"error":null,"status":null,"output":null}"#;
             let mut writer = sw;
             writer.write_all(resp.as_bytes()).await.unwrap();
             writer.write_all(b"\n").await.unwrap();
             writer.flush().await.unwrap();
         });
 
-        proto.heartbeat().await.expect("heartbeat should succeed");
+        let pong = proto.heartbeat().await.expect("heartbeat should succeed");
+        assert!(pong, "heartbeat should receive pong");
     }
 
     #[tokio::test]

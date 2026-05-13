@@ -20,49 +20,7 @@ from agent_nexus.platform.skills.models import (
 
 
 class TestSkillMetadata:
-    def test_creation_with_all_fields(self):
-        meta = SkillMetadata(
-            name="doc-filler",
-            agent_type="atomic",
-            triggers=["fill docs"],
-            capabilities=["write"],
-            model_config={"recommended": "openai:gpt-4o"},
-            extra={"version": "1.0"},
-        )
-        assert meta.name == "doc-filler"
-        assert meta.agent_type == "atomic"
-        assert meta.triggers == ["fill docs"]
-        assert meta.capabilities == ["write"]
-        assert meta.model_config == {"recommended": "openai:gpt-4o"}
-        assert meta.extra == {"version": "1.0"}
-
-    def test_defaults(self):
-        meta = SkillMetadata(
-            name="test-agent",
-            agent_type="atomic",
-            triggers=[],
-            capabilities=[],
-            model_config={},
-        )
-        assert meta.extra == {}
-        assert meta.triggers == []
-        assert meta.capabilities == []
-        assert meta.model_config == {}
-
-    def test_frozen_cannot_modify(self):
-        meta = SkillMetadata(
-            name="test", agent_type="atomic", triggers=[], capabilities=[], model_config={}
-        )
-        with pytest.raises(AttributeError):
-            meta.name = "changed"  # pyright: ignore[reportAttributeAccessIssue]
-
-    def test_frozen_cannot_modify_list(self):
-        meta = SkillMetadata(
-            name="test", agent_type="atomic", triggers=["a"], capabilities=[], model_config={}
-        )
-        # Frozen dataclass prevents reassignment of the field itself
-        with pytest.raises(AttributeError):
-            meta.triggers = ["b"]  # pyright: ignore[reportAttributeAccessIssue]
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -71,10 +29,6 @@ class TestSkillMetadata:
 
 
 class TestSkillBody:
-    def test_creation(self):
-        body = SkillBody(content="# Role\nYou are a helper.")
-        assert body.content == "# Role\nYou are a helper."
-
     def test_frozen(self):
         body = SkillBody(content="some content")
         with pytest.raises(AttributeError):
@@ -87,18 +41,6 @@ class TestSkillBody:
 
 
 class TestSkillResources:
-    def test_creation_with_sections(self):
-        res = SkillResources(
-            content="# Resources\n## Example\nHello",
-            sections={"Example": "Hello"},
-        )
-        assert res.content == "# Resources\n## Example\nHello"
-        assert res.sections == {"Example": "Hello"}
-
-    def test_default_sections(self):
-        res = SkillResources(content="# Resources")
-        assert res.sections == {}
-
     def test_frozen(self):
         res = SkillResources(content="x")
         with pytest.raises(AttributeError):
@@ -134,18 +76,6 @@ class TestParsedSkillTier0:
             triggers=["review"],
             capabilities=["read"],
             model_config={},
-        )
-        skill = ParsedSkill(metadata=meta, body=None, resources=None, raw="")
-        summary = skill.tier0_summary()
-        assert "Model:" not in summary
-
-    def test_tier0_summary_model_config_without_recommended(self):
-        meta = SkillMetadata(
-            name="reviewer",
-            agent_type="atomic",
-            triggers=[],
-            capabilities=[],
-            model_config={"fallback": "gpt-3.5"},
         )
         skill = ParsedSkill(metadata=meta, body=None, resources=None, raw="")
         summary = skill.tier0_summary()

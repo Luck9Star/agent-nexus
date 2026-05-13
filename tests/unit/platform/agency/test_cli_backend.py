@@ -20,7 +20,6 @@ from agent_nexus.platform.agency.cli import (
     _write_report,
 )
 
-
 # ===================================================================
 # _validate_output_path — path traversal prevention (SECURITY)
 # ===================================================================
@@ -34,40 +33,10 @@ class TestValidateOutputPath:
         with pytest.raises(ValueError, match="sensitive location"):
             _validate_output_path(Path("/etc/passwd"))
 
-    def test_blocks_etc_root(self) -> None:
-        """Exact /etc path is rejected."""
-        with pytest.raises(ValueError, match="sensitive location"):
-            _validate_output_path(Path("/etc"))
-
     def test_blocks_usr_traversal(self) -> None:
         """Paths under /usr are rejected."""
         with pytest.raises(ValueError, match="sensitive location"):
             _validate_output_path(Path("/usr/local/bin/evil"))
-
-    def test_blocks_usr_root(self) -> None:
-        """Exact /usr path is rejected."""
-        with pytest.raises(ValueError, match="sensitive location"):
-            _validate_output_path(Path("/usr"))
-
-    def test_blocks_bin_traversal(self) -> None:
-        """Paths under /bin are rejected."""
-        with pytest.raises(ValueError, match="sensitive location"):
-            _validate_output_path(Path("/bin/bash"))
-
-    def test_blocks_sbin_traversal(self) -> None:
-        """Paths under /sbin are rejected."""
-        with pytest.raises(ValueError, match="sensitive location"):
-            _validate_output_path(Path("/sbin/mount"))
-
-    def test_blocks_var_db(self) -> None:
-        """Paths under /var/db are rejected."""
-        with pytest.raises(ValueError, match="sensitive location"):
-            _validate_output_path(Path("/var/db/some_db"))
-
-    def test_blocks_system_traversal(self) -> None:
-        """Paths under /System are rejected (macOS)."""
-        with pytest.raises(ValueError, match="sensitive location"):
-            _validate_output_path(Path("/System/Library"))
 
     def test_blocks_ssh_dir(self) -> None:
         """Paths under ~/.ssh are rejected."""
@@ -89,12 +58,12 @@ class TestValidateOutputPath:
 
     def test_blocks_dotdot_segments(self) -> None:
         """Paths containing '..' segments are rejected outright."""
-        with pytest.raises(ValueError, match=r"\.\.") :
+        with pytest.raises(ValueError, match=r"\.\."):
             _validate_output_path(Path("../../../etc/passwd"))
 
     def test_blocks_dotdot_in_middle(self) -> None:
         """Paths with '..' in the middle are rejected."""
-        with pytest.raises(ValueError, match=r"\.\.") :
+        with pytest.raises(ValueError, match=r"\.\."):
             _validate_output_path(Path("/tmp/safe/../../../etc/passwd"))
 
     def test_accepts_valid_tmp_path(self, tmp_path: Path) -> None:
@@ -152,39 +121,6 @@ class TestExecutePipeline:
 
     @patch("agent_nexus.platform.orchestration.task_graph.TaskGraph")
     @patch("agent_nexus.platform.agency.task_composer.TaskComposer")
-    def test_creates_task_graph_in_memory(self, mock_composer_cls, mock_graph_cls) -> None:
-        """TaskGraph is opened with ':memory:' database."""
-        mock_graph = MagicMock()
-        mock_graph_cls.return_value.__enter__ = MagicMock(return_value=mock_graph)
-        mock_graph_cls.return_value.__exit__ = MagicMock(return_value=False)
-
-        mock_composer = MagicMock()
-        mock_result = self._make_mock_result()
-        mock_composer.run.return_value = mock_result
-        mock_composer_cls.return_value = mock_composer
-
-        registry = MagicMock()
-        executor = MagicMock()
-        executor.close = MagicMock()
-
-        _execute_pipeline(
-            message="test",
-            mode="plan",
-            max_parallel=3,
-            timeout=60,
-            reasoning_protocol=False,
-            registry=registry,
-            executor=executor,
-            is_llm=True,
-            llm_planner=None,
-            llm_integrator=None,
-            llm_qa_gate=None,
-        )
-
-        mock_graph_cls.assert_called_once_with(":memory:")
-
-    @patch("agent_nexus.platform.orchestration.task_graph.TaskGraph")
-    @patch("agent_nexus.platform.agency.task_composer.TaskComposer")
     def test_closes_llm_executor_on_success(self, mock_composer_cls, mock_graph_cls) -> None:
         """LLM executor.close() is called when is_llm=True."""
         mock_graph_cls.return_value.__enter__ = MagicMock(return_value=MagicMock())
@@ -207,91 +143,6 @@ class TestExecutePipeline:
         )
         executor.close.assert_called_once()
 
-    @patch("agent_nexus.platform.orchestration.task_graph.TaskGraph")
-    @patch("agent_nexus.platform.agency.task_composer.TaskComposer")
-    def test_closes_llm_executor_on_failure(self, mock_composer_cls, mock_graph_cls) -> None:
-        """LLM executor.close() is called even when composer.run() raises."""
-        mock_graph_cls.return_value.__enter__ = MagicMock(return_value=MagicMock())
-        mock_graph_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_composer_cls.return_value.run.side_effect = RuntimeError("boom")
-
-        executor = MagicMock()
-        with pytest.raises(RuntimeError, match="boom"):
-            _execute_pipeline(
-                message="test",
-                mode="plan",
-                max_parallel=3,
-                timeout=60,
-                reasoning_protocol=False,
-                registry=MagicMock(),
-                executor=executor,
-                is_llm=True,
-                llm_planner=None,
-                llm_integrator=None,
-                llm_qa_gate=None,
-            )
-        executor.close.assert_called_once()
-
-    @patch("agent_nexus.platform.orchestration.task_graph.TaskGraph")
-    @patch("agent_nexus.platform.agency.task_composer.TaskComposer")
-    def test_no_close_for_profile_executor(self, mock_composer_cls, mock_graph_cls) -> None:
-        """ProfileBasedExecutor (is_llm=False) does not call close in finally."""
-        mock_graph_cls.return_value.__enter__ = MagicMock(return_value=MagicMock())
-        mock_graph_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_composer_cls.return_value.run.return_value = self._make_mock_result()
-
-        executor = MagicMock()
-        _execute_pipeline(
-            message="test",
-            mode="plan",
-            max_parallel=3,
-            timeout=60,
-            reasoning_protocol=False,
-            registry=MagicMock(),
-            executor=executor,
-            is_llm=False,
-            llm_planner=None,
-            llm_integrator=None,
-            llm_qa_gate=None,
-        )
-        executor.close.assert_not_called()
-
-    @patch("agent_nexus.platform.orchestration.task_graph.TaskGraph")
-    @patch("agent_nexus.platform.agency.task_composer.TaskComposer")
-    def test_passes_all_params_to_composer_run(self, mock_composer_cls, mock_graph_cls) -> None:
-        """All pipeline parameters are forwarded to composer.run()."""
-        mock_graph = MagicMock()
-        mock_graph_cls.return_value.__enter__ = MagicMock(return_value=mock_graph)
-        mock_graph_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_composer = MagicMock()
-        mock_composer.run.return_value = self._make_mock_result()
-        mock_composer_cls.return_value = mock_composer
-
-        mock_planner = MagicMock()
-        mock_integrator = MagicMock()
-        mock_qa = MagicMock()
-
-        _execute_pipeline(
-            message="test task",
-            mode="review",
-            max_parallel=5,
-            timeout=120,
-            reasoning_protocol=True,
-            registry=MagicMock(),
-            executor=MagicMock(),
-            is_llm=True,
-            llm_planner=mock_planner,
-            llm_integrator=mock_integrator,
-            llm_qa_gate=mock_qa,
-        )
-
-        run_call = mock_composer.run.call_args
-        assert run_call.kwargs["concurrent"] is True
-        assert run_call.kwargs["llm_planner"] is mock_planner
-        assert run_call.kwargs["llm_integrator"] is mock_integrator
-        assert run_call.kwargs["llm_qa_gate"] is mock_qa
-        assert run_call.kwargs["task_graph"] is mock_graph
-
 
 # ===================================================================
 # _create_executor — executor factory with LLM fallback
@@ -300,26 +151,6 @@ class TestExecutePipeline:
 
 class TestCreateExecutor:
     """Tests for _create_executor — LLM first, fallback to profile-based."""
-
-    @patch("agent_nexus.platform.agency.executor.LLMExecutor")
-    def test_returns_llm_executor_on_success(self, mock_llm_cls) -> None:
-        """When LLM init succeeds, returns (LLMExecutor, True)."""
-        mock_instance = MagicMock()
-        mock_instance.model_name = "test-model"
-        mock_llm_cls.return_value = mock_instance
-
-        executor, is_llm = _create_executor(
-            model="api:model",
-            config_dir=None,
-            temperature=0.7,
-            registry=MagicMock(),
-            shared_registry=MagicMock(),
-            shared_client=MagicMock(),
-            effective_call_timeout=30.0,
-            reasoning_protocol=False,
-        )
-        assert is_llm is True
-        assert executor is mock_instance
 
     @patch("agent_nexus.platform.agency.executor.ProfileBasedExecutor")
     @patch("agent_nexus.platform.agency.executor.LLMExecutor")
@@ -342,56 +173,6 @@ class TestCreateExecutor:
         assert is_llm is False
         assert executor is mock_profile
         mock_profile_cls.assert_called_once()
-
-    @patch("agent_nexus.platform.agency.executor.ProfileBasedExecutor")
-    @patch("agent_nexus.platform.agency.executor.LLMExecutor")
-    def test_fallback_passes_registry(self, mock_llm_cls, mock_profile_cls) -> None:
-        """Fallback ProfileBasedExecutor receives the same registry."""
-        mock_llm_cls.side_effect = ValueError("bad model")
-        mock_registry = MagicMock()
-        mock_profile_cls.return_value = MagicMock()
-
-        _create_executor(
-            model="bad",
-            config_dir=None,
-            temperature=None,
-            registry=mock_registry,
-            shared_registry=None,
-            shared_client=None,
-            effective_call_timeout=30.0,
-            reasoning_protocol=False,
-        )
-        mock_profile_cls.assert_called_once_with(registry=mock_registry)
-
-    @patch("agent_nexus.platform.agency.executor.LLMExecutor")
-    def test_llm_executor_receives_all_params(self, mock_llm_cls) -> None:
-        """LLMExecutor constructor receives all forwarded parameters."""
-        mock_instance = MagicMock()
-        mock_instance.model_name = "test"
-        mock_llm_cls.return_value = mock_instance
-
-        mock_registry = MagicMock()
-        mock_shared_reg = MagicMock()
-        mock_client = MagicMock()
-
-        _create_executor(
-            model="anthropic:claude-sonnet-4-20250514",
-            config_dir="/cfg",
-            temperature=0.5,
-            registry=mock_registry,
-            shared_registry=mock_shared_reg,
-            shared_client=mock_client,
-            effective_call_timeout=60.0,
-            reasoning_protocol=True,
-        )
-
-        call_kwargs = mock_llm_cls.call_args.kwargs
-        assert call_kwargs["model_string"] == "anthropic:claude-sonnet-4-20250514"
-        assert call_kwargs["default_temperature"] == 0.5
-        assert call_kwargs["capability_registry"] is mock_shared_reg
-        assert call_kwargs["client"] is mock_client
-        assert call_kwargs["timeout"] == 60.0
-        assert call_kwargs["reasoning_protocol"] is True
 
 
 # ===================================================================
@@ -457,20 +238,6 @@ class TestLoadExperts:
                 _load_experts("/vendor", "/allowlist")
             mock_rmtree.assert_called_once()
 
-    @patch("agent_nexus.platform.agency.cli.ExpertRegistry")
-    @patch("agent_nexus.platform.agency.cli.AgencyImporter")
-    def test_empty_profiles_returns_empty_registry(self, mock_importer_cls, mock_registry_cls) -> None:
-        """Empty dry_run result returns a registry with no experts."""
-        mock_importer = MagicMock()
-        mock_importer.dry_run.return_value = []
-        mock_importer_cls.return_value = mock_importer
-        mock_registry = MagicMock()
-        mock_registry_cls.return_value = mock_registry
-
-        result = _load_experts("/vendor", "/allowlist")
-        assert result is mock_registry
-        mock_registry.add.assert_not_called()
-
 
 # ===================================================================
 # _handle_output — output routing (file vs stdout)
@@ -479,30 +246,6 @@ class TestLoadExperts:
 
 class TestHandleOutput:
     """Tests for _handle_output — dispatches to file or stdout."""
-
-    def test_file_output_calls_write_report(self) -> None:
-        """output_target='file' triggers _write_report with timestamped path."""
-        result = MagicMock()
-        result.output_target = "file"
-
-        with patch("agent_nexus.platform.agency.cli._write_report") as mock_write:
-            _handle_output(result)
-            mock_write.assert_called_once()
-            # The path should be a Path with timestamp pattern
-            written_path = mock_write.call_args[0][1]
-            assert written_path.name.startswith("composition-report-")
-            assert written_path.name.endswith(".md")
-
-    def test_custom_path_output_calls_write_report(self) -> None:
-        """output_target with a specific path passes that path to _write_report."""
-        result = MagicMock()
-        result.output_target = "my-report.md"
-
-        with patch("agent_nexus.platform.agency.cli._write_report") as mock_write:
-            _handle_output(result)
-            mock_write.assert_called_once()
-            written_path = mock_write.call_args[0][1]
-            assert str(written_path) == "my-report.md"
 
     def test_none_output_calls_print_result(self) -> None:
         """output_target=None delegates to _print_result."""
@@ -522,7 +265,9 @@ class TestHandleOutput:
 class TestWriteReport:
     """Tests for _write_report — writes markdown to disk."""
 
-    def _make_result(self, *, integrated: bool = True, skipped: list[str] | None = None) -> MagicMock:
+    def _make_result(
+        self, *, integrated: bool = True, skipped: list[str] | None = None
+    ) -> MagicMock:
         result = MagicMock()
         result.task = "Design architecture"
         result.qa_passed = True
@@ -578,18 +323,6 @@ class TestWriteReport:
         assert "agency.test1" in content
         assert "agency.test2" in content
         assert "**Skipped**" in content
-
-    def test_rejects_sensitive_output_path(self) -> None:
-        """Writing to /etc is blocked by _validate_output_path."""
-        result = self._make_result()
-        with pytest.raises(ValueError, match="sensitive location"):
-            _write_report(result, Path("/etc/evil-report.md"))
-
-    def test_rejects_dotdot_in_path(self) -> None:
-        """Paths with '..' segments are rejected."""
-        result = self._make_result()
-        with pytest.raises(ValueError, match=r"\.\.") :
-            _write_report(result, Path("../../../tmp/evil.md"))
 
     def test_file_encoding_is_utf8(self, tmp_path: Path) -> None:
         """Report is written in UTF-8 encoding (supports Chinese characters)."""

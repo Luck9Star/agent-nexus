@@ -4,7 +4,7 @@ use ap_runtime::mcp_client::ToolInfo;
 
 /// Merge tool schemas from multiple agents into a unified gateway format.
 ///
-/// Each tool is namespaced via `McpToolAdapter` (`{agent}___{tool}`) with its
+/// Each tool is namespaced via `McpToolAdapter` (`mcp__{agent}__{tool}`) with its
 /// description and input schema preserved.
 #[must_use] 
 pub fn merge_tool_schemas(
@@ -26,7 +26,9 @@ pub fn merge_tool_schemas(
             );
             map.insert(
                 "inputSchema".to_string(),
-                tool.input_schema.clone().unwrap_or(serde_json::Value::Null),
+                tool.input_schema.clone().unwrap_or_else(|| {
+                    serde_json::json!({"type": "object", "properties": {}})
+                }),
             );
             serde_json::Value::Object(map)
         })
@@ -72,7 +74,7 @@ mod tests {
         let tools = vec![sample_tool()];
         let schemas = merge_tool_schemas("code-reviewer", &tools);
         assert_eq!(schemas.len(), 1);
-        assert_eq!(schemas[0]["name"], "code-reviewer___review");
+        assert_eq!(schemas[0]["name"], "mcp__code_reviewer__review");
         assert_eq!(schemas[0]["description"], "Review code");
         assert_eq!(schemas[0]["inputSchema"]["type"], "object");
     }
@@ -99,18 +101,18 @@ mod tests {
         ];
         let schemas = merge_tool_schemas("my-agent", &tools);
         assert_eq!(schemas.len(), 2);
-        assert_eq!(schemas[0]["name"], "my-agent___a");
-        assert_eq!(schemas[1]["name"], "my-agent___b");
+        assert_eq!(schemas[0]["name"], "mcp__my_agent__a");
+        assert_eq!(schemas[1]["name"], "mcp__my_agent__b");
     }
 
     #[test]
     fn extract_tool_call_basic() {
         let req = serde_json::json!({
-            "name": "code-reviewer___review",
+            "name": "mcp__code_reviewer__review",
             "arguments": {"path": "/src/main.rs"}
         });
         let (agent, tool, args) = extract_tool_call(&req).unwrap();
-        assert_eq!(agent, "code-reviewer");
+        assert_eq!(agent, "code_reviewer");
         assert_eq!(tool, "review");
         assert_eq!(args["path"], "/src/main.rs");
     }
@@ -118,10 +120,10 @@ mod tests {
     #[test]
     fn extract_tool_call_no_arguments_defaults_empty_object() {
         let req = serde_json::json!({
-            "name": "my-agent___ping"
+            "name": "mcp__my_agent__ping"
         });
         let (agent, tool, args) = extract_tool_call(&req).unwrap();
-        assert_eq!(agent, "my-agent");
+        assert_eq!(agent, "my_agent");
         assert_eq!(tool, "ping");
         assert!(args.is_object());
         assert!(args.as_object().unwrap().is_empty());
@@ -135,7 +137,7 @@ mod tests {
 
     #[test]
     fn extract_tool_call_unparseable_name_returns_none() {
-        let req = serde_json::json!({"name": "no_separator"});
+        let req = serde_json::json!({"name": "no_mcp_prefix__separator"});
         assert!(extract_tool_call(&req).is_none());
     }
 }

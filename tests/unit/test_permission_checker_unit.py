@@ -11,7 +11,6 @@ import pytest
 from agent_nexus.models.permission import PermissionConfig, PermissionMode
 from agent_nexus.platform.runtime.permission_checker import PermissionChecker
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -116,4 +115,3 @@ class TestDeniedCommands:
         )
         d = checker.check_command("echo hello")
         assert d.allowed is True
-

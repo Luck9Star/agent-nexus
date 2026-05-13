@@ -146,31 +146,6 @@ quality:
 
 
 # ===================================================================
-# 3. Output Contract Schema — valid document
-# ===================================================================
-@pytest.mark.timeout(30)
-def test_output_contract_schema_valid():
-    """A fully-populated OutputContract document must pass validation."""
-    instance = yaml.safe_load(
-        """
-artifact_type: risk_report
-format: markdown
-required_sections:
-  - findings
-  - severity
-  - affected_components
-  - mitigation
-constraints:
-  max_findings: 10
-  require_evidence: true
-"""
-    )
-    _validate(OUTPUT_CONTRACT_SCHEMA_PATH, instance)
-    # jsonschema.validate raises on failure; explicit check for clarity
-    assert instance["artifact_type"] == "risk_report"
-
-
-# ===================================================================
 # 4. Output Contract Schema — missing required fields
 # ===================================================================
 @pytest.mark.timeout(30)

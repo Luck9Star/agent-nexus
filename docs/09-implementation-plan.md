@@ -2,7 +2,7 @@
 
 > Agent Nexus Design Doc — §11 实施计划：7 个 Phase、风险矩阵、项目结构
 
-> **Status**: Phase 1-10 已完成 | Phase 11 (Integration Tests) TODO
+> **Status**: Phase 1-8 已完成 | Phase 9 进行中 (~40%) | Phase 10 部分完成
 > **Code**: `src/agent_nexus/`, `agents/`, `tests/`, `crates/`
 
 ## §11 实施计划
@@ -43,7 +43,7 @@
 - [x] **T2: Tiered Context Loading 基础框架** — TieredContextBuilder（L0/L1 分层注入）
 - [x] **T5: Provider-Agnostic Tool Search** — AgentSearchTool MCP tool + Anthropic 原生 `defer_loading` 适配
 - [x] Model Config Manager
-- [x] 所有 11 个 Atomic Agent 注册（含 1 个自进化晋升的 good-skill）
+- [x] 所有 20 个 Atomic Agent 注册（含 1 个自进化晋升的 good-skill）
 - [ ] 端到端 MCP 测试
 
 ### Phase 4：Git-based Distribution + CLI（Week 6-7）
@@ -211,7 +211,7 @@
 - [ ] test_composite_api.py
 - [ ] test_agency_api.py
 
-### Phase 10：配置整合（已完成）✅
+### Phase 10：配置整合（部分完成）⚠️
 
 目标：统一配置来源，消除 sources.yaml
 
@@ -221,9 +221,6 @@
 - [x] init 模板更新为 6 providers
 - [x] sources 命令使用 config.toml
 - [ ] **sources.yaml → config.toml 迁移工具**
-- [ ] ap-runtime crate：Agent Supervisor（tokio::process + DashMap）
-- [ ] ap-gateway crate：MCP 网关（rmcp + 多路复用）
-- [ ] ap-cli crate：CLI（clap 命令行）
 - [ ] 逐模块替换验证（每个 crate 独立测试后替换 Python 模块）
 - [ ] 接口兼容性测试（Rust 平台 vs Python 平台读写同一 lockfile.json）
 
@@ -265,20 +262,55 @@ agent-nexus/
 │   │   │   └── tool_adapter.py
 │   │   ├── config/              # 模型配置（Provider Registry + pydantic-ai）
 │   │   │   ├── model_config.py
+│   │   │   ├── model_db.py      # models.dev 数据获取
 │   │   │   ├── loader.py
-│   │   │   └── defaults.py
+│   │   │   ├── defaults.py
+│   │   │   └── config_templates.py # 配置模板
+│   │   ├── agency/              # Agency Pipeline（LLM 驱动专家编排，24 files）
+│   │   │   ├── llm_planner.py   # LLMPlanner（任务分解）
+│   │   │   ├── dag_dispatcher.py # DAGDispatcher（并行 DAG 调度）
+│   │   │   ├── llm_executor.py  # LLMExecutor（per-expert 调用）
+│   │   │   ├── llm_integrator.py # LLMIntegrator（语义合成）
+│   │   │   ├── llm_qa_gate.py   # LLMQualityGate（质量评估）
+│   │   │   ├── registry.py      # Registry（专家注册）
+│   │   │   ├── selector.py      # Selector（专家选择）
+│   │   │   ├── llm_client.py    # LLMClient + ModelCapability
+│   │   │   ├── token_counter.py # Token 计数（CJK 感知）
+│   │   │   ├── context_provider.py # 上下文提供
+│   │   │   ├── hooks.py         # Agency hooks
+│   │   │   ├── planner.py       # Planner 基础类
+│   │   │   ├── executor.py      # Executor 基础类
+│   │   │   ├── integrator.py    # Integrator 基础类
+│   │   │   ├── qa_gate.py       # QAGate 基础类
+│   │   │   ├── reflector.py     # 结果反思
+│   │   │   ├── task_composer.py # 任务组装
+│   │   │   ├── prompt_loader.py # Prompt 加载
+│   │   │   ├── parser.py        # Profile 解析
+│   │   │   ├── policy.py        # 内容策略
+│   │   │   ├── allowlist.py     # 白名单验证
+│   │   │   ├── importer.py      # 导入器
+│   │   │   ├── json_parse.py    # JSON 解析工具
+│   │   │   ├── cli.py           # CLI 入口
+│   │   │   └── cli_backend/     # CLI 会话管理
 │   │   ├── hooks/               # Hook 执行器
 │   │   │   └── executor.py
 │   │   ├── local/               # Local Platform（CLI + Git Installer + Supervisor）
-│   │   │   ├── cli.py           # CLI 入口 (Typer)
+│   │   │   ├── cli/             # CLI 命令模块（Typer）
 │   │   │   ├── sources.py       # 包源管理（sources.yaml 解析）
 │   │   │   ├── installer.py     # Git Installer（clone --sparse + venv）
 │   │   │   ├── lockfile.py      # 锁文件管理（lockfile.json）
-│   │   │   └── supervisor.py    # Agent 进程管理
+│   │   │   ├── supervisor.py    # Agent 进程管理
+│   │   │   ├── manifest.py      # Manifest 解析（TOML + YAML 双读）
+│   │   │   ├── quality_gate.py  # Quality Gate Pipeline
+│   │   │   ├── scoring.py       # 评分管理
+│   │   │   ├── signer.py        # Sigstore + GPG 签名
+│   │   │   ├── dependency_resolver.py # 依赖解析 + 冲突检测
+│   │   │   ├── create_agent.py  # agent 脚手架
+│   │   │   └── capabilities.toml # 能力分类词汇表
 │   │   ├── skills/              # Skill 加载器
 │   │   │   ├── loader.py
 │   │   │   └── models.py
-│   │   ├── evolution/           # Self-Evolution Engine
+│   │   ├── evolution/           # Self-Evolution Engine (18 files)
 │   │   │   ├── engine.py
 │   │   │   ├── evolver.py
 │   │   │   ├── store.py
@@ -287,7 +319,15 @@ agent-nexus/
 │   │   │   ├── context_describer.py
 │   │   │   ├── health.py
 │   │   │   ├── promotion.py
-│   │   │   └── thresholds.py
+│   │   │   ├── thresholds.py
+│   │   │   ├── experimenter.py  # A/B 实验框架
+│   │   │   ├── skill_patch.py   # 技能补丁
+│   │   │   ├── skill_store.py   # Skill 持久化
+│   │   │   ├── evolution_config.py # 进化配置
+│   │   │   ├── metrics.py       # 进化指标导出
+│   │   │   ├── analysis_store.py # 分析结果存储
+│   │   │   ├── budget_store.py  # 预算存储
+│   │   │   └── _shared.py       # 共享工具
 │   │   └── runtime/             # Python Runtime（CaveAgent 集成）
 │   │       ├── runtime.py
 │   │       ├── executor.py
@@ -296,31 +336,38 @@ agent-nexus/
 │   │       ├── security_checker.py
 │   │       ├── security_rules.py
 │   │       └── token_tracker.py
-│   └── models/                  # 共享数据模型
+│   └── models/                  # 共享数据模型（17 文件）
 │       ├── agent.py
+│       ├── capability.py        # 模型能力注册表
+│       ├── composition.py       # 组合图模型
 │       ├── config.py
 │       ├── context.py
 │       ├── distribution.py
+│       ├── errors.py            # 统一错误类型
 │       ├── evolution.py
+│       ├── external_mcp.py      # 外部 MCP 适配模型
 │       ├── hooks.py
 │       ├── ipc.py
 │       ├── permission.py
 │       ├── runtime.py
-│       └── task.py
+│       ├── task.py
+│       └── team.py              # 团队模型
 ├── agents/                      # 官方 Agent
-│   ├── atomic/                  # 11 Atomic Agents（含 1 个自进化晋升）
+│   ├── atomic/                  # 20 Atomic Agents
 │   └── composite/               # 5 Composite Agents
 ├── tests/                       # 测试
 │   ├── unit/
 │   ├── integration/
 │   └── e2e/
 ├── templates/                   # OrchestrationDSL TOML 模板
-├── crates/                      # Rust 重构（远期）
+├── crates/                      # Rust 平台重写（已完成 7 crates）
 │   ├── ap-core/                 # 核心类型、配置、协议
 │   ├── ap-fetcher/              # Git-based 包获取（git2 + semver）
 │   ├── ap-runtime/              # Agent 运行时 (tokio)
-│   ├── ap-gateway/              # MCP 网关 (rmcp)
-│   └── ap-cli/                  # CLI (clap)
+│   ├── ap-gateway/              # MCP 网关（axum + 多路复用）
+│   ├── ap-evolution/            # 自建进化引擎
+│   ├── ap-cli-backend/          # CLI 后端（类型、解析、路由、会话）
+│   └── ap-cli/                  # CLI（clap 命令行）
 └── pyproject.toml
 ```
 

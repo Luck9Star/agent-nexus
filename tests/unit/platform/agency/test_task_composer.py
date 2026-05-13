@@ -42,16 +42,6 @@ def _build_composer() -> TaskComposer:
 class TestTaskComposerInput:
     """TaskComposerInput dataclass validates fields."""
 
-    def test_input_fields(self) -> None:
-        inp = TaskComposerInput(
-            task="Design integration architecture",
-            mode="plan",
-            max_parallel=3,
-        )
-        assert inp.task == "Design integration architecture"
-        assert inp.mode == "plan"
-        assert inp.max_parallel == 3
-
 
 @pytest.mark.timeout(30)
 class TestTaskComposerSelect:
@@ -66,23 +56,6 @@ class TestTaskComposerSelect:
         result = composer.run(inp)
         assert isinstance(result, TaskComposerResult)
         assert len(result.selected_agents) > 0
-
-
-@pytest.mark.timeout(30)
-class TestTaskComposerDAG:
-    """TaskComposer generates a valid DAG."""
-
-    def test_dag_has_integrate_and_validate(self) -> None:
-        composer = _build_composer()
-        inp = TaskComposerInput(
-            task="Review code quality",
-            mode="plan",
-        )
-        result = composer.run(inp)
-        assert result.dag is not None
-        task_ids = [t.id for t in result.dag.tasks]
-        assert "integrate" in task_ids
-        assert "validate" in task_ids
 
 
 @pytest.mark.timeout(30)

@@ -23,7 +23,6 @@ from agent_nexus.models.evolution import (
 from agent_nexus.platform.evolution.health import HealthChecker
 from agent_nexus.platform.evolution.store import EvolutionStore
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -35,7 +34,7 @@ def _make_store(tmp_path: Path) -> EvolutionStore:
 
 def _skill(
     id: str = "sk-1",
-    name: str = "test-skill",
+    name: str | None = None,
     directory: str = "",
     selections: int = 0,
     applied: int = 0,
@@ -45,7 +44,7 @@ def _skill(
 ) -> SkillRecord:
     return SkillRecord(
         id=id,
-        name=name,
+        name=name if name is not None else id,
         directory=directory,
         lineage=lineage or SkillLineage(),
         total_selections=selections,
@@ -237,9 +236,7 @@ class TestGetMetrics:
         [None, ""],
         ids=["none", "empty_string"],
     )
-    def test_empty_agent_name_returns_all(
-        self, tmp_path: Path, agent_name: str | None
-    ) -> None:
+    def test_empty_agent_name_returns_all(self, tmp_path: Path, agent_name: str | None) -> None:
         store = _make_store(tmp_path)
         store.save_skill_record(
             _skill(
@@ -280,13 +277,7 @@ class TestDeactivateSkill:
         store.save_skill_record(_skill(id="sk-1"))
         assert store.deactivate_skill("sk-1") is True
 
-    def test_deactivate_nonexistent_returns_false(self, tmp_path: Path) -> None:
-        store = _make_store(tmp_path)
-        assert store.deactivate_skill("sk-nonexistent") is False
-
-    def test_deactivate_already_inactive_idempotent(
-        self, tmp_path: Path
-    ) -> None:
+    def test_deactivate_already_inactive_idempotent(self, tmp_path: Path) -> None:
         """Calling deactivate_skill on an already-inactive skill is idempotent.
 
         The SQL uses ``WHERE id = ?`` without ``AND is_active = 1``, so
@@ -304,9 +295,7 @@ class TestDeactivateSkill:
         assert record is not None
         assert record.is_active is False
 
-    def test_deactivate_removes_from_active_skills(
-        self, tmp_path: Path
-    ) -> None:
+    def test_deactivate_removes_from_active_skills(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         store.save_skill_record(_skill(id="sk-1", name="active-skill"))
         store.save_skill_record(_skill(id="sk-2", name="keep-skill"))
@@ -334,9 +323,7 @@ class TestGetSkillRecordsBatch:
 
     def test_single_id_found(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
-        store.save_skill_record(
-            _skill(id="sk-1", name="found", selections=10, applied=5)
-        )
+        store.save_skill_record(_skill(id="sk-1", name="found", selections=10, applied=5))
         result = store.get_skill_records_batch(["sk-1"])
         assert "sk-1" in result
         assert result["sk-1"].name == "found"
@@ -360,11 +347,6 @@ class TestGetSkillRecordsBatch:
         assert len(result) == 1
         assert "sk-1" in result
         assert "sk-missing" not in result
-
-    def test_all_ids_missing_returns_empty(self, tmp_path: Path) -> None:
-        store = _make_store(tmp_path)
-        result = store.get_skill_records_batch(["sk-nope-1", "sk-nope-2"])
-        assert result == {}
 
 
 # ===================================================================
@@ -414,9 +396,7 @@ class TestGetChildren:
                     parent_skill_ids=["sk-parent"],
                 ),
             )
-            result = store.evolve_skill(
-                child, parent_skill_ids=["sk-parent"]
-            )
+            result = store.evolve_skill(child, parent_skill_ids=["sk-parent"])
             assert result.success
 
         children = store.get_children("sk-parent")

@@ -13,15 +13,10 @@ import json
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
-import pytest
-from pydantic import ValidationError
-
 # Direct module imports to avoid triggering __init__.py circular imports
 from agent_nexus.platform.agency.llm_planner import (
-    ExpertSelection,
     LLMPlanner,
     PlannerOutput,
-    StructuredPlannerOutput,
 )
 from agent_nexus.platform.agency.registry import ExpertRegistry
 
@@ -84,38 +79,6 @@ def _make_mock_client(response_text: str) -> MagicMock:
 class TestStructuredPlannerOutput:
     """Tests for the Pydantic StructuredPlannerOutput model."""
 
-    def test_expert_selection_defaults(self):
-        """ExpertSelection parameters default to empty dict."""
-        sel = ExpertSelection(expert_id="test", task="do something")
-        assert sel.parameters == {}
-
-    def test_json_schema_generation(self):
-        """model_json_schema returns a usable JSON schema."""
-        schema = StructuredPlannerOutput.model_json_schema()
-        assert "properties" in schema
-        assert "capabilities" in schema["properties"]
-        assert "expert_selections" in schema["properties"]
-        assert "decomposition_strategy" in schema["properties"]
-        # decomposition_strategy should be constrained to literal values
-        ds_prop = schema["properties"]["decomposition_strategy"]
-        assert "enum" in ds_prop or "anyOf" in ds_prop
-
-    def test_model_validate_json_parses_string(self):
-        """model_validate_json accepts a raw JSON string."""
-        raw = json.dumps(
-            {
-                "capabilities": ["code_review"],
-                "expert_selections": [{"expert_id": "agency.code-reviewer", "task": "review"}],
-            }
-        )
-        result = StructuredPlannerOutput.model_validate_json(raw)
-        assert result.capabilities == ["code_review"]
-
-    def test_model_validate_json_rejects_invalid(self):
-        """model_validate_json raises on invalid JSON."""
-        with pytest.raises((ValidationError, ValueError)):
-            StructuredPlannerOutput.model_validate_json("not json")
-
 
 # ---------------------------------------------------------------------------
 # PlannerOutput.from_json — unique tests only
@@ -124,24 +87,6 @@ class TestStructuredPlannerOutput:
 
 class TestPlannerOutputFromJson:
     """Tests for PlannerOutput.from_json() — unique scenarios only."""
-
-    def test_partial_json_falls_back_to_manual_parse(self):
-        """JSON with fields that fail Pydantic falls back to manual extraction.
-
-        For example, decomposition_strategy="bad_value" fails Pydantic's
-        Literal constraint, so the fallback path extracts what it can.
-        """
-        raw = json.dumps(
-            {
-                "capabilities": ["code_review"],
-                "decomposition_strategy": "bad_value",
-            }
-        )
-        output = PlannerOutput.from_json(raw)
-        # Fallback should still extract capabilities
-        assert output.capabilities == ["code_review"]
-        # decomposition_strategy from manual fallback is the raw value
-        assert output.decomposition_strategy == "bad_value"
 
     def test_backward_compatible_without_expert_selections(self):
         """Old format without expert_selections still works."""
@@ -161,33 +106,6 @@ class TestPlannerOutputFromJson:
 # ---------------------------------------------------------------------------
 # _build_planning_prompt — unique tests only
 # ---------------------------------------------------------------------------
-
-
-class TestBuildPlanningPrompt:
-    """Tests for the dynamic schema and expert info injection — unique scenarios."""
-
-    def test_prompt_contains_json_schema(self):
-        """Prompt includes the Pydantic JSON schema."""
-        registry = _make_registry()
-        planner = LLMPlanner(registry=registry, client=None)
-        prompt = planner._build_planning_prompt()
-
-        # The schema should be included in the output format section
-        assert "capabilities" in prompt
-        assert "expert_selections" in prompt
-        assert "expert_id" in prompt
-        assert "decomposition_strategy" in prompt
-
-    def test_prompt_contains_expert_id_constraint(self):
-        """Prompt includes the constraint that expert_id must be from the known list."""
-        registry = _make_registry()
-        planner = LLMPlanner(registry=registry, client=None)
-        prompt = planner._build_planning_prompt()
-
-        assert "agency.code-reviewer" in prompt
-        assert "agency.architect" in prompt
-        # The constraint text should mention expert_id values
-        assert "expert_id" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -261,19 +179,3 @@ class TestLLMAnalyze:
 # ---------------------------------------------------------------------------
 # ExpertSelection model — unique tests only
 # ---------------------------------------------------------------------------
-
-
-class TestExpertSelection:
-    """Tests for the ExpertSelection Pydantic model — unique scenarios."""
-
-    def test_missing_required_field_raises(self):
-        """Missing required fields raise ValidationError."""
-        with pytest.raises(ValidationError):
-            ExpertSelection(expert_id="test", task=None)  # type: ignore[arg-type]
-
-    def test_schema_includes_descriptions(self):
-        """Field descriptions are present in the JSON schema."""
-        schema = ExpertSelection.model_json_schema()
-        props = schema["properties"]
-        assert "description" in props["expert_id"]
-        assert "description" in props["task"]

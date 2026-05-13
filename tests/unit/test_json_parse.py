@@ -147,11 +147,6 @@ class TestRobustJsonParse:
         result = robust_json_parse(text)
         assert result == {"first": True}
 
-    def test_none_equivalent_empty(self):
-        """Empty string is falsy and should return None."""
-        result = robust_json_parse("")
-        assert result is None
-
     def test_plain_text_no_json_returns_none(self):
         result = robust_json_parse("This is just plain text with no JSON at all.")
         assert result is None

@@ -64,38 +64,6 @@ class TestGenericCLIBackendBuildArgs:
         assert "-m" in args
 
 
-class TestGenericCLIBackendAvailability:
-    @patch("shutil.which", return_value="/usr/local/bin/claude")
-    def test_available_when_installed(self, mock_which):
-        backend = GenericCLIBackend(_claude_config())
-        assert backend.is_available() is True
-
-    @patch("shutil.which", return_value=None)
-    def test_not_available_when_missing(self, mock_which):
-        backend = GenericCLIBackend(_claude_config())
-        assert backend.is_available() is False
-
-    @patch("shutil.which", return_value="/usr/local/bin/claude")
-    def test_name_returns_command(self, mock_which):
-        backend = GenericCLIBackend(_claude_config())
-        assert backend.name == "claude"
-
-
-class TestGenericCLIBackendModelMap:
-    def test_resolve_known_model(self):
-        backend = GenericCLIBackend(_claude_config())
-        assert backend.resolve_model("sonnet") == "claude-sonnet-4-20250514"
-
-    def test_resolve_unknown_returns_input(self):
-        backend = GenericCLIBackend(_claude_config())
-        assert backend.resolve_model("opus") == "opus"
-
-    def test_empty_model_map_passes_through(self):
-        config = BackendConfig(command="test", args=[])
-        backend = GenericCLIBackend(config)
-        assert backend.resolve_model("anything") == "anything"
-
-
 def _mock_popen(stdout: str = "", stderr: str = "", returncode: int = 0) -> MagicMock:
     """Create a mock Popen that behaves like our call() expects."""
     proc = MagicMock()

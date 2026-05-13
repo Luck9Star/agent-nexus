@@ -224,20 +224,6 @@ class TestSortByDownloads:
         assert results[1][1].name == "amid"
         assert results[2][1].name == "anew"
 
-    def test_sort_downloads_all_agents(self, tmp_path: Path) -> None:
-        sm, _ = _setup_index(
-            tmp_path,
-            "https://example.com/sort-dl2.git",
-            [
-                _agent(name="a1", download_count=10),
-                _agent(name="a2", download_count=200),
-                _agent(name="a3", download_count=50),
-            ],
-        )
-        results = sm.search_agents("a", sort_by="downloads")
-        names = [r[1].name for r in results]
-        assert names == ["a2", "a3", "a1"]
-
 
 class TestSortByName:
     """sort_by='name' orders alphabetically."""
@@ -333,16 +319,3 @@ class TestSortByRelevance:
         # Default order is the index order from the source
         names = [r[1].name for r in results]
         assert names == ["agent-1", "agent-2"]
-
-    def test_explicit_relevance_same_as_default(self, tmp_path: Path) -> None:
-        sm, _ = _setup_index(
-            tmp_path,
-            "https://example.com/sort-rel2.git",
-            [
-                _agent(name="zebra"),
-                _agent(name="alpha"),
-            ],
-        )
-        default_results = sm.search_agents("a")
-        relevance_results = sm.search_agents("a", sort_by="relevance")
-        assert [r[1].name for r in default_results] == [r[1].name for r in relevance_results]

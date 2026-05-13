@@ -367,6 +367,11 @@ class ConfigLoader:
         merged_stages = dict(global_config.models.stages)
         merged_stages.update(project_config.models.stages)
 
+        # Env var override: AGENT_MODEL wins over both project and global config
+        env_model = os.environ.get("AGENT_MODEL")
+        if env_model:
+            merged_default = env_model
+
         return PlatformConfig(
             schema_version=global_config.schema_version,
             runtime=global_config.runtime,

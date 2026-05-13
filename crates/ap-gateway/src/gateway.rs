@@ -42,7 +42,7 @@ fn validate_name(label: &str, value: &str) -> Result<(), GatewayError> {
     }
     if value.contains("___") {
         return Err(GatewayError::ValidationError(format!(
-            "{label} must not contain triple underscores (conflicts with agent__tool separator)"
+            "{label} must not contain triple underscores (reserved separator)"
         )));
     }
     Ok(())
@@ -271,18 +271,33 @@ impl McpGateway {
         }
 
         // Parse the namespaced tool name.
-        let (agent, tool, arguments) = crate::schema::extract_tool_call(&req)
+        let (agent_sanitized, tool_sanitized, arguments) = crate::schema::extract_tool_call(&req)
             .ok_or_else(|| {
                 GatewayError::ToolCall("Invalid tool call request: missing or malformed 'name'".to_string())
             })?;
 
         // Validate agent and tool names before any lookup.
-        validate_name("agent_name", &agent)?;
-        validate_name("tool_name", &tool)?;
+        validate_name("agent_name", &agent_sanitized)?;
+        validate_name("tool_name", &tool_sanitized)?;
+
+        // Resolve sanitized agent name to original registry name.
+        let agent_original = gw.registry.find_by_sanitized_name(&agent_sanitized)
+            .await
+            .ok_or_else(|| RegistryError::NotFound(agent_sanitized.clone()))?;
+
+        // Resolve sanitized tool name to original tool name via cached tool list.
+        let tools = gw.registry.get_tools(&agent_original).await
+            .map_err(GatewayError::from)?;
+        let tool_original = tools.iter()
+            .find(|t| crate::tool_adapter::sanitize(&t.name) == tool_sanitized)
+            .map(|t| t.name.clone())
+            .ok_or_else(|| GatewayError::ToolCall(
+                format!("Tool '{tool_sanitized}' not found on agent '{agent_original}'")
+            ))?;
 
         // Agent must be explicitly activated before tool calls.
         // Returns 503 if the agent is registered but not yet running.
-        let result = gw.registry.call_tool(&agent, &tool, arguments).await?;
+        let result = gw.registry.call_tool(&agent_original, &tool_original, arguments).await?;
         Ok(Json(result))
     }
 }
@@ -501,7 +516,7 @@ mod tests {
 
         let body: Vec<serde_json::Value> = resp.json().await.unwrap();
         assert_eq!(body.len(), 1);
-        assert_eq!(body[0]["name"], "code-reviewer___review");
+        assert_eq!(body[0]["name"], "mcp__code_reviewer__review");
     }
 
     #[tokio::test]
@@ -530,7 +545,7 @@ mod tests {
         let resp = client
             .post(format!("http://{addr}/tools/call"))
             .json(&serde_json::json!({
-                "name": "code-reviewer___review",
+                "name": "mcp__code_reviewer__review",
                 "arguments": {"path": "/src/main.rs"}
             }))
             .send()
@@ -562,7 +577,7 @@ mod tests {
         let resp = client
             .post(format!("http://{addr}/tools/call"))
             .json(&serde_json::json!({
-                "name": "reviewer___some_tool",
+                "name": "mcp__reviewer__some_tool",
                 "arguments": {}
             }))
             .send()
@@ -607,7 +622,7 @@ mod tests {
         let resp = client
             .post(format!("http://{addr}/tools/call"))
             .json(&serde_json::json!({
-                "name": "../etc___passwd",
+                "name": "mcp__.._etc__passwd",
                 "arguments": {}
             }))
             .send()
@@ -632,7 +647,7 @@ mod tests {
         let resp = client
             .post(format!("http://{addr}/tools/call"))
             .json(&serde_json::json!({
-                "name": "agent___tool with spaces",
+                "name": "mcp__agent__tool with spaces",
                 "arguments": {}
             }))
             .send()

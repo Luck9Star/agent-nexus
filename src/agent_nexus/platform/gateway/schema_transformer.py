@@ -48,25 +48,28 @@ class SchemaTransformer:
         model   = transformer.resolve_model({"type": "object", "properties": {...}})
     """
 
-    def __init__(self, full_schema: dict[str, Any]) -> None:
+    def __init__(self, full_schema: dict[str, Any], max_depth: int = 20) -> None:
         self._full_schema = full_schema
         self._model_cache: dict[str, type[BaseModel]] = {}
+        self._max_depth = max_depth
+        # NOTE: _current_depth is NOT thread-safe. SchemaTransformer is
+        # designed for single-threaded use (one resolve() call at a time).
+        # If concurrent use is needed, wrap calls with external locking or
+        # use a threading.local() for depth tracking.
+        self._current_depth = 0
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def resolve(self, schema: dict[str, Any], name: str = "Anonymous") -> type:
-        """Unified entry: auto-detect complexity and return a Python type.
-
-        Simple schemas (primitives, plain arrays) return built-in types;
-        complex schemas (objects, ``$ref``, ``allOf``) return dynamically
-        created :class:`pydantic.BaseModel` subclasses.
-        """
+        """Unified entry: auto-detect complexity and return a Python type."""
+        self._current_depth = 0
         return self._resolve_any(schema, name)
 
     def resolve_model(self, schema: dict[str, Any], name: str = "DynamicModel") -> type[BaseModel]:
         """Explicit: force-generate a Pydantic BaseModel regardless of schema complexity."""
+        self._current_depth = 0
         result = self._resolve_any(schema, name)
         if isinstance(result, type) and issubclass(result, BaseModel):
             return result
@@ -79,6 +82,22 @@ class SchemaTransformer:
 
     def _resolve_any(self, schema: dict[str, Any], name: str = "Anonymous") -> Any:  # noqa: PLR0911
         """Dispatch based on schema keywords."""
+        self._current_depth += 1
+        if self._current_depth > self._max_depth:
+            self._current_depth -= 1
+            logger.warning(
+                "Schema recursion depth %d exceeded at '%s' — degrading to str",
+                self._max_depth,
+                name,
+            )
+            return str
+        try:
+            return self._resolve_any_inner(schema, name)
+        finally:
+            self._current_depth -= 1
+
+    def _resolve_any_inner(self, schema: dict[str, Any], name: str = "Anonymous") -> Any:  # noqa: PLR0911
+        """Inner dispatch — all recursive calls go through _resolve_any which tracks depth."""
         # 1. ``$ref`` — highest priority
         if "$ref" in schema:
             resolved = self._resolve_ref(schema["$ref"], name)
@@ -195,8 +214,7 @@ class SchemaTransformer:
         if not (isinstance(ref_type, type) and issubclass(ref_type, BaseModel)):
             return {}
         return {
-            name: (info.annotation, info.default)
-            for name, info in ref_type.model_fields.items()
+            name: (info.annotation, info.default) for name, info in ref_type.model_fields.items()
         }
 
     @staticmethod

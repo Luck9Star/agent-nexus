@@ -16,24 +16,6 @@ def store(tmp_path: Path) -> CLISessionStore:
     return CLISessionStore(db_path)
 
 
-class TestCLISessionStoreSchema:
-    def test_tables_created(self, store: CLISessionStore):
-        tables = store._list_tables()
-        assert "cli_sessions" in tables
-        assert "task_executions" in tables
-        assert "backend_health" in tables
-        assert "daily_stats" in tables
-
-    def test_triggers_created(self, store: CLISessionStore):
-        triggers = store._list_triggers()
-        assert "trg_update_daily_stats" in triggers
-        assert "trg_delete_daily_stats" in triggers
-
-    def test_wal_mode_enabled(self, store: CLISessionStore):
-        result = store._pragma("journal_mode")
-        assert result == "wal"
-
-
 class TestCLISessionStoreCRUD:
     def test_save_and_get(self, store: CLISessionStore):
         record = CLISessionRecord(

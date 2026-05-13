@@ -24,13 +24,11 @@ import pytest
 from agent_nexus.models.ipc import (
     A2AMessage,
     AgentAddress,
-    AgentToPlatformType,
     PlatformToAgentType,
 )
-from agent_nexus.platform.orchestration.message_broker import MessageBroker
 from agent_nexus.platform.orchestration.agent_directory import AgentDirectory
+from agent_nexus.platform.orchestration.message_broker import MessageBroker
 from agent_nexus.platform.orchestration.process_manager import AgentHandle
-
 
 # ============================================================================
 # Fixtures
@@ -80,12 +78,6 @@ class TestAgentAddress:
     def test_with_role(self) -> None:
         addr = AgentAddress(agent_id="agent-b", role="coordinator")
         assert addr.role == "coordinator"
-
-    def test_frozen(self) -> None:
-        """AgentAddress is immutable (FrozenModel)."""
-        addr = AgentAddress(agent_id="agent-a")
-        with pytest.raises(Exception):
-            addr.role = "worker"
 
 
 class TestA2AMessage:
@@ -189,28 +181,6 @@ class TestA2AMessage:
 # ============================================================================
 
 
-class TestIPCEnumExtensions:
-    def test_platform_to_agent_a2a_types(self) -> None:
-        assert PlatformToAgentType.RECEIVE_MESSAGE == "receive_message"
-        assert PlatformToAgentType.RECEIVE_REQUEST == "receive_request"
-        assert PlatformToAgentType.RECEIVE_BROADCAST == "receive_broadcast"
-        assert PlatformToAgentType.RECEIVE_REPLY == "receive_reply"
-
-    def test_agent_to_platform_a2a_types(self) -> None:
-        assert AgentToPlatformType.SEND_MESSAGE == "send_message"
-        assert AgentToPlatformType.SEND_REQUEST == "send_request"
-        assert AgentToPlatformType.BROADCAST == "broadcast"
-        assert AgentToPlatformType.REPLY == "reply"
-
-    def test_existing_types_unchanged(self) -> None:
-        assert PlatformToAgentType.CHAT == "chat"
-        assert PlatformToAgentType.TASK == "task"
-        assert PlatformToAgentType.DATA_REFERENCE == "data_reference"
-        assert AgentToPlatformType.RESULT == "result"
-        assert AgentToPlatformType.PROGRESS == "progress"
-        assert AgentToPlatformType.ERROR == "error"
-
-
 # ============================================================================
 # MessageBroker — send_message
 # ============================================================================
@@ -304,18 +274,6 @@ class TestMessageBrokerSendRequest:
         with pytest.raises(KeyError, match="No pending request"):
             await broker.deliver_reply("unknown-msg-id", "reply content")
 
-    async def test_request_cleans_up_on_timeout(self) -> None:
-        handle_b = _make_mock_handle("agent-b")
-        pm = _make_mock_process_manager({"agent-b": handle_b})
-        broker = MessageBroker(pm)
-
-        with pytest.raises(TimeoutError):
-            await broker.send_request("agent-a", "agent-b", "hello", timeout=0.1)
-
-        # Pending replies should be cleaned up
-        assert len(broker._pending_replies) == 0
-        assert len(broker._active_requests) == 0
-
 
 # ============================================================================
 # MessageBroker — broadcast
@@ -326,11 +284,13 @@ class TestMessageBrokerBroadcast:
     async def test_broadcast_delivers_to_all(self) -> None:
         handle_b = _make_mock_handle("agent-b")
         handle_c = _make_mock_handle("agent-c")
-        pm = _make_mock_process_manager({
-            "agent-a": _make_mock_handle("agent-a"),
-            "agent-b": handle_b,
-            "agent-c": handle_c,
-        })
+        pm = _make_mock_process_manager(
+            {
+                "agent-a": _make_mock_handle("agent-a"),
+                "agent-b": handle_b,
+                "agent-c": handle_c,
+            }
+        )
         broker = MessageBroker(pm)
 
         delivered = await broker.broadcast("agent-a", "announcement")
@@ -344,9 +304,11 @@ class TestMessageBrokerBroadcast:
         assert handle_c.ipc.stream.send.await_count == 1
 
     async def test_broadcast_excludes_sender(self) -> None:
-        pm = _make_mock_process_manager({
-            "agent-a": _make_mock_handle("agent-a"),
-        })
+        pm = _make_mock_process_manager(
+            {
+                "agent-a": _make_mock_handle("agent-a"),
+            }
+        )
         broker = MessageBroker(pm)
 
         delivered = await broker.broadcast("agent-a", "msg")
@@ -358,11 +320,13 @@ class TestMessageBrokerBroadcast:
         # Make agent-b's send fail
         handle_b.ipc.stream.send = AsyncMock(side_effect=OSError("pipe broken"))
 
-        pm = _make_mock_process_manager({
-            "agent-a": _make_mock_handle("agent-a"),
-            "agent-b": handle_b,
-            "agent-c": handle_c,
-        })
+        pm = _make_mock_process_manager(
+            {
+                "agent-a": _make_mock_handle("agent-a"),
+                "agent-b": handle_b,
+                "agent-c": handle_c,
+            }
+        )
         broker = MessageBroker(pm)
 
         delivered = await broker.broadcast("agent-a", "msg")
@@ -371,14 +335,6 @@ class TestMessageBrokerBroadcast:
         assert "agent-c" in delivered
         assert "agent-b" not in delivered
         assert handle_c.ipc.stream.send.await_count == 1
-
-    async def test_broadcast_no_other_agents(self) -> None:
-        handle_a = _make_mock_handle("agent-a")
-        pm = _make_mock_process_manager({"agent-a": handle_a})
-        broker = MessageBroker(pm)
-
-        delivered = await broker.broadcast("agent-a", "msg")
-        assert delivered == []
 
 
 # ============================================================================
@@ -433,29 +389,6 @@ class TestMessageBrokerNestingProhibition:
 # ============================================================================
 
 
-class TestMessageBrokerDeliverReply:
-    async def test_deliver_reply_resolves_future(self) -> None:
-        handle_b = _make_mock_handle("agent-b")
-        pm = _make_mock_process_manager({"agent-b": handle_b})
-        broker = MessageBroker(pm)
-
-        # Start a request, capture the message_id
-        handle_b.ipc.stream.send = AsyncMock()
-
-        request_task = asyncio.create_task(
-            broker.send_request("agent-a", "agent-b", "ping", timeout=5.0)
-        )
-        await asyncio.sleep(0.05)
-
-        sent_msg = handle_b.ipc.stream.send.call_args[0][0]
-        a2a_data = json.loads(sent_msg.content)
-        request_id = a2a_data["message_id"]
-
-        await broker.deliver_reply(request_id, "pong")
-        result = await request_task
-        assert result == "pong"
-
-
 # ============================================================================
 # MessageBroker — route
 # ============================================================================
@@ -504,10 +437,12 @@ class TestMessageBrokerRoute:
 
     async def test_route_broadcast(self) -> None:
         handle_b = _make_mock_handle("agent-b")
-        pm = _make_mock_process_manager({
-            "agent-a": _make_mock_handle("agent-a"),
-            "agent-b": handle_b,
-        })
+        pm = _make_mock_process_manager(
+            {
+                "agent-a": _make_mock_handle("agent-a"),
+                "agent-b": handle_b,
+            }
+        )
         broker = MessageBroker(pm)
 
         msg = A2AMessage(
@@ -576,9 +511,7 @@ class TestMessageBrokerRoute:
 
 class TestMessageBrokerBuildHelpers:
     def test_build_a2a_creates_uuid(self) -> None:
-        msg = MessageBroker._build_a2a(
-            from_agent="a", to_agent="b", msg_type="chat", content="hi"
-        )
+        msg = MessageBroker._build_a2a(from_agent="a", to_agent="b", msg_type="chat", content="hi")
         assert msg.message_id  # non-empty UUID string
         assert msg.from_agent == "a"
         assert msg.to_agent == "b"

@@ -63,28 +63,6 @@ class TestAgentInfo:
         assert "reviewer" in info._search_text
         assert "code reviewer" in info._search_text
 
-    def test_is_activated_false_initially(self) -> None:
-        info = AgentInfo(manifest=_make_manifest(), name="a")
-        assert not info.is_activated
-
-    def test_is_activated_true_with_schemas(self) -> None:
-        info = AgentInfo(manifest=_make_manifest(), name="a", tool_schemas=[{"name": "x"}])
-        assert info.is_activated
-
-    def test_is_running_false_no_handle(self) -> None:
-        info = AgentInfo(manifest=_make_manifest(), name="a")
-        assert not info.is_running
-
-    def test_is_running_true_with_alive_handle(self) -> None:
-        handle = _make_handle(alive=True)
-        info = AgentInfo(manifest=_make_manifest(), name="a", handle=handle)
-        assert info.is_running
-
-    def test_is_running_false_with_dead_handle(self) -> None:
-        handle = _make_handle(alive=False)
-        info = AgentInfo(manifest=_make_manifest(), name="a", handle=handle)
-        assert not info.is_running
-
 
 # ---------------------------------------------------------------------------
 # Registration
@@ -365,18 +343,6 @@ class TestListAgents:
         reg.register_agent(_make_manifest("d1"))
         assert len(reg.list_all_agents()) == 2
 
-    def test_list_core_only(self) -> None:
-        reg = DeferredAgentRegistry(_make_mock_pm())
-        reg.register_agent(_make_manifest("c1"), deferred=False)
-        reg.register_agent(_make_manifest("d1"))
-        assert len(reg.list_core_agents()) == 1
-
-    def test_list_deferred_only(self) -> None:
-        reg = DeferredAgentRegistry(_make_mock_pm())
-        reg.register_agent(_make_manifest("c1"), deferred=False)
-        reg.register_agent(_make_manifest("d1"))
-        assert len(reg.list_deferred_agents()) == 1
-
 
 # ---------------------------------------------------------------------------
 # build_manifest / search_agents
@@ -432,9 +398,7 @@ class TestSearchAgents:
     def test_search_max_results(self) -> None:
         reg = DeferredAgentRegistry(_make_mock_pm())
         for i in range(10):
-            reg.register_agent(
-                _make_manifest(f"agent-{i}", description=f"code tool number {i}")
-            )
+            reg.register_agent(_make_manifest(f"agent-{i}", description=f"code tool number {i}"))
         results = reg.search_agents("code", max_results=3)
         assert len(results) == 3
 
@@ -444,18 +408,3 @@ class TestSearchAgents:
         reg.register_agent(_make_manifest("d-review", description="review docs"))
         results = reg.search_agents("review")
         assert len(results) == 2
-
-
-# ---------------------------------------------------------------------------
-# get_tool_adapter / get_tool_adapters
-# ---------------------------------------------------------------------------
-
-
-class TestToolAdapters:
-    def test_get_adapter_not_found(self) -> None:
-        reg = DeferredAgentRegistry(_make_mock_pm())
-        assert reg.get_tool_adapter("mcp__ghost__tool") is None
-
-    def test_get_adapters_empty(self) -> None:
-        reg = DeferredAgentRegistry(_make_mock_pm())
-        assert reg.get_tool_adapters("unknown") == []

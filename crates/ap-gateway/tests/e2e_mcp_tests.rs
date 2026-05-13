@@ -142,8 +142,8 @@ async fn e2e_tool_registration_and_discovery() {
         .iter()
         .filter_map(|t| t["name"].as_str())
         .collect();
-    assert!(names.contains(&"reviewer___review"));
-    assert!(names.contains(&"reviewer___lint"));
+    assert!(names.contains(&"mcp__reviewer__review"));
+    assert!(names.contains(&"mcp__reviewer__lint"));
 
     handle.shutdown().await;
 }
@@ -174,7 +174,7 @@ async fn e2e_namespaced_tool_invocation() {
     let resp = client
         .post(format!("http://{addr}/tools/call"))
         .json(&serde_json::json!({
-            "name": "formatter___format",
+            "name": "mcp__formatter__format",
             "arguments": {"file": "main.rs", "style": "rustfmt"}
         }))
         .send()
@@ -236,14 +236,14 @@ async fn e2e_multi_agent_isolation() {
     assert_eq!(body.len(), 2);
 
     let names: Vec<&str> = body.iter().filter_map(|t| t["name"].as_str()).collect();
-    assert!(names.contains(&"security-scanner___scan"));
-    assert!(names.contains(&"doc-gen___generate"));
+    assert!(names.contains(&"mcp__security_scanner__scan"));
+    assert!(names.contains(&"mcp__doc_gen__generate"));
 
     // Verify tool invocation for agent A
     let resp_a = client
         .post(format!("http://{addr}/tools/call"))
         .json(&serde_json::json!({
-            "name": "security-scanner___scan",
+            "name": "mcp__security_scanner__scan",
             "arguments": {"target": "src/"}
         }))
         .send()
@@ -257,7 +257,7 @@ async fn e2e_multi_agent_isolation() {
     let resp_b = client
         .post(format!("http://{addr}/tools/call"))
         .json(&serde_json::json!({
-            "name": "doc-gen___generate",
+            "name": "mcp__doc_gen__generate",
             "arguments": {"format": "markdown"}
         }))
         .send()
@@ -343,9 +343,9 @@ async fn e2e_registry_adapter_lifecycle() {
     assert_eq!(tools_x.len(), 2);
 
     let namespaced = adapter.namespace_tool("agent-x", "ping");
-    assert_eq!(namespaced, "agent-x___ping");
+    assert_eq!(namespaced, "mcp__agent_x__ping");
     let (agent, tool) = adapter.parse_namespaced(&namespaced).unwrap();
-    assert_eq!(agent, "agent-x");
+    assert_eq!(agent, "agent_x");
     assert_eq!(tool, "ping");
 
     // Call a tool through the registry (bypassing HTTP for direct registry test)

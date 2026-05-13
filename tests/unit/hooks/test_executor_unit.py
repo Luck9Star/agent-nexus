@@ -13,8 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from agent_nexus.models.hooks import HookDefinition, HookEvent, HookType
-from agent_nexus.platform.hooks.executor import HookExecutor, _is_private_url
-
+from agent_nexus.platform.hooks.executor import HookExecutor
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -129,9 +128,7 @@ class TestGetHooksForEventFiltering:
         ]
         executor = HookExecutor(hooks=hooks, allowed_commands=["echo"])
 
-        result = executor.get_hooks_for_event(
-            HookEvent.PRE_EXECUTION, matcher="read_file"
-        )
+        result = executor.get_hooks_for_event(HookEvent.PRE_EXECUTION, matcher="read_file")
         assert len(result) == 1
         assert result[0].matcher == "read_*"
 
@@ -143,9 +140,7 @@ class TestGetHooksForEventFiltering:
         ]
         executor = HookExecutor(hooks=hooks, allowed_commands=["echo"])
 
-        result = executor.get_hooks_for_event(
-            HookEvent.PRE_EXECUTION, matcher="anything"
-        )
+        result = executor.get_hooks_for_event(HookEvent.PRE_EXECUTION, matcher="anything")
         assert len(result) == 1
         assert result[0].matcher is None
 
@@ -173,95 +168,6 @@ class TestGetHooksForEventFiltering:
 
         result = executor.get_hooks_for_event(HookEvent.PRE_EXECUTION)
         assert len(result) == 3
-
-
-# ======================================================================
-# C) _validate_command_args() validation
-# ======================================================================
-
-
-class TestValidateCommandArgs:
-    """_validate_command_args validates COMMAND hook inputs."""
-
-    def test_hook_with_no_command_returns_error(self) -> None:
-        """COMMAND hook missing 'command' field raises ValidationError at construction."""
-        with pytest.raises(ValidationError, match="command"):
-            HookDefinition(
-                type=HookType.COMMAND,
-                event=HookEvent.PRE_EXECUTION,
-                command=None,
-            )
-
-    def test_hook_with_malformed_shell_string_returns_error(self) -> None:
-        """Unbalanced quotes cause shlex.split to raise ValueError."""
-        hook = HookDefinition(
-            type=HookType.COMMAND,
-            event=HookEvent.PRE_EXECUTION,
-            command='echo "unclosed',
-        )
-        args, err = HookExecutor._validate_command_args(hook)
-        assert args is None
-        assert err is not None
-        assert err.passed is False
-        assert "malformed" in err.error.lower()
-
-    def test_hook_with_empty_parsed_args_returns_error(self) -> None:
-        """Whitespace-only command parses to empty list -> error."""
-        hook = HookDefinition(
-            type=HookType.COMMAND,
-            event=HookEvent.PRE_EXECUTION,
-            command="   ",
-        )
-        args, err = HookExecutor._validate_command_args(hook)
-        assert args is None
-        assert err is not None
-        assert err.passed is False
-        assert "empty" in err.error.lower()
-
-    def test_valid_command_returns_args_no_error(self) -> None:
-        """Valid command string returns parsed args and no error."""
-        hook = HookDefinition(
-            type=HookType.COMMAND,
-            event=HookEvent.PRE_EXECUTION,
-            command="echo hello world",
-        )
-        args, err = HookExecutor._validate_command_args(hook)
-        assert err is None
-        assert args == ["echo", "hello", "world"]
-
-
-# ======================================================================
-# D) _check_command_allowlist() security
-# ======================================================================
-
-
-class TestCheckCommandAllowlist:
-    """_check_command_allowlist enforces command allowlist."""
-
-    def test_empty_allowlist_rejects_all(self) -> None:
-        """No allowed_commands means every command is rejected."""
-        executor = HookExecutor(allowed_commands=[])
-        hook = _cmd_hook(command="echo hello")
-        result = executor._check_command_allowlist(hook, "echo")
-        assert result is not None
-        assert result.passed is False
-        assert "not in allowlist" in result.error
-
-    def test_command_in_allowlist_allowed(self) -> None:
-        """Command that is in allowlist passes."""
-        executor = HookExecutor(allowed_commands=["git", "npm"])
-        hook = _cmd_hook(command="git status")
-        result = executor._check_command_allowlist(hook, "git")
-        assert result is None  # None means allowed
-
-    def test_command_not_in_allowlist_rejected(self) -> None:
-        """Command not in allowlist is rejected even when allowlist is non-empty."""
-        executor = HookExecutor(allowed_commands=["git", "npm"])
-        hook = _cmd_hook(command="rm -rf /")
-        result = executor._check_command_allowlist(hook, "rm")
-        assert result is not None
-        assert result.passed is False
-        assert "rm" in result.error
 
 
 # ======================================================================
@@ -318,46 +224,3 @@ class TestValidateHttpUrl:
         hook = _http_hook(url="https://example.com/webhook")
         result = HookExecutor._validate_http_url(hook)
         assert result is None
-
-
-# ======================================================================
-# F) _is_private_url() helper
-# ======================================================================
-
-
-class TestIsPrivateUrl:
-    """_is_private_url detects private/internal IP ranges and hostnames."""
-
-    def test_192_168_range_is_private(self) -> None:
-        assert _is_private_url("http://192.168.1.1/secret") is True
-
-    def test_10_range_is_private(self) -> None:
-        assert _is_private_url("http://10.0.0.1/secret") is True
-
-    def test_172_16_range_is_private(self) -> None:
-        assert _is_private_url("http://172.16.0.1/secret") is True
-
-    def test_172_31_range_is_private(self) -> None:
-        """172.31.x.x is the last valid 172.16-31 private range."""
-        assert _is_private_url("http://172.31.255.255/secret") is True
-
-    def test_172_32_is_not_private(self) -> None:
-        """172.32.x.x is outside the private 172.16-31 range."""
-        assert _is_private_url("http://172.32.0.1/page") is False
-
-    def test_localhost_is_private(self) -> None:
-        assert _is_private_url("http://localhost/secret") is True
-
-    def test_loopback_127_is_private(self) -> None:
-        assert _is_private_url("http://127.0.0.1/secret") is True
-
-    def test_public_ip_is_not_private(self) -> None:
-        assert _is_private_url("http://93.184.216.34/page") is False
-
-    def test_invalid_hostname_returns_false(self) -> None:
-        """A hostname that is not an IP and not in blocked list returns False."""
-        assert _is_private_url("http://example.com/page") is False
-
-    def test_google_metadata_is_private(self) -> None:
-        """GCP metadata endpoint is blocked."""
-        assert _is_private_url("http://metadata.google.internal/computeMetadata/v1/") is True

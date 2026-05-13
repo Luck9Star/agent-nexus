@@ -7,7 +7,6 @@ installation can be reproduced or rolled back.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
@@ -15,6 +14,11 @@ import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
 from pathlib import Path
+
+if os.name != "nt":
+    import fcntl
+else:
+    fcntl = None  # type: ignore[assignment]
 
 from agent_nexus.models.distribution import Lockfile, LockfileEntry
 
@@ -36,6 +40,11 @@ class LockfileManager:
         # mtime-based cache to avoid re-reading unchanged lockfile
         self._cache: Lockfile | None = None
         self._cache_mtime: float = 0.0
+
+    @property
+    def corrupt_detected(self) -> bool:
+        """Return True if the last load detected a corrupt lockfile."""
+        return self._corrupt_detected
 
     # ------------------------------------------------------------------
     # Public API
@@ -97,6 +106,9 @@ class LockfileManager:
         """
         lock_path = self._path.with_suffix(".lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
+        if fcntl is None:
+            yield
+            return
         fh = open(lock_path, "w")  # noqa: SIM115
         try:
             fcntl.flock(fh, fcntl.LOCK_EX)

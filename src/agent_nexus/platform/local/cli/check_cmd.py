@@ -53,9 +53,7 @@ def _check_manifest(path: Path, dir_name: str) -> tuple[list[str], dict | None]:
             errors.append(f"Manifest: missing required field '{field}'")
 
     if "name" in data and data["name"] != dir_name:
-        errors.append(
-            f"Manifest: name '{data['name']}' does not match directory name '{dir_name}'"
-        )
+        errors.append(f"Manifest: name '{data['name']}' does not match directory name '{dir_name}'")
 
     return errors, data
 

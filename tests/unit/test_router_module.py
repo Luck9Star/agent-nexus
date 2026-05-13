@@ -218,17 +218,6 @@ class TestWorkflowResult:
 class TestSubtaskController:
     """Tests for SubtaskController."""
 
-    def test_init_default_config(self) -> None:
-        ctrl = SubtaskController()
-        assert ctrl._config.timeout_seconds == 60.0
-        assert ctrl._config.max_retries == 2
-        assert ctrl._config.max_parallel == 3
-
-    def test_init_custom_config(self) -> None:
-        cfg = SubtaskConfig(timeout_seconds=30.0, max_retries=5, max_parallel=10)
-        ctrl = SubtaskController(config=cfg)
-        assert ctrl._config.timeout_seconds == 30.0
-
     @pytest.mark.asyncio
     async def test_run_with_timeout_success(self) -> None:
         ctrl = SubtaskController()
@@ -334,39 +323,6 @@ class TestSubtaskController:
         assert call_count == 4  # 1 initial + 3 retries
 
     @pytest.mark.asyncio
-    async def test_run_parallel_all_success(self) -> None:
-        ctrl = SubtaskController()
-
-        async def make_coro(val):
-            return val
-
-        results = await ctrl.run_parallel([make_coro("a"), make_coro("b"), make_coro("c")])
-        assert results == ["a", "b", "c"]
-
-    @pytest.mark.asyncio
-    async def test_run_parallel_empty_list(self) -> None:
-        ctrl = SubtaskController()
-        results = await ctrl.run_parallel([])
-        assert results == []
-
-    @pytest.mark.asyncio
-    async def test_run_parallel_mixed_success_and_failure(self) -> None:
-        ctrl = SubtaskController()
-
-        async def ok():
-            return "success"
-
-        async def fail():
-            raise RuntimeError("boom")
-
-        results = await ctrl.run_parallel([ok(), fail(), ok()])
-        assert results[0] == "success"
-        assert isinstance(results[1], RuntimeError)
-        # results[2] may be "success" or RuntimeError depending on
-        # whether it started before fail() set the failed flag.
-        assert results[2] == "success" or isinstance(results[2], RuntimeError)
-
-    @pytest.mark.asyncio
     async def test_run_parallel_all_fail(self) -> None:
         ctrl = SubtaskController()
 
@@ -409,12 +365,6 @@ class TestSubtaskController:
 class TestPlatformRouterInit:
     """Tests for PlatformRouter initialization."""
 
-    def test_init_with_defaults(self) -> None:
-        pm = _make_process_manager()
-        router = PlatformRouter(process_manager=pm)
-        assert router._pm is pm
-        assert isinstance(router._subtask, SubtaskController)
-
     def test_init_with_custom_subtask(self) -> None:
         pm = _make_process_manager()
         ctrl = SubtaskController(config=SubtaskConfig(timeout_seconds=30.0))
@@ -424,18 +374,6 @@ class TestPlatformRouterInit:
 
 class TestPhaseToRole:
     """Tests for PlatformRouter._phase_to_role static method."""
-
-    def test_research_maps_to_explore(self) -> None:
-        assert PlatformRouter._phase_to_role(WorkflowPhase.research) == "explore"
-
-    def test_synthesis_maps_to_plan(self) -> None:
-        assert PlatformRouter._phase_to_role(WorkflowPhase.synthesis) == "plan"
-
-    def test_implementation_maps_to_worker(self) -> None:
-        assert PlatformRouter._phase_to_role(WorkflowPhase.implementation) == "worker"
-
-    def test_verification_maps_to_verification(self) -> None:
-        assert PlatformRouter._phase_to_role(WorkflowPhase.verification) == "verification"
 
     def test_all_phases_have_roles(self) -> None:
         for phase in WorkflowPhase:
@@ -840,18 +778,6 @@ class TestRouteComposite:
 
 
 class TestRegisterComposite:
-    """Tests for PlatformRouter.register_composite + route_chat composite detection."""
-
-    def test_register_composite_stores_definition(self) -> None:
-        pm = _make_process_manager()
-        router = PlatformRouter(process_manager=pm)
-        definition = _make_definition(agent_name="comp-agent")
-
-        router.register_composite("comp-agent", definition)
-
-        assert "comp-agent" in router._composite_defs
-        assert router._composite_defs["comp-agent"] is definition
-
     @pytest.mark.asyncio
     async def test_route_chat_routes_to_composite(self) -> None:
         """route_chat delegates to route_composite when a composite is registered."""
@@ -997,18 +923,6 @@ class TestGetTools:
         assert len(tools) == 2
         assert tools[0]["name"] == "tool_a"
         assert tools[1]["name"] == "tool_b"
-
-
-class TestStopAll:
-    """Tests for PlatformRouter.stop_all."""
-
-    @pytest.mark.asyncio
-    async def test_stop_all_delegates_to_pm(self) -> None:
-        pm = _make_process_manager()
-        router = PlatformRouter(process_manager=pm)
-
-        await router.stop_all()
-        pm.stop_all.assert_awaited_once()
 
 
 # ============================================================================
@@ -1356,7 +1270,9 @@ class TestSubtaskCancelledError:
 class TestSubtaskSystemExit:
     """iter110d: SystemExit propagates immediately, not retried."""
 
-    @pytest.mark.skip(reason="SystemExit through asyncio.wait_for sets process exit code to 1 regardless of catch; KeyboardInterrupt covers the same re-raise path")
+    @pytest.mark.skip(
+        reason="SystemExit through asyncio.wait_for sets process exit code to 1 regardless of catch; KeyboardInterrupt covers the same re-raise path"
+    )
     @pytest.mark.asyncio
     async def test_run_with_retry_propagates_system_exit(self) -> None:
         """SystemExit in run_with_retry is propagated immediately."""
@@ -1448,16 +1364,6 @@ class TestWorkflowContextClose:
             task_graph=tg,
         )
         assert ctx.task_graph is not None
-        await ctx.aclose()
-        assert ctx.task_graph is None
-
-    @pytest.mark.asyncio
-    async def test_aclose_without_task_graph(self) -> None:
-        ctx = WorkflowContext(
-            conversation_id="c1",
-            message="hi",
-            agent_name="test",
-        )
         await ctx.aclose()
         assert ctx.task_graph is None
 

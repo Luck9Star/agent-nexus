@@ -1,4 +1,5 @@
 """Tests for check_cmd helper functions."""
+
 from __future__ import annotations
 
 from agent_nexus.platform.local.cli.check_cmd import (
@@ -39,9 +40,7 @@ class TestCheckManifest:
 
     def test_valid_manifest(self, tmp_path):
         manifest = tmp_path / "agent-manifest.yaml"
-        manifest.write_text(
-            "name: myagent\nversion: '1.0'\ntype: atomic\ndescription: test\n"
-        )
+        manifest.write_text("name: myagent\nversion: '1.0'\ntype: atomic\ndescription: test\n")
         errors, data = _check_manifest(tmp_path, "myagent")
         assert errors == []
         assert data is not None
@@ -49,9 +48,7 @@ class TestCheckManifest:
 
     def test_name_mismatch(self, tmp_path):
         manifest = tmp_path / "agent-manifest.yaml"
-        manifest.write_text(
-            "name: other\nversion: '1.0'\ntype: atomic\ndescription: test\n"
-        )
+        manifest.write_text("name: other\nversion: '1.0'\ntype: atomic\ndescription: test\n")
         errors, _ = _check_manifest(tmp_path, "myagent")
         assert any("does not match" in e for e in errors)
 
@@ -94,10 +91,6 @@ class TestCheckAtomicFiles:
     def test_missing_agent_py(self, tmp_path):
         assert any("agent.py" in e for e in _check_atomic_files(tmp_path))
 
-    def test_present(self, tmp_path):
-        (tmp_path / "agent.py").write_text("pass")
-        assert _check_atomic_files(tmp_path) == []
-
 
 class TestValidateCompositionSections:
     def test_both_present(self):
@@ -128,21 +121,24 @@ class TestValidateCompositionTasks:
     def test_missing_name(self):
         errors: list[str] = []
         _validate_composition_tasks(
-            {"tasks": {"t1": {"agent": "b"}}}, errors,
+            {"tasks": {"t1": {"agent": "b"}}},
+            errors,
         )
         assert any("missing" in e and "name" in e for e in errors)
 
     def test_missing_agent(self):
         errors: list[str] = []
         _validate_composition_tasks(
-            {"tasks": {"t1": {"name": "a"}}}, errors,
+            {"tasks": {"t1": {"name": "a"}}},
+            errors,
         )
         assert any("missing" in e and "agent" in e for e in errors)
 
     def test_self_dependency(self):
         errors: list[str] = []
         _validate_composition_tasks(
-            {"tasks": {"t1": {"name": "a", "agent": "b", "blocked_by": ["t1"]}}}, errors,
+            {"tasks": {"t1": {"name": "a", "agent": "b", "blocked_by": ["t1"]}}},
+            errors,
         )
         assert any("cannot depend on itself" in e for e in errors)
 
@@ -161,14 +157,16 @@ class TestDetectCompositionCycles:
     def test_no_cycle(self):
         errors: list[str] = []
         _detect_composition_cycles(
-            {"t1": {"blocked_by": []}, "t2": {"blocked_by": ["t1"]}}, errors,
+            {"t1": {"blocked_by": []}, "t2": {"blocked_by": ["t1"]}},
+            errors,
         )
         assert errors == []
 
     def test_simple_cycle(self):
         errors: list[str] = []
         _detect_composition_cycles(
-            {"t1": {"blocked_by": ["t2"]}, "t2": {"blocked_by": ["t1"]}}, errors,
+            {"t1": {"blocked_by": ["t2"]}, "t2": {"blocked_by": ["t1"]}},
+            errors,
         )
         assert any("circular" in e for e in errors)
 

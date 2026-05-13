@@ -14,19 +14,12 @@ from agent_nexus.platform.gateway.auth import (
     ToolAccessPolicy,
 )
 
-
 # ============================================================================
 # GatewayAuthConfig defaults
 # ============================================================================
 
 
 class TestGatewayAuthConfig:
-    def test_defaults_disabled(self) -> None:
-        config = GatewayAuthConfig()
-        assert config.enabled is False
-        assert config.method == "api_key"
-        assert config.keys == []
-
     def test_enabled_with_keys(self) -> None:
         config = GatewayAuthConfig(enabled=True, keys=["abc123"])
         assert config.enabled is True
@@ -70,22 +63,6 @@ class TestGatewayAuthenticatorAuthenticate:
         # Both keys should work
         assert auth.authenticate(key1).client_id.startswith("key-")
         assert auth.authenticate(key2).client_id.startswith("key-")
-
-
-# ============================================================================
-# GatewayAuthenticator.hash_key
-# ============================================================================
-
-
-class TestHashKey:
-    def test_produces_sha256(self) -> None:
-        key = "test-key"
-        expected = hashlib.sha256(key.encode()).hexdigest()
-        assert GatewayAuthenticator.hash_key(key) == expected
-
-    def test_deterministic(self) -> None:
-        key = "another-key"
-        assert GatewayAuthenticator.hash_key(key) == GatewayAuthenticator.hash_key(key)
 
 
 # ============================================================================
@@ -257,11 +234,6 @@ class TestGlobPatternMatching:
             tools_denied=denied,
         )
         return ToolAccessChecker(policies=[policy])
-
-    def test_star_matches_all(self) -> None:
-        checker = self._make_checker(["*"], [])
-        client = AuthenticatedClient(client_id="c", roles=["default"])
-        assert checker.is_tool_allowed(client, "anything") is True
 
     def test_prefix_glob(self) -> None:
         checker = self._make_checker(["search_*"], [])

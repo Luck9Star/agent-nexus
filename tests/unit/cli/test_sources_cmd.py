@@ -72,9 +72,7 @@ class TestSourcesAdd:
         mock_validate.side_effect = ValueError("Invalid git URL scheme: 'file:///bad'")
         from agent_nexus.platform.local.cli.sources_cmd import sources_app
 
-        result = runner.invoke(
-            sources_app, ["add", "--name", "bad", "--url", "file:///bad"]
-        )
+        result = runner.invoke(sources_app, ["add", "--name", "bad", "--url", "file:///bad"])
         assert result.exit_code == 1
         assert "Error" in result.output
 

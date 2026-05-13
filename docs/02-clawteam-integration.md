@@ -3,7 +3,7 @@
 > Agent Nexus Design Doc — §4 自建编排层：自建组件设计（参考 ClawTeam 实现）、TaskGraph、IPC、ProcessManager、OrchestrationDSL、与 ClawTeam 的对应关系
 
 > **Status**: ✅ Implemented
-> **Code**: `src/agent_nexus/platform/orchestration/` (TaskGraph 806 lines, IPC 445 lines, ProcessManager 629 lines, DSL 578 lines)
+> **Code**: `src/agent_nexus/platform/orchestration/` (TaskGraph 855 lines, IPC 489 lines, ProcessManager 661 lines, DSL 654 lines)
 > **Tests**: `tests/unit/test_task_graph.py`, `tests/unit/test_task_model.py`, `tests/unit/test_task_models.py`, `tests/unit/test_ipc.py`, `tests/unit/test_ipc_models.py`, `tests/unit/test_process_manager.py`, `tests/unit/test_dsl.py`, `tests/unit/test_orchestration_pipeline.py`
 
 ## §4 自建编排层
@@ -38,6 +38,9 @@
 | `clawteam/team/mailbox.py` | **IPC** | 进程间通信（stdin/stdout JSON-lines） | 简化：不需要文件邮箱，用管道通信 |
 | `clawteam/spawn/` SpawnBackend | **ProcessManager** | 子进程管理 + 健康检查 + 自动重启 | `spawn/subprocess_backend.py` |
 | `clawteam/templates/` Team Template | **OrchestrationDSL** | TOML DAG 编排定义 | 模板格式 + blocked_by |
+| — | **team_manager.py** | 团队生命周期管理（创建、销毁、状态追踪） | 自建扩展，无 ClawTeam 对应模块 |
+| — | **message_broker.py** | 消息路由与分发（Agent 间通信中转） | 自建扩展，无 ClawTeam 对应模块 |
+| — | **agent_directory.py** | Agent 发现与注册（能力目录、索引查询） | 自建扩展，无 ClawTeam 对应模块 |
 | `clawteam/transport/` Transport | **暂不实现** | 初期仅本地通信 | P2P ZeroMQ 按需扩展 |
 | `clawteam/board/` Board | **暂不实现** | 初期不需要可视化 | 按需加 |
 | `clawteam/harness/` Harness | **不实现** | Platform Router 4-Phase Workflow 替代 | — |
@@ -244,11 +247,11 @@ preload_agents = ["requirements-analyzer"]
 
 | 自建组件 | 实际代码量 | 参考 ClawTeam 源码 | 复杂度 |
 |----------|-----------|-------------------|--------|
-| TaskGraph | 806 行 | `store/file.py` (blocked_by + 环检测) | 中 |
-| IPC 协议 | 445 行 | `team/mailbox.py` (消息格式参考) | 低 |
-| ProcessManager | 629 行 | `spawn/subprocess_backend.py` + 健康检查 | 中 |
-| OrchestrationDSL | 578 行 | `templates/__init__.py` + TOML 解析 | 低 |
-| **总计** | **2,458 行** | | |
+| TaskGraph | 855 行 | `store/file.py` (blocked_by + 环检测) | 中 |
+| IPC 协议 | 489 行 | `team/mailbox.py` (消息格式参考) | 低 |
+| ProcessManager | 661 行 | `spawn/subprocess_backend.py` + 健康检查 | 中 |
+| OrchestrationDSL | 654 行 | `templates/__init__.py` + TOML 解析 | 低 |
+| **总计** | **2,659 行** | | |
 
 > MIT License 义务：如果直接搬运 ClawTeam 代码，需保留原始版权声明和许可声明。
 

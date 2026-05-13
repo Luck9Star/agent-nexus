@@ -3,8 +3,8 @@
 > Agent Nexus Design Doc — §1 产品定位与愿景 + §2 竞争格局与差异化 + §3 核心架构
 
 > **Status**: ✅ Implemented
-> **Code**: `src/agent_nexus/platform/` (14,170 lines), `src/agent_nexus/models/` (1,577 lines)
-> **Tests**: `tests/unit/` (55 test files), `tests/e2e/` (integration + e2e)
+> **Code**: `src/agent_nexus/platform/` (11 子模块，持续增长), `src/agent_nexus/models/` (17 个模型文件)
+> **Tests**: `tests/unit/` (140 test files), `tests/integration/` (11 test files), `tests/e2e/` (25 test files)
 
 ## §1 产品定位与愿景
 
@@ -59,7 +59,7 @@ Agent Platform（自研增强层）
 
 ### 1.4 首批 Agent
 
-**Atomic Agents（11）**：requirements-analyzer、doc-filler、code-reviewer、contract-analyzer、api-doc-generator、security-scanner、accessibility-auditor、localization-specialist、market-intelligence-analyst、test-suite-generator、good-skill
+**Atomic Agents（20）**：requirements-analyzer、doc-filler、code-reviewer、contract-analyzer、api-doc-generator、security-scanner、accessibility-auditor、localization-specialist、market-intelligence-analyst、test-suite-generator、good-skill、api-contract-tester、config-linter、data-pipeline-validator、db-schema-analyzer、dependency-auditor、error-analyzer、generic-expert-agent、i18n-validator、performance-profiler
 
 **Composite Agents（5）**：feature-delivery-pipeline、document-compliance-gateway、cicd-quality-gate、competitive-intelligence-briefing、product-documentation-suite
 
@@ -124,13 +124,17 @@ deer-flow（Apache-2.0, ByteDance）提供有价值的架构参考：
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  Layer 4: Self-Evolution Engine ✅                          │  │
-│  │  Code: platform/evolution/ (3,837 lines)                   │  │
+│  │  Code: platform/evolution/ (18 files)                      │  │
 │  │                                                            │  │
 │  │  Layer 1: Atomic Skill Evolution                          │  │
 │  │  ├── ExecutionAnalyzer (per-task LLM 分析)                │  │
 │  │  ├── SkillEvolver: FIX / DERIVED / CAPTURED               │  │
 │  │  ├── HealthChecker: 规则引擎预过滤                         │  │
 │  │  ├── EvolutionStore: SQLite DAG 版本管理                   │  │
+│  │  ├── SkillStore: 独立 Skill 持久化                        │  │
+│  │  ├── Experimenter: A/B 实验框架                           │  │
+│  │  ├── SkillPatch: 技能补丁机制                             │  │
+│  │  ├── AnalysisStore / BudgetStore / Metrics: 专项存储       │  │
 │  │  └── 质量: applied_rate, completion_rate, effective_rate   │  │
 │  │                                                            │  │
 │  │  Layer 2: Composite Orchestration Evolution                │  │
@@ -144,7 +148,7 @@ deer-flow（Apache-2.0, ByteDance）提供有价值的架构参考：
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  Layer 3: Python Runtime ✅                                 │  │
-│  │  Code: platform/runtime/ (1,810 lines)                     │  │
+│  │  Code: platform/runtime/ (8 files)                         │  │
 │  │                                                            │  │
 │  │  每个 Atomic Agent 内部:                                   │  │
 │  │  ├── IPythonExecutor（同进程 InteractiveShell）              │  │
@@ -162,27 +166,48 @@ deer-flow（Apache-2.0, ByteDance）提供有价值的架构参考：
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  Layer 2: 编排层 ✅                                         │  │
-│  │  Code: platform/orchestration/ (2,499 lines)               │  │
+│  │  Code: platform/orchestration/ (7 files)                   │  │
 │  │  ├── TaskGraph（SQLite + 依赖图 + 状态机 + 环检测）        │  │
 │  │  ├── IPC（stdin/stdout JSON-lines 管道协议）               │  │
 │  │  ├── ProcessManager（asyncio.subprocess + 健康检查）       │  │
-│  │  └── OrchestrationDSL (TOML DAG 定义 + 验证)              │  │
+│  │  ├── OrchestrationDSL (TOML DAG 定义 + 验证)              │  │
+│  │  ├── AgentDirectory（Agent 发现与注册）                    │  │
+│  │  ├── MessageBroker（消息路由与分发）                       │  │
+│  │  └── TeamManager（团队生命周期管理）                       │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  Layer 1: MCP 暴露层 ✅                                     │  │
-│  │  Code: platform/gateway/ (1,320 lines)                     │  │
+│  │  Code: platform/gateway/ (7 files)                         │  │
 │  │  ├── MCPGateway（FastMCP Server 聚合）                    │  │
 │  │  ├── DeferredAgentRegistry（Agent 级延迟加载）            │  │
 │  │  ├── ToolAdapter（Agent 工具适配）                         │  │
+│  │  ├── Auth（请求认证）                                      │  │
+│  │  ├── Audit（操作审计）                                     │  │
+│  │  ├── ExternalMcpAdapter（外部 MCP Server 桥接）           │  │
+│  │  ├── SchemaTransformer（Schema 转换）                     │  │
 │  │  └── 职责: 跨进程调用、外部工具、非 Python 客户端         │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  Platform Router ✅                                         │  │
-│  │  Code: platform/router/ (992 lines)                        │  │
+│  │  Code: platform/router/                                     │  │
 │  │  ├── 4-Phase Workflow (Research → Synthesis → Implementation → Verification) │
 │  │  └── SubtaskController (超时/重试/并行控制)                │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  Agency Pipeline ✅                                         │  │
+│  │  Code: platform/agency/ (24 files)                          │  │
+│  │  ├── LLMPlanner (LLM 驱动任务分解)                         │  │
+│  │  ├── DAGDispatcher (并行 DAG 调度)                         │  │
+│  │  ├── LLMExecutor (per-expert LLM 调用)                     │  │
+│  │  ├── LLMIntegrator (语义合成)                               │  │
+│  │  ├── LLMQualityGate (质量评估)                              │  │
+│  │  ├── Registry / Selector (专家注册与选择)                  │  │
+│  │  ├── TokenCounter / LLMClient (模型能力感知)               │  │
+│  │  ├── Policy / Allowlist (策略与白名单)                     │  │
+│  │  └── CLI / Parser / Importer (CLI 入口与解析)              │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
@@ -204,7 +229,7 @@ deer-flow（Apache-2.0, ByteDance）提供有价值的架构参考：
 |---|------|------|
 | D1 | 自建编排层 | 参考 ClawTeam 实现按需精简自建，不作为 pip 依赖引入。避免 API 不稳定风险，完全控制接口 |
 | D2 | 双层 Agent 架构 | Atomic（PydanticAI + Runtime + MCP）+ Composite（OrchestrationDSL TOML） |
-| D3 | Agent 三种运行模式 | MCP standalone / Platform Router / CLI standalone |
+| D3 | Agent 三种运行模式 | MCP standalone / Platform Router / CLI standalone（Agency Pipeline 是独立编排管道，非 RunMode） |
 | D4 | 用户本地执行 | 无计费，用户管理模型配置 |
 | D5 | MCP-native | 所有 Agent 暴露为 MCP Server |
 | D6 | 外部通信用 MCP | stdio + SSE 双模式 |
@@ -222,5 +247,45 @@ deer-flow（Apache-2.0, ByteDance）提供有价值的架构参考：
 | D18 | Provider-Agnostic Tool Search | Gateway 层提供 `search_agents()` 标准 function calling 作为基础方案，Anthropic 用户可选用原生 `defer_loading` 零 round-trip 加速 |
 | D19 | Compaction 防死循环 | Context 溢出时只重注入 Layer 0 + Layer 1 摘要，设 `min_turns_between_compactions=5` 防止正反馈死循环（OpenClaw #68032 教训） |
 | D20 | Context Budget 硬限制 | Layer 0 ≤ 800 tokens，Layer 1 ≤ 3000 tokens，bootstrap 总量 ≤ 5000 tokens，compaction 触发阈值 80%，目标压缩到 40% |
+| D21 | Agency Pipeline | LLM 驱动的专家编排管道：Planner（任务分解）→ Executor（per-expert LLM 调用）→ Integrator（语义合成）→ QAGate（质量评估）。共享 ModelCapabilityRegistry 提供模型能力数据 |
+
+### 3.3 Agency Pipeline 架构
+
+Agency Pipeline 是独立于 Agent RunMode 之外的编排管道，用于 LLM 驱动的多专家编排。Agent 本身只有 3 种 RunMode（MCP standalone / Platform Router / CLI standalone），Agency Pipeline 是平台级能力。核心架构为 5 阶段流水线：
+
+```
+用户任务 → LLMPlanner → DAGDispatcher → LLMExecutor → LLMIntegrator → LLMQualityGate → 最终输出
+```
+
+**阶段职责**：
+
+| 阶段 | 模块 | 职责 |
+|------|------|------|
+| 任务分解 | `llm_planner.py` | LLM 将用户任务分解为专家子任务列表，生成执行 DAG |
+| 并行调度 | `dag_dispatcher.py` | 按 DAG 依赖关系并行调度无阻塞子任务，管理最大并行度 |
+| 专家执行 | `llm_executor.py` | 为每个子任务选择专家 profile，调用 LLM 生成输出 |
+| 语义合成 | `llm_integrator.py` | 将多个专家输出合成为统一结果，处理冲突 |
+| 质量评估 | `llm_qa_gate.py` | LLM 评估合成质量，不达标则回退重试 |
+
+**支撑模块**：
+
+| 模块 | 职责 |
+|------|------|
+| `registry.py` | 专家注册表（profile 加载、能力搜索） |
+| `selector.py` | 专家选择器（能力匹配、多样性去重） |
+| `parser.py` + `policy.py` + `allowlist.py` | 专家 profile 解析、内容策略检查、白名单验证 |
+| `llm_client.py` | 统一 LLM 客户端（litellm + streaming），共享连接池 |
+| `model_capability.py` | ModelCapabilityRegistry：17 模型 × 6 Provider 的能力数据（max_tokens、temperature、vision） |
+| `token_counter.py` | CJK 感知的 Token 计数，用于预算管理 |
+| `context_provider.py` | 管道上下文注入 |
+| `prompt_loader.py` | Prompt 模板加载 |
+| `task_composer.py` | 子任务组装 |
+| `reflector.py` | 结果反思与优化建议 |
+| `hooks.py` | 管道生命周期 hook |
+| `json_parse.py` | JSON 解析容错工具 |
+| `planner.py` / `executor.py` / `integrator.py` / `qa_gate.py` | 非LLM 基础类 |
+| `cli_backend/` | CLI 会话管理 + 命令路由 |
+
+**ModelCapabilityRegistry 4 级回退**：精确匹配 → 去日期后缀 → 去尾部数字 → Provider 默认值。所有管道阶段共享同一 Registry 实例，避免重复模型数据获取。
 
 ---

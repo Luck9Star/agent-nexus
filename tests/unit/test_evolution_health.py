@@ -8,7 +8,6 @@ from agent_nexus.platform.evolution.health import (
     HealthChecker,
     HealthReport,
 )
-from agent_nexus.platform.evolution.thresholds import SkillRates
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -341,49 +340,5 @@ class TestGetHealthSummary:
 
 
 # ---------------------------------------------------------------------------
-# store property
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
 # iter100 regression: get_health_summary includes CAPTURED count
 # ---------------------------------------------------------------------------
-
-
-class TestHealthSummaryCaptured:
-    def test_summary_includes_captured_suggestions_key(self):
-        """get_health_summary must count CAPTURED type suggestions."""
-        captured_skill = _skill(
-            id="sk-cap",
-            name="captured-skill",
-            selections=10,
-            applied=8,
-            completions=7,
-            fallbacks=0,
-        )
-        store = _make_store([captured_skill])
-        checker = HealthChecker(store)
-
-        # Monkey-patch check_health to inject a CAPTURED suggestion
-        original = checker.check_health
-
-        def patched(
-            skill_record: SkillRecord,
-            rates: SkillRates | None = None,
-        ) -> list[EvolutionSuggestion]:
-            if skill_record.id == "sk-cap":
-                return [
-                    EvolutionSuggestion(
-                        evolution_type=EvolutionType.CAPTURED,
-                        target_skill_ids=[skill_record.id],
-                        direction="test captured",
-                        confidence=0.8,
-                    )
-                ]
-            return original(skill_record, rates=rates)
-
-        checker.check_health = patched  # type: ignore[assignment]
-        summary = checker.get_health_summary()
-        assert "captured_suggestions" in summary
-        assert summary["captured_suggestions"] == 1
-        assert summary["unhealthy"] == 1

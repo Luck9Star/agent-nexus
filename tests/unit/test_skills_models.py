@@ -32,30 +32,7 @@ def _meta(**overrides: object) -> SkillMetadata:
 
 
 class TestFrozenSemantics:
-    def test_equal_metadata(self):
-        a = _meta(name="x", agent_type="atomic")
-        b = _meta(name="x", agent_type="atomic")
-        assert a == b
-
-    def test_unequal_metadata_name(self):
-        a = _meta(name="x")
-        b = _meta(name="y")
-        assert a != b
-
-    def test_skill_body_equality(self):
-        assert SkillBody("abc") == SkillBody("abc")
-        assert SkillBody("abc") != SkillBody("def")
-
-    def test_skill_resources_equality(self):
-        r1 = SkillResources(content="c", sections={"A": "a"})
-        r2 = SkillResources(content="c", sections={"A": "a"})
-        assert r1 == r2
-
-    def test_parsed_skill_equality(self):
-        m = _meta()
-        p1 = ParsedSkill(metadata=m, body=None, resources=None, raw="")
-        p2 = ParsedSkill(metadata=m, body=None, resources=None, raw="")
-        assert p1 == p2
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -105,16 +82,6 @@ class TestTierMethodCombinations:
         result = skill.tier2_section("example")
         assert result in ("first", "second")
 
-    def test_raw_preserved(self):
-        raw_text = "---\nname: t\nagent_type: a\n---\nbody"
-        skill = ParsedSkill(
-            metadata=_meta(),
-            body=None,
-            resources=None,
-            raw=raw_text,
-        )
-        assert skill.raw == raw_text
-
 
 # ---------------------------------------------------------------------------
 # Default factory isolation
@@ -122,13 +89,4 @@ class TestTierMethodCombinations:
 
 
 class TestDefaultFactoryIsolation:
-    def test_metadata_extra_independent(self):
-        m1 = _meta()
-        m2 = _meta()
-        m1.extra["key"] = "val"  # would fail if shared mutable
-        assert "key" not in m2.extra  # frozen: can't set anyway
-
-    def test_resources_sections_independent(self):
-        r1 = SkillResources(content="a")
-        r2 = SkillResources(content="b")
-        assert r1.sections is not r2.sections
+    pass

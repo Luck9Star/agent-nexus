@@ -148,6 +148,26 @@ impl DeferredAgentRegistry {
             .collect()
     }
 
+    /// Find an agent's original name from its sanitized name.
+    ///
+    /// Agent names are sanitized during tool namespacing (e.g., "code-reviewer"
+    /// → "code_reviewer"). This method resolves the sanitized name back to the
+    /// original name used for registry lookups.
+    pub async fn find_by_sanitized_name(&self, sanitized: &str) -> Option<String> {
+        let agents = self.agents.read().await;
+        // Fast path: exact match (agent name may not need sanitization)
+        if agents.contains_key(sanitized) {
+            return Some(sanitized.to_string());
+        }
+        // Slow path: match by sanitized name
+        for key in agents.keys() {
+            if crate::tool_adapter::sanitize(key) == sanitized {
+                return Some(key.clone());
+            }
+        }
+        None
+    }
+
     /// Activate an agent: start its subprocess, connect MCP, list tools.
     ///
     /// The `client_factory` closure is called at most once per agent thanks to

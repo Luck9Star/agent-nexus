@@ -23,6 +23,11 @@ pub enum PlatformToAgentType {
     Chat,
     Task,
     DataReference,
+    // A2A delivery types — Platform relays these to target agents
+    ReceiveMessage,
+    ReceiveRequest,
+    ReceiveBroadcast,
+    ReceiveReply,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +36,11 @@ pub enum AgentToPlatformType {
     Result,
     Progress,
     Error,
+    // A2A origination types — Agent asks Platform to relay
+    SendMessage,
+    SendRequest,
+    Broadcast,
+    Reply,
 }
 
 // ── Flat message structs (matches Python exactly) ──────────────────
@@ -187,6 +197,38 @@ impl IPCMessage {
             payload: IpcPayload::AgentToPlatform(payload),
         }
     }
+}
+
+// ── A2A (Agent-to-Agent) messaging models ───────────────────────────
+
+/// Network-layer address for an agent in A2A communication.
+///
+/// Python source: models/ipc.py:152-161
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentAddress {
+    pub agent_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub composition: Option<String>,
+}
+
+/// Agent-to-Agent message carried over the Platform-as-Broker relay.
+///
+/// Python source: models/ipc.py:164-188
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct A2AMessage {
+    pub message_id: String,
+    pub from_agent: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to_agent: Option<String>,
+    pub msg_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_reply_to: Option<String>,
+    pub content: String,
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub metadata: std::collections::HashMap<String, serde_json::Value>,
+    pub timestamp: f64,
 }
 
 #[cfg(test)]
@@ -446,5 +488,86 @@ mod tests {
             }
             _ => panic!("Expected PlatformToAgent variant"),
         }
+    }
+
+    // -- A2A variant tests --------------------------------------------------
+
+    #[test]
+    fn deserialize_a2a_receive_message() {
+        let json = r#"{"type":"receive_message","content":"hello from peer","task_id":"t-1"}"#;
+        let msg: PlatformToAgent = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.msg_type, PlatformToAgentType::ReceiveMessage);
+        assert_eq!(msg.content, "hello from peer");
+    }
+
+    #[test]
+    fn deserialize_a2a_receive_request() {
+        let json = r#"{"type":"receive_request","content":"review this code","task_id":"t-2"}"#;
+        let msg: PlatformToAgent = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.msg_type, PlatformToAgentType::ReceiveRequest);
+    }
+
+    #[test]
+    fn deserialize_a2a_receive_broadcast() {
+        let json = r#"{"type":"receive_broadcast","content":"status update","task_id":"t-3"}"#;
+        let msg: PlatformToAgent = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.msg_type, PlatformToAgentType::ReceiveBroadcast);
+    }
+
+    #[test]
+    fn deserialize_a2a_receive_reply() {
+        let json = r#"{"type":"receive_reply","content":"here is my response","task_id":"t-4"}"#;
+        let msg: PlatformToAgent = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.msg_type, PlatformToAgentType::ReceiveReply);
+    }
+
+    #[test]
+    fn deserialize_a2a_send_message() {
+        let json = r#"{"type":"send_message","content":"hello peer","task_id":"t-5","output":{"to_agent":"agent-b"}}"#;
+        let msg: AgentToPlatform = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.msg_type, AgentToPlatformType::SendMessage);
+    }
+
+    #[test]
+    fn deserialize_a2a_broadcast() {
+        let json = r#"{"type":"broadcast","content":"announcement","task_id":"t-6"}"#;
+        let msg: AgentToPlatform = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.msg_type, AgentToPlatformType::Broadcast);
+    }
+
+    #[test]
+    fn deserialize_a2a_reply() {
+        let json = r#"{"type":"reply","content":"response to request","task_id":"t-7"}"#;
+        let msg: AgentToPlatform = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.msg_type, AgentToPlatformType::Reply);
+    }
+
+    #[test]
+    fn a2a_agent_address_roundtrip() {
+        let addr = AgentAddress {
+            agent_id: "agent-a".to_string(),
+            role: Some("coordinator".to_string()),
+            composition: None,
+        };
+        let json = serde_json::to_string(&addr).unwrap();
+        let de: AgentAddress = serde_json::from_str(&json).unwrap();
+        assert_eq!(addr, de);
+    }
+
+    #[test]
+    fn a2a_message_roundtrip() {
+        let msg = A2AMessage {
+            message_id: "msg-1".to_string(),
+            from_agent: "agent-a".to_string(),
+            to_agent: Some("agent-b".to_string()),
+            msg_type: "chat".to_string(),
+            in_reply_to: None,
+            content: "hello".to_string(),
+            metadata: std::collections::HashMap::new(),
+            timestamp: 1715600000.0,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let de: A2AMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, de);
     }
 }

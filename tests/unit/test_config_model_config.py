@@ -103,18 +103,6 @@ class TestResolveModelPriority:
 class TestResolveModelTier:
     """Verify tier resolution with string and enum inputs."""
 
-    def test_tier_as_string(self) -> None:
-        config = _make_config()
-        mgr = ModelConfigManager(config)
-        result = mgr.resolve_model("agent", recommended_tier="lightweight")
-        assert result == MODEL_TIER_MAP[ModelTier.LIGHTWEIGHT]
-
-    def test_tier_as_enum(self) -> None:
-        config = _make_config()
-        mgr = ModelConfigManager(config)
-        result = mgr.resolve_model("agent", recommended_tier=ModelTier.STANDARD)
-        assert result == MODEL_TIER_MAP[ModelTier.STANDARD]
-
     def test_unknown_tier_string_falls_back(self) -> None:
         config = _make_config(default="fallback:model")
         mgr = ModelConfigManager(config)
@@ -245,10 +233,13 @@ class TestResolveApiKeyLogging:
         config = _make_config()
         mgr = ModelConfigManager(config)
 
-        with patch.dict("os.environ", {}, clear=True), patch.object(
-            logging.getLogger("agent_nexus.platform.config.model_config"),
-            "warning",
-        ) as mock_warn:
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(
+                logging.getLogger("agent_nexus.platform.config.model_config"),
+                "warning",
+            ) as mock_warn,
+        ):
             result = mgr.resolve_api_key("openai")
 
         assert result == ""

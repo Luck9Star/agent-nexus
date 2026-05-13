@@ -238,7 +238,7 @@ class TestEvolutionStoreEdgeCases:
     def test_get_all_skills_pagination_beyond_end(self, store: EvolutionStore) -> None:
         """Pagination with offset beyond total returns empty list."""
         for i in range(3):
-            store.save_skill_record(_make_skill(f"s{i}"))
+            store.save_skill_record(_make_skill(f"s{i}", name=f"skill-{i}"))
 
         result = store.get_all_skills(limit=5, offset=100)
         assert result == []

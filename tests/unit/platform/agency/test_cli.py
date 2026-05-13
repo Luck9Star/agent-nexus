@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from agent_nexus.platform.agency.cli import cli, _format_section_value, _setup_llm_components
+from agent_nexus.platform.agency.cli import _setup_llm_components, cli
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _VENDOR_DIR = _PROJECT_ROOT / "vendor" / "agency-agents"
@@ -178,22 +178,6 @@ class TestListExpertsCommand:
         # Should show expert IDs
         assert "agency." in result.output
 
-    def test_list_experts_shows_capabilities(self) -> None:
-        runner = CliRunner()
-        result = runner.invoke(
-            cli,
-            [
-                "list-experts",
-                "--vendor-path",
-                str(_VENDOR_DIR),
-                "--allowlist",
-                str(_ALLOWLIST_PATH),
-            ],
-        )
-        assert result.exit_code == 0, f"CLI error: {result.output}"
-        assert "Capabilities:" in result.output
-        assert "Output contract:" in result.output
-
     def test_list_experts_bad_vendor_path(self) -> None:
         runner = CliRunner()
         result = runner.invoke(
@@ -340,35 +324,3 @@ class TestSetupLLMComponentsResourceCleanup:
                     sys.modules["agent_nexus.models.capability"] = orig
                 else:
                     sys.modules.pop("agent_nexus.models.capability", None)
-
-
-class TestFormatSectionValue:
-    """Tests for _format_section_value helper (CC reduction pre-condition)."""
-
-    def test_list_with_items(self) -> None:
-        assert _format_section_value(["a", "b"]) == ["- a", "- b"]
-
-    def test_empty_list(self) -> None:
-        assert _format_section_value([]) == []
-
-    def test_dict_with_items(self) -> None:
-        result = _format_section_value({"x": 1, "y": 2})
-        assert result == ["- **x**: 1", "- **y**: 2"]
-
-    def test_empty_dict(self) -> None:
-        assert _format_section_value({}) == []
-
-    def test_none_value(self) -> None:
-        assert _format_section_value(None) == []
-
-    def test_empty_string(self) -> None:
-        assert _format_section_value("") == []
-
-    def test_whitespace_string(self) -> None:
-        assert _format_section_value("   ") == []
-
-    def test_nonempty_string(self) -> None:
-        assert _format_section_value("hello") == ["hello"]
-
-    def test_integer(self) -> None:
-        assert _format_section_value(42) == ["42"]

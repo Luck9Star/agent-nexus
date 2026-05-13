@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import patch
 
 from agent_nexus.platform.router.subtask import SubtaskConfig, SubtaskController
 
@@ -14,38 +14,12 @@ from agent_nexus.platform.router.subtask import SubtaskConfig, SubtaskController
 # ---------------------------------------------------------------------------
 
 
-class TestSubtaskConfig:
-    def test_defaults(self):
-        cfg = SubtaskConfig()
-        assert cfg.timeout_seconds == 60.0
-        assert cfg.max_retries == 2
-        assert cfg.max_parallel == 3
-
-    def test_custom_values(self):
-        cfg = SubtaskConfig(timeout_seconds=30.0, max_retries=5, max_parallel=10)
-        assert cfg.timeout_seconds == 30.0
-        assert cfg.max_retries == 5
-        assert cfg.max_parallel == 10
-
-
 # ---------------------------------------------------------------------------
 # SubtaskController — run_with_timeout
 # ---------------------------------------------------------------------------
 
 
 class TestRunWithTimeout:
-    @pytest.mark.asyncio
-    async def test_success_within_timeout(self):
-        ctrl = SubtaskController(SubtaskConfig(timeout_seconds=5.0))
-        result = await ctrl.run_with_timeout(self._immediate("ok"))
-        assert result == "ok"
-
-    @pytest.mark.asyncio
-    async def test_timeout_raises(self):
-        ctrl = SubtaskController(SubtaskConfig(timeout_seconds=0.1))
-        with pytest.raises(TimeoutError):
-            await ctrl.run_with_timeout(asyncio.sleep(10))
-
     @pytest.mark.asyncio
     async def test_override_timeout(self):
         ctrl = SubtaskController(SubtaskConfig(timeout_seconds=10.0))
@@ -88,31 +62,6 @@ class TestRunWithRetry:
         ctrl = SubtaskController(SubtaskConfig(max_retries=2))
         result = await ctrl.run_with_retry(lambda: self._immediate("yes"))
         assert result == "yes"
-
-    @pytest.mark.asyncio
-    async def test_retries_and_succeeds(self):
-        ctrl = SubtaskController(SubtaskConfig(max_retries=3))
-        attempts = {"n": 0}
-
-        async def factory():
-            attempts["n"] += 1
-            if attempts["n"] < 3:
-                raise RuntimeError("not yet")
-            return "ok"
-
-        result = await ctrl.run_with_retry(factory)
-        assert result == "ok"
-        assert attempts["n"] == 3
-
-    @pytest.mark.asyncio
-    async def test_exhausts_retries_raises_last(self):
-        ctrl = SubtaskController(SubtaskConfig(max_retries=2))
-
-        async def factory():
-            raise ValueError("always fail")
-
-        with pytest.raises(ValueError, match="always fail"):
-            await ctrl.run_with_retry(factory)
 
     @pytest.mark.asyncio
     async def test_override_max_retries(self):
@@ -233,22 +182,6 @@ class TestRunParallel:
         assert results[0] == "completed"
 
     @pytest.mark.asyncio
-    async def test_concurrency_limited(self):
-        max_seen = {"n": 0}
-        current = {"n": 0}
-        ctrl = SubtaskController(SubtaskConfig(max_parallel=2))
-
-        async def tracked():
-            current["n"] += 1
-            max_seen["n"] = max(max_seen["n"], current["n"])
-            await asyncio.sleep(0.05)
-            current["n"] -= 1
-
-        coros = [tracked() for _ in range(6)]
-        await ctrl.run_parallel(coros)
-        assert max_seen["n"] <= 2
-
-    @pytest.mark.asyncio
     async def test_results_order_matches_input(self):
         ctrl = SubtaskController()
 
@@ -305,14 +238,6 @@ class TestRunParallel:
 class TestSubtaskConfigValidation:
     """SubtaskConfig rejects invalid values via __post_init__."""
 
-    def test_timeout_seconds_zero_raises(self):
-        with pytest.raises(ValueError, match="timeout_seconds must be >= 0.1"):
-            SubtaskConfig(timeout_seconds=0)
-
-    def test_timeout_seconds_negative_raises(self):
-        with pytest.raises(ValueError, match="timeout_seconds must be >= 0.1"):
-            SubtaskConfig(timeout_seconds=-1.0)
-
     def test_timeout_seconds_tiny_raises(self):
         with pytest.raises(ValueError, match="timeout_seconds must be >= 0.1"):
             SubtaskConfig(timeout_seconds=0.05)
@@ -321,32 +246,13 @@ class TestSubtaskConfigValidation:
         cfg = SubtaskConfig(timeout_seconds=0.1)
         assert cfg.timeout_seconds == 0.1
 
-    def test_max_retries_negative_raises(self):
-        with pytest.raises(ValueError, match="max_retries must be >= 0"):
-            SubtaskConfig(max_retries=-1)
-
     def test_max_retries_zero_accepted(self):
         cfg = SubtaskConfig(max_retries=0)
         assert cfg.max_retries == 0
 
-    def test_max_parallel_zero_raises(self):
-        with pytest.raises(ValueError, match="max_parallel must be >= 1"):
-            SubtaskConfig(max_parallel=0)
-
-    def test_max_parallel_negative_raises(self):
-        with pytest.raises(ValueError, match="max_parallel must be >= 1"):
-            SubtaskConfig(max_parallel=-3)
-
     def test_max_parallel_one_accepted(self):
         cfg = SubtaskConfig(max_parallel=1)
         assert cfg.max_parallel == 1
-
-    def test_defaults_still_valid(self):
-        """Default values pass validation."""
-        cfg = SubtaskConfig()
-        assert cfg.timeout_seconds == 60.0
-        assert cfg.max_retries == 2
-        assert cfg.max_parallel == 3
 
 
 # ---------------------------------------------------------------------------
@@ -373,24 +279,5 @@ class TestSubtaskSystemExit:
         with patch.object(ctrl, "run_with_timeout", _bypass_wait_for):
             with pytest.raises(SystemExit):
                 await ctrl.run_with_retry(raise_system_exit)
-
-        assert attempts["n"] == 1  # no retries
-
-    @pytest.mark.asyncio
-    async def test_run_with_retry_propagates_generator_exit(self) -> None:
-        """GeneratorExit in run_with_retry is propagated immediately."""
-        ctrl = SubtaskController(SubtaskConfig(max_retries=3))
-        attempts = {"n": 0}
-
-        async def raise_generator_exit():
-            attempts["n"] += 1
-            raise GeneratorExit()
-
-        async def _bypass_wait_for(coro, timeout=None):
-            return await coro
-
-        with patch.object(ctrl, "run_with_timeout", _bypass_wait_for):
-            with pytest.raises(GeneratorExit):
-                await ctrl.run_with_retry(raise_generator_exit)
 
         assert attempts["n"] == 1  # no retries

@@ -139,9 +139,7 @@ class EvolutionDashboard:
             return None
 
         all_skills = self._store.get_all_skills()
-        children = self._find_children(
-            skill_id, all_skills=all_skills, visited=set(), depth=0
-        )
+        children = self._find_children(skill_id, all_skills=all_skills, visited=set(), depth=0)
         return LineageNode(
             skill_id=record.id,
             name=record.name,

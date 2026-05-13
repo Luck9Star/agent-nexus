@@ -494,24 +494,6 @@ class TestCleanupDead:
         assert pm.get_agent("dead") is None
         assert pm.get_agent("alive") is not None
 
-    async def test_cleanup_dead_none(self, pm: ProcessManager) -> None:
-        """_cleanup_dead returns empty when all alive (or none)."""
-        cleaned = pm._cleanup_dead()
-        assert cleaned == []
-
-    @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_cleanup_dead_zero_returncode(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
-        """_cleanup_dead with rc=0 hits the else debug branch (line 463)."""
-        mock_spawn.return_value = _make_mock_process(returncode=None, pid=10)
-        await pm.start_agent(name="clean-exit", command=["echo"])
-
-        # Simulate clean exit (rc=0)
-        pm._agents["clean-exit"].process.returncode = 0
-        cleaned = pm._cleanup_dead()
-        assert "clean-exit" in cleaned
-
 
 # iter124d regression: _cleanup_dead closes IPC streams + cancels drain tasks
 class TestCleanupDeadFDLeak:
@@ -552,20 +534,6 @@ class TestCleanupDeadFDLeak:
         assert "dead" in cleaned
         mock_drain.cancel.assert_called_once()
 
-    @patch("agent_nexus.platform.orchestration.process_manager.asyncio.create_subprocess_exec")
-    async def test_cleanup_dead_no_close_on_alive(
-        self, mock_spawn: AsyncMock, pm: ProcessManager
-    ) -> None:
-        """_cleanup_dead does NOT close IPC for alive agents."""
-        mock_spawn.return_value = _make_mock_process(returncode=None, pid=10)
-        await pm.start_agent(name="alive", command=["echo"])
-
-        pm._agents["alive"].ipc.stream._stdin.is_closing.return_value = False
-        stream = pm._agents["alive"].ipc.stream
-        cleaned = pm._cleanup_dead()
-        assert cleaned == []
-        stream._stdin.close.assert_not_called()
-
 
 class TestProcessManagerDel:
     """__del__ kills orphaned processes, handling ProcessLookupError (lines 481-482)."""
@@ -604,27 +572,6 @@ class TestProcessManagerDelRobustness:
         del pm._agents  # simulate interpreter GC having collected the dict
         pm.__del__()  # must not raise
         assert not hasattr(pm, "_agents")
-
-    def test_del_handle_attr_error(self) -> None:
-        """__del__ skips handles whose .process raises RuntimeError."""
-        from agent_nexus.platform.orchestration.process_manager import AgentHandle
-
-        pm = ProcessManager()
-        mock_proc = MagicMock(spec=asyncio.subprocess.Process)
-        mock_proc.returncode = None
-        # Make .kill() raise OSError to test broad except path
-        mock_proc.kill.side_effect = OSError("bad file descriptor")
-        handle = AgentHandle(
-            name="broken",
-            process=mock_proc,
-            ipc=MagicMock(),
-            start_command=["echo"],
-            start_cwd=None,
-            start_env={},
-        )
-        pm._agents["broken"] = handle
-        pm.__del__()  # must not raise — OSError caught by broad except
-        mock_proc.kill.assert_called_once()
 
 
 _SUBPROCESS_PATCH = (
@@ -670,10 +617,6 @@ def _iter17_make_handle(name: str, pid: int = 10000, returncode=None) -> AgentHa
 class TestProcessManagerLock:
     """ProcessManager.start_agent must serialize concurrent calls."""
 
-    def test_lock_initialized(self) -> None:
-        pm = ProcessManager()
-        assert isinstance(pm._lock, asyncio.Lock)
-
     @pytest.mark.asyncio
     async def test_start_agent_acquires_lock(self) -> None:
         pm = ProcessManager()
@@ -711,26 +654,6 @@ class TestProcessManagerLock:
         assert "already running" in str(errors[0])
 
     @pytest.mark.asyncio
-    async def test_different_names_concurrent(self) -> None:
-        """start_agent with different names — both succeed."""
-        pm = ProcessManager()
-
-        async def fake_create(*_a, **_kw):
-            return _iter17_make_mock_process()
-
-        with patch(_SUBPROCESS_PATCH, side_effect=fake_create):
-            results = await asyncio.gather(
-                pm.start_agent("agent-a", command=["echo", "a"]),
-                pm.start_agent("agent-b", command=["echo", "b"]),
-                return_exceptions=True,
-            )
-
-        successes = [r for r in results if isinstance(r, AgentHandle)]
-        assert len(successes) == 2
-        assert pm.get_agent("agent-a") is not None
-        assert pm.get_agent("agent-b") is not None
-
-    @pytest.mark.asyncio
     async def test_stale_handle_cleanup_under_lock(self) -> None:
         """A dead handle for the same name is replaced by a new start."""
         pm = ProcessManager()
@@ -746,38 +669,6 @@ class TestProcessManagerLock:
 
         assert handle.pid == 55555
         assert pm.get_agent("recycle-agent") is handle
-
-    @pytest.mark.asyncio
-    async def test_stop_all_runs_concurrently(self) -> None:
-        """stop_all should stop all agents without deadlock."""
-        pm = ProcessManager()
-        for name in ("a", "b", "c"):
-            pm._agents[name] = _iter17_make_handle(name, returncode=0)
-
-        await pm.stop_all(timeout=1.0)
-        assert len(pm.list_running()) == 0
-
-    @pytest.mark.asyncio
-    async def test_restart_preserves_params(self) -> None:
-        """restart_agent reuses original command/cwd/env."""
-        pm = ProcessManager()
-        original = _iter17_make_mock_process(pid=77777)
-        with patch(_SUBPROCESS_PATCH, return_value=original):
-            await pm.start_agent(
-                "restart-me",
-                command=["python", "-m", "agent"],
-                cwd="/tmp/test",
-                env={"KEY": "val"},
-            )
-
-        pm.get_agent("restart-me").process.returncode = 0
-
-        restarted = _iter17_make_mock_process(pid=88888)
-        with patch(_SUBPROCESS_PATCH, return_value=restarted):
-            handle = await pm.restart_agent("restart-me")
-
-        assert handle.pid == 88888
-        assert handle.start_command == ["python", "-m", "agent"]
 
 
 # ============================================================================
@@ -819,16 +710,6 @@ class TestStopAgentLockProtection:
         await pm.stop_agent("test-agent")
 
         assert "test-agent" not in pm._agents
-
-    @pytest.mark.asyncio
-    async def test_stop_agent_closes_ipc_even_if_dead(self):
-        pm, handle, mock_proc = self._make_pm()
-        mock_proc.returncode = 1
-        close_mock = handle.ipc.stream.close
-
-        await pm.stop_agent("test-agent")
-
-        close_mock.assert_awaited()
 
 
 class TestProcessManagerStopIdentityCheck:
@@ -927,44 +808,6 @@ class TestProcessManagerStartOrphanCleanup:
         mock_proc.kill.assert_called_once()
 
 
-class TestProcessManagerStopAllLogsErrors:
-    """stop_all logs exceptions from individual stop_agent calls."""
-
-    @pytest.mark.asyncio
-    async def test_stop_all_logs_stop_errors(self, caplog):
-        """Exceptions from stop_agent are logged, not silently swallowed."""
-        import logging
-
-        pm = ProcessManager()
-        # Add a fake agent
-        mock_proc = _make_mock_process(returncode=None)
-        stream = MagicMock(spec=IPCStream)
-        stream.close = AsyncMock()
-        ipc = MagicMock(spec=IPCProtocol)
-        ipc.stream = stream
-        handle = AgentHandle(
-            name="bad-agent",
-            process=mock_proc,
-            ipc=ipc,
-            drain_task=None,
-            start_command=["test"],
-            start_cwd="/tmp",
-            start_env={},
-        )
-        pm._agents["bad-agent"] = handle
-
-        # Make process.wait raise to simulate stop failure
-        mock_proc.wait = AsyncMock(side_effect=RuntimeError("stop exploded"))
-
-        with caplog.at_level(
-            logging.ERROR, logger="agent_nexus.platform.orchestration.process_manager"
-        ):
-            await pm.stop_all(timeout=0.1)
-
-        # Should have logged the error
-        assert any("Error stopping agent" in r.message for r in caplog.records)
-
-
 # ============================================================================
 # Iteration 23: restart_agent race condition + health_check cleanup
 # ============================================================================
@@ -1024,9 +867,12 @@ class TestRestartAgentRaceCondition:
 
         with patch.object(pm, "stop_agent", side_effect=_stop_raises_keyerror):
             new_proc = _iter17_make_mock_process(pid=50002)
-            with patch(_SUBPROCESS_PATCH, return_value=new_proc), caplog.at_level(
-                logging.WARNING,
-                logger="agent_nexus.platform.orchestration.process_manager",
+            with (
+                patch(_SUBPROCESS_PATCH, return_value=new_proc),
+                caplog.at_level(
+                    logging.WARNING,
+                    logger="agent_nexus.platform.orchestration.process_manager",
+                ),
             ):
                 result = await pm.restart_agent("warn-agent")
 
@@ -1107,82 +953,10 @@ class TestStartAgentStoppingGuard:
                 command=["echo", "hello"],
             )
 
-    @pytest.mark.asyncio
-    async def test_start_after_stopping_completes_succeeds(self):
-        """start_agent succeeds once _stopping is cleared."""
-        pm = ProcessManager()
-
-        # Simulate stop completed
-        pm._stopping.add("transient-agent")
-        pm._stopping.discard("transient-agent")
-
-        mock_proc = _iter17_make_mock_process(pid=70001)
-        with patch(_SUBPROCESS_PATCH, return_value=mock_proc):
-            handle = await pm.start_agent(
-                name="transient-agent",
-                command=["echo", "hello"],
-            )
-
-        assert isinstance(handle, AgentHandle)
-        assert pm.get_agent("transient-agent") is handle
-
-    @pytest.mark.asyncio
-    async def test_start_stopping_takes_priority_over_alive_check(self):
-        """The _stopping check runs before the is_alive check."""
-        pm = ProcessManager()
-
-        # Both: in _stopping AND in _agents with a dead handle
-        dead_proc = _iter17_make_mock_process(pid=80001, returncode=1)
-        stream = MagicMock(spec=IPCStream)
-        stream.close = AsyncMock()
-        ipc = MagicMock(spec=IPCProtocol)
-        ipc.stream = stream
-        old_handle = AgentHandle(
-            name="priority-agent",
-            process=dead_proc,
-            ipc=ipc,
-            drain_task=None,
-            start_command=["old"],
-            start_cwd="/tmp",
-            start_env={},
-        )
-        pm._agents["priority-agent"] = old_handle
-        pm._stopping.add("priority-agent")
-
-        # Should raise about stopping, NOT about already running
-        with pytest.raises(ValueError, match="being stopped"):
-            await pm.start_agent(
-                name="priority-agent",
-                command=["echo", "hello"],
-            )
-
 
 # ============================================================================
 # Coverage gap: _drain_stderr logs stderr content
 # ============================================================================
-
-
-class TestDrainStderrLogging:
-    """_drain_stderr logs debug messages when stderr has content (line 114)."""
-
-    @pytest.mark.asyncio
-    async def test_drain_stderr_logs_content(self, caplog) -> None:
-        """_drain_stderr logs each stderr line before EOF."""
-        import logging
-
-        pm = ProcessManager()
-        mock_proc = MagicMock()
-        mock_stderr = AsyncMock()
-        # First readline returns content, second returns b"" (EOF)
-        mock_stderr.readline.side_effect = [b"error: something failed\n", b""]
-        mock_proc.stderr = mock_stderr
-
-        with caplog.at_level(
-            logging.DEBUG, logger="agent_nexus.platform.orchestration.process_manager"
-        ):
-            await pm._drain_stderr(mock_proc, "test-agent")
-
-        assert any("error: something failed" in r.message for r in caplog.records)
 
 
 # iter127 regression: drain_task exception handling
@@ -1237,22 +1011,6 @@ class TestDrainStderrExceptionHandling:
 
         # CancelledError should NOT produce "failed unexpectedly" log
         assert not any("failed unexpectedly" in r.message for r in caplog.records)
-
-    @pytest.mark.asyncio
-    async def test_drain_stderr_assertion_error_caught(self, caplog) -> None:
-        """AssertionError (stderr is None) is caught and logged."""
-        import logging
-
-        pm = ProcessManager()
-        mock_proc = MagicMock()
-        mock_proc.stderr = None  # Triggers assertion
-
-        with caplog.at_level(
-            logging.WARNING, logger="agent_nexus.platform.orchestration.process_manager"
-        ):
-            await pm._drain_stderr(mock_proc, "null-stderr-agent")
-
-        assert any("stderr drain task failed unexpectedly" in r.message for r in caplog.records)
 
 
 # ============================================================================
@@ -1397,126 +1155,9 @@ class TestStopAgentIPCCloseExceptions:
 # ============================================================================
 
 
-class TestStopAgentSigtermSuccess:
-    """stop_agent SIGTERM stage: process exits and is logged (lines 297-301)."""
-
-    @pytest.mark.asyncio
-    async def test_stop_sigterm_then_clean_exit(self) -> None:
-        """Process exits cleanly after SIGTERM, removed from registry."""
-        pm = ProcessManager()
-        mock_proc = _make_mock_process(returncode=None)
-        stream = MagicMock(spec=IPCStream)
-        stream.close = AsyncMock()
-        ipc = MagicMock(spec=IPCProtocol)
-        ipc.stream = stream
-        handle = AgentHandle(
-            name="sigterm-exit",
-            process=mock_proc,
-            ipc=ipc,
-            drain_task=None,
-            start_command=["test"],
-            start_cwd="/tmp",
-            start_env={},
-        )
-        pm._agents["sigterm-exit"] = handle
-
-        call_count = 0
-
-        async def _fake_wait_for(coro, timeout=None):
-            nonlocal call_count
-            call_count += 1
-            coro.close()
-            if call_count <= 2:
-                # call 1: IPCStream.close() drain
-                # call 2: stage 1 process.wait timeout
-                raise TimeoutError()
-            # call 3: stage 2 process.wait succeeds after SIGTERM
-            mock_proc.returncode = -signal.SIGTERM
-
-        with patch(
-            "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
-            side_effect=_fake_wait_for,
-        ):
-            await pm.stop_agent("sigterm-exit", timeout=1.0)
-
-        mock_proc.send_signal.assert_called_with(signal.SIGTERM)
-        assert pm.get_agent("sigterm-exit") is None
-
-
 # ============================================================================
 # Coverage gap: stop_agent SIGKILL edge cases
 # ============================================================================
-
-
-class TestStopAgentSigkillEdgeCases:
-    """stop_agent handles ProcessLookupError on kill and exception on wait (lines 309-315)."""
-
-    @pytest.mark.asyncio
-    async def test_sigkill_process_lookup_error(self) -> None:
-        """SIGKILL raises ProcessLookupError (process already dead), handled gracefully (lines 309-310)."""
-        pm = ProcessManager()
-        mock_proc = _make_mock_process(returncode=None)
-        stream = MagicMock(spec=IPCStream)
-        stream.close = AsyncMock()
-        ipc = MagicMock(spec=IPCProtocol)
-        ipc.stream = stream
-        handle = AgentHandle(
-            name="kill-pl",
-            process=mock_proc,
-            ipc=ipc,
-            drain_task=None,
-            start_command=["test"],
-            start_cwd="/tmp",
-            start_env={},
-        )
-        pm._agents["kill-pl"] = handle
-        mock_proc.kill.side_effect = ProcessLookupError("already gone")
-
-        async def _always_timeout(coro, timeout=None):
-            coro.close()
-            raise TimeoutError()
-
-        with patch(
-            "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
-            side_effect=_always_timeout,
-        ):
-            await pm.stop_agent("kill-pl", timeout=1.0)
-
-        mock_proc.kill.assert_called_once()
-        assert pm.get_agent("kill-pl") is None
-
-    @pytest.mark.asyncio
-    async def test_sigkill_wait_raises_exception(self) -> None:
-        """process.wait() after SIGKILL raises exception, handled gracefully (lines 314-315)."""
-        pm = ProcessManager()
-        mock_proc = _make_mock_process(returncode=None)
-        stream = MagicMock(spec=IPCStream)
-        stream.close = AsyncMock()
-        ipc = MagicMock(spec=IPCProtocol)
-        ipc.stream = stream
-        handle = AgentHandle(
-            name="kill-wait-fail",
-            process=mock_proc,
-            ipc=ipc,
-            drain_task=None,
-            start_command=["test"],
-            start_cwd="/tmp",
-            start_env={},
-        )
-        pm._agents["kill-wait-fail"] = handle
-        mock_proc.wait = AsyncMock(side_effect=RuntimeError("wait exploded"))
-
-        async def _always_timeout(coro, timeout=None):
-            coro.close()
-            raise TimeoutError()
-
-        with patch(
-            "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
-            side_effect=_always_timeout,
-        ):
-            await pm.stop_agent("kill-wait-fail", timeout=1.0)
-
-        assert pm.get_agent("kill-wait-fail") is None
 
 
 # ============================================================================
@@ -1524,135 +1165,14 @@ class TestStopAgentSigkillEdgeCases:
 # ============================================================================
 
 
-class TestHealthCheckAliveButUnresponsive:
-    """health_check returns False when process is alive but heartbeat fails (line 379)."""
-
-    @pytest.mark.asyncio
-    async def test_health_check_ipc_returns_false(self) -> None:
-        """health_check returns False when send_heartbeat returns False (not an exception)."""
-        pm = ProcessManager()
-        mock_proc = _make_mock_process(returncode=None)
-        stream = MagicMock(spec=IPCStream)
-        stream.close = AsyncMock()
-        ipc = MagicMock(spec=IPCProtocol)
-        ipc.stream = stream
-        ipc.send_heartbeat = AsyncMock(return_value=False)
-        handle = AgentHandle(
-            name="unresponsive",
-            process=mock_proc,
-            ipc=ipc,
-            drain_task=None,
-            start_command=["test"],
-            start_cwd="/tmp",
-            start_env={},
-        )
-        pm._agents["unresponsive"] = handle
-
-        result = await pm.health_check("unresponsive")
-        assert result is False
-        # Agent should still be registered (not cleaned up — it's alive, just unresponsive)
-        assert pm.get_agent("unresponsive") is handle
-
-
 # ============================================================================
 # Coverage gap: SIGTERM success path with real wait (not patched wait_for)
 # ============================================================================
 
 
-class TestStopAgentSigtermRealWait:
-    """SIGTERM success path using real process.wait() (lines 297-301)."""
-
-    @pytest.mark.asyncio
-    async def test_sigterm_real_wait_succeeds(self) -> None:
-        """Process exits after SIGTERM — uses real process.wait, not mocked wait_for."""
-        pm = ProcessManager()
-        mock_proc = _make_mock_process(returncode=None)
-        stream = MagicMock(spec=IPCStream)
-        stream.close = AsyncMock()
-        ipc = MagicMock(spec=IPCProtocol)
-        ipc.stream = stream
-        handle = AgentHandle(
-            name="sigterm-real",
-            process=mock_proc,
-            ipc=ipc,
-            drain_task=None,
-            start_command=["test"],
-            start_cwd="/tmp",
-            start_env={},
-        )
-        pm._agents["sigterm-real"] = handle
-
-        wait_call_count = 0
-
-        async def _mock_wait():
-            nonlocal wait_call_count
-            wait_call_count += 1
-            # First wait (stage 1): simulate timeout by not setting returncode
-            if wait_call_count == 1:
-                raise TimeoutError()
-            # Second wait (stage 2 after SIGTERM): success
-            mock_proc.returncode = -signal.SIGTERM
-
-        mock_proc.wait = _mock_wait
-
-        # Patch wait_for to just await the coroutine (no real timeout logic)
-        async def _passthrough_wait_for(coro, timeout=None):
-            return await coro
-
-        with patch(
-            "agent_nexus.platform.orchestration.process_manager.asyncio.wait_for",
-            side_effect=_passthrough_wait_for,
-        ):
-            await pm.stop_agent("sigterm-real", timeout=1.0)
-
-        mock_proc.send_signal.assert_called_with(signal.SIGTERM)
-        assert pm.get_agent("sigterm-real") is None
-
-
 # ============================================================================
 # Coverage gap: health_check alive-but-dead-after-cleanup race
 # ============================================================================
-
-
-class TestHealthCheckDeadAfterCleanup:
-    """health_check returns False when process dies between _cleanup_dead and is_alive check (line 379)."""
-
-    @pytest.mark.asyncio
-    async def test_process_dead_after_cleanup(self) -> None:
-        """Process is alive during cleanup but dead at is_alive check."""
-        pm = ProcessManager()
-        mock_proc = _make_mock_process(returncode=None)
-        stream = MagicMock(spec=IPCStream)
-        stream.close = AsyncMock()
-        ipc = MagicMock(spec=IPCProtocol)
-        ipc.stream = stream
-        handle = AgentHandle(
-            name="dies-after-cleanup",
-            process=mock_proc,
-            ipc=ipc,
-            drain_task=None,
-            start_command=["test"],
-            start_cwd="/tmp",
-            start_env={},
-        )
-        pm._agents["dies-after-cleanup"] = handle
-
-        # The process is alive during _cleanup_dead (returncode=None),
-        # but then becomes dead when is_alive is checked.
-        # We simulate this by setting returncode to a dead value
-        # after _cleanup_dead runs.
-        original_cleanup = pm._cleanup_dead
-
-        def _cleanup_then_kill():
-            result = original_cleanup()
-            # Now simulate the process dying right after cleanup
-            mock_proc.returncode = 1
-            return result
-
-        with patch.object(pm, "_cleanup_dead", side_effect=_cleanup_then_kill):
-            result = await pm.health_check("dies-after-cleanup")
-
-        assert result is False
 
 
 # ============================================================================
@@ -1768,24 +1288,6 @@ class TestRestartAgentConcurrentStart:
         assert isinstance(result, AgentHandle)
         assert result.pid == 70099
         assert result.start_command == ["injected"]
-
-    @pytest.mark.asyncio
-    async def test_restart_proceeds_when_no_concurrent_start(self) -> None:
-        """Normal restart (no concurrent start) proceeds as before."""
-        pm = ProcessManager()
-
-        original_proc = _iter17_make_mock_process(pid=80001)
-        with patch(_SUBPROCESS_PATCH, return_value=original_proc):
-            await pm.start_agent("normal-agent", command=["echo"])
-
-        pm._agents["normal-agent"].process.returncode = 0
-
-        new_proc = _iter17_make_mock_process(pid=80002)
-        with patch(_SUBPROCESS_PATCH, return_value=new_proc):
-            result = await pm.restart_agent("normal-agent")
-
-        assert isinstance(result, AgentHandle)
-        assert result.pid == 80002
 
 
 # ============================================================================

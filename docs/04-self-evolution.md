@@ -3,7 +3,7 @@
 > Agent Nexus Design Doc — §6 Self-Evolution Engine：OpenSpace 核心机制、双层自进化设计、三触发器 + 防循环机制、质量指标、健康诊断阈值、进化引擎架构、SQLite Schema
 
 > **Status**: ✅ Implemented
-> **Code**: `src/agent_nexus/platform/evolution/` (Engine 250, Store 1392, Analyzer 306, Evolver 443, Compaction 220, Health 310, Promotion 408, ContextDescriber 340, Thresholds 118 — 3,837 lines total)
+> **Code**: `src/agent_nexus/platform/evolution/` (18 files, 5,272 lines total — Engine 349, Store 402, Analyzer 304, Evolver 431, Compaction 220, Health 289, Promotion 399, ContextDescriber 303, Thresholds 119, SkillPatch 241, Experimenter 301, Metrics 198, SkillStore 927, EvolutionConfig 99, AnalysisStore 282, BudgetStore 175, _Shared 141)
 > **Tests**: `tests/unit/test_evolution_engine.py`, `tests/unit/test_evolution_store.py`, `tests/unit/test_evolution_analyzer.py`, `tests/unit/test_evolution_evolver.py`, `tests/unit/test_evolution_compaction.py`, `tests/unit/test_evolution_health.py`, `tests/unit/test_evolution_promotion.py`, `tests/unit/test_evolution_thresholds.py`, `tests/unit/test_evolution_models.py`, `tests/unit/test_evolution_module.py`
 
 ## §6 Self-Evolution Engine
@@ -127,7 +127,7 @@ fallback_rate = total_fallbacks / total_selections
 
 ### 6.6 进化引擎架构
 
-> **实现模块**: `src/agent_nexus/platform/evolution/engine.py` — `EvolutionEngine` (统一门面), `src/agent_nexus/platform/evolution/evolver.py` — `SkillEvolver` (FIX/DERIVED/CAPTURED), `src/agent_nexus/platform/evolution/analyzer.py` — `ExecutionAnalyzer` (任务后分析), `src/agent_nexus/platform/evolution/health.py` — `HealthChecker` (阈值诊断), `src/agent_nexus/platform/evolution/compaction.py` — `CompactionGuard` (防死循环), `src/agent_nexus/platform/evolution/promotion.py` — `AgentPromoter` (Skill→Agent 提升), `src/agent_nexus/platform/evolution/store.py` — `EvolutionStore` (SQLite 持久化)
+> **实现模块**: `src/agent_nexus/platform/evolution/engine.py` — `EvolutionEngine` (统一门面), `src/agent_nexus/platform/evolution/evolver.py` — `SkillEvolver` (FIX/DERIVED/CAPTURED), `src/agent_nexus/platform/evolution/analyzer.py` — `ExecutionAnalyzer` (任务后分析), `src/agent_nexus/platform/evolution/health.py` — `HealthChecker` (阈值诊断), `src/agent_nexus/platform/evolution/compaction.py` — `CompactionGuard` (防死循环), `src/agent_nexus/platform/evolution/promotion.py` — `AgentPromoter` (Skill→Agent 提升), `src/agent_nexus/platform/evolution/store.py` — `EvolutionStore` (SQLite 持久化), `src/agent_nexus/platform/evolution/context_describer.py` — `EvolutionContextDescriber` (进化数据分层注入), `src/agent_nexus/platform/evolution/thresholds.py` — 进化阈值配置, `src/agent_nexus/platform/evolution/experimenter.py` — A/B 实验框架, `src/agent_nexus/platform/evolution/skill_patch.py` — 技能补丁机制, `src/agent_nexus/platform/evolution/skill_store.py` — Skill 持久化, `src/agent_nexus/platform/evolution/analysis_store.py` — 分析结果存储, `src/agent_nexus/platform/evolution/budget_store.py` — 进化预算管理, `src/agent_nexus/platform/evolution/metrics.py` — 进化指标, `src/agent_nexus/platform/evolution/evolution_config.py` — 进化配置, `src/agent_nexus/platform/evolution/_shared.py` — 共享工具
 
 ```python
 class EvolutionEngine:

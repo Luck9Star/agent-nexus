@@ -616,7 +616,7 @@ def sources():
 | `local/installer.py` | **ap-fetcher** | Git 操作（git2 crate） |
 | `local/sources.py` | ap-fetcher | 包源管理 |
 | `local/supervisor.py` | **ap-runtime** | tokio::process 进程管理 |
-| `gateway/` | **ap-gateway** | rmcp MCP 网关 |
+| `gateway/` | **ap-gateway** | axum HTTP MCP 网关 |
 | `local/cli/` | **ap-cli** | clap 命令行 |
 | `config/` | **ap-core** | 配置解析 |
 | `local/lockfile.py` | ap-core | 锁文件管理 |
@@ -626,16 +626,20 @@ def sources():
 
 ```
 crates/
-├── ap-core/          # 核心类型、配置、lockfile、manifest 解析
-│   └── Cargo.toml    # serde, toml, serde_yaml, semver
+├── ap-core/          # 核心类型、配置、lockfile、manifest 解析、TaskGraph、IPC、DSL
+│   └── Cargo.toml    # serde, serde_json, serde_yml, toml, rusqlite, tokio, chrono, thiserror
 ├── ap-fetcher/       # Git-based 包获取（替代 ap-registry + ap-client + ap-store）
-│   └── Cargo.toml    # git2, semver, ap-core
+│   └── Cargo.toml    # ap-core, tokio
 ├── ap-runtime/       # Agent Supervisor（tokio::process）
-│   └── Cargo.toml    # tokio, dashmap, ap-core
-├── ap-gateway/       # MCP 网关（rmcp）
-│   └── Cargo.toml    # rmcp, tokio, ap-core
+│   └── Cargo.toml    # ap-core, tokio, serde, thiserror
+├── ap-gateway/       # MCP 网关（axum HTTP）
+│   └── Cargo.toml    # ap-core, ap-runtime, tokio, serde, serde_json, thiserror, axum
+├── ap-evolution/     # 自进化引擎（SQLite store + analyzer + evolver + promotion）
+│   └── Cargo.toml    # ap-core, tokio, rusqlite, serde, thiserror
+├── ap-cli-backend/   # CLI 后端（session store + command routing + health check）
+│   └── Cargo.toml    # ap-core, tokio, rusqlite, serde, serde_json, thiserror
 └── ap-cli/           # CLI（clap）
-    └── Cargo.toml    # clap, ap-core, ap-fetcher, ap-runtime, ap-gateway
+    └── Cargo.toml    # clap, ap-core, ap-fetcher, ap-runtime, ap-gateway, ap-evolution, ap-cli-backend
 ```
 
 **关键变化**：
@@ -643,10 +647,14 @@ crates/
 - 删除 `ap-client`（Registry HTTP 客户端）— 被 ap-fetcher 替代
 - 删除 `ap-store`（CAS 本地缓存）— Git 天然提供内容寻址
 - 新增 `ap-fetcher`（Git 操作 + 版本解析）
-- 删除依赖：object_store、cacache、sqlx、reqwest、axum
-- 新增依赖：git2、serde_yaml
+- 新增 `ap-evolution`（自进化引擎 Rust 实现）
+- 新增 `ap-cli-backend`（CLI 后端独立组件）
+- 删除依赖：object_store、cacache、sqlx、reqwest、rmcp、dashmap
+- 新增依赖：git2、serde_yml（注意不是 serde_yaml）、axum（替代 rmcp）
 
-#### 12.6.3 核心 Trait
+#### 12.6.3 核心 Trait 与 Struct
+
+> **Note**: 以下为实际实现签名。Rust 端采用 struct-based 方案而非 trait-based，与 Python 端的 class 设计对齐。
 
 ```rust
 // ap-core: 核心类型
@@ -668,13 +676,14 @@ pub struct Manifest {
 
 pub enum AgentType { Atomic, Composite }
 
-// ap-fetcher: Git 包获取
-#[async_trait]
-pub trait PackageFetcher {
-    async fn fetch(&self, name: &str, version: Option<&Version>) -> Result<FetchedPackage>;
-    async fn list_versions(&self, name: &str) -> Result<Vec<Version>>;
-    async fn get_latest(&self, name: &str) -> Result<Version>;
-    async fn search(&self, query: &str) -> Result<Vec<IndexEntry>>;
+// ap-fetcher: Git 包获取（Installer trait）
+pub trait Installer: Send + Sync {
+    fn install(
+        &self,
+        url: &str,
+        branch: Option<&str>,
+        version: Option<&str>,
+    ) -> Result<PathBuf, InstallerError>;
 }
 
 pub struct GitFetcher {
@@ -682,22 +691,37 @@ pub struct GitFetcher {
     cache_dir: PathBuf,
 }
 
-// ap-runtime: Agent 进程管理
-#[async_trait]
-pub trait AgentManager {
-    async fn start(&mut self, name: &str, config: AgentConfig) -> Result<AgentHandle>;
-    async fn stop(&mut self, name: &str, force: bool) -> Result<()>;
-    async fn restart(&mut self, name: &str) -> Result<AgentHandle>;
-    async fn health_check(&self, name: &str) -> Result<bool>;
+// ap-runtime: Agent 进程管理（AgentProcess struct）
+pub struct AgentProcess {
+    name: String,
+    child: Option<tokio::process::Child>,
+    config: ProcessSpec,
 }
 
-// ap-gateway: MCP 路由
-#[async_trait]
-pub trait McpRouter {
-    async fn route_request(&self, agent: &str, request: McpRequest) -> Result<McpResponse>;
-    async fn list_tools(&self) -> Result<Vec<ToolInfo>>;
-    async fn search_and_activate(&self, query: &str) -> Result<Vec<ActivatedAgent>>;
+impl AgentProcess {
+    pub async fn start(&mut self) -> Result<()>;
+    pub async fn stop(&mut self, force: bool) -> Result<()>;
+    pub fn health_check(&self) -> Result<bool>;
 }
+
+// ap-gateway: MCP 路由（GatewayConfig + DeferredAgentRegistry struct）
+pub struct GatewayConfig {
+    pub port: u16,
+    pub host: String,
+}
+
+pub struct DeferredAgentRegistry {
+    core_agents: HashMap<String, AgentInfo>,
+    deferred_agents: HashMap<String, AgentManifest>,
+}
+
+// ap-evolution: 自进化引擎（EvolutionStore + Evolver struct）
+pub struct EvolutionStore { /* SQLite-backed */ }
+pub struct Evolver { /* LLM-driven FIX/DERIVED/CAPTURED */ }
+
+// ap-cli-backend: CLI 后端（CLIRouter + SessionStore）
+pub struct CLIRouter { /* command dispatch */ }
+pub struct SessionStore { /* SQLite CRUD + archival */ }
 ```
 
 #### 12.6.4 不变接口
@@ -716,31 +740,77 @@ Rust 重构前后完全一致的接口：
 
 | 依赖 | 用途 | Python 实现 | Rust 重构 |
 |------|------|------------|-----------|
-| MCP 通信 | Agent ↔ 平台 | FastMCP | rmcp |
+| MCP 通信 | Agent ↔ 平台 | FastMCP | axum（HTTP） |
 | 进程管理 | Agent 子进程 | asyncio.subprocess | tokio::process |
 | Git 操作 | 包获取 | subprocess(git) | git2 (libgit2) |
-| 序列化 | 配置/lockfile | PyYAML/toml | serde + toml + serde_yaml |
+| 序列化 | 配置/lockfile | PyYAML/toml | serde + toml + serde_yml |
 | 版本解析 | SemVer | packaging | semver |
 | CLI | 命令行 | Typer | clap |
-| 并发 Map | Agent 注册 | dict | dashmap |
+| 数据库 | TaskGraph/Evolution | SQLite (aiosqlite) | SQLite (rusqlite) |
 
-### 12.7 技术选型汇总
+### 12.7 配置系统
+
+> **Code**: `src/agent_nexus/platform/config/` (loader.py, model_config.py, defaults.py, model_db.py), `src/agent_nexus/models/capability.py`
+
+配置系统采用三层优先级链 + 可选 models.dev 丰富层的架构：
+
+#### 12.7.1 三层配置加载
+
+`ConfigLoader` 负责加载和合并配置，优先级从高到低：
+
+| 层级 | 来源 | 说明 |
+|------|------|------|
+| **L1 环境变量** | `AGENT_MODEL`, `DEFAULT_MODEL`, `AGENT_NEXUS_HOME` | 最高优先级，覆盖一切 |
+| **L2 配置文件** | `config.toml` + `agent-nexus.toml`（项目级） | 全局 + 项目合并（项目覆盖全局） |
+| **L3 内置默认** | `defaults.py` 常量 | 兜底默认值 |
+
+**ModelConfigManager 6 级模型解析链**：`AGENT_MODEL` env → manifest recommended → tier map → config default → `DEFAULT_MODEL` env → `"openai:gpt-4o"` 内置常量。
+
+#### 12.7.2 Model Tier 映射
+
+| Tier | 模型 | 用途 |
+|------|------|------|
+| lightweight | `openai:gpt-4o-mini` | 快速任务、映射阶段 |
+| standard | `openai:gpt-4o` | 通用任务 |
+| powerful | `anthropic:claude-sonnet-4-20250514` | 复杂推理 |
+| premium | `anthropic:claude-opus-4-20250116` | 深度分析、代码审查 |
+
+#### 12.7.3 ModelCapabilityRegistry
+
+`ModelCapabilityRegistry` 是模型能力查询引擎，为 Agency Pipeline 和 LLMClient 提供模型限制数据：
+
+- **数据范围**：17 个内置模型，覆盖 5 个 Provider（Anthropic 5、OpenAI 5、DeepSeek 2、Qwen 3、MiniMax 2）。Ollama 仅存在于 `PROVIDER_DEFAULTS` 占位符
+- **每个模型字段**：`model_id`, `provider`, `max_output_tokens`, `context_window`, `supports_vision`, `supports_tool_use`, `supports_temperature`, `temperature_min/max`
+- **4 级回退**：精确匹配 → 去日期后缀（`claude-sonnet-4-20250514` → `claude-sonnet-4`）→ 去尾部数字 → Provider 默认值
+- **可选丰富**：`ModelDBClient` 从 `models.dev/api.json` 获取 116+ Provider 的完整模型目录，磁盘缓存 24 小时 TTL，trigram 模糊搜索
+
+#### 12.7.4 Provider Fallback
+
+`ModelConfigManager.get_provider_config()` 按以下顺序解析 Provider 配置：
+
+1. `config.toml` 中 `[providers.<name>]` 显式配置
+2. 内置 Provider 默认值（`defaults.DEFAULT_PROVIDERS`，含 openai/anthropic/deepseek/minimax/qwen/ollama）
+3. 仅需 `base_url` 即可工作（最小配置）
+
+API Key 解析：环境变量优先 → `config.toml` 中 `api_key` 字段 → Provider 特定 fallback env var。
+
+### 12.8 技术选型对比
 
 | 层级 | 组件 | Python 实现 | Rust 重构 |
 |------|------|------------|-----------|
 | **分发** | 包获取 | subprocess(git) | git2 |
 | **分发** | 版本管理 | packaging | semver |
-| **分发** | 包源索引 | PyYAML | serde_yaml |
+| **分发** | 包源索引 | PyYAML | serde_yml |
 | **本地** | CLI | Typer | clap |
 | **本地** | 进程管理 | asyncio.subprocess | tokio::process |
-| **本地** | 配置 | tomli + PyYAML | toml + serde_yaml |
+| **本地** | 配置 | tomli + PyYAML | toml + serde_yml |
 | **本地** | 锁文件 | json | serde_json |
 | **Agent** | MCP Server | FastMCP | 不动（Python） |
 | **Agent** | LLM 框架 | pydantic-ai | 不动（Python） |
 | **Agent** | Runtime | IPythonRuntime | 不动（Python） |
 | **Agent** | 依赖管理 | uv | uv（机制不变） |
 
-### 12.8 与早期设计文档的关系
+### 12.9 与早期设计文档的关系
 
 本文档（§12）从早期的"Cloud Service + Local Client"架构重构为 Git-based 分发。主要变更：
 
@@ -753,7 +823,7 @@ Rust 重构前后完全一致的接口：
 | 发布 | HTTP POST /publish | git push + PR |
 | 认证 | OAuth2 | Git SSH/HTTPS |
 | 本地缓存 | CAS 缓存 (cacache) | Git repo cache |
-| Rust crates | 7 个 (含 ap-registry, ap-client, ap-store) | 5 个 (含 ap-fetcher) |
+| Rust crates | 7 个 (含 ap-registry, ap-client, ap-store) | 7 个 (含 ap-fetcher, ap-evolution, ap-cli-backend) |
 
 **不受影响的文档章节**：
 - §4 自建编排层（TaskGraph, IPC, ProcessManager, OrchestrationDSL）— 不变
@@ -763,7 +833,7 @@ Rust 重构前后完全一致的接口：
 - §8 MCP 通信（Gateway, Deferred Loading, Token 优化）— 不变
 - §10 技术约束（大部分不变，Rust 重构范围缩小）
 
-### 12.9 未来演进路径
+### 12.10 未来演进路径
 
 Git-based 分发是为 MVP 设计的初始方案。当规模增长时，可按以下路径演进：
 
@@ -790,6 +860,20 @@ v5.2 (Git-based) ─────→ v6.0 (Hybrid) ─────→ v7.0 (Cloud
 | agent-manifest.yaml | ✅ | ✅ | 格式不变 |
 | MCP 协议 | ✅ | ✅ | 不变 |
 | Agent Package | ✅ | ✅ | 不变 |
-| PackageFetcher trait | GitFetcher | HttpFetcher | 同一 trait |
+| Installer trait | GitFetcher | HttpFetcher | 同一 trait |
+
+#### 12.6.6 Python → Rust 模块映射
+
+| Python 模块 | Rust Crate | 映射说明 |
+|------------|-----------|---------|
+| `evolution/engine.py` | ap-evolution | EvolutionEngine → Evolver |
+| `evolution/store.py` | ap-evolution | EvolutionStore → SQLite rusqlite |
+| `evolution/analyzer.py` | ap-evolution | ExecutionAnalyzer |
+| `evolution/evolver.py` | ap-evolution | SkillEvolver (FIX/DERIVED/CAPTURED) |
+| `evolution/promotion.py` | ap-evolution | AgentPromoter |
+| `local/cli/` | ap-cli + ap-cli-backend | clap CLI + CLIRouter + SessionStore |
+| `local/installer.py` | ap-fetcher | GitInstaller → Installer trait |
+| `gateway/` | ap-gateway | axum HTTP gateway + DeferredAgentRegistry |
+| `config/` | ap-core | ConfigLoader + ModelConfig |
 
 ---

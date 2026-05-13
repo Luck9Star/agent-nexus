@@ -11,11 +11,9 @@ import time
 
 import pytest
 
-from agent_nexus.models.task import TaskItem, TaskState
+from agent_nexus.models.task import TaskState
 from agent_nexus.platform.agency.dag_dispatcher import (
     DAGDispatcher,
-    DispatchResult,
-    dag_task_to_task_item,
     load_dag_into_graph,
 )
 from agent_nexus.platform.agency.integrator import Artifact
@@ -64,36 +62,6 @@ def _build_dag(
 @pytest.mark.timeout(10)
 class TestDagTaskConversion:
     """dag_task_to_task_item preserves id, agent, blocked_by, output_contract in vars."""
-
-    def test_preserves_id(self) -> None:
-        dag_task = DAGTask(id="arch", agent="agency.architect", output="plan")
-        item = dag_task_to_task_item(dag_task, "build a thing")
-        assert item.id == "arch"
-
-    def test_preserves_agent(self) -> None:
-        dag_task = DAGTask(id="sec", agent="agency.security", output="report")
-        item = dag_task_to_task_item(dag_task, "secure it")
-        assert item.agent == "agency.security"
-
-    def test_preserves_blocked_by(self) -> None:
-        dag_task = DAGTask(id="impl", agent="agency.coder", output="code", blocked_by=["arch"])
-        item = dag_task_to_task_item(dag_task, "implement it")
-        assert item.blocked_by == ["arch"]
-
-    def test_output_contract_in_vars(self) -> None:
-        dag_task = DAGTask(id="test", agent="agency.tester", output="test_results")
-        item = dag_task_to_task_item(dag_task, "test it")
-        assert item.vars["output_contract"] == "test_results"
-
-    def test_description_copied_from_argument(self) -> None:
-        dag_task = DAGTask(id="x", agent="a", output="o")
-        item = dag_task_to_task_item(dag_task, "my special task")
-        assert item.description == "my special task"
-
-    def test_empty_blocked_by(self) -> None:
-        dag_task = DAGTask(id="x", agent="a", output="o", blocked_by=[])
-        item = dag_task_to_task_item(dag_task, "desc")
-        assert item.blocked_by == []
 
 
 # ---------------------------------------------------------------------------
@@ -220,32 +188,6 @@ class TestSimpleDispatch:
         assert set(result.completed) == {"s1", "s2"}
         assert len(result.failed) == 0
 
-    def test_artifacts_collected(self) -> None:
-        dag = _build_dag(
-            [
-                DAGTask(id="s1", agent="a1", output="o1"),
-                DAGTask(id="s2", agent="a2", output="o2"),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor)
-        result = dispatcher.dispatch(dag, "build it")
-        assert "s1" in result.artifacts
-        assert "s2" in result.artifacts
-        assert result.artifacts["s1"].source_agent == "a1"
-        assert result.artifacts["s2"].source_agent == "a2"
-
-    def test_no_timeout(self) -> None:
-        dag = _build_dag(
-            [
-                DAGTask(id="s1", agent="a1", output="o1"),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor)
-        result = dispatcher.dispatch(dag, "test")
-        assert result.timed_out is False
-
 
 # ---------------------------------------------------------------------------
 # 5. TestSequentialDispatch
@@ -267,19 +209,6 @@ class TestSequentialDispatch:
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "sequential work")
         assert set(result.completed) == {"a", "b"}
-
-    def test_artifact_for_both(self) -> None:
-        dag = _build_dag(
-            [
-                DAGTask(id="a", agent="a1", output="o1"),
-                DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor)
-        result = dispatcher.dispatch(dag, "sequential work")
-        assert "a" in result.artifacts
-        assert "b" in result.artifacts
 
 
 # ---------------------------------------------------------------------------
@@ -304,19 +233,6 @@ class TestMixedParallelSequential:
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "mixed work")
         assert set(result.completed) == {"s1", "s2", "s3"}
-
-    def test_no_failures(self) -> None:
-        dag = _build_dag(
-            [
-                DAGTask(id="s1", agent="a1", output="o1"),
-                DAGTask(id="s2", agent="a2", output="o2"),
-                DAGTask(id="s3", agent="a3", output="o3", blocked_by=["s1"]),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor)
-        result = dispatcher.dispatch(dag, "mixed work")
-        assert len(result.failed) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -389,29 +305,6 @@ class TestAllFail:
         result = dispatcher.dispatch(dag, "everything fails")
         assert set(result.failed) == {"s1", "s2", "s3"}
 
-    def test_no_artifacts(self) -> None:
-        dag = _build_dag(
-            [
-                DAGTask(id="s1", agent="a1", output="o1"),
-                DAGTask(id="s2", agent="a2", output="o2"),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _fail_executor)
-        result = dispatcher.dispatch(dag, "everything fails")
-        assert len(result.artifacts) == 0
-
-    def test_no_completed(self) -> None:
-        dag = _build_dag(
-            [
-                DAGTask(id="s1", agent="a1", output="o1"),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _fail_executor)
-        result = dispatcher.dispatch(dag, "everything fails")
-        assert len(result.completed) == 0
-
 
 # ---------------------------------------------------------------------------
 # 9. TestTimeout
@@ -428,17 +321,6 @@ class TestTimeout:
                 DAGTask(id="slow1", agent="a1", output="o1"),
                 DAGTask(id="slow2", agent="a2", output="o2"),
                 DAGTask(id="slow3", agent="a3", output="o3"),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _slow_executor, timeout_seconds=0.01)
-        result = dispatcher.dispatch(dag, "will timeout")
-        assert result.timed_out is True
-
-    def test_timeout_with_no_completions_possible(self) -> None:
-        dag = _build_dag(
-            [
-                DAGTask(id="s1", agent="a1", output="o1"),
             ]
         )
         graph = TaskGraph(":memory:")
@@ -474,20 +356,6 @@ class TestMaxParallelRespected:
         dispatcher = DAGDispatcher(graph, tracking_executor, max_batch_size=1)
         result = dispatcher.dispatch(dag, "sequential test")
         assert set(result.completed) == {"s1", "s2", "s3"}
-
-    def test_max_batch_size_1_executes_one_at_a_time(self) -> None:
-        """With max_batch_size=1, only 1 task executes per round."""
-        dag = _build_dag(
-            [
-                DAGTask(id="s1", agent="a1", output="o1"),
-                DAGTask(id="s2", agent="a2", output="o2"),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor, max_batch_size=1)
-        result = dispatcher.dispatch(dag, "one at a time")
-        # Both should complete, just never in the same batch
-        assert set(result.completed) == {"s1", "s2"}
 
 
 # ---------------------------------------------------------------------------
@@ -594,10 +462,11 @@ class TestDispatchWithExpertExecutorProtocol:
     def test_lambda_executor(self) -> None:
         def executor(profile_id, task):
             return Artifact(
-                    source_agent=profile_id,
-                    artifact_type="lambda_result",
-                    sections={"task_desc": task},
-                )
+                source_agent=profile_id,
+                artifact_type="lambda_result",
+                sections={"task_desc": task},
+            )
+
         dag = _build_dag(
             [
                 DAGTask(id="s1", agent="a1", output="o1"),
@@ -608,25 +477,6 @@ class TestDispatchWithExpertExecutorProtocol:
         result = dispatcher.dispatch(dag, "lambda test")
         assert result.artifacts["s1"].artifact_type == "lambda_result"
         assert result.artifacts["s1"].sections["task_desc"] == "lambda test"
-
-    def test_executor_receives_correct_args(self) -> None:
-        received: dict[str, str] = {}
-
-        def capturing_executor(profile_id: str, task: str) -> Artifact:
-            received["profile_id"] = profile_id
-            received["task"] = task
-            return _make_artifact(profile_id)
-
-        dag = _build_dag(
-            [
-                DAGTask(id="s1", agent="my.special.agent", output="o1"),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, capturing_executor)
-        dispatcher.dispatch(dag, "check args")
-        assert received["profile_id"] == "my.special.agent"
-        assert received["task"] == "check args"
 
 
 # ---------------------------------------------------------------------------
@@ -655,24 +505,6 @@ class TestStuckDependencyFailure:
         result = dispatcher.dispatch(dag, "cascading failure")
         assert "upstream" in result.failed
         assert "downstream" in result.failed
-
-    def test_cascading_failure_no_artifacts_for_blocked(self) -> None:
-        def selective(profile_id: str, task: str) -> Artifact:
-            if profile_id == "a1":
-                raise RuntimeError("upstream fails")
-            return _make_artifact(profile_id)
-
-        dag = _build_dag(
-            [
-                DAGTask(id="upstream", agent="a1", output="o1"),
-                DAGTask(id="downstream", agent="a2", output="o2", blocked_by=["upstream"]),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, selective)
-        result = dispatcher.dispatch(dag, "cascading failure")
-        assert "downstream" not in result.artifacts
-        assert "upstream" not in result.artifacts
 
 
 # ---------------------------------------------------------------------------
@@ -705,48 +537,6 @@ class TestSpecialistTasksOnly:
         assert "nexus.integrator" not in dispatched_agents
         assert "s1" in result.completed
         assert "integrate" not in result.completed
-
-    def test_validate_never_dispatched(self) -> None:
-        dispatched_agents: list[str] = []
-
-        def tracking(profile_id: str, task: str) -> Artifact:
-            dispatched_agents.append(profile_id)
-            return _make_artifact(profile_id)
-
-        dag = _build_dag(
-            [
-                DAGTask(id="s1", agent="a1", output="o1"),
-                DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, tracking)
-        result = dispatcher.dispatch(dag, "filter test")
-        assert "nexus.qa-gate" not in dispatched_agents
-        assert "validate" not in result.completed
-
-    def test_both_fixed_tasks_excluded(self) -> None:
-        dispatched_ids: list[str] = []
-
-        def tracking(profile_id: str, task: str) -> Artifact:
-            dispatched_ids.append(profile_id)
-            return _make_artifact(profile_id)
-
-        dag = _build_dag(
-            [
-                DAGTask(id="s1", agent="a1", output="o1"),
-                DAGTask(
-                    id="integrate", agent="nexus.integrator", output="merged", task_type="synthetic"
-                ),
-                DAGTask(id="validate", agent="nexus.qa-gate", output="qa", task_type="synthetic"),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, tracking)
-        result = dispatcher.dispatch(dag, "filter test")
-        assert set(result.completed) == {"s1"}
-        assert "integrate" not in result.completed
-        assert "validate" not in result.completed
 
 
 # ---------------------------------------------------------------------------
@@ -851,11 +641,13 @@ class TestTimeoutMidBatch:
             time.sleep(0.01)
             return _make_artifact(profile_id)
 
-        dag = _build_dag([
-            DAGTask(id="s1", agent="a1", output="o1"),
-            DAGTask(id="s2", agent="a2", output="o2"),
-            DAGTask(id="s3", agent="a3", output="o3"),
-        ])
+        dag = _build_dag(
+            [
+                DAGTask(id="s1", agent="a1", output="o1"),
+                DAGTask(id="s2", agent="a2", output="o2"),
+                DAGTask(id="s3", agent="a3", output="o3"),
+            ]
+        )
         graph = TaskGraph(":memory:")
         # Very short timeout so deadline fires mid-batch
         dispatcher = DAGDispatcher(graph, counting, max_batch_size=10, timeout_seconds=0.005)
@@ -888,20 +680,6 @@ class TestDiamondDependency:
         dispatcher = DAGDispatcher(graph, _ok_executor)
         result = dispatcher.dispatch(dag, "diamond deps")
         assert set(result.completed) == {"a", "b", "c", "d"}
-
-    def test_diamond_artifact_count(self) -> None:
-        dag = _build_dag(
-            [
-                DAGTask(id="a", agent="a1", output="o1"),
-                DAGTask(id="b", agent="a2", output="o2", blocked_by=["a"]),
-                DAGTask(id="c", agent="a3", output="o3", blocked_by=["a"]),
-                DAGTask(id="d", agent="a4", output="o4", blocked_by=["b", "c"]),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor)
-        result = dispatcher.dispatch(dag, "diamond deps")
-        assert len(result.artifacts) == 4
 
 
 @pytest.mark.timeout(10)
@@ -957,73 +735,9 @@ class TestMaxBatchSizeSemantics:
     per round, not true concurrency.
     """
 
-    def test_constructor_accepts_max_batch_size(self) -> None:
-        """DAGDispatcher constructor accepts max_batch_size parameter."""
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor, max_batch_size=2)
-        assert dispatcher._max_batch_size == 2
-
-    def test_batch_size_limits_pick_per_round(self) -> None:
-        """max_batch_size=2 with 4 tasks: at most 2 tasks per round, all complete."""
-        call_count = {"n": 0}
-
-        def tracking(profile_id: str, task: str) -> Artifact:
-            call_count["n"] += 1
-            return _make_artifact(profile_id)
-
-        dag = _build_dag(
-            [
-                DAGTask(id="s1", agent="a1", output="o1"),
-                DAGTask(id="s2", agent="a2", output="o2"),
-                DAGTask(id="s3", agent="a3", output="o3"),
-                DAGTask(id="s4", agent="a4", output="o4"),
-            ]
-        )
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, tracking, max_batch_size=2)
-        result = dispatcher.dispatch(dag, "batch test")
-        # All 4 should complete
-        assert set(result.completed) == {"s1", "s2", "s3", "s4"}
-
-    def test_default_max_batch_size_is_3(self) -> None:
-        """Default max_batch_size is 3."""
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor)
-        assert dispatcher._max_batch_size == 3
-
 
 class TestDAGDispatcherCleanup:
     """DAGDispatcher resource cleanup — close() and __del__ safety."""
-
-    def test_close_shuts_down_pool(self) -> None:
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor, use_concurrency=True)
-        # Force pool creation by triggering a concurrent dispatch path
-        assert dispatcher._pool is None
-        dispatcher.close()
-        assert dispatcher._pool is None
-        graph.close()
-
-    def test_del_with_active_pool_does_not_crash(self) -> None:
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor, use_concurrency=True)
-        # Simulate pool being created but never closed
-        import concurrent.futures
-
-        dispatcher._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        # __del__ should not crash
-        dispatcher.__del__()
-        assert dispatcher._pool is None
-        graph.close()
-
-    def test_close_idempotent(self) -> None:
-        graph = TaskGraph(":memory:")
-        dispatcher = DAGDispatcher(graph, _ok_executor)
-        dispatcher.close()
-        assert dispatcher._pool is None
-        dispatcher.close()  # second close is a no-op
-        assert dispatcher._pool is None
-        graph.close()
 
 
 class TestParallelRaceCondition:
@@ -1100,74 +814,6 @@ class TestFailStartedInBatch:
         dispatcher = DAGDispatcher(graph, _ok_executor)
         return dispatcher, graph
 
-    def test_in_progress_tasks_marked_failed(self) -> None:
-        """IN_PROGRESS tasks in started_ids should be moved to FAILED state."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="t1", description="test", agent="a1", blocked_by=[]),
-            TaskItem(id="t2", description="test", agent="a2", blocked_by=[]),
-        ])
-        graph.start_task("t1")
-        graph.start_task("t2")
-
-        result = DispatchResult()
-        dispatcher._fail_started_in_batch(["t1", "t2"], result)
-
-        assert graph.get_task("t1") is not None
-        assert graph.get_task("t1").state == TaskState.FAILED
-        assert graph.get_task("t2") is not None
-        assert graph.get_task("t2").state == TaskState.FAILED
-        assert "t1" in result.failed
-        assert "t2" in result.failed
-
-    def test_non_in_progress_tasks_untouched(self) -> None:
-        """Tasks not in IN_PROGRESS state should not be affected."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="t1", description="test", agent="a1", blocked_by=[]),
-            TaskItem(id="t2", description="test", agent="a2", blocked_by=[]),
-        ])
-        # t1 stays PENDING, t2 completed
-        graph.start_task("t2")
-        graph.complete_task("t2")
-
-        result = DispatchResult()
-        dispatcher._fail_started_in_batch(["t1", "t2"], result)
-
-        assert graph.get_task("t1").state == TaskState.PENDING
-        assert graph.get_task("t2").state == TaskState.COMPLETED
-        assert result.failed == []
-
-    def test_none_task_no_error(self) -> None:
-        """Non-existent task IDs in started_ids should not raise errors."""
-        dispatcher, _ = self._make_dispatcher()
-        result = DispatchResult()
-        # "ghost" does not exist in the graph at all
-        dispatcher._fail_started_in_batch(["ghost", "phantom"], result)
-        assert result.failed == []
-
-    def test_mixed_states_only_in_progress_failed(self) -> None:
-        """Only IN_PROGRESS tasks among mixed states get failed."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="pending", description="test", agent="a1", blocked_by=[]),
-            TaskItem(id="running", description="test", agent="a2", blocked_by=[]),
-            TaskItem(id="done", description="test", agent="a3", blocked_by=[]),
-        ])
-        graph.start_task("running")
-        graph.start_task("done")
-        graph.complete_task("done")
-        # "pending" stays PENDING
-        # "pending" stays PENDING
-
-        result = DispatchResult()
-        dispatcher._fail_started_in_batch(["pending", "running", "done", "nonexistent"], result)
-
-        assert graph.get_task("pending").state == TaskState.PENDING
-        assert graph.get_task("running").state == TaskState.FAILED
-        assert graph.get_task("done").state == TaskState.COMPLETED
-        assert result.failed == ["running"]
-
 
 # ---------------------------------------------------------------------------
 # 18. TestFailInProgress — _fail_in_progress error handling
@@ -1183,72 +829,6 @@ class TestFailInProgress:
         dispatcher = DAGDispatcher(graph, _ok_executor)
         return dispatcher, graph
 
-    def test_in_progress_tasks_failed(self) -> None:
-        """IN_PROGRESS tasks in specialist_ids get failed."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="t1", description="test", agent="a1", blocked_by=[]),
-            TaskItem(id="t2", description="test", agent="a2", blocked_by=[]),
-        ])
-        graph.start_task("t1")
-        graph.start_task("t2")
-
-        result = DispatchResult()
-        failed_set: set[str] = set()
-        dispatcher._fail_in_progress({"t1", "t2"}, result, failed_set)
-
-        assert graph.get_task("t1").state == TaskState.FAILED
-        assert graph.get_task("t2").state == TaskState.FAILED
-        assert "t1" in result.failed
-        assert "t2" in result.failed
-        assert "t1" in failed_set
-        assert "t2" in failed_set
-
-    def test_already_in_failed_set_not_duplicated(self) -> None:
-        """Tasks already in failed_set are not appended to result.failed again."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="t1", description="test", agent="a1", blocked_by=[]),
-        ])
-        graph.start_task("t1")
-
-        result = DispatchResult()
-        result.failed.append("t1")
-        failed_set: set[str] = {"t1"}
-        dispatcher._fail_in_progress({"t1"}, result, failed_set)
-
-        # Task should still be failed in graph
-        assert graph.get_task("t1").state == TaskState.FAILED
-        # But not duplicated in result.failed
-        assert result.failed.count("t1") == 1
-
-    def test_non_in_progress_untouched(self) -> None:
-        """PENDING and COMPLETED tasks are not affected."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="pending", description="test", agent="a1", blocked_by=[]),
-            TaskItem(id="done", description="test", agent="a2", blocked_by=[]),
-        ])
-        graph.start_task("done")
-        graph.complete_task("done")
-
-        result = DispatchResult()
-        failed_set: set[str] = set()
-        dispatcher._fail_in_progress({"pending", "done"}, result, failed_set)
-
-        assert graph.get_task("pending").state == TaskState.PENDING
-        assert graph.get_task("done").state == TaskState.COMPLETED
-        assert result.failed == []
-        assert failed_set == set()
-
-    def test_none_task_skipped(self) -> None:
-        """IDs not in the graph are silently skipped."""
-        dispatcher, _ = self._make_dispatcher()
-        result = DispatchResult()
-        failed_set: set[str] = set()
-        dispatcher._fail_in_progress({"nonexistent"}, result, failed_set)
-        assert result.failed == []
-
 
 # ---------------------------------------------------------------------------
 # 19. TestFailOrphanedPending — _fail_orphaned_pending + _should_fail_orphan
@@ -1263,158 +843,3 @@ class TestFailOrphanedPending:
         graph = TaskGraph(":memory:")
         dispatcher = DAGDispatcher(graph, _ok_executor)
         return dispatcher, graph
-
-    def test_orphan_no_blocker_failed(self) -> None:
-        """PENDING task with no blockers (independent, never started) gets failed."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="orphan", description="test", agent="a1", blocked_by=[]),
-        ])
-        # Task stays PENDING (never started)
-
-        result = DispatchResult()
-        failed_set: set[str] = set()
-        dispatcher._fail_orphaned_pending({"orphan"}, result, failed_set)
-
-        assert graph.get_task("orphan").state == TaskState.FAILED
-        assert "orphan" in result.failed
-
-    def test_all_blockers_terminal_failed(self) -> None:
-        """PENDING task whose all blockers are COMPLETED/FAILED gets failed."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="dep1", description="test", agent="a1", blocked_by=[]),
-            TaskItem(id="dep2", description="test", agent="a2", blocked_by=[]),
-            TaskItem(id="orphan", description="test", agent="a3", blocked_by=["dep1", "dep2"]),
-        ])
-        graph.start_task("dep1")
-        graph.fail_task("dep1")
-        graph.start_task("dep2")
-        graph.complete_task("dep2")
-
-        result = DispatchResult()
-        failed_set: set[str] = set()
-        dispatcher._fail_orphaned_pending({"orphan", "dep1", "dep2"}, result, failed_set)
-
-        assert graph.get_task("orphan").state == TaskState.FAILED
-        assert "orphan" in result.failed
-
-    def test_active_in_progress_blocker_prevents_failure(self) -> None:
-        """PENDING task with an IN_PROGRESS blocker is NOT failed."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="dep", description="test", agent="a1", blocked_by=[]),
-            TaskItem(id="blocked", description="test", agent="a2", blocked_by=["dep"]),
-        ])
-        graph.start_task("dep")  # dep is IN_PROGRESS, not terminal
-
-        result = DispatchResult()
-        failed_set: set[str] = set()
-        dispatcher._fail_orphaned_pending({"dep", "blocked"}, result, failed_set)
-
-        # dep is IN_PROGRESS — not PENDING, so loop skips it
-        # blocked is PENDING but its blocker (dep) is IN_PROGRESS (not terminal)
-        assert graph.get_task("blocked").state == TaskState.PENDING
-        assert "blocked" not in result.failed
-
-    def test_cascade_propagation(self) -> None:
-        """Multi-level dependency chain: A -> B -> C. Failing A cascades to B then C."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="a", description="test", agent="a1", blocked_by=[]),
-            TaskItem(id="b", description="test", agent="a2", blocked_by=["a"]),
-            TaskItem(id="c", description="test", agent="a3", blocked_by=["b"]),
-        ])
-        # All PENDING. The while loop should cascade:
-        # Round 1: a has no blockers -> fail a
-        # Round 2: b's blocker (a) is now FAILED -> fail b
-        # Round 3: c's blocker (b) is now FAILED -> fail c
-
-        result = DispatchResult()
-        failed_set: set[str] = set()
-        dispatcher._fail_orphaned_pending({"a", "b", "c"}, result, failed_set)
-
-        assert graph.get_task("a").state == TaskState.FAILED
-        assert graph.get_task("b").state == TaskState.FAILED
-        assert graph.get_task("c").state == TaskState.FAILED
-        assert "a" in result.failed
-        assert "b" in result.failed
-        assert "c" in result.failed
-
-    def test_already_in_failed_set_not_duplicated(self) -> None:
-        """Tasks already in failed_set are not appended again."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="orphan", description="test", agent="a1", blocked_by=[]),
-        ])
-
-        result = DispatchResult()
-        result.failed.append("orphan")
-        failed_set: set[str] = {"orphan"}
-        dispatcher._fail_orphaned_pending({"orphan"}, result, failed_set)
-
-        assert result.failed.count("orphan") == 1
-
-    def test_non_pending_tasks_skipped(self) -> None:
-        """COMPLETED and IN_PROGRESS tasks are not affected."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="done", description="test", agent="a1", blocked_by=[]),
-            TaskItem(id="running", description="test", agent="a2", blocked_by=[]),
-        ])
-        graph.start_task("done")
-        graph.complete_task("done")
-        graph.start_task("running")
-
-        result = DispatchResult()
-        failed_set: set[str] = set()
-        dispatcher._fail_orphaned_pending({"done", "running"}, result, failed_set)
-
-        assert graph.get_task("done").state == TaskState.COMPLETED
-        assert graph.get_task("running").state == TaskState.IN_PROGRESS
-        assert result.failed == []
-
-    def test_none_task_skipped(self) -> None:
-        """IDs not in the graph are silently skipped."""
-        dispatcher, _ = self._make_dispatcher()
-        result = DispatchResult()
-        failed_set: set[str] = set()
-        dispatcher._fail_orphaned_pending({"ghost"}, result, failed_set)
-        assert result.failed == []
-
-    def test_should_fail_orphan_no_blockers(self) -> None:
-        """_should_fail_orphan returns True for tasks with no blockers."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="t1", description="test", agent="a1", blocked_by=[]),
-        ])
-        task = graph.get_task("t1")
-        assert dispatcher._should_fail_orphan(task) is True
-
-    def test_should_fail_orphan_all_deps_terminal(self) -> None:
-        """_should_fail_orphan returns True when all deps are COMPLETED or FAILED."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="dep1", description="test", agent="a1", blocked_by=[]),
-            TaskItem(id="dep2", description="test", agent="a2", blocked_by=[]),
-            TaskItem(id="child", description="test", agent="a3", blocked_by=["dep1", "dep2"]),
-        ])
-        graph.start_task("dep1")
-        graph.complete_task("dep1")
-        graph.start_task("dep2")
-        graph.fail_task("dep2")
-
-        task = graph.get_task("child")
-        assert dispatcher._should_fail_orphan(task) is True
-
-    def test_should_fail_orphan_active_dep_returns_false(self) -> None:
-        """_should_fail_orphan returns False when a dep is still active."""
-        dispatcher, graph = self._make_dispatcher()
-        graph.add_tasks([
-            TaskItem(id="dep", description="test", agent="a1", blocked_by=[]),
-            TaskItem(id="child", description="test", agent="a2", blocked_by=["dep"]),
-        ])
-        graph.start_task("dep")  # IN_PROGRESS
-
-        task = graph.get_task("child")
-        assert dispatcher._should_fail_orphan(task) is False

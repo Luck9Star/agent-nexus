@@ -100,8 +100,10 @@ class SkillRecord(FrozenModel):
     @model_validator(mode="after")
     def _validate_counters(self) -> SkillRecord:
         _validate_counter_invariants(
-            self.total_selections, self.total_applied,
-            self.total_completions, self.total_fallbacks,
+            self.total_selections,
+            self.total_applied,
+            self.total_completions,
+            self.total_fallbacks,
         )
         return self
 
@@ -120,8 +122,10 @@ class EvolutionMetrics(FrozenModel):
     @model_validator(mode="after")
     def _validate_counters(self) -> EvolutionMetrics:
         _validate_counter_invariants(
-            self.total_selections, self.total_applied,
-            self.total_completions, self.total_fallbacks,
+            self.total_selections,
+            self.total_applied,
+            self.total_completions,
+            self.total_fallbacks,
         )
         return self
 

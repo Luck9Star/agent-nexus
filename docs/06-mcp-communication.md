@@ -3,7 +3,7 @@
 > Agent Nexus Design Doc — §8 MCP 暴露与通信：FastMCP 双模式、MCP Gateway、通信矩阵、Platform Router、SKILL.md 规范、数据流场景
 
 > **Status**: ✅ Implemented (core) | ⚠️ Partial (Provider Adaptation, AnthropicNativeStrategy, Deferred Loading)
-> **Code**: `src/agent_nexus/platform/gateway/` (gateway.py, deferred_registry.py, tool_adapter.py), `src/agent_nexus/platform/router/` (router.py, workflow.py, subtask.py)
+> **Code**: `src/agent_nexus/platform/gateway/` (gateway.py, deferred_registry.py, tool_adapter.py, audit.py, auth.py, external_mcp_adapter.py, schema_transformer.py), `src/agent_nexus/platform/router/` (router.py, workflow.py, subtask.py)
 > **Tests**: `tests/unit/test_gateway_tool_adapter.py`, `tests/unit/test_router_subtask.py`, `tests/unit/test_router_workflow.py`, `tests/unit/test_gateway_module.py`
 
 > ⚠️ **Note**: 以下功能标记为 "deferred" 或 "pending implementation"：
@@ -237,6 +237,29 @@ SKILL.md 遵循 deer-flow 的渐进式加载理念，分为三层：
 | **Body** | role, workflow, constraints | 首轮交互前加载 |
 | **Resources** | examples, templates, references | 按需加载 |
 
+#### 8.5a SkillLoader 加载策略
+
+> **Code**: `src/agent_nexus/platform/skills/loader.py`
+
+SkillLoader 实现 SKILL.md 的运行时加载，支持两种加载策略：
+
+| 策略 | 说明 | 适用场景 |
+|------|------|----------|
+| **eager** | 一次性加载全部三层内容 | 启动时已知会使用的 Agent |
+| **lazy**（默认） | Metadata 即时加载，Body/Resources 按需加载 | Deferred Loading 场景 |
+
+**加载流程**：
+
+```
+SkillLoader.load(skill_path)
+  → 解析 YAML frontmatter → SkillDefinition（名称、描述、触发器、能力）
+  → [lazy] 延迟加载 Body/Resources
+  → [eager] 立即加载全部内容
+  → 返回 Skill 对象（供 TieredContextBuilder 注入 AgentContext）
+```
+
+SkillDefinition 中的 `tool_loading` 字段（`eager`/`lazy`/`manifest_only`）控制工具 Schema 的加载粒度，与 §8.8 Deferred Loading 联动。
+
 **Atomic Agent SKILL.md 示例：**
 
 ```markdown
@@ -365,6 +388,28 @@ pre_tool_use:
 - **LLM 响应格式**：Prompt/Agent 类型 Hook 返回 `{"ok": true}` 或 `{"ok": false, "reason": "..."}`
 - **超时控制**：`timeout_seconds` 防止 Hook 无限等待
 - **聚合结果**：`AggregatedHookResult.blocked` 任一 Hook 阻塞即为 blocked
+
+#### 8.6.5a HookExecutor 执行管线
+
+> **Code**: `src/agent_nexus/platform/hooks/executor.py`
+
+HookExecutor 是 Hook 系统的运行时执行引擎，负责 Hook 的加载、匹配、执行和结果聚合：
+
+**执行流程**：
+
+```
+事件触发 → 匹配 Hook（event + matcher glob）→ 按 priority 排序 → 顺序执行 → 聚合结果
+```
+
+**关键设计**：
+
+| 特性 | 说明 |
+|------|------|
+| **类型路由** | 根据 `HookType`（command/http/prompt/agent）选择不同执行策略 |
+| **超时保护** | 每个 Hook 独立 `asyncio.wait_for` 超时控制，超时视为失败 |
+| **并发安全** | Hook 注册使用不可变快照（frozen dataclass），执行期间不修改注册表 |
+| **失败隔离** | 单个 Hook 异常不中断其他 Hook 执行，记入 `HookExecution.error` |
+| **结果聚合** | `AggregatedHookResult` 合并所有 Hook 结果，任一 `block_on_failure` Hook 失败即 `blocked=True` |
 
 #### 8.6.6 Hook 注册来源
 

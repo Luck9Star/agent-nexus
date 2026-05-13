@@ -428,13 +428,13 @@ class ExternalServerConfig(BaseModel):
 | Git 安装器 | ✅ GitInstaller | ✅ Installer trait | sparse-checkout 高效克隆 |
 | Source 管理 | ✅ SourceManager | ✅ | 三种 source + index.yaml |
 | Lockfile | ✅ LockfileManager | ✅ | flock + atomic write |
-| 安全审计 | ❌ | ✅ security_audit.rs | Rust 有，Python 无 |
-| Manifest 检查 | ⚠️ 基础 | ✅ manifest_checker.rs | 格式不统一（YAML vs TOML）|
-| SKILL 检查 | ❌ | ✅ skill_checker.rs | Rust 有，Python 无 |
+| 安全审计 | ✅ QualityGate.SecurityCheck | ✅ security_audit.rs | Python 通过 QualityGate 集成 |
+| Manifest 检查 | ✅ QualityGate.ManifestCheck | ✅ manifest_checker.rs | Python 已有完整 manifest 检查 |
+| SKILL 检查 | ✅ QualityGate.SkillFileCheck | ✅ skill_checker.rs | Python 通过 QualityGate 集成 |
 | 签名验证 | ❌ | ❌ | 无任何签名机制 |
-| 依赖解析 | ❌ | ❌ | 声明但不检查 |
+| 依赖解析 | ✅ DependencyResolver | ❌ | Python 有版本冲突检测 |
 | 搜索 API | ⚠️ 本地 | ❌ | 仅按名称搜索 |
-| 评分系统 | ❌ | ❌ | 无 |
+| 评分系统 | ✅ ScoreManager | ❌ | Python 有 JSON 持久化评分 |
 
 **关键约束**：
 - Python 用 `agent-manifest.yaml`，Rust 用 `agent.toml` — 双格式待统一
@@ -594,7 +594,7 @@ class Conflict(BaseModel):
 
 ### 5.1 需求分析
 
-**目标**：将现有 12 个 Atomic Agent 扩展到 30-50 个，覆盖主流开发领域。
+**目标**：将现有 20 个 Atomic Agent 扩展到 30-50 个，覆盖主流开发领域。
 
 **来源**：市场趋势从泛化→专精，Agent Nexus Atomic/Composite 分层优势明显。
 
@@ -607,11 +607,11 @@ class Conflict(BaseModel):
 
 | 组件 | 状态 | 说明 |
 |------|------|------|
-| Atomic Agent 模式 | ✅ 成熟 | 12 个 agent，统一结构 |
+| Atomic Agent 模式 | ✅ 成熟 | 20 个 agent，统一结构 |
 | Composite Agent 组合 | ✅ 成熟 | 5 个 composite，DAG 编排 |
 | Agent Manifest | ✅ 成熟 | 标准化字段 |
 | SKILL.md 规范 | ✅ 成熟 | 三段式渐进加载 |
-| Agent 脚手架 | ❌ 缺失 | 手动创建 4-5 个文件 |
+| Agent 脚手架 | ✅ 已实现 | `create-agent` CLI + `AgentCreator` 类，支持 atomic/composite 类型 |
 | 能力分类体系 | ❌ 缺失 | 无受控词汇表 |
 | Agent 模板系统 | ❌ 缺失 | 无 cookiecutter 模板 |
 | 测试基础设施 | ⚠️ 基础 | pyproject.toml 有 [dev]，但多数 agent 无测试文件 |

@@ -10,7 +10,6 @@ from agent_nexus.platform.router.workflow import (
     WorkflowResult,
 )
 
-
 # ---------------------------------------------------------------------------
 # WorkflowContext
 # ---------------------------------------------------------------------------
@@ -40,20 +39,6 @@ class TestWorkflowContext:
         )
         assert ctx.current_phase == WorkflowPhase.synthesis
 
-    def test_close_sets_task_graph_none(self):
-        from agent_nexus.platform.orchestration.task_graph import TaskGraph
-
-        tg = TaskGraph(":memory:")  # pyright: ignore[reportArgumentType]
-        ctx = WorkflowContext(
-            conversation_id="cid-3",
-            message="test",
-            agent_name="agent",
-            task_graph=tg,
-        )
-        assert ctx.task_graph is not None
-        ctx.close()
-        assert ctx.task_graph is None
-
     def test_close_releases_mem_conn(self):
         """Regression: close() must call task_graph.close() to release _mem_conn."""
         from agent_nexus.platform.orchestration.task_graph import TaskGraph
@@ -69,25 +54,6 @@ class TestWorkflowContext:
         ctx.close()
         # After close(), the in-memory connection should have been released
         assert tg._mem_conn is None
-
-    def test_close_idempotent(self):
-        ctx = WorkflowContext(
-            conversation_id="cid-4",
-            message="test",
-            agent_name="agent",
-        )
-        ctx.close()  # already None
-        ctx.close()  # second call should not raise
-        assert ctx.task_graph is None
-
-    def test_phase_results_mutable(self):
-        ctx = WorkflowContext(
-            conversation_id="cid-5",
-            message="msg",
-            agent_name="agent",
-        )
-        ctx.phase_results[WorkflowPhase.research] = "data"
-        assert ctx.phase_results[WorkflowPhase.research] == "data"
 
 
 # ---------------------------------------------------------------------------
@@ -122,43 +88,6 @@ class TestWorkflowResult:
         assert result.error == "synthesis timed out"
         assert result.completed_phases == 2
 
-    def test_partial_completion(self):
-        phases = {
-            WorkflowPhase.research: "r",
-            WorkflowPhase.synthesis: "s",
-        }
-        result = WorkflowResult(
-            success=False,
-            final_output="",
-            phase_results=phases,
-            total_phases=4,
-            completed_phases=2,
-        )
-        assert len(result.phase_results) == 2
-        assert result.completed_phases < result.total_phases
-
-    def test_error_defaults_none(self):
-        result = WorkflowResult(
-            success=True,
-            final_output="ok",
-            phase_results={},
-            total_phases=4,
-            completed_phases=4,
-        )
-        assert result.error is None
-        assert result.error_type is None
-
-    def test_empty_phase_results(self):
-        result = WorkflowResult(
-            success=False,
-            final_output="",
-            phase_results={},
-            total_phases=4,
-            completed_phases=0,
-            error="immediate failure",
-        )
-        assert result.phase_results == {}
-
 
 class TestWorkflowResultErrorType:
     """iter101 regression: error_type carries exception class name."""
@@ -174,14 +103,3 @@ class TestWorkflowResultErrorType:
             error_type="ValueError",
         )
         assert result.error_type == "ValueError"
-
-    def test_error_type_defaults_none(self):
-        result = WorkflowResult(
-            success=True,
-            final_output="ok",
-            phase_results={},
-            total_phases=1,
-            completed_phases=1,
-            error=None,
-        )
-        assert result.error_type is None

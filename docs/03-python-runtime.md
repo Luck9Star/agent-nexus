@@ -3,7 +3,7 @@
 > Agent Nexus Design Doc — §5 Python Runtime 执行层：Runtime vs Tool Call 范式、CaveAgent 实测数据、架构核心、SecurityChecker、Runtime-First Hybrid 策略、隔离级别、与 Atomic Agent 集成
 
 > **Status**: ✅ Implemented
-> **Code**: `src/agent_nexus/platform/runtime/` (PythonRuntime 245 lines, IPythonExecutor 438 lines, SecurityChecker 267 lines, SecurityRules 281 lines, TieredDescriber 139 lines, PermissionChecker 403 lines, TokenTracker 175 lines)
+> **Code**: `src/agent_nexus/platform/runtime/` (PythonRuntime 247 lines, IPythonExecutor 452 lines, SecurityChecker 324 lines, SecurityRules 382 lines, TieredDescriber 141 lines, PermissionChecker 378 lines, TokenTracker 171 lines)
 > **Tests**: `tests/unit/test_runtime.py`, `tests/unit/test_runtime_models.py`, `tests/unit/test_executor.py`, `tests/unit/test_security_checker.py`, `tests/unit/test_security_rules.py`, `tests/unit/test_describer.py`, `tests/unit/test_permission_checker.py`, `tests/unit/test_permission_models.py`, `tests/unit/test_token_tracker.py`
 
 ## §5 Python Runtime 执行层

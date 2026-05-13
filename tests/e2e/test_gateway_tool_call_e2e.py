@@ -25,7 +25,6 @@ from agent_nexus.platform.orchestration.process_manager import (
     ProcessManager,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -303,9 +302,7 @@ class TestDeferredRegistryLifecycle:
         assert len(agents) == 1
         assert agents[0].name == "deferred-agent"
 
-    def test_deferred_agent_not_in_tools_initially(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    def test_deferred_agent_not_in_tools_initially(self, registry: DeferredAgentRegistry) -> None:
         """Deferred agents contribute zero tools before activation."""
         manifest = _make_manifest("dormant-agent", "Dormant")
         registry.register_agent(manifest, deferred=True)
@@ -356,9 +353,7 @@ class TestDeferredRegistryLifecycle:
         registry.register_agent(
             _make_manifest("code-reviewer", "Reviews Python code"), deferred=False
         )
-        registry.register_agent(
-            _make_manifest("doc-writer", "Writes documentation"), deferred=True
-        )
+        registry.register_agent(_make_manifest("doc-writer", "Writes documentation"), deferred=True)
 
         results = registry.search_agents("code")
         assert len(results) == 1
@@ -366,12 +361,8 @@ class TestDeferredRegistryLifecycle:
 
     def test_build_manifest_text(self, registry: DeferredAgentRegistry) -> None:
         """build_manifest produces text summary for LLM context."""
-        registry.register_agent(
-            _make_manifest("core-1", "Core agent for testing"), deferred=False
-        )
-        registry.register_agent(
-            _make_manifest("deferred-1", "Deferred agent"), deferred=True
-        )
+        registry.register_agent(_make_manifest("core-1", "Core agent for testing"), deferred=False)
+        registry.register_agent(_make_manifest("deferred-1", "Deferred agent"), deferred=True)
 
         text = registry.build_manifest()
         assert "core-1" in text
@@ -379,9 +370,7 @@ class TestDeferredRegistryLifecycle:
         assert "core" in text
         assert "available" in text
 
-    def test_reregister_from_core_to_deferred(
-        self, registry: DeferredAgentRegistry
-    ) -> None:
+    def test_reregister_from_core_to_deferred(self, registry: DeferredAgentRegistry) -> None:
         """Re-registering a core agent as deferred moves it correctly."""
         manifest = _make_manifest("switch", "Switchable")
         registry.register_agent(manifest, deferred=False)

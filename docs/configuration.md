@@ -95,6 +95,42 @@ Optional. Per-stage model overrides for the Agency pipeline:
 | `api_key_env` | `""` | Environment variable holding the API key |
 | `api` | `"openai-compatible"` | API protocol: `openai-compatible`, `anthropic-messages`, or `ollama` |
 | `base_url` | `""` | Base URL override for the API endpoint |
+| `streaming` | `true` | Enable streaming for this provider |
+
+#### Streaming Configuration
+
+`ModelConfig` supports `streaming_default` to set the global streaming preference. Individual `ProviderConfig` entries can override this with their `streaming` field.
+
+```toml
+[models]
+streaming_default = true
+
+[models.providers.anthropic]
+streaming = true
+```
+
+#### Advanced Configuration Sections
+
+| Section | Description |
+|---------|-------------|
+| `[cli_backends.*]` | Named CLI backend configurations for agent routing |
+| `[cli_routing]` | CLI command routing rules |
+| `[[mcp.external_servers]]` | External MCP server connections (array of tables) |
+
+```toml
+[cli_backends.my-backend]
+type = "local"
+command = "python"
+
+[cli_routing]
+default_backend = "my-backend"
+
+[[mcp.external_servers]]
+name = "external-tool"
+transport = "stdio"
+command = "npx"
+args = ["-y", "some-mcp-server"]
+```
 
 #### `sources`
 Array of agent package sources. Each entry:
@@ -130,12 +166,11 @@ All paths in project config are resolved relative to the config file's directory
 |----------|----------|
 | `OPENAI_API_KEY` | OpenAI |
 | `ANTHROPIC_API_KEY` | Anthropic |
-| `ANTHROPIC_AUTH_TOKEN` | Anthropic (alt) |
+| `ANTHROPIC_AUTH_TOKEN` | Anthropic (alt; used by `init` wizard key detection only) |
 | `DEEPSEEK_API_KEY` | DeepSeek |
 | `MINIMAX_API_KEY` | MiniMax |
 | `DASHSCOPE_API_KEY` | Qwen (DashScope) |
 | `OLLAMA_HOST` | Ollama host |
-| `API_API_KEY` | Custom API provider |
 
 ### Platform Settings
 
@@ -151,9 +186,8 @@ All paths in project config are resolved relative to the config file's directory
 |----------|---------|
 | `EDITOR` | Text editor for `config edit` command (default: vi) |
 | `AGENT_NEXUS_PYTHON` | Python path for Rust runtime command |
-| `MCP_TRANSPORT` | MCP transport mode (stdio/SSE) |
-| `MCP_PORT` | MCP SSE port |
-| `MCP_HOST` | MCP SSE host |
+
+> **Note**: `MCP_TRANSPORT`, `MCP_PORT`, and `MCP_HOST` are available in scaffold-generated agent templates (via `create-agent`), not as platform-level configuration. They control individual agent MCP server behavior.
 
 ## Model String Format
 

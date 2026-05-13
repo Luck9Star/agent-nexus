@@ -378,6 +378,12 @@ class AgentPromoter:
     def _generate_skill_md(self, candidate: PromotionCandidate) -> str:
         """Generate a SKILL.md for the promoted agent."""
         return (
+            f"---\n"
+            f"name: {candidate.skill_name}\n"
+            f"description: Auto-promoted from skill {candidate.skill_id}\n"
+            f"agent_type: atomic\n"
+            f"---\n"
+            f"\n"
             f"# {candidate.skill_name}\n"
             f"\n"
             f"Auto-promoted from skill `{candidate.skill_id}`.\n"

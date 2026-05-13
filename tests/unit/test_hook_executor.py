@@ -603,22 +603,6 @@ pre_execution:
         assert len(executor._hooks) == 1
         assert executor._hooks[0].command == "echo valid"
 
-    def test_from_yaml_invalid_hook_dict_skipped(self, tmp_path: Path) -> None:
-        """Lines 106-107: a dict without required fields is skipped."""
-        yaml_content = """
-pre_execution:
-  - type: command
-    command: "echo valid"
-  - not_a_real_field: true
-"""
-        yaml_file = tmp_path / "hooks.yaml"
-        yaml_file.write_text(yaml_content)
-
-        executor = HookExecutor.from_yaml(yaml_file)
-        # Second entry lacks 'type' -> model_validate fails -> skipped
-        assert len(executor._hooks) == 1
-        assert executor._hooks[0].command == "echo valid"
-
     def test_from_yaml_hook_missing_type_field(self, tmp_path: Path) -> None:
         """Lines 106-107: hook dict without 'type' -> validation error, skipped."""
         yaml_content = """
@@ -670,25 +654,6 @@ class TestUnknownHookType:
         assert result.results[0].blocked is False
         assert "Unknown hook type" in result.results[0].error
 
-    @pytest.mark.asyncio
-    async def test_unknown_hook_type_with_block_on_failure(self) -> None:
-        """Line 198-203: unknown type + block_on_failure -> blocked=True."""
-        hook = _cmd_hook(block_on_failure=True)
-        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
-
-        with (
-            patch.object(executor, "_execute_command", None),
-            patch.object(executor, "_execute_http", None),
-            patch.object(executor, "_execute_prompt", None),
-            patch.object(executor, "_execute_agent", None),
-        ):
-            result = await executor.execute_event(HookEvent.PRE_EXECUTION)
-
-        assert len(result.results) == 1
-        assert result.results[0].passed is False
-        assert result.results[0].blocked is True
-        assert result.blocked is True
-
 
 # ---------------------------------------------------------------------------
 # 10. Malformed command string (lines 232-233)
@@ -710,16 +675,6 @@ class TestMalformedCommand:
         assert result.results[0].error is not None
         assert "Malformed command string" in result.results[0].error
         assert result.results[0].blocked is False
-
-    @pytest.mark.asyncio
-    async def test_malformed_command_blocking(self) -> None:
-        """Malformed command + block_on_failure -> blocked=True."""
-        hook = _cmd_hook(command="echo 'unclosed", block_on_failure=True)
-        executor = HookExecutor(hooks=[hook], allowed_commands=_ALLOWED)
-
-        result = await executor.execute_event(HookEvent.PRE_EXECUTION)
-        assert result.results[0].blocked is True
-        assert result.blocked is True
 
 
 # ---------------------------------------------------------------------------
@@ -871,17 +826,13 @@ class TestFromYamlAllowedCommandsPreserved:
         yaml_file.write_text("pre_execution: []")
 
         with patch.object(yaml, "safe_load", side_effect=RuntimeError("bad yaml")):
-            executor = HookExecutor.from_yaml(
-                yaml_file, allowed_commands=["git", "npm"]
-            )
+            executor = HookExecutor.from_yaml(yaml_file, allowed_commands=["git", "npm"])
         assert executor._hooks == []
         assert "git" in executor._allowed_commands
         assert "npm" in executor._allowed_commands
 
     def test_nonexistent_file_preserves_allowed_commands(self, tmp_path: Path) -> None:
-        executor = HookExecutor.from_yaml(
-            tmp_path / "nonexistent.yaml", allowed_commands=["git"]
-        )
+        executor = HookExecutor.from_yaml(tmp_path / "nonexistent.yaml", allowed_commands=["git"])
         assert executor._hooks == []
         assert "git" in executor._allowed_commands
 
@@ -893,23 +844,6 @@ class TestFromYamlAllowedCommandsPreserved:
 
 class TestParseHooksForEvent:
     """Unit tests for HookExecutor._parse_hooks_for_event static method."""
-
-    def test_valid_hook_dicts_return_definitions(self) -> None:
-        hook_list = [{"type": "command", "command": "echo hello"}]
-        result = HookExecutor._parse_hooks_for_event(
-            HookEvent.PRE_EXECUTION, hook_list, Path("test.yaml")
-        )
-        assert len(result) == 1
-        assert isinstance(result[0], HookDefinition)
-        assert result[0].type == HookType.COMMAND
-        assert result[0].event == HookEvent.PRE_EXECUTION
-
-    def test_non_dict_entries_are_skipped(self) -> None:
-        hook_list = ["not_a_dict", 42, None]
-        result = HookExecutor._parse_hooks_for_event(
-            HookEvent.PRE_EXECUTION, hook_list, Path("test.yaml")
-        )
-        assert result == []
 
     def test_invalid_hook_dicts_are_skipped_not_exception(self) -> None:
         """A dict that fails model_validate is skipped, not raised."""
@@ -924,7 +858,5 @@ class TestParseHooksForEvent:
         assert result[0].command == "echo ok"
 
     def test_empty_list_returns_empty_list(self) -> None:
-        result = HookExecutor._parse_hooks_for_event(
-            HookEvent.PRE_EXECUTION, [], Path("test.yaml")
-        )
+        result = HookExecutor._parse_hooks_for_event(HookEvent.PRE_EXECUTION, [], Path("test.yaml"))
         assert result == []

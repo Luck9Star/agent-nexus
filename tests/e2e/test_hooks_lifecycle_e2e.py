@@ -6,13 +6,11 @@ Only the HTTP target is deliberately unreachable (connection-refused) to test er
 
 from __future__ import annotations
 
-
 import pytest
 from pydantic import ValidationError
 
 from agent_nexus.models.hooks import HookDefinition, HookEvent, HookType
 from agent_nexus.platform.hooks.executor import HookExecutor
-
 
 # ---------------------------------------------------------------------------
 # Helpers

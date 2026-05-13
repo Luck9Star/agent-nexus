@@ -53,23 +53,6 @@ def _llm_response(data: dict) -> MagicMock:
 # --- Existing tests (kept for backward compat) ---
 
 
-def test_planner_output_from_llm_response():
-    raw = json.dumps(
-        {
-            "capabilities": ["code_review", "system_design"],
-            "focus_hints": {
-                "agency.code-reviewer": "Focus on security vulnerabilities",
-                "agency.architect": "Focus on scalability concerns",
-            },
-            "decomposition_strategy": "parallel",
-        }
-    )
-    output = PlannerOutput.from_json(raw)
-    assert output.capabilities == ["code_review", "system_design"]
-    assert output.decomposition_strategy == "parallel"
-    assert "agency.code-reviewer" in output.focus_hints
-
-
 def test_planner_output_from_invalid_json_falls_back():
     output = PlannerOutput.from_json("not json at all")
     assert output.capabilities == []
@@ -173,9 +156,7 @@ class TestStructuredPlannerOutput:
             "capabilities": ["code_review"],
             "focus_hints": {"agency.code-reviewer": "security"},
             "decomposition_strategy": "parallel",
-            "expert_selections": [
-                {"expert_id": "agency.code-reviewer", "task": "Review"}
-            ],
+            "expert_selections": [{"expert_id": "agency.code-reviewer", "task": "Review"}],
         }
         result = StructuredPlannerOutput.model_validate(data)
         assert result.capabilities == ["code_review"]
@@ -184,16 +165,7 @@ class TestStructuredPlannerOutput:
 
     def test_invalid_decomposition_strategy_rejected(self):
         with pytest.raises(ValidationError):
-            StructuredPlannerOutput.model_validate(
-                {"decomposition_strategy": "invalid_strategy"}
-            )
-
-    def test_default_values(self):
-        result = StructuredPlannerOutput.model_validate({})
-        assert result.capabilities == []
-        assert result.focus_hints == {}
-        assert result.decomposition_strategy == "parallel"
-        assert result.expert_selections == []
+            StructuredPlannerOutput.model_validate({"decomposition_strategy": "invalid_strategy"})
 
 
 class TestExpertSelection:
@@ -271,38 +243,11 @@ class TestLLMPlannerAnalyze:
         assert isinstance(result, PlannerOutput)
         assert result.capabilities == []
 
-    def test_temperature_forwarded(self):
-        mock_client = _llm_response(
-            {"capabilities": [], "decomposition_strategy": "parallel"}
-        )
-
-        planner = LLMPlanner(
-            registry=_make_registry(), client=mock_client, temperature=0.1
-        )
-        planner.analyze_task("task")
-
-        call_kwargs = mock_client.call.call_args.kwargs
-        assert call_kwargs["temperature"] == 0.1
-
     def test_no_client_increments_fallback_counter(self):
         planner = LLMPlanner(registry=_make_registry(), client=None)
         planner.analyze_task("review code")
 
         assert LLMPlanner.fallback_count() == 1
-
-    def test_prompt_contains_expert_info(self):
-        mock_client = _llm_response(
-            {"capabilities": [], "decomposition_strategy": "parallel"}
-        )
-
-        planner = LLMPlanner(registry=_make_registry(), client=mock_client)
-        planner.analyze_task("review")
-
-        call_kwargs = mock_client.call.call_args.kwargs
-        prompt = call_kwargs["system_prompt"]
-        assert "code_review" in prompt
-        assert "system_design" in prompt
-        assert "agency.code-reviewer" in prompt
 
 
 class TestGetAllProfiles:

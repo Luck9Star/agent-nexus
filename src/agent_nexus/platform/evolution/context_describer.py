@@ -21,9 +21,7 @@ from agent_nexus.platform.evolution.thresholds import SkillRates
 logger = logging.getLogger(__name__)
 
 
-def _format_skill_table(
-    active: list[SkillRecord], reports: dict[str, HealthReport]
-) -> str:
+def _format_skill_table(active: list[SkillRecord], reports: dict[str, HealthReport]) -> str:
     """Format active skills as a markdown table with health status."""
     lines: list[str] = ["[Evolution Skill Metrics]"]
     lines.append("| Skill | Selections | Eff. Rate | Health |")

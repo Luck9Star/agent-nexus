@@ -33,9 +33,7 @@ from agent_nexus.platform.evolution.thresholds import (
 logger = logging.getLogger(__name__)
 
 
-def _build_health_metrics(
-    skill: SkillRecord, rates: SkillRates | None
-) -> dict[str, float]:
+def _build_health_metrics(skill: SkillRecord, rates: SkillRates | None) -> dict[str, float]:
     """Build health metrics dict from a skill record and its rates."""
     metrics: dict[str, float] = {"total_selections": float(skill.total_selections)}
     if rates is not None:

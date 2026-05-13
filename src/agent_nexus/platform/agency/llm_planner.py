@@ -112,6 +112,7 @@ class PlannerOutput:
             capabilities=data.get("capabilities", []),
             focus_hints=data.get("focus_hints", {}),
             decomposition_strategy=data.get("decomposition_strategy", "parallel"),
+            expert_selections=data.get("expert_selections", []),
         )
 
 

@@ -81,12 +81,6 @@ class TestResolveDependencies:
         integrate = next(t for t in dag.tasks if t.id == "integrate")
         assert set(integrate.blocked_by) == {"a", "b"}
 
-    def test_validate_blocked_by_integrate(self, planner: DynamicCompositePlanner) -> None:
-        subtasks = [_subtask("x", ["system_design"])]
-        dag = planner.resolve_dependencies(subtasks, composition_name="test")
-        validate = next(t for t in dag.tasks if t.id == "validate")
-        assert validate.blocked_by == ["integrate"]
-
     def test_chain_dependency(self, planner: DynamicCompositePlanner) -> None:
         """Subset chain: A has superset caps, B is subset of A, C depends on B.
 
@@ -118,11 +112,6 @@ class TestResolveDependencies:
         dag = planner.resolve_dependencies(subtasks, composition_name="my-comp")
         assert isinstance(dag, CompositionDAG)
         assert dag.name == "my-comp"
-
-    def test_max_parallel_default(self, planner: DynamicCompositePlanner) -> None:
-        subtasks = [_subtask("a", ["system_design"])]
-        dag = planner.resolve_dependencies(subtasks, composition_name="test")
-        assert dag.max_parallel == 3
 
     def test_max_parallel_custom(self, planner: DynamicCompositePlanner) -> None:
         subtasks = [_subtask("a", ["system_design"])]

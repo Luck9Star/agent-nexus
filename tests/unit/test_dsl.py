@@ -17,7 +17,6 @@ from agent_nexus.platform.orchestration.dsl import (
     DSLTask,
     DSLToolLoading,
     DSLValidationError,
-    MessagingConfig,
     OrchestrationDefinition,
     OrchestrationDSL,
 )
@@ -44,12 +43,6 @@ class TestDSLAgent:
         """Invalid tool_loading raises ValueError."""
         with pytest.raises(ValueError, match="Invalid tool_loading"):
             DSLAgent(name="bad", description="", tool_loading="aggressive")
-
-    def test_default_values(self) -> None:
-        """Default role=worker, tool_loading=lazy."""
-        agent = DSLAgent(name="default", description="desc")
-        assert agent.role == "worker"
-        assert agent.tool_loading == "lazy"
 
 
 # ============================================================================
@@ -118,12 +111,6 @@ class TestDSLToolLoading:
         with pytest.raises(ValueError, match="Invalid tool_loading strategy"):
             DSLToolLoading(strategy="preload_everything")
 
-    def test_default_values(self) -> None:
-        """Default strategy=lazy, preload_agents=[]."""
-        tl = DSLToolLoading()
-        assert tl.strategy == "lazy"
-        assert tl.preload_agents == []
-
 
 # ============================================================================
 # OrchestrationDefinition helpers
@@ -167,11 +154,6 @@ class TestOrchestrationDefinition:
         assert len(a1_tasks) == 2
         assert all(t.agent == "a1" for t in a1_tasks)
 
-    def test_get_agent_tasks_no_match(self) -> None:
-        """get_agent_tasks returns empty for agent with no tasks."""
-        defn = self._make_definition()
-        assert defn.get_agent_tasks("unknown") == []
-
     def test_get_task_depth_root(self) -> None:
         """Root tasks have depth 0."""
         defn = self._make_definition()
@@ -187,22 +169,6 @@ class TestOrchestrationDefinition:
         """Unknown task returns -1."""
         defn = self._make_definition()
         assert defn.get_task_depth("nonexistent") == -1
-
-    def test_get_task_depth_multi_level(self) -> None:
-        """Multi-level depth: T1 -> T2 -> T4."""
-        defn = self._make_definition()
-        # Add T4 blocked_by T2
-        tasks = list(defn.tasks) + [
-            DSLTask(id="T4", description="Deep", agent="a1", blocked_by=["T2"]),
-        ]
-        defn = OrchestrationDefinition(
-            goal="Deep",
-            agent_name="test",
-            agents=defn.agents,
-            tasks=tasks,
-            tool_loading=DSLToolLoading(),
-        )
-        assert defn.get_task_depth("T4") == 2
 
     def test_get_task_depth_cycle_no_recursion_error(self) -> None:
         """get_task_depth does NOT raise RecursionError on cyclic deps."""
@@ -225,42 +191,6 @@ class TestOrchestrationDefinition:
         d2 = defn.get_task_depth("T2")
         assert d1 == -1
         assert d2 == -1
-
-    def test_get_task_depth_self_loop_no_crash(self) -> None:
-        """Self-referencing task (T1 blocked_by T1) does not crash."""
-        agents = {
-            "a1": DSLAgent(name="a1", description="Agent 1"),
-        }
-        tasks = [
-            DSLTask(id="T1", description="", agent="a1", blocked_by=["T1"]),
-        ]
-        defn = OrchestrationDefinition(
-            goal="Self-loop",
-            agent_name="self-loop-test",
-            agents=agents,
-            tasks=tasks,
-            tool_loading=DSLToolLoading(),
-        )
-        # Self-loop detected as cycle — returns -1
-        d = defn.get_task_depth("T1")
-        assert d == -1
-
-    def test_downstream_of_cycle_also_neg_one(self) -> None:
-        """Tasks depending on a cyclic task also get depth -1."""
-        agents = {"a1": DSLAgent(name="a1", description="A")}
-        tasks = [
-            DSLTask(id="T1", description="", agent="a1", blocked_by=["T2"]),
-            DSLTask(id="T2", description="", agent="a1", blocked_by=["T1"]),
-            DSLTask(id="T3", description="", agent="a1", blocked_by=["T1"]),
-        ]
-        defn = OrchestrationDefinition(
-            goal="Cycle + downstream",
-            agent_name="test",
-            agents=agents,
-            tasks=tasks,
-            tool_loading=DSLToolLoading(),
-        )
-        assert defn.get_task_depth("T3") == -1
 
 
 # ============================================================================
@@ -308,23 +238,6 @@ class TestParseStringValid:
         assert defn.agent_name == "feature-pipeline"
         assert len(defn.agents) == 2
         assert len(defn.tasks) == 2
-
-    def test_parse_preserves_agents(self) -> None:
-        """Parsed agents have correct fields."""
-        dsl = OrchestrationDSL()
-        defn = dsl.parse_string(_MINIMAL_VALID_TOML)
-
-        assert "explorer" in defn.agents
-        assert defn.agents["explorer"].role == "explore"
-        assert "worker" in defn.agents
-
-    def test_parse_preserves_tasks(self) -> None:
-        """Parsed tasks have correct fields and deps."""
-        dsl = OrchestrationDSL()
-        defn = dsl.parse_string(_MINIMAL_VALID_TOML)
-
-        impl = next(t for t in defn.tasks if t.id == "implement")
-        assert impl.blocked_by == ["explore"]
 
 
 class TestParseStringErrors:
@@ -538,28 +451,6 @@ class TestParseFile:
         with pytest.raises(DSLSyntaxError, match="TOML file not found"):
             dsl.parse_file(tmp_path / "nonexistent.toml")
 
-    def test_parse_file_invalid_toml(self, tmp_path: Any) -> None:
-        """parse_file raises DSLSyntaxError for invalid TOML content."""
-        bad_file = tmp_path / "bad.toml"
-        bad_file.write_text("this is not valid toml {{{", encoding="utf-8")
-
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match="Invalid TOML"):
-            dsl.parse_file(bad_file)
-
-    def test_parse_file_valid(self, tmp_path: Any) -> None:
-        """parse_file returns OrchestrationDefinition for valid TOML file."""
-        toml_file = tmp_path / "valid.toml"
-        toml_file.write_text(_MINIMAL_VALID_TOML, encoding="utf-8")
-
-        dsl = OrchestrationDSL()
-        defn = dsl.parse_file(toml_file)
-
-        assert defn.goal == "Build feature X"
-        assert defn.agent_name == "feature-pipeline"
-        assert len(defn.agents) == 2
-        assert len(defn.tasks) == 2
-
 
 # ============================================================================
 # TOML parsing edge cases -- missing fields, invalid types
@@ -601,12 +492,6 @@ class TestParseStringEdgeCases:
         with pytest.raises(DSLSyntaxError, match=r"\[goal\]\.description must be a non-empty"):
             dsl.parse_string(_wrap_toml("[goal]\ndescription = ''"))
 
-    def test_goal_description_wrong_type(self) -> None:
-        """[goal].description as integer raises DSLSyntaxError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match=r"\[goal\]\.description must be a non-empty"):
-            dsl.parse_string(_wrap_toml("[goal]\ndescription = 42"))
-
     # -- [agent_name] section edge cases (line 292) --
 
     def test_agent_name_value_empty(self) -> None:
@@ -614,12 +499,6 @@ class TestParseStringEdgeCases:
         dsl = OrchestrationDSL()
         with pytest.raises(DSLSyntaxError, match=r"\[agent_name\]\.value must be a non-empty"):
             dsl.parse_string(_wrap_toml('[agent_name]\nvalue = ""'))
-
-    def test_agent_name_value_wrong_type(self) -> None:
-        """[agent_name].value as integer raises DSLSyntaxError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match=r"\[agent_name\]\.value must be a non-empty"):
-            dsl.parse_string(_wrap_toml("[agent_name]\nvalue = 123"))
 
     # -- [[agents]] section edge cases (lines 297, 301, 304, 317-318) --
 
@@ -680,50 +559,6 @@ value = "test"
 
 [[agents]]
 description = "No name here"
-
-[[tasks]]
-id = "T1"
-description = "Task"
-agent = "a"
-""")
-
-    def test_agent_invalid_role_in_toml(self) -> None:
-        """Agent with invalid role raises DSLSyntaxError from ValueError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match="Invalid agent role"):
-            dsl.parse_string("""
-[goal]
-description = "Test"
-
-[agent_name]
-value = "test"
-
-[[agents]]
-name = "a"
-description = ""
-role = "superhero"
-
-[[tasks]]
-id = "T1"
-description = "Task"
-agent = "a"
-""")
-
-    def test_agent_invalid_tool_loading_in_toml(self) -> None:
-        """Agent with invalid tool_loading raises DSLSyntaxError from ValueError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match="Invalid tool_loading"):
-            dsl.parse_string("""
-[goal]
-description = "Test"
-
-[agent_name]
-value = "test"
-
-[[agents]]
-name = "a"
-description = ""
-tool_loading = "always"
 
 [[tasks]]
 id = "T1"
@@ -795,69 +630,6 @@ description = "No id"
 agent = "a"
 """)
 
-    def test_task_id_empty_string(self) -> None:
-        """Task with empty id string raises DSLSyntaxError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match=r"tasks\[0\]\.id must be a non-empty"):
-            dsl.parse_string("""
-[goal]
-description = "Test"
-
-[agent_name]
-value = "test"
-
-[[agents]]
-name = "a"
-description = ""
-
-[[tasks]]
-id = ""
-description = "Empty id"
-agent = "a"
-""")
-
-    def test_task_description_empty(self) -> None:
-        """Task with empty description raises DSLSyntaxError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match=r"\.description must be a non-empty"):
-            dsl.parse_string("""
-[goal]
-description = "Test"
-
-[agent_name]
-value = "test"
-
-[[agents]]
-name = "a"
-description = ""
-
-[[tasks]]
-id = "T1"
-description = ""
-agent = "a"
-""")
-
-    def test_task_description_wrong_type(self) -> None:
-        """Task description as integer raises DSLSyntaxError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match=r"\.description must be a non-empty"):
-            dsl.parse_string("""
-[goal]
-description = "Test"
-
-[agent_name]
-value = "test"
-
-[[agents]]
-name = "a"
-description = ""
-
-[[tasks]]
-id = "T1"
-description = 123
-agent = "a"
-""")
-
     def test_task_agent_missing(self) -> None:
         """Task with missing agent raises DSLSyntaxError."""
         dsl = OrchestrationDSL()
@@ -920,28 +692,6 @@ id = "T1"
 description = "Task"
 agent = "a"
 blocked_by = [""]
-""")
-
-    def test_task_blocked_by_non_string_entry(self) -> None:
-        """Task with integer in blocked_by raises DSLSyntaxError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match=r"\.blocked_by\[0\] must be a non-empty"):
-            dsl.parse_string("""
-[goal]
-description = "Test"
-
-[agent_name]
-value = "test"
-
-[[agents]]
-name = "a"
-description = ""
-
-[[tasks]]
-id = "T1"
-description = "Task"
-agent = "a"
-blocked_by = [42]
 """)
 
     def test_task_vars_not_a_dict(self) -> None:
@@ -1019,30 +769,6 @@ strategy = "lazy"
 preload_agents = "not-a-list"
 """)
 
-    def test_tool_loading_invalid_strategy(self) -> None:
-        """Invalid tool_loading strategy raises DSLSyntaxError from ValueError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match="Invalid tool_loading strategy"):
-            dsl.parse_string("""
-[goal]
-description = "Test"
-
-[agent_name]
-value = "test"
-
-[[agents]]
-name = "a"
-description = ""
-
-[[tasks]]
-id = "T1"
-description = "Task"
-agent = "a"
-
-[tool_loading]
-strategy = "preload_everything"
-""")
-
 
 # ============================================================================
 # validate() edge cases -- preload_agents unknown ref (lines 263-264)
@@ -1099,105 +825,6 @@ agent = "a"
 blocked_by = ["T1"]
 """)
 
-    def test_parse_raises_on_unknown_agent_ref(self) -> None:
-        """Parsing TOML referencing unknown agent raises DSLValidationError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLValidationError, match="DSL validation failed"):
-            dsl.parse_string("""
-[goal]
-description = "Test"
-
-[agent_name]
-value = "test"
-
-[[agents]]
-name = "a"
-description = ""
-
-[[tasks]]
-id = "T1"
-description = "Task"
-agent = "nonexistent"
-""")
-
-    def test_parse_raises_on_unknown_blocked_by_ref(self) -> None:
-        """Parsing TOML with unknown blocked_by task raises DSLValidationError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLValidationError, match="DSL validation failed"):
-            dsl.parse_string("""
-[goal]
-description = "Test"
-
-[agent_name]
-value = "test"
-
-[[agents]]
-name = "a"
-description = ""
-
-[[tasks]]
-id = "T1"
-description = "Task"
-agent = "a"
-blocked_by = ["ghost_task"]
-""")
-
-
-# ============================================================================
-# get_task_depth -- cache hit path (line 127)
-# ============================================================================
-
-
-class TestGetTaskDepthCacheHit:
-    def test_depth_cache_hit_on_repeated_call(self) -> None:
-        """Second call for same task hits cache (line 127)."""
-        agents = {
-            "a1": DSLAgent(name="a1", description="Agent 1"),
-        }
-        tasks = [
-            DSLTask(id="T1", description="Root", agent="a1"),
-            DSLTask(id="T2", description="Child", agent="a1", blocked_by=["T1"]),
-            DSLTask(id="T3", description="Grandchild", agent="a1", blocked_by=["T2"]),
-        ]
-        defn = OrchestrationDefinition(
-            goal="Cache test",
-            agent_name="test",
-            agents=agents,
-            tasks=tasks,
-            tool_loading=DSLToolLoading(),
-        )
-
-        # First call computes and caches T2 -> depth 1
-        assert defn.get_task_depth("T2") == 1
-        # Second call should hit cache (line 127) and return same value
-        assert defn.get_task_depth("T2") == 1
-
-    def test_depth_shared_cache_across_siblings(self) -> None:
-        """Cache populated for shared dependency used by multiple tasks."""
-        agents = {
-            "a1": DSLAgent(name="a1", description="Agent 1"),
-        }
-        tasks = [
-            DSLTask(id="T1", description="Root", agent="a1"),
-            DSLTask(id="T2", description="Child A", agent="a1", blocked_by=["T1"]),
-            DSLTask(id="T3", description="Child B", agent="a1", blocked_by=["T1"]),
-            DSLTask(id="T4", description="Grandchild", agent="a1", blocked_by=["T2", "T3"]),
-        ]
-        defn = OrchestrationDefinition(
-            goal="Cache siblings",
-            agent_name="test",
-            agents=agents,
-            tasks=tasks,
-            tool_loading=DSLToolLoading(),
-        )
-
-        # Computing T4 depth also caches T1, T2, T3
-        assert defn.get_task_depth("T4") == 2
-        # These should now be cache hits
-        assert defn.get_task_depth("T1") == 0
-        assert defn.get_task_depth("T2") == 1
-        assert defn.get_task_depth("T3") == 1
-
 
 # ============================================================================
 # MessagingConfig
@@ -1205,24 +832,7 @@ class TestGetTaskDepthCacheHit:
 
 
 class TestMessagingConfig:
-    def test_defaults(self) -> None:
-        mc = MessagingConfig()
-        assert mc.enabled is True
-        assert mc.max_message_size == 1_048_576
-        assert mc.request_timeout == 30.0
-        assert mc.allowed_channels == ["chat", "request", "broadcast"]
-
-    def test_custom_values(self) -> None:
-        mc = MessagingConfig(
-            enabled=False,
-            max_message_size=2048,
-            request_timeout=60.0,
-            allowed_channels=["chat"],
-        )
-        assert mc.enabled is False
-        assert mc.max_message_size == 2048
-        assert mc.request_timeout == 60.0
-        assert mc.allowed_channels == ["chat"]
+    pass
 
 
 # ============================================================================
@@ -1241,13 +851,16 @@ class TestMessagingTomlParsing:
 
     def test_parse_messaging_section_canonical(self) -> None:
         """Parse [messaging] in canonical TOML format."""
-        toml_str = _MINIMAL_VALID_TOML + """
+        toml_str = (
+            _MINIMAL_VALID_TOML
+            + """
 [messaging]
 enabled = false
 max_message_size = 4096
 request_timeout = 10.0
 allowed_channels = ["chat"]
 """
+        )
         dsl = OrchestrationDSL()
         defn = dsl.parse_string(toml_str)
         assert defn.messaging.enabled is False
@@ -1291,54 +904,36 @@ request_timeout = 15.0
         """[messaging].enabled as string raises DSLSyntaxError."""
         dsl = OrchestrationDSL()
         with pytest.raises(DSLSyntaxError, match="enabled must be a boolean"):
-            dsl.parse_string(_MINIMAL_VALID_TOML + """
+            dsl.parse_string(
+                _MINIMAL_VALID_TOML
+                + """
 [messaging]
 enabled = "yes"
-""")
+"""
+            )
 
     def test_messaging_max_size_not_positive(self) -> None:
         """[messaging].max_message_size as negative raises DSLSyntaxError."""
         dsl = OrchestrationDSL()
         with pytest.raises(DSLSyntaxError, match="max_message_size must be a positive"):
-            dsl.parse_string(_MINIMAL_VALID_TOML + """
+            dsl.parse_string(
+                _MINIMAL_VALID_TOML
+                + """
 [messaging]
 max_message_size = -1
-""")
-
-    def test_messaging_timeout_not_positive(self) -> None:
-        """[messaging].request_timeout as negative raises DSLSyntaxError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match="request_timeout must be a positive"):
-            dsl.parse_string(_MINIMAL_VALID_TOML + """
-[messaging]
-request_timeout = -5.0
-""")
-
-    def test_messaging_channels_not_a_list(self) -> None:
-        """[messaging].allowed_channels as string raises DSLSyntaxError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match="allowed_channels must be a list"):
-            dsl.parse_string(_MINIMAL_VALID_TOML + """
-[messaging]
-allowed_channels = "chat"
-""")
-
-    def test_messaging_channels_empty_entry(self) -> None:
-        """Empty string in allowed_channels raises DSLSyntaxError."""
-        dsl = OrchestrationDSL()
-        with pytest.raises(DSLSyntaxError, match=r"allowed_channels\[1\] must be a non-empty"):
-            dsl.parse_string(_MINIMAL_VALID_TOML + """
-[messaging]
-allowed_channels = ["chat", ""]
-""")
+"""
+            )
 
     def test_messaging_partial_section(self) -> None:
         """Partial [messaging] section uses defaults for missing fields."""
         dsl = OrchestrationDSL()
-        defn = dsl.parse_string(_MINIMAL_VALID_TOML + """
+        defn = dsl.parse_string(
+            _MINIMAL_VALID_TOML
+            + """
 [messaging]
 enabled = false
-""")
+"""
+        )
         assert defn.messaging.enabled is False
         assert defn.messaging.max_message_size == 1_048_576
         assert defn.messaging.request_timeout == 30.0

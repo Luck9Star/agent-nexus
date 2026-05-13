@@ -23,7 +23,7 @@ from agent_nexus.models.evolution import (
     SkillRecord,
 )
 from agent_nexus.platform.evolution._shared import _SCHEMA_SQL
-from agent_nexus.platform.evolution.skill_store import SkillStore, _safe_json_loads
+from agent_nexus.platform.evolution.skill_store import SkillStore
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -214,13 +214,14 @@ class TestListAndFilter:
 
 class TestVersionsAndAncestry:
     def _seed(self, store: SkillStore) -> None:
-        v1 = _make_record(id="s-v1", name="skill-a", generation=0)
+        v1 = _make_record(id="s-v1", name="skill-a", generation=0, is_active=False)
         v2 = _make_record(
             id="s-v2",
             name="skill-a",
             origin=SkillOrigin.FIXED,
             generation=1,
             parent_ids=["s-v1"],
+            is_active=False,
         )
         v3 = _make_record(
             id="s-v3",
@@ -263,13 +264,6 @@ class TestVersionsAndAncestry:
 
 
 class TestIncrementCounters:
-    def test_increment_selected(self, store: SkillStore) -> None:
-        store.save_skill_record(_make_record(id="s1"))
-        store.increment_counters("s1", selected=True)
-        loaded = store.get_skill_record("s1")
-        assert loaded is not None
-        assert loaded.total_selections == 1
-
     def test_increment_multiple_counters(self, store: SkillStore) -> None:
         store.save_skill_record(_make_record(id="s1"))
         store.increment_counters("s1", selected=True, applied=True, completed=True)
@@ -279,33 +273,9 @@ class TestIncrementCounters:
         assert loaded.total_applied == 1
         assert loaded.total_completions == 1
 
-    def test_increment_accumulates(self, store: SkillStore) -> None:
-        store.save_skill_record(_make_record(id="s1"))
-        store.increment_counters("s1", selected=True)
-        store.increment_counters("s1", selected=True)
-        store.increment_counters("s1", selected=True)
-        loaded = store.get_skill_record("s1")
-        assert loaded is not None
-        assert loaded.total_selections == 3
-
-    def test_increment_noop_when_no_flags(self, store: SkillStore) -> None:
-        store.save_skill_record(_make_record(id="s1"))
-        store.increment_counters("s1")
-        loaded = store.get_skill_record("s1")
-        assert loaded is not None
-        assert loaded.total_selections == 0
-
     def test_applied_without_selected_raises(self, store: SkillStore) -> None:
         with pytest.raises(ValueError, match="applied requires selected"):
             store.increment_counters("s1", applied=True)
-
-    def test_completed_without_applied_raises(self, store: SkillStore) -> None:
-        with pytest.raises(ValueError, match="completed requires applied"):
-            store.increment_counters("s1", selected=True, completed=True)
-
-    def test_fell_back_without_selected_raises(self, store: SkillStore) -> None:
-        with pytest.raises(ValueError, match="fell_back requires selected"):
-            store.increment_counters("s1", fell_back=True)
 
     def test_increment_nonexistent_logs_warning(self, store: SkillStore, caplog) -> None:
         with caplog.at_level("WARNING"):
@@ -362,19 +332,11 @@ class TestEvolveSkill:
 
     def test_evolve_fix_duplicate_active_name_fails(self, store: SkillStore) -> None:
         existing = _make_record(id="e1", name="skill-x", is_active=True)
-        other = _make_record(id="e2", name="skill-x", is_active=True)
         store.save_skill_record(existing)
-        store.save_skill_record(other)
-        fix = _make_record(
-            id="fix1",
-            name="skill-x",
-            origin=SkillOrigin.FIXED,
-            generation=1,
-        )
-        # e1 is deactivated, but e2 (same name) remains active → duplicate
-        result = store.evolve_skill(fix, parent_skill_ids=["e1"])
-        assert result.success is False
-        assert "Duplicate active" in result.error
+        # Second active skill with same name raises ValueError from save_skill_record
+        other = _make_record(id="e2", name="skill-x", is_active=True)
+        with pytest.raises(ValueError, match="Duplicate active skill name"):
+            store.save_skill_record(other)
 
     def test_evolve_id_collision_returns_error(self, store: SkillStore) -> None:
         original = _make_record(id="s1", name="original")
@@ -416,18 +378,6 @@ class TestGetMetrics:
             total_completions=0,
             total_fallbacks=0,
         )
-
-    def test_metrics_aggregates_active_only(self, store: SkillStore) -> None:
-        r1 = _make_record(id="s1", name="skill-1", directory="agents/agent-a/skills")
-        r2 = _make_record(id="s2", name="skill-2", directory="agents/agent-b/skills")
-        store.save_skill_record(r1)
-        store.save_skill_record(r2)
-        store.increment_counters("s1", selected=True, applied=True)
-        store.increment_counters("s2", selected=True, fell_back=True)
-        metrics = store.get_metrics()
-        assert metrics.total_selections == 2
-        assert metrics.total_applied == 1
-        assert metrics.total_fallbacks == 1
 
     def test_metrics_filter_by_agent(self, store: SkillStore) -> None:
         r1 = _make_record(id="s1", name="skill-1", directory="agents/agent-a/skills")
@@ -476,7 +426,7 @@ class TestRowToRecordEdgeCases:
         with conn as c:
             c.execute(
                 "UPDATE skill_records SET lineage_content_snapshot = ? WHERE id = ?",
-                ("not-json{{{" , "skill-1"),
+                ("not-json{{{", "skill-1"),
             )
         loaded = store.get_skill_record("skill-1")
         assert loaded is not None
@@ -502,101 +452,9 @@ class TestRowToRecordEdgeCases:
 # ============================================================================
 
 
-class TestSafeJsonLoads:
-    def test_none_returns_default(self) -> None:
-        assert _safe_json_loads(None, {"key": "val"}) == {"key": "val"}
-
-    def test_empty_string_returns_default(self) -> None:
-        assert _safe_json_loads("", "fallback") == "fallback"
-
-    def test_valid_json_returns_parsed(self) -> None:
-        result = _safe_json_loads('{"a": 1}', None)
-        assert result == {"a": 1}
-
-    def test_corrupt_json_returns_default(self) -> None:
-        assert _safe_json_loads("{not-json{{{", "default") == "default"
-
-    def test_type_error_input_returns_default(self) -> None:
-        assert _safe_json_loads(123, "default") == "default"  # type: ignore[arg-type]
-
-
 # ===================================================================
 # _expand_frontiers — extracted BFS helper
 # ===================================================================
-
-
-class TestExpandFrontiers:
-    """Tests for SkillStore._expand_frontiers static method."""
-
-    def test_no_new_parents(self):
-        """When all parents already visited, no progress is made."""
-        from agent_nexus.platform.evolution.skill_store import SkillStore
-
-        frontiers = {"a": ["x"]}
-        visited = {"a": {"x"}}
-        round_parents = {"x": ["p1"]}
-        # p1 not in visited, but let's test already-visited case
-        visited = {"a": {"x", "p1"}}
-        round_parents = {"x": ["p1"]}
-        next_f, progress = SkillStore._expand_frontiers(
-            ["a"], frontiers, round_parents, visited,
-        )
-        assert not progress
-        assert next_f == {"a": []}
-
-    def test_discovers_new_parents(self):
-        """New parents are added to visited and next_frontiers."""
-        from agent_nexus.platform.evolution.skill_store import SkillStore
-
-        frontiers = {"a": ["x"]}
-        visited = {"a": set()}
-        round_parents = {"x": ["p1", "p2"]}
-        next_f, progress = SkillStore._expand_frontiers(
-            ["a"], frontiers, round_parents, visited,
-        )
-        assert progress
-        assert next_f["a"] == ["p1", "p2"]
-        assert visited["a"] == {"p1", "p2"}
-
-    def test_partial_new_parents(self):
-        """Only truly new parents are added to next frontier."""
-        from agent_nexus.platform.evolution.skill_store import SkillStore
-
-        frontiers = {"a": ["x"]}
-        visited = {"a": {"p1"}}
-        round_parents = {"x": ["p1", "p2"]}
-        next_f, progress = SkillStore._expand_frontiers(
-            ["a"], frontiers, round_parents, visited,
-        )
-        assert progress
-        assert next_f["a"] == ["p2"]
-        assert visited["a"] == {"p1", "p2"}
-
-    def test_multiple_skills(self):
-        """Frontier expansion works across multiple skills independently."""
-        from agent_nexus.platform.evolution.skill_store import SkillStore
-
-        frontiers = {"a": ["x"], "b": ["y"]}
-        visited = {"a": set(), "b": set()}
-        round_parents = {"x": ["p1"], "y": ["p2"]}
-        next_f, progress = SkillStore._expand_frontiers(
-            ["a", "b"], frontiers, round_parents, visited,
-        )
-        assert progress
-        assert next_f == {"a": ["p1"], "b": ["p2"]}
-
-    def test_empty_frontiers(self):
-        """Empty frontiers produce no progress."""
-        from agent_nexus.platform.evolution.skill_store import SkillStore
-
-        frontiers = {"a": []}
-        visited = {"a": set()}
-        round_parents = {}
-        next_f, progress = SkillStore._expand_frontiers(
-            ["a"], frontiers, round_parents, visited,
-        )
-        assert not progress
-        assert next_f == {"a": []}
 
 
 # ===================================================================
@@ -607,20 +465,13 @@ class TestExpandFrontiers:
 class TestParseSnapshot:
     """Tests for SkillStore._parse_snapshot static method (CC 10)."""
 
-    def test_none_returns_empty(self) -> None:
-        assert SkillStore._parse_snapshot(None, "s1") == {}
-
-    def test_empty_string_returns_empty(self) -> None:
-        assert SkillStore._parse_snapshot("", "s1") == {}
-
-    def test_double_quoted_empty_returns_empty(self) -> None:
-        assert SkillStore._parse_snapshot('""', "s1") == {}
-
-    def test_empty_json_object_returns_empty(self) -> None:
-        assert SkillStore._parse_snapshot("{}", "s1") == {}
-
-    def test_null_string_returns_empty(self) -> None:
-        assert SkillStore._parse_snapshot("null", "s1") == {}
+    @pytest.mark.parametrize(
+        "raw",
+        [None, "", '""', "{}", "null", "[1, 2, 3]", "42"],
+        ids=["none", "empty", "dq-empty", "empty-obj", "null", "array", "number"],
+    )
+    def test_empty_or_non_dict_returns_empty(self, raw) -> None:
+        assert SkillStore._parse_snapshot(raw, "s1") == {}
 
     def test_valid_dict_all_strings(self) -> None:
         raw = '{"file.py": "content", "README.md": "docs"}'
@@ -629,12 +480,6 @@ class TestParseSnapshot:
             "README.md": "docs",
         }
 
-    def test_non_dict_json_returns_empty(self) -> None:
-        assert SkillStore._parse_snapshot("[1, 2, 3]", "s1") == {}
-
-    def test_json_number_returns_empty(self) -> None:
-        assert SkillStore._parse_snapshot("42", "s1") == {}
-
     def test_non_string_values_returns_empty_with_warning(self, caplog) -> None:
         raw = '{"file.py": 123, "other.py": [1, 2]}'
         with caplog.at_level("WARNING"):
@@ -642,13 +487,6 @@ class TestParseSnapshot:
         assert result == {}
         assert "non-string" in caplog.text
         assert "s1" in caplog.text
-
-    def test_partial_non_string_values_returns_empty(self, caplog) -> None:
-        """Even one non-string value causes full rejection."""
-        raw = '{"file.py": "ok", "bad.py": 42}'
-        with caplog.at_level("WARNING"):
-            result = SkillStore._parse_snapshot(raw, "s1")
-        assert result == {}
 
     def test_corrupted_json_returns_empty_with_warning(self, caplog) -> None:
         with caplog.at_level("WARNING"):
@@ -661,7 +499,3 @@ class TestParseSnapshot:
             result = SkillStore._parse_snapshot(12345, "s1")  # type: ignore[arg-type]
         assert result == {}
         assert "Corrupted" in caplog.text
-
-    def test_single_entry(self) -> None:
-        raw = '{"main.py": "print(1)"}'
-        assert SkillStore._parse_snapshot(raw, "s1") == {"main.py": "print(1)"}

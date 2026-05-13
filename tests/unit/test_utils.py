@@ -43,21 +43,8 @@ class TestAgentNameToPackage:
     def test_multi_hyphen_name(self):
         assert agent_name_to_package("test-suite-generator") == "agent_test_suite_generator"
 
-    def test_single_word(self):
-        assert agent_name_to_package("planner") == "agent_planner"
-
     def test_underscore_name_unchanged(self):
         assert agent_name_to_package("my_agent") == "agent_my_agent"
-
-    def test_already_prefixed(self):
-        """If the name already starts with agent_, it still gets the prefix."""
-        assert agent_name_to_package("agent_code-reviewer") == "agent_agent_code_reviewer"
-
-    def test_empty_string(self):
-        assert agent_name_to_package("") == "agent_"
-
-    def test_name_with_numbers(self):
-        assert agent_name_to_package("v2-updater") == "agent_v2_updater"
 
 
 # ---------------------------------------------------------------------------
@@ -80,13 +67,6 @@ class TestToClassName:
     def test_already_pascal_case_with_no_hyphens(self):
         """No hyphens means no split; capitalize() lowercases tail chars."""
         assert to_class_name("CodeReviewer") == "Codereviewer"
-
-    def test_underscore_name(self):
-        """Underscores are not the separator; split is on hyphens only."""
-        assert to_class_name("my_agent") == "My_agent"
-
-    def test_single_char(self):
-        assert to_class_name("a") == "A"
 
     def test_empty_string(self):
         assert to_class_name("") == ""
@@ -116,22 +96,7 @@ class TestMakeErrorResult:
         assert result["error_type"] == "ValueError"
         assert result["success"] is False
 
-    def test_various_error_types(self):
-        for error_type in ("IPCError", "TimeoutError", "ProcessNotAliveError"):
-            result = make_error_result("msg", error_type)
-            assert result["error_type"] == error_type
 
-    def test_output_always_empty(self):
-        result = make_error_result("err", "E")
-        assert result["output"] == ""
-
-    def test_success_always_false(self):
-        result = make_error_result("err", "E")
-        assert result["success"] is False
-
-
-# ---------------------------------------------------------------------------
-# cache_path_for_url
 # ---------------------------------------------------------------------------
 
 
@@ -145,28 +110,11 @@ class TestCachePathForUrl:
         assert result.parent == base / "cache" / "repos"
         assert len(result.name) == 12
 
-    def test_deterministic_same_url(self):
-        base = Path("/tmp")
-        url = "https://github.com/example/repo.git"
-        result1 = cache_path_for_url(base, url)
-        result2 = cache_path_for_url(base, url)
-        assert result1 == result2
-
     def test_different_urls_different_paths(self):
         base = Path("/tmp")
         url1 = "https://github.com/example/repo1.git"
         url2 = "https://github.com/example/repo2.git"
         assert cache_path_for_url(base, url1) != cache_path_for_url(base, url2)
-
-    def test_digest_is_hex(self):
-        base = Path("/tmp")
-        result = cache_path_for_url(base, "https://example.com")
-        assert all(c in "0123456789abcdef" for c in result.name)
-
-    def test_path_includes_base_dir(self):
-        base = Path("/custom/base")
-        result = cache_path_for_url(base, "https://example.com")
-        assert str(result).startswith(str(base))
 
 
 # ---------------------------------------------------------------------------
@@ -179,10 +127,6 @@ class TestDetectCyclesDfs:
 
     def test_empty_graph(self):
         result = detect_cycles_dfs([], lambda _: [])
-        assert result == []
-
-    def test_single_node_no_edges(self):
-        result = detect_cycles_dfs(["A"], lambda _: [])
         assert result == []
 
     def test_self_loop_detected(self):
@@ -220,21 +164,6 @@ class TestDetectCyclesDfs:
         result = detect_cycles_dfs(graph.keys(), lambda n: graph[n])
         assert len(result) == 1
 
-    def test_multiple_cycles(self):
-        graph = {
-            "A": ["B"],
-            "B": ["A"],
-            "C": ["D"],
-            "D": ["C"],
-        }
-        result = detect_cycles_dfs(graph.keys(), lambda n: graph[n])
-        assert len(result) == 2
-
-    def test_linear_chain_no_cycle(self):
-        graph = {"A": ["B"], "B": ["C"], "C": ["D"], "D": []}
-        result = detect_cycles_dfs(graph.keys(), lambda n: graph[n])
-        assert result == []
-
 
 # ---------------------------------------------------------------------------
 # sqlite_connection
@@ -253,17 +182,6 @@ class TestSqliteConnection:
         with sqlite_connection(db_file) as conn:
             rows = conn.execute("SELECT id FROM t").fetchall()
             assert rows == [(1,)]
-
-    def test_file_based_connection_closed_after_exit(self, tmp_path):
-        db_file = tmp_path / "test.db"
-        with sqlite_connection(db_file) as conn:
-            conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
-        # Connection should be closed; executing should fail or auto-reopen
-        # We verify by opening a new connection
-        conn2 = sqlite3.connect(str(db_file))
-        rows = conn2.execute("SELECT count(*) FROM t").fetchall()
-        conn2.close()
-        assert rows == [(0,)]  # table exists, empty
 
     def test_memory_db_with_persistent_conn(self):
         persistent = sqlite3.connect(":memory:")

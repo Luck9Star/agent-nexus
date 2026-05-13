@@ -31,17 +31,16 @@
 
 | # | 约束 | 说明 |
 |---|------|------|
-| 1 | 零外部依赖（内部通信） | Router → Agent 只用 stdin/stdout，不用 HTTP 服务器 |
+| 1 | 零外部依赖（编排层） | 编排层（TaskGraph, ProcessManager, IPC, DSL）仅用 asyncio + aiosqlite + stdlib，不引入第三方 pip 包。Agency Pipeline 和 LLM 集成有自己的依赖（litellm, anthropic, openai 等） |
 | 2 | 编排层自建 | 参考 ClawTeam 实现，按需精简自建 |
 | 3 | MCP 为基 | 所有 Agent 暴露为 MCP Server |
 | 4 | SKILL.md 先行 | 每个 Agent 必须先有 SKILL.md，再实现代码 |
 | 5 | Runtime-First Hybrid | Python Runtime 优先，不完全抛弃 Tool Call |
 | 6 | Python Agent Runtime 不动 | Agent 内部代码（pydantic-ai、业务逻辑、Python 依赖）保持 Python，通过 MCP 与 Rust 平台通信 |
 | 7 | uv 管理不变 | venv 创建和依赖安装始终通过 uv，无论平台用 Python 还是 Rust |
-| 8 | rmcp 官方 SDK | Rust MCP 通信使用 rmcp crate（官方 Rust SDK），支持 stdio/SSE/StreamableHTTP |
-| 9 | axum HTTP 框架 | Rust HTTP 服务使用 axum（与 crates.io 同款） |
-| 10 | git2 Git 操作 | Rust Git 操作使用 git2 crate（libgit2 绑定），支持 clone、tag、sparse checkout |
-| 11 | semver 版本解析 | Rust 版本解析使用 semver crate，与 Python packaging 版本规范兼容 |
+| 8 | axum HTTP 框架 | Rust MCP Gateway 和 HTTP 服务使用 axum（JSON-RPC 2.0 over HTTP/SSE，替代 rmcp SDK） |
+| 9 | git2 Git 操作 | Rust Git 操作使用 git2 crate（libgit2 绑定），支持 clone、tag、sparse checkout |
+| 10 | semver 版本解析 | Rust 版本解析使用 semver crate，与 Python packaging 版本规范兼容 |
 
 ### 10.3 Token 优化约束
 
@@ -226,13 +225,12 @@ class TokenUsage:
 
 | Crate | 许可证 | 用途 |
 |-------|--------|------|
-| **rmcp** (modelcontextprotocol/rust-sdk) | MIT | MCP 官方 Rust SDK (3.2k⭐) |
+| **axum** | MIT | HTTP 框架（MCP Gateway JSON-RPC over HTTP/SSE） |
 | **tokio** | MIT | 异步运行时 |
 | **git2** | MIT/Apache-2.0 | Git 操作（libgit2 绑定） |
 | **serde** | MIT/Apache-2.0 | 序列化框架 |
 | **semver** | MIT/Apache-2.0 | 版本解析 |
 | **clap** | MIT/Apache-2.0 | CLI 框架 |
-| **dashmap** | MIT | 并发 HashMap |
 | **toml** | MIT/Apache-2.0 | TOML 解析 |
 | **yaml-rust2** | MIT/Apache-2.0 | YAML 解析 |
 
@@ -308,7 +306,7 @@ PermissionChecker 侧重**静态权限控制**（配置层面），SecurityCheck
 | 组件 | Python Implementation | Rust 重构 | 不迁移原因 |
 |------|----------------------|-----------|-----------|
 | Git Installer (subprocess→git) | ✅ Implemented | ✅ 重构（ap-fetcher） | 性能关键 |
-| MCP Gateway (FastMCP → rmcp) | ✅ Implemented | ✅ 重构 | 官方 SDK |
+| MCP Gateway (FastMCP → axum) | ✅ Implemented | ✅ 重构 | axum HTTP |
 | Agent Supervisor (asyncio → tokio) | ✅ Implemented | ✅ 重构 | 进程管理 |
 | CLI (Typer → clap) | ✅ Implemented | ✅ 重构 | 用户体验 |
 | Agent Runtime | Python | **不动** | MCP 边界 |

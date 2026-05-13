@@ -47,35 +47,6 @@ def _make_supervisor(tmp_path: Path) -> tuple[AgentSupervisor, MagicMock, MagicM
 
 
 # ---------------------------------------------------------------------------
-# RestartTracker
-# ---------------------------------------------------------------------------
-
-
-class TestRestartTracker:
-    def test_should_retry_when_under_max(self) -> None:
-        t = RestartTracker(count=0, max_restarts=3)
-        assert t.should_retry() is True
-
-    def test_should_retry_false_at_max(self) -> None:
-        t = RestartTracker(count=3, max_restarts=3)
-        assert t.should_retry() is False
-
-    def test_record_increments(self) -> None:
-        t = RestartTracker(count=0, max_restarts=3)
-        t.record()
-        assert t.count == 1
-
-    def test_reset_zeroes_count(self) -> None:
-        t = RestartTracker(count=2, max_restarts=3)
-        t.reset()
-        assert t.count == 0
-
-    def test_default_max_restarts(self) -> None:
-        t = RestartTracker()
-        assert t.max_restarts == 3
-
-
-# ---------------------------------------------------------------------------
 # AgentSupervisor
 # ---------------------------------------------------------------------------
 

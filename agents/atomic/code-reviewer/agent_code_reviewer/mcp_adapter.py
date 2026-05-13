@@ -8,6 +8,8 @@ Provides three MCP tools:
 
 from __future__ import annotations
 
+import json
+
 from agent_code_reviewer.models import CodeAnalysis
 from agent_code_reviewer.tools.analyze_code import analyze_code as _analyze
 from agent_code_reviewer.tools.check_patterns import check_patterns as _check
@@ -59,18 +61,20 @@ def create_mcp_server() -> object:
         }
 
     @mcp.tool()
-    def generate_review(analysis: dict, patterns: list[dict] | None = None) -> dict:
+    def generate_review(analysis: str, patterns: str | None = None) -> dict:
         """Generate a structured review report from analysis results.
 
         Compiles findings into a report with severity counts, suggestions,
         and an overall quality score (0-100).
         """
-        parsed_analysis = CodeAnalysis.model_validate(analysis)
+        # MCP inputSchema: str avoids ambiguous anyOf.
+        # Accept JSON strings, parse internally.
+        parsed_analysis = CodeAnalysis.model_validate(json.loads(analysis))
         parsed_patterns = None
         if patterns:
             from agent_code_reviewer.models import PatternMatch
 
-            parsed_patterns = [PatternMatch.model_validate(p) for p in patterns]
+            parsed_patterns = [PatternMatch.model_validate(p) for p in json.loads(patterns)]
         result = _review(parsed_analysis, parsed_patterns)
         return result.model_dump()
 

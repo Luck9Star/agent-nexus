@@ -114,7 +114,7 @@ agent-nexus/
 │   │   └── evolution/        # Self-evolution engine
 │   └── models/               # Shared data models
 ├── agents/                   # Agent packages (independent pyproject.toml each)
-│   ├── atomic/               # 11 Atomic Agents
+│   ├── atomic/               # 20 Atomic Agents
 │   └── composite/            # 5 Composite Agents
 ├── crates/                   # Rust platform rewrite
 │   ├── ap-core/              # TaskGraph · ProcessManager · StateMachine · DSL

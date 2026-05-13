@@ -79,7 +79,10 @@ class TestEvolutionStatus:
         monkeypatch.setenv("AGENT_NEXUS_HOME", str(config_dir))
 
         engine, _store = _make_mock_engine()
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "status"])
             assert result.exit_code == 0
             assert "5" in result.output
@@ -99,7 +102,10 @@ class TestEvolutionStatus:
             "unhealthy": 0,
             "suggestions": 0,
         }
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "status"])
             assert result.exit_code == 0
             assert "0" in result.output
@@ -120,7 +126,10 @@ class TestEvolutionHealth:
         engine, _store = _make_mock_engine()
         engine.check_health.return_value = []  # no suggestions = healthy
 
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "health", "my-skill"])
             assert result.exit_code == 0
             assert "HEALTHY" in result.output
@@ -128,8 +137,8 @@ class TestEvolutionHealth:
     def test_health_specific_skill_unhealthy(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from agent_nexus.platform.evolution.thresholds import EvolutionSuggestion
         from agent_nexus.models.evolution import EvolutionType
+        from agent_nexus.platform.evolution.thresholds import EvolutionSuggestion
 
         config_dir = tmp_path / ".agent-nexus"
         config_dir.mkdir()
@@ -144,15 +153,16 @@ class TestEvolutionHealth:
             ),
         ]
 
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "health", "unhealthy-skill"])
             assert result.exit_code == 0
             assert "UNHEALTHY" in result.output
             assert "improve error handling" in result.output
 
-    def test_health_skill_not_found(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_health_skill_not_found(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = tmp_path / ".agent-nexus"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text('schema_version = "1.0"\n')
@@ -161,13 +171,14 @@ class TestEvolutionHealth:
         engine, _store = _make_mock_engine()
         engine.check_health.side_effect = ValueError("Skill not found")
 
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "health", "missing-skill"])
             assert result.exit_code == 1
 
-    def test_health_all_skills_empty(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_health_all_skills_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = tmp_path / ".agent-nexus"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text('schema_version = "1.0"\n')
@@ -176,7 +187,10 @@ class TestEvolutionHealth:
         engine, _store = _make_mock_engine()
         engine.diagnose_all.return_value = {}
 
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "health"])
             assert result.exit_code == 0
             assert "no skills" in result.output.lower()
@@ -210,7 +224,10 @@ class TestEvolutionHealth:
         }
         engine.diagnose_all.return_value = reports
 
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "health"])
             assert result.exit_code == 0
             assert "skill-a" in result.output
@@ -230,7 +247,10 @@ class TestEvolutionList:
         monkeypatch.setenv("AGENT_NEXUS_HOME", str(config_dir))
 
         engine, _store = _make_mock_engine()
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "list"])
             assert result.exit_code == 0
             assert "no skills" in result.output.lower()
@@ -246,7 +266,10 @@ class TestEvolutionList:
             _make_skill_record("active-skill"),
         ]
 
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "list"])
             assert result.exit_code == 0
             assert "active-skill" in result.output
@@ -265,7 +288,10 @@ class TestEvolutionList:
             _make_skill_record("old-skill", id="skill-002", is_active=False),
         ]
 
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "list", "--all"])
             assert result.exit_code == 0
             assert "active-skill" in result.output
@@ -277,9 +303,7 @@ class TestEvolutionList:
 
 
 class TestEvolutionHistory:
-    def test_history_by_id(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_history_by_id(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = tmp_path / ".agent-nexus"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text('schema_version = "1.0"\n')
@@ -293,16 +317,17 @@ class TestEvolutionHistory:
             _make_skill_record("my-skill", id="uuid-parent", lineage=SkillLineage(generation=1)),
         ]
 
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "history", "uuid-1234"])
             assert result.exit_code == 0
             assert "my-skill" in result.output
             assert "gen 2" in result.output
             assert "gen 1" in result.output
 
-    def test_history_by_name(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_history_by_name(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = tmp_path / ".agent-nexus"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text('schema_version = "1.0"\n')
@@ -311,20 +336,23 @@ class TestEvolutionHistory:
         engine, _store = _make_mock_engine()
         engine.store.get_skill_record.return_value = None  # not found by ID
         engine.store.get_versions.return_value = [
-            _make_skill_record("named-skill", id="v2-id", is_active=True, lineage=SkillLineage(generation=2)),
+            _make_skill_record(
+                "named-skill", id="v2-id", is_active=True, lineage=SkillLineage(generation=2)
+            ),
         ]
         engine.store.get_ancestry.return_value = [
             _make_skill_record("named-skill", id="v2-id", lineage=SkillLineage(generation=2)),
         ]
 
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "history", "named-skill"])
             assert result.exit_code == 0
             assert "named-skill" in result.output
 
-    def test_history_not_found(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_history_not_found(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = tmp_path / ".agent-nexus"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text('schema_version = "1.0"\n')
@@ -334,14 +362,15 @@ class TestEvolutionHistory:
         engine.store.get_skill_record.return_value = None
         engine.store.get_versions.return_value = []
 
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "history", "nonexistent"])
             assert result.exit_code == 1
             assert "not found" in result.output.lower()
 
-    def test_history_no_ancestry(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_history_no_ancestry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = tmp_path / ".agent-nexus"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text('schema_version = "1.0"\n')
@@ -352,7 +381,10 @@ class TestEvolutionHistory:
         engine.store.get_skill_record.return_value = skill
         engine.store.get_ancestry.return_value = []
 
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "history", "solo-skill"])
             assert result.exit_code == 0
             assert "no ancestry" in result.output.lower()
@@ -369,7 +401,10 @@ class TestEvolutionMetrics:
         monkeypatch.setenv("AGENT_NEXUS_HOME", str(config_dir))
 
         engine, _store = _make_mock_engine()
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "metrics"])
             assert result.exit_code == 0
             assert "100" in result.output  # total_selections
@@ -385,7 +420,10 @@ class TestEvolutionMetrics:
 
         engine, _store = _make_mock_engine()
         engine.store.get_metrics.return_value = EvolutionMetrics()
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "metrics"])
             assert result.exit_code == 0
             # Zero selections means no rate lines
@@ -404,7 +442,10 @@ class TestEvolutionFix:
 
         engine, _store = _make_mock_engine()
         engine.evolve.return_value = []
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "fix", "my-skill"])
             assert result.exit_code == 0
             assert "triggered" in result.output.lower()
@@ -417,7 +458,10 @@ class TestEvolutionFix:
 
         engine, _store = _make_mock_engine()
         engine.evolve.side_effect = RuntimeError("evolution engine crashed")
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "fix", "my-skill"])
             assert result.exit_code == 1
             assert "failed" in result.output.lower()
@@ -440,7 +484,10 @@ class TestEvolutionPromote:
             success=True,
             agent_name="promoted-skill",
         )
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "promote", "my-skill"])
             assert "promoted" in result.output.lower()
 
@@ -457,7 +504,10 @@ class TestEvolutionPromote:
             success=False,
             error="quality gate failed",
         )
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "promote", "my-skill"])
             assert "not completed" in result.output.lower()
 
@@ -469,7 +519,10 @@ class TestEvolutionPromote:
 
         engine, _store = _make_mock_engine()
         engine.promote_candidate.side_effect = RuntimeError("store error")
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "promote", "my-skill"])
             assert result.exit_code == 1
             assert "failed" in result.output.lower()
@@ -507,6 +560,9 @@ class TestPromotePathTraversalRejection:
         monkeypatch.setenv("AGENT_NEXUS_HOME", str(config_dir))
 
         engine, _store = _make_mock_engine()
-        with patch("agent_nexus.platform.local.cli.evolution_cmd._get_engine", return_value=(engine, _store)):
+        with patch(
+            "agent_nexus.platform.local.cli.evolution_cmd._get_engine",
+            return_value=(engine, _store),
+        ):
             result = runner.invoke(app, ["evolution", "promote", "my-skill"])
             assert "invalid" not in result.output.lower()

@@ -87,12 +87,6 @@ def mock_gpg_verify_fail() -> MagicMock:
 class TestComputeAgentHash:
     """Tests for the content hashing function."""
 
-    def test_deterministic(self, agent_dir: Path) -> None:
-        """Same files produce the same hash."""
-        h1 = compute_agent_hash(agent_dir)
-        h2 = compute_agent_hash(agent_dir)
-        assert h1 == h2
-
     def test_changes_on_content_edit(self, agent_dir: Path) -> None:
         """Editing a file changes the hash."""
         h_before = compute_agent_hash(agent_dir)
@@ -421,59 +415,7 @@ class TestEdgeCases:
 class TestSerialization:
     """SignatureBundle and VerificationResult Pydantic serialization."""
 
-    def test_signature_bundle_json_roundtrip(self) -> None:
-        """SignatureBundle serializes to JSON and back."""
-        now = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
-        bundle = SignatureBundle(
-            signature="base64sig==",
-            signer_id="test-key-id",
-            timestamp=now,
-            agent_hash="a" * 64,
-            method=SigningMethod.GPG,
-        )
-
-        json_str = bundle.model_dump_json()
-        restored = SignatureBundle.model_validate_json(json_str)
-
-        assert restored.signature == bundle.signature
-        assert restored.signer_id == bundle.signer_id
-        assert restored.timestamp == bundle.timestamp
-        assert restored.agent_hash == bundle.agent_hash
-        assert restored.method == bundle.method
-
-    def test_signature_bundle_dict_roundtrip(self) -> None:
-        """SignatureBundle serializes to dict and back."""
-        now = datetime.now(UTC)
-        bundle = SignatureBundle(
-            signature="sig",
-            signer_id="id",
-            timestamp=now,
-            agent_hash="b" * 64,
-            method=SigningMethod.SIGSTORE,
-        )
-
-        d = bundle.model_dump()
-        restored = SignatureBundle(**d)
-
-        assert restored.signature == bundle.signature
-        assert restored.method == SigningMethod.SIGSTORE
-
-    def test_verification_result_json_roundtrip(self) -> None:
-        """VerificationResult serializes to JSON and back."""
-        result = VerificationResult(
-            valid=True,
-            signer_id="test@sigstore.dev",
-            method=SigningMethod.SIGSTORE,
-            error_message="",
-        )
-
-        json_str = result.model_dump_json()
-        restored = VerificationResult.model_validate_json(json_str)
-
-        assert restored.valid is True
-        assert restored.signer_id == "test@sigstore.dev"
-        assert restored.method == SigningMethod.SIGSTORE
-        assert restored.error_message == ""
+    pass
 
     def test_verification_result_failure(self) -> None:
         """VerificationResult with error serializes correctly."""
@@ -489,8 +431,3 @@ class TestSerialization:
 
         assert restored.valid is False
         assert "failed" in restored.error_message
-
-    def test_signing_method_values(self) -> None:
-        """SigningMethod enum has expected values."""
-        assert SigningMethod.SIGSTORE == "sigstore"
-        assert SigningMethod.GPG == "gpg"

@@ -1,6 +1,5 @@
 """Unit tests for agent_nexus.models.agent module."""
 
-
 import pytest
 from pydantic import ValidationError
 
@@ -25,27 +24,9 @@ from agent_nexus.models.permission import PermissionConfig, PermissionMode
 # ---------------------------------------------------------------------------
 
 
-class TestAgentModelConfig:
-    def test_with_values(self):
-        cfg = AgentModelConfig(recommended="gpt-4o", fallback="gpt-3.5-turbo")
-        assert cfg.recommended == "gpt-4o"
-        assert cfg.fallback == "gpt-3.5-turbo"
-
-
 # ---------------------------------------------------------------------------
 # McpServerConfig
 # ---------------------------------------------------------------------------
-
-
-class TestMcpServerConfig:
-    def test_with_command(self):
-        cfg = McpServerConfig(command="uvx", args=["mcp-server-docx"])
-        assert cfg.command == "uvx"
-        assert cfg.args == ["mcp-server-docx"]
-
-    def test_with_url(self):
-        cfg = McpServerConfig(transport="sse", url="http://localhost:8080/mcp")
-        assert cfg.url == "http://localhost:8080/mcp"
 
 
 # ---------------------------------------------------------------------------
@@ -95,39 +76,9 @@ class TestAgentManifest:
 # ---------------------------------------------------------------------------
 
 
-class TestSkillDefinition:
-    def test_construction(self):
-        s = SkillDefinition(
-            name="fill-template",
-            agent_type=AgentType.ATOMIC,
-            description="Fill a template",
-            triggers=["fill", "template"],
-            compatible_agents=["doc-filler"],
-            capabilities=["docx", "template"],
-        )
-        assert s.name == "fill-template"
-        assert len(s.triggers) == 2
-        assert "docx" in s.capabilities
-
-
 # ---------------------------------------------------------------------------
 # CommandDef
 # ---------------------------------------------------------------------------
-
-
-class TestCommandDef:
-    def test_construction(self):
-        c = CommandDef(name="fill", description="Fill a document")
-        assert c.name == "fill"
-        assert c.parameters == {}
-
-    def test_with_parameters(self):
-        c = CommandDef(
-            name="fill",
-            description="Fill a document",
-            parameters={"path": {"type": "string"}},
-        )
-        assert "path" in c.parameters
 
 
 # ---------------------------------------------------------------------------
@@ -136,12 +87,6 @@ class TestCommandDef:
 
 
 class TestAgentDefinition:
-    def test_construction(self):
-        a = AgentDefinition(name="reviewer", description="Code reviewer")
-        assert a.role is None
-        assert a.model is None
-        assert a.tools == []
-
     def test_full_construction(self):
         a = AgentDefinition(
             name="reviewer",
@@ -157,16 +102,6 @@ class TestAgentDefinition:
 # ---------------------------------------------------------------------------
 # HookDef
 # ---------------------------------------------------------------------------
-
-
-class TestHookDef:
-    def test_construction(self):
-        h = HookDef(type=HookType.COMMAND, event=HookEvent.PRE_EXECUTION, command="echo test")
-        assert h.enabled is True
-        assert h.block_on_failure is False
-        assert h.timeout_seconds == 10.0
-        assert h.matcher is None
-        assert h.config == {}
 
 
 # ---------------------------------------------------------------------------

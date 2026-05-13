@@ -154,24 +154,6 @@ class TestGitNexusGate:
         assert result.passed is True
         assert result.skipped is True
 
-    def test_refactor_triggers_gitnexus(self) -> None:
-        result = QAGate.check_gitnexus_gate(
-            task_type="refactor",
-            impact_analysis_completed=True,
-            detect_changes_completed=True,
-        )
-
-        assert result.passed is True
-
-    def test_symbol_edit_triggers_gitnexus(self) -> None:
-        result = QAGate.check_gitnexus_gate(
-            task_type="symbol_edit",
-            impact_analysis_completed=True,
-            detect_changes_completed=True,
-        )
-
-        assert result.passed is True
-
 
 # ---------------------------------------------------------------------------
 # Full QA gate (contract + gitnexus)

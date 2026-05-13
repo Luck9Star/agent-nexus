@@ -12,18 +12,20 @@ This directory contains the complete design documentation for Agent Nexus. All d
 | 2 | [02-clawteam-integration.md](02-clawteam-integration.md) | Self-built orchestration layer: TaskGraph, IPC, ProcessManager, OrchestrationDSL | ✅ Implemented |
 | 3 | [03-python-runtime.md](03-python-runtime.md) | Python Runtime execution layer: CaveAgent-based, SecurityChecker, isolation levels | ✅ Implemented |
 | 4 | [04-self-evolution.md](04-self-evolution.md) | Self-Evolution Engine: Atomic Skill Evolution, Composite Orchestration Evolution, Agent Promotion | ✅ Implemented |
-| 5 | [05-agent-system.md](05-agent-system.md) | Agent system: 11 Atomic Agents, 5 Composite Agents, 3 run modes, package structure | ⚠️ Design Goals |
+| 5 | [05-agent-system.md](05-agent-system.md) | Agent system: 20 Atomic Agents, 5 Composite Agents, 3 run modes, package structure | ⚠️ Design Goals |
 | 6 | [06-mcp-communication.md](06-mcp-communication.md) | MCP exposure, Gateway, communication matrix, Platform Router, SKILL.md spec | ⚠️ Partially implemented |
 | 7 | [07-marketplace.md](07-marketplace.md) | Git-based Agent distribution, installation flow, quality gates, versioning | ⚠️ Partially implemented |
 | 8 | [08-constraints-decisions.md](08-constraints-decisions.md) | Technical constraints, design decisions, security model, Rust rewrite scope | ✅ Implemented |
 | 9 | [09-implementation-plan.md](09-implementation-plan.md) | 7-phase implementation plan, risk matrix, timeline | ✅ Phase 0-10 Complete, Phase 11 TODO |
 | 10 | [10-cloud-local-architecture.md](10-cloud-local-architecture.md) | Git distribution model, local architecture, Python implementation, Rust migration path | ✅ Implemented |
 | 12 | [12-atomic-agents-improvement-plan.md](12-atomic-agents-improvement-plan.md) | Atomic Agents 借鉴改进方案 P0-P4（Schema/Hook/Token/Context/Reflect） | ✅ Implemented |
+| 13 | [13-feature-roadmap-design.md](13-feature-roadmap-design.md) | Feature roadmap: P0-P2 5 modules detailed design (P2P/Gateway/Marketplace/Extension/Evolution) | ✅ Implemented |
+| 14 | [14-reasoning-protocol.md](14-reasoning-protocol.md) | Reasoning protocol design for Agent decision-making | ✅ Implemented |
 | A | [appendix.md](appendix.md) | OrchestrationDSL TOML schemas, Agent type comparison, model tier config, reference projects | ✅ Implemented |
 | T | [testing.md](testing.md) | Test suite overview, coverage, conventions, run instructions | ✅ Live document |
 | C | [capability-testing.md](capability-testing.md) | Contract-driven capability tests: 80 tests, 3 agent tiers × 2 modes × 2 validation levels | ⚠️ ~40% Implemented |
 |   | [configuration.md](configuration.md) | Full config schema, environment variables, priority chain, migration | ✅ Live document |
-|   | [cli.md](cli.md) | Complete CLI reference — 24 commands with usage examples | ✅ Live document |
+|   | [cli.md](cli.md) | Complete CLI reference — all platform commands with usage examples | ✅ Live document |
 |   | [quick-start.md](quick-start.md) | 5-minute setup guide: install → init → config → run | ✅ Live document |
 
 ## Architecture at a Glance
@@ -60,7 +62,21 @@ For new contributors, the recommended reading order is:
 14. **testing.md** — Testing conventions and coverage
 15. **capability-testing.md** — Agent capability contract testing framework
 
-## Archived Documents
+## Audit & Review Reports
+
+| Document | Description |
+|----------|-------------|
+| [audit-report-SERENA.md](audit-report-SERENA.md) | Serena audit report (initial) |
+| [audit-report-SERENA-v2.md](audit-report-SERENA-v2.md) | Serena audit report v2 |
+| [audit-report-SERENA-v3.md](audit-report-SERENA-v3.md) | Serena audit report v3 |
+| [rust-review-report.md](rust-review-report.md) | Rust crate review |
+| [rust-deep-review-v2.md](rust-deep-review-v2.md) | Rust deep review v2 |
+| [code-review-2026-04-23.md](code-review-2026-04-23.md) | Code review snapshot |
+| [complexity-analysis.md](complexity-analysis.md) | Code complexity analysis |
+| [test-audit-report.md](test-audit-report.md) | Test suite audit |
+| [agency-review-report.md](agency-review-report.md) | Agency pipeline review |
+| [cli-alignment-report.md](cli-alignment-report.md) | CLI alignment verification |
+| [TODO-FIXME.md](TODO-FIXME.md) | Tracked TODO/FIXME items |
 
 Documents that have been completed or superseded are moved to [archive/](archive/):
 

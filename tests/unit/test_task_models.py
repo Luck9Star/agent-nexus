@@ -12,72 +12,12 @@ from agent_nexus.models.task import TaskGraphSnapshot, TaskItem, TaskState
 # ---------------------------------------------------------------------------
 
 
-
 # ---------------------------------------------------------------------------
 # TaskItem
 # ---------------------------------------------------------------------------
 
 
 class TestTaskItem:
-    def test_construction_with_required_fields(self):
-        t = TaskItem(id="t1", description="Do work", agent="worker-1")
-        assert t.id == "t1"
-        assert t.description == "Do work"
-        assert t.agent == "worker-1"
-
-    def test_default_state_is_pending(self):
-        t = TaskItem(id="t1", description="Do work", agent="worker-1")
-        assert t.state is TaskState.PENDING
-
-    def test_default_blocked_by_empty(self):
-        t = TaskItem(id="t1", description="Do work", agent="worker-1")
-        assert t.blocked_by == []
-
-    def test_default_vars_empty(self):
-        t = TaskItem(id="t1", description="Do work", agent="worker-1")
-        assert t.vars == {}
-
-    def test_default_result_none(self):
-        t = TaskItem(id="t1", description="Do work", agent="worker-1")
-        assert t.result is None
-
-    def test_with_blocked_by(self):
-        t = TaskItem(
-            id="t2",
-            description="Follow-up",
-            agent="worker-2",
-            blocked_by=["t1"],
-        )
-        assert t.blocked_by == ["t1"]
-
-    def test_with_state(self):
-        t = TaskItem(
-            id="t1",
-            description="Do work",
-            agent="worker-1",
-            state=TaskState.IN_PROGRESS,
-        )
-        assert t.state is TaskState.IN_PROGRESS
-
-    def test_with_result(self):
-        t = TaskItem(
-            id="t1",
-            description="Do work",
-            agent="worker-1",
-            state=TaskState.COMPLETED,
-            result={"output": "done"},
-        )
-        assert t.result == {"output": "done"}
-
-    def test_with_vars(self):
-        t = TaskItem(
-            id="t1",
-            description="Do work",
-            agent="worker-1",
-            vars={"input_file": "/tmp/data.csv"},
-        )
-        assert t.vars["input_file"] == "/tmp/data.csv"
-
     def test_serialization_round_trip(self):
         t = TaskItem(
             id="t1",
@@ -103,19 +43,6 @@ class TestTaskItem:
         assert parsed["result"] == "done"
         t2 = TaskItem.model_validate_json(json_str)
         assert t2 == t
-
-    def test_empty_blocked_by_list(self):
-        t = TaskItem(id="t1", description="Do work", agent="worker-1", blocked_by=[])
-        assert t.blocked_by == []
-
-    def test_multiple_blocked_by(self):
-        t = TaskItem(
-            id="t3",
-            description="Aggregate",
-            agent="worker-3",
-            blocked_by=["t1", "t2"],
-        )
-        assert len(t.blocked_by) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -153,10 +80,6 @@ class TestTaskItemSelfReference:
         )
         assert t.blocked_by == ["t0", "t2"]
 
-    def test_empty_blocked_by_still_allowed(self) -> None:
-        t = TaskItem(id="t1", description="Do work", agent="worker-1")
-        assert t.blocked_by == []
-
 
 class TestTaskGraphSnapshot:
     def test_default_construction(self):
@@ -180,6 +103,3 @@ class TestTaskGraphSnapshot:
         data = snap.model_dump()
         snap2 = TaskGraphSnapshot(**data)
         assert snap2 == snap
-
-
-

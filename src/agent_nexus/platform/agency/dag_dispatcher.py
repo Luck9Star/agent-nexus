@@ -243,9 +243,9 @@ class DAGDispatcher:
         return upstream if upstream else None
 
     def close(self) -> None:
-        """Shut down the thread pool, waiting for in-flight work."""
+        """Shut down the thread pool without blocking for in-flight work."""
         if self._pool is not None:
-            self._pool.shutdown(wait=True)
+            self._pool.shutdown(wait=False, cancel_futures=True)
             self._pool = None
 
     @property

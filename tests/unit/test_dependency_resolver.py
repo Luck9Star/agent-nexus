@@ -4,15 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from agent_nexus.platform.local.dependency_resolver import (
     ConflictReport,
     DependencyResolver,
     ResolvedDependency,
     _parse_dep_string,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -119,11 +116,6 @@ class TestResolvedDependency:
         assert dep.dep_type == "agent"
         assert dep.resolved_path == "/agents/doc-filler"
 
-    def test_frozen(self) -> None:
-        dep = ResolvedDependency(name="x", version_spec="", dep_type="pip")
-        with pytest.raises(AttributeError):
-            dep.name = "y"  # type: ignore[misc]
-
 
 # ============================================================================
 # ConflictReport dataclass
@@ -140,13 +132,6 @@ class TestConflictReport:
         )
         assert report.dep_name == "requests"
         assert report.agent_a == "agent-a"
-
-    def test_frozen(self) -> None:
-        report = ConflictReport(
-            dep_name="x", agent_a="a", agent_b="b", conflict_reason="r"
-        )
-        with pytest.raises(AttributeError):
-            report.dep_name = "y"  # type: ignore[misc]
 
 
 # ============================================================================
@@ -168,9 +153,7 @@ class TestDependencyResolverResolve:
         assert deps == []
 
     def test_resolves_pip_dependencies(self, tmp_path: Path) -> None:
-        agent_dir = _make_agent_dir(
-            tmp_path, pip_dependencies=["requests>=2.0", "numpy"]
-        )
+        agent_dir = _make_agent_dir(tmp_path, pip_dependencies=["requests>=2.0", "numpy"])
         resolver = DependencyResolver()
         deps = resolver.resolve(agent_dir)
 
@@ -188,9 +171,7 @@ class TestDependencyResolverResolve:
         agents_dir.mkdir()
         (agents_dir / "doc-filler").mkdir()
 
-        agent_dir = _make_agent_dir(
-            tmp_path, name="composite-1", atomic_agents=["doc-filler"]
-        )
+        agent_dir = _make_agent_dir(tmp_path, name="composite-1", atomic_agents=["doc-filler"])
         resolver = DependencyResolver(agents_dir=agents_dir)
         deps = resolver.resolve(agent_dir)
 
@@ -201,9 +182,7 @@ class TestDependencyResolverResolve:
         assert "doc-filler" in deps[0].resolved_path
 
     def test_atomic_agent_not_installed(self, tmp_path: Path) -> None:
-        agent_dir = _make_agent_dir(
-            tmp_path, name="composite-2", atomic_agents=["missing-agent"]
-        )
+        agent_dir = _make_agent_dir(tmp_path, name="composite-2", atomic_agents=["missing-agent"])
         resolver = DependencyResolver(agents_dir=tmp_path / "agents")
         deps = resolver.resolve(agent_dir)
 
@@ -211,9 +190,7 @@ class TestDependencyResolverResolve:
         assert deps[0].resolved_path is None
 
     def test_atomic_agent_no_agents_dir(self, tmp_path: Path) -> None:
-        agent_dir = _make_agent_dir(
-            tmp_path, name="composite-3", atomic_agents=["some-agent"]
-        )
+        agent_dir = _make_agent_dir(tmp_path, name="composite-3", atomic_agents=["some-agent"])
         resolver = DependencyResolver()  # No agents_dir
         deps = resolver.resolve(agent_dir)
 

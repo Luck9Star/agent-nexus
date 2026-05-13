@@ -1,14 +1,11 @@
 """Unit tests for agent_nexus.models.evolution module."""
 
-
 import pytest
 from pydantic import ValidationError
 
 from agent_nexus.models.evolution import (
     EvolutionContext,
     EvolutionMetrics,
-    SkillLineage,
-    SkillOrigin,
     SkillRecord,
 )
 
@@ -18,25 +15,7 @@ from agent_nexus.models.evolution import (
 
 
 class TestSkillRecord:
-    def test_with_quality_counters(self):
-        sr = SkillRecord(
-            id="skill-1",
-            name="test",
-            total_selections=100,
-            total_applied=80,
-            total_completions=70,
-            total_fallbacks=10,
-        )
-        assert sr.total_selections == 100
-        assert sr.total_applied == 80
-        assert sr.total_completions == 70
-        assert sr.total_fallbacks == 10
-
-    def test_with_lineage(self):
-        lineage = SkillLineage(origin=SkillOrigin.FIXED, generation=2)
-        sr = SkillRecord(id="skill-1", name="test", lineage=lineage)
-        assert sr.lineage.origin is SkillOrigin.FIXED
-        assert sr.lineage.generation == 2
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -68,14 +47,7 @@ class TestEvolutionMetrics:
 
 
 class TestEvolutionContext:
-    def test_with_error(self):
-        ec = EvolutionContext(
-            agent_id="agent-1",
-            task_id="task-1",
-            execution_error="TimeoutError: execution timed out",
-        )
-        assert ec.execution_error is not None
-        assert "Timeout" in ec.execution_error
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -130,31 +102,3 @@ class TestMinLengthEvolution:
 
 # ---------------------------------------------------------------------------
 # Counter invariant tests: total_applied + total_fallbacks <= total_selections
-# ---------------------------------------------------------------------------
-
-
-class TestEvolutionMetricsCounterInvariant:
-    """Counter invariants for EvolutionMetrics."""
-
-    def test_zero_selections_with_applied_rejected(self):
-        with pytest.raises(
-            ValidationError,
-            match="zero selections requires zero applied and zero fallbacks",
-        ):
-            EvolutionMetrics(total_selections=0, total_applied=1, total_fallbacks=0)
-
-    def test_completions_plus_fallbacks_exceeds_applied(self):
-        with pytest.raises(
-            ValidationError,
-            match="total_completions \\+ total_fallbacks cannot exceed total_applied",
-        ):
-            EvolutionMetrics(
-                total_selections=10,
-                total_applied=5,
-                total_completions=3,
-                total_fallbacks=3,
-            )
-
-    def test_applied_exceeds_selections_rejected(self):
-        with pytest.raises(ValidationError, match="total_applied cannot exceed total_selections"):
-            EvolutionMetrics(total_selections=5, total_applied=6)

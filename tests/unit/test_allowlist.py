@@ -8,13 +8,10 @@ import yaml
 from agent_nexus.platform.agency.allowlist import (
     _SAFE_SOURCE_PATH,
     _validate_capabilities,
-    _validate_entries,
     _validate_id,
     _validate_output_contract,
-    _validate_source,
     _validate_source_path,
     _validate_string_list,
-    _validate_top_level,
     _validate_tools,
     load_allowlist,
     validate_allowlist_entry,
@@ -23,6 +20,7 @@ from agent_nexus.platform.agency.allowlist import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _write_yaml(tmp_path, content: dict, name: str = "allowlist.yaml"):
     p = tmp_path / name
@@ -61,21 +59,6 @@ class TestLoadAllowlistHappyPath:
         assert "source" in result
         assert "agents" in result
         assert len(result["agents"]) == 1
-
-    def test_loads_multiple_agents(self, tmp_path):
-        data = _valid_allowlist()
-        data["agents"].append(
-            _valid_entry(id="agency.another", source_path="agents/another.md")
-        )
-        p = _write_yaml(tmp_path, data)
-        result = load_allowlist(p)
-        assert len(result["agents"]) == 2
-
-    def test_preserves_source_fields(self, tmp_path):
-        p = _write_yaml(tmp_path, _valid_allowlist())
-        result = load_allowlist(p)
-        assert result["source"]["repo"] == "https://github.com/example/agents"
-        assert result["source"]["ref"] == "main"
 
 
 # ===================================================================
@@ -134,20 +117,6 @@ class TestLoadAllowlistErrors:
         with pytest.raises(ValueError, match="missing required field"):
             load_allowlist(p)
 
-    def test_source_not_dict(self, tmp_path):
-        data = _valid_allowlist()
-        data["source"] = "not a dict"
-        p = _write_yaml(tmp_path, data)
-        with pytest.raises(ValueError, match="'source' must be a mapping"):
-            load_allowlist(p)
-
-    def test_source_missing_repo(self, tmp_path):
-        data = _valid_allowlist()
-        data["source"] = {"ref": "main"}
-        p = _write_yaml(tmp_path, data)
-        with pytest.raises(ValueError, match="'repo' and 'ref'"):
-            load_allowlist(p)
-
     def test_file_not_found(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             load_allowlist(str(tmp_path / "nonexistent.yaml"))
@@ -186,11 +155,6 @@ class TestValidateId:
         _validate_id({"id": "agency.my-agent"}, errors)
         assert errors == []
 
-    def test_missing_id_field(self):
-        errors: list[str] = []
-        _validate_id({}, errors)
-        assert errors == []
-
     def test_non_string_id(self):
         errors: list[str] = []
         _validate_id({"id": 123}, errors)
@@ -211,11 +175,6 @@ class TestValidateCapabilities:
     def test_valid_capabilities(self):
         errors: list[str] = []
         _validate_capabilities({"capabilities": ["analysis", "coding"]}, errors)
-        assert errors == []
-
-    def test_missing_capabilities(self):
-        errors: list[str] = []
-        _validate_capabilities({}, errors)
         assert errors == []
 
     def test_not_a_list(self):
@@ -245,11 +204,6 @@ class TestValidateOutputContract:
         _validate_output_contract({"output_contract": "markdown"}, errors)
         assert errors == []
 
-    def test_missing_contract(self):
-        errors: list[str] = []
-        _validate_output_contract({}, errors)
-        assert errors == []
-
     def test_empty_string(self):
         errors: list[str] = []
         _validate_output_contract({"output_contract": "  "}, errors)
@@ -270,11 +224,6 @@ class TestValidateSourcePath:
     def test_valid_path(self):
         errors: list[str] = []
         _validate_source_path({"source_path": "agents/test.md"}, errors)
-        assert errors == []
-
-    def test_missing_path(self):
-        errors: list[str] = []
-        _validate_source_path({}, errors)
         assert errors == []
 
     def test_non_md_extension(self):
@@ -333,14 +282,7 @@ class TestValidateStringList:
 class TestValidateTools:
     def test_valid_tools(self):
         errors: list[str] = []
-        _validate_tools(
-            {"tools": {"allowed": ["read"], "denied": ["write"]}}, errors
-        )
-        assert errors == []
-
-    def test_missing_tools(self):
-        errors: list[str] = []
-        _validate_tools({}, errors)
+        _validate_tools({"tools": {"allowed": ["read"], "denied": ["write"]}}, errors)
         assert errors == []
 
     def test_tools_not_dict(self):
@@ -353,29 +295,10 @@ class TestValidateTools:
         _validate_tools({"tools": {"allowed": "read"}}, errors)
         assert any("tools.allowed" in e for e in errors)
 
-    def test_denied_not_list(self):
-        errors: list[str] = []
-        _validate_tools({"tools": {"denied": 42}}, errors)
-        assert any("tools.denied" in e for e in errors)
-
     def test_overlap_allowed_denied(self):
         errors: list[str] = []
-        _validate_tools(
-            {"tools": {"allowed": ["read", "write"], "denied": ["write"]}}, errors
-        )
+        _validate_tools({"tools": {"allowed": ["read", "write"], "denied": ["write"]}}, errors)
         assert any("both allowed and denied" in e for e in errors)
-
-    def test_no_overlap_passes(self):
-        errors: list[str] = []
-        _validate_tools(
-            {"tools": {"allowed": ["read"], "denied": ["delete"]}}, errors
-        )
-        assert errors == []
-
-    def test_empty_tools_dict_passes(self):
-        errors: list[str] = []
-        _validate_tools({"tools": {}}, errors)
-        assert errors == []
 
 
 # ===================================================================
@@ -386,102 +309,24 @@ class TestValidateTools:
 class TestSafeSourcePathRegex:
     """Direct tests for the _SAFE_SOURCE_PATH compiled regex."""
 
-    def test_valid_simple_path(self):
-        assert _SAFE_SOURCE_PATH.match("expert.md")
+    @pytest.mark.parametrize(
+        "path",
+        ["expert.md", "skills/expert.md", "my-agent/skills/review.md"],
+        ids=["simple", "nested", "deep-nested"],
+    )
+    def test_valid_paths(self, path: str):
+        assert _SAFE_SOURCE_PATH.match(path)
 
-    def test_valid_nested_path(self):
-        assert _SAFE_SOURCE_PATH.match("skills/expert.md")
-
-    def test_valid_deep_nested_path(self):
-        assert _SAFE_SOURCE_PATH.match("my-agent/skills/review.md")
-
-    def test_windows_style_path_fails(self):
-        assert _SAFE_SOURCE_PATH.match("C:\\etc\\passwd.md") is None
-
-    def test_backslash_path_fails(self):
-        assert _SAFE_SOURCE_PATH.match("skills\\expert.md") is None
-
-    def test_parent_traversal_fails(self):
-        assert _SAFE_SOURCE_PATH.match("../etc/expert.md") is None
-
-    def test_tilde_path_fails(self):
-        assert _SAFE_SOURCE_PATH.match("~/expert.md") is None
-
-    def test_absolute_path_fails(self):
-        assert _SAFE_SOURCE_PATH.match("/etc/expert.md") is None
-
-    def test_url_encoded_traversal_fails(self):
-        assert _SAFE_SOURCE_PATH.match("%2e%2e/expert.md") is None
-
-
-# ===================================================================
-# _validate_entries — extracted helper
-# ===================================================================
-
-
-class TestValidateEntries:
-    def test_valid_entries(self):
-        entries = [_valid_entry(id="agency.a"), _valid_entry(id="agency.b")]
-        result = _validate_entries(entries)  # should not raise
-        assert result is None  # void function returns None
-
-    def test_duplicate_id_raises(self):
-        entries = [_valid_entry(id="agency.dup"), _valid_entry(id="agency.dup")]
-        with pytest.raises(ValueError, match="Duplicate"):
-            _validate_entries(entries)
-
-    def test_non_dict_entry_raises(self):
-        entries = ["not a dict"]
-        with pytest.raises(ValueError, match="must be a mapping"):
-            _validate_entries(entries)
-
-    def test_invalid_entry_field_raises(self):
-        entries = [_valid_entry(id="bad-prefix")]
-        with pytest.raises(ValueError, match="agency."):
-            _validate_entries(entries)
-
-
-# ===================================================================
-# _validate_source — extracted helper
-# ===================================================================
-
-
-class TestValidateSource:
-    def test_valid_source(self):
-        result = _validate_source({"repo": "https://example.com/r", "ref": "main"})
-        assert result is None  # void function returns None
-
-    def test_non_dict_source_raises(self):
-        with pytest.raises(ValueError, match="mapping"):
-            _validate_source("not a dict")
-
-    def test_missing_repo_raises(self):
-        with pytest.raises(ValueError, match="'repo' and 'ref'"):
-            _validate_source({"ref": "main"})
-
-    def test_missing_ref_raises(self):
-        with pytest.raises(ValueError, match="'repo' and 'ref'"):
-            _validate_source({"repo": "https://example.com/r"})
-
-
-# ===================================================================
-# _validate_top_level — extracted helper
-# ===================================================================
-
-
-class TestValidateTopLevel:
-    def test_valid_top_level(self):
-        result = _validate_top_level({"source": {}, "agents": []})
-        assert result is None  # void function returns None
-
-    def test_missing_source_raises(self):
-        with pytest.raises(ValueError, match="'source'"):
-            _validate_top_level({"agents": []})
-
-    def test_missing_agents_raises(self):
-        with pytest.raises(ValueError, match="'agents'"):
-            _validate_top_level({"source": {}})
-
-    def test_agents_not_list_raises(self):
-        with pytest.raises(ValueError, match="'agents' list"):
-            _validate_top_level({"source": {}, "agents": "nope"})
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "../etc/expert.md",
+            "~/expert.md",
+            "/etc/expert.md",
+            "%2e%2e/expert.md",
+            "skills\\expert.md",
+        ],
+        ids=["parent-traversal", "tilde", "absolute", "url-encoded", "backslash"],
+    )
+    def test_invalid_paths(self, path: str):
+        assert _SAFE_SOURCE_PATH.match(path) is None

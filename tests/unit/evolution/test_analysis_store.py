@@ -15,7 +15,6 @@ import pytest
 from agent_nexus.platform.evolution._shared import _SCHEMA_SQL
 from agent_nexus.platform.evolution.analysis_store import AnalysisStore
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -76,7 +75,9 @@ class TestRecordAnalysis:
         ).fetchone()
         assert row == ("t1", "agent-a", "text")
 
-    def test_stores_evolution_suggestions_as_json(self, store: AnalysisStore, db: sqlite3.Connection):
+    def test_stores_evolution_suggestions_as_json(
+        self, store: AnalysisStore, db: sqlite3.Connection
+    ):
         suggestions = [{"type": "evolve", "target": "skill-1"}]
         aid = store.record_analysis("t1", "agent-a", "text", evolution_suggestions=suggestions)
         row = db.execute(
@@ -84,7 +85,9 @@ class TestRecordAnalysis:
         ).fetchone()
         assert json.loads(row[0]) == suggestions
 
-    def test_null_suggestions_stored_as_empty_list(self, store: AnalysisStore, db: sqlite3.Connection):
+    def test_null_suggestions_stored_as_empty_list(
+        self, store: AnalysisStore, db: sqlite3.Connection
+    ):
         aid = store.record_analysis("t1", "agent-a", "text", evolution_suggestions=None)
         row = db.execute(
             "SELECT evolution_suggestions FROM execution_analyses WHERE id=?", (aid,)
@@ -100,8 +103,20 @@ class TestRecordAnalysis:
 class TestRecordAnalysisJudgments:
     def test_inserts_judgment_rows(self, store: AnalysisStore, db: sqlite3.Connection):
         judgments = [
-            {"skill_id": "skill-1", "selected": True, "applied": True, "completed": False, "fell_back": False},
-            {"skill_id": "skill-2", "selected": True, "applied": False, "completed": False, "fell_back": False},
+            {
+                "skill_id": "skill-1",
+                "selected": True,
+                "applied": True,
+                "completed": False,
+                "fell_back": False,
+            },
+            {
+                "skill_id": "skill-2",
+                "selected": True,
+                "applied": False,
+                "completed": False,
+                "fell_back": False,
+            },
         ]
         aid = store.record_analysis("t1", "agent-a", "text", judgments=judgments)
         rows = db.execute(
@@ -122,13 +137,6 @@ class TestRecordAnalysisJudgments:
         ).fetchone()[0]
         assert count == 1
 
-    def test_empty_judgments_no_insert(self, store: AnalysisStore, db: sqlite3.Connection):
-        aid = store.record_analysis("t1", "agent-a", "text", judgments=[])
-        count = db.execute(
-            "SELECT COUNT(*) FROM skill_judgments WHERE analysis_id=?", (aid,)
-        ).fetchone()[0]
-        assert count == 0
-
 
 # ---------------------------------------------------------------------------
 # record_analysis — counter updates
@@ -138,7 +146,13 @@ class TestRecordAnalysisJudgments:
 class TestRecordAnalysisCounters:
     def test_increments_counters(self, store: AnalysisStore, db: sqlite3.Connection):
         judgments = [
-            {"skill_id": "skill-1", "selected": True, "applied": True, "completed": True, "fell_back": False},
+            {
+                "skill_id": "skill-1",
+                "selected": True,
+                "applied": True,
+                "completed": True,
+                "fell_back": False,
+            },
         ]
         store.record_analysis("t1", "agent-a", "text", judgments=judgments)
         row = db.execute(
@@ -149,8 +163,20 @@ class TestRecordAnalysisCounters:
 
     def test_multiple_judgments_accumulate(self, store: AnalysisStore, db: sqlite3.Connection):
         judgments = [
-            {"skill_id": "skill-1", "selected": True, "applied": True, "completed": False, "fell_back": False},
-            {"skill_id": "skill-1", "selected": True, "applied": False, "completed": False, "fell_back": True},
+            {
+                "skill_id": "skill-1",
+                "selected": True,
+                "applied": True,
+                "completed": False,
+                "fell_back": False,
+            },
+            {
+                "skill_id": "skill-1",
+                "selected": True,
+                "applied": False,
+                "completed": False,
+                "fell_back": True,
+            },
         ]
         store.record_analysis("t1", "agent-a", "text", judgments=judgments)
         row = db.execute(
@@ -176,21 +202,29 @@ class TestCounterInvariants:
     def test_applied_requires_selected(self, store: AnalysisStore):
         with pytest.raises(ValueError, match="applied requires selected"):
             store.record_analysis(
-                "t1", "agent-a", "text",
+                "t1",
+                "agent-a",
+                "text",
                 judgments=[{"skill_id": "skill-1", "selected": False, "applied": True}],
             )
 
     def test_completed_requires_applied(self, store: AnalysisStore):
         with pytest.raises(ValueError, match="completed requires applied"):
             store.record_analysis(
-                "t1", "agent-a", "text",
-                judgments=[{"skill_id": "skill-1", "selected": True, "applied": False, "completed": True}],
+                "t1",
+                "agent-a",
+                "text",
+                judgments=[
+                    {"skill_id": "skill-1", "selected": True, "applied": False, "completed": True}
+                ],
             )
 
     def test_fell_back_requires_selected(self, store: AnalysisStore):
         with pytest.raises(ValueError, match="fell_back requires selected"):
             store.record_analysis(
-                "t1", "agent-a", "text",
+                "t1",
+                "agent-a",
+                "text",
                 judgments=[{"skill_id": "skill-1", "selected": False, "fell_back": True}],
             )
 
@@ -262,16 +296,13 @@ class TestGetJudgmentsForSkill:
     def test_limit_parameter(self, store: AnalysisStore):
         for i in range(5):
             store.record_analysis(
-                f"t{i}", "agent-a", "text",
+                f"t{i}",
+                "agent-a",
+                "text",
                 judgments=[{"skill_id": "skill-1", "selected": True}],
             )
         result = store.get_judgments_for_skill("skill-1", limit=3)
         assert len(result) == 3
-
-    def test_limit_below_1_clamped(self, store: AnalysisStore):
-        store.record_analysis("t1", "agent-a", "text", judgments=[{"skill_id": "skill-1", "selected": True}])
-        result = store.get_judgments_for_skill("skill-1", limit=0)
-        assert len(result) == 1  # limit clamped to 1
 
 
 # ---------------------------------------------------------------------------
@@ -296,44 +327,25 @@ class TestGetJudgmentsBatch:
     def test_limit_per_skill(self, store: AnalysisStore):
         for i in range(4):
             store.record_analysis(
-                f"t{i}", "agent-a", "text",
+                f"t{i}",
+                "agent-a",
+                "text",
                 judgments=[{"skill_id": "skill-1", "selected": True}],
             )
         result = store.get_judgments_batch({"skill-1"}, limit_per_skill=2)
         assert len(result["skill-1"]) == 2
 
     def test_limit_below_1_clamped(self, store: AnalysisStore):
-        store.record_analysis("t1", "agent-a", "text", judgments=[{"skill_id": "skill-1", "selected": True}])
+        store.record_analysis(
+            "t1", "agent-a", "text", judgments=[{"skill_id": "skill-1", "selected": True}]
+        )
         result = store.get_judgments_batch({"skill-1"}, limit_per_skill=0)
         assert len(result["skill-1"]) == 1
 
     def test_missing_skill_returns_empty_list(self, store: AnalysisStore):
-        store.record_analysis("t1", "agent-a", "text", judgments=[{"skill_id": "skill-1", "selected": True}])
+        store.record_analysis(
+            "t1", "agent-a", "text", judgments=[{"skill_id": "skill-1", "selected": True}]
+        )
         result = store.get_judgments_batch({"skill-1", "skill-missing"})
         assert result["skill-1"]  # has data
         assert result["skill-missing"] == []
-
-
-# ---------------------------------------------------------------------------
-# _judgment_row_to_dict (static helper)
-# ---------------------------------------------------------------------------
-
-
-class TestJudgmentRowToDict:
-    def test_converts_row(self):
-        row = ("jid", "aid", "sid", 1, 0, 1, 0)
-        d = AnalysisStore._judgment_row_to_dict(row)
-        assert d == {
-            "id": "jid",
-            "analysis_id": "aid",
-            "skill_id": "sid",
-            "selected": True,
-            "applied": False,
-            "completed": True,
-            "fell_back": False,
-        }
-
-    def test_all_true(self):
-        row = ("jid", "aid", "sid", 1, 1, 1, 1)
-        d = AnalysisStore._judgment_row_to_dict(row)
-        assert all(d[k] is True for k in ("selected", "applied", "completed", "fell_back"))

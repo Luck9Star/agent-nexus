@@ -162,10 +162,12 @@ class TestTaskGraphAsyncOps:
     def test_async_get_ready_tasks(self, tmp_path: Path) -> None:
         """aget_ready_tasks returns unblocked pending tasks."""
         tg = TaskGraph(":memory:")
-        tg.add_tasks([
-            _make_task("ready-1"),
-            _make_task("blocked-1", blocked_by=["ready-1"]),
-        ])
+        tg.add_tasks(
+            [
+                _make_task("ready-1"),
+                _make_task("blocked-1", blocked_by=["ready-1"]),
+            ]
+        )
 
         result = asyncio.run(tg.aget_ready_tasks())
         assert len(result) == 1
@@ -174,10 +176,12 @@ class TestTaskGraphAsyncOps:
     def test_async_get_blocked_tasks(self, tmp_path: Path) -> None:
         """aget_blocked_tasks returns tasks with unresolved deps."""
         tg = TaskGraph(":memory:")
-        tg.add_tasks([
-            _make_task("root"),
-            _make_task("blocked", blocked_by=["root"]),
-        ])
+        tg.add_tasks(
+            [
+                _make_task("root"),
+                _make_task("blocked", blocked_by=["root"]),
+            ]
+        )
 
         result = asyncio.run(tg.aget_blocked_tasks())
         assert len(result) == 1
@@ -186,10 +190,12 @@ class TestTaskGraphAsyncOps:
     def test_async_snapshot(self, tmp_path: Path) -> None:
         """aget_snapshot returns complete graph state."""
         tg = TaskGraph(":memory:")
-        tg.add_tasks([
-            _make_task("s1"),
-            _make_task("s2", blocked_by=["s1"]),
-        ])
+        tg.add_tasks(
+            [
+                _make_task("s1"),
+                _make_task("s2", blocked_by=["s1"]),
+            ]
+        )
 
         snapshot = asyncio.run(tg.aget_snapshot())
         assert len(snapshot.tasks) == 2
@@ -242,7 +248,7 @@ class TestTaskGraphLargeDAG:
 
         tasks = [_make_task("t0")]
         for i in range(1, 100):
-            tasks.append(_make_task(f"t{i}", blocked_by=[f"t{i-1}"]))
+            tasks.append(_make_task(f"t{i}", blocked_by=[f"t{i - 1}"]))
 
         start = time.monotonic()
         tg.add_tasks(tasks)
@@ -280,7 +286,7 @@ class TestTaskGraphLargeDAG:
         """Cycle detection on 100-task DAG completes quickly."""
         tg = TaskGraph(str(tmp_path / "cycle-perf.db"))
 
-        tasks = [_make_task(f"t{i}", blocked_by=[f"t{i-1}"] if i > 0 else []) for i in range(100)]
+        tasks = [_make_task(f"t{i}", blocked_by=[f"t{i - 1}"] if i > 0 else []) for i in range(100)]
         tg.add_tasks(tasks)
 
         start = time.monotonic()
@@ -303,10 +309,12 @@ class TestTaskGraphStateTransitions:
     def test_start_blocked_task_raises(self, tmp_path: Path) -> None:
         """Starting a task with unresolved deps raises ValueError."""
         tg = TaskGraph(str(tmp_path / "blocked.db"))
-        tg.add_tasks([
-            _make_task("blocker"),
-            _make_task("blocked", blocked_by=["blocker"]),
-        ])
+        tg.add_tasks(
+            [
+                _make_task("blocker"),
+                _make_task("blocked", blocked_by=["blocker"]),
+            ]
+        )
 
         with pytest.raises(ValueError, match="unresolved dependencies"):
             tg.start_task("blocked")
@@ -360,11 +368,13 @@ class TestTaskGraphStateTransitions:
     def test_clear_resets_graph(self, tmp_path: Path) -> None:
         """clear() removes all tasks and dependencies."""
         tg = TaskGraph(str(tmp_path / "clear.db"))
-        tg.add_tasks([
-            _make_task("a"),
-            _make_task("b", blocked_by=["a"]),
-            _make_task("c", blocked_by=["b"]),
-        ])
+        tg.add_tasks(
+            [
+                _make_task("a"),
+                _make_task("b", blocked_by=["a"]),
+                _make_task("c", blocked_by=["b"]),
+            ]
+        )
 
         assert len(tg.get_snapshot().tasks) == 3
 

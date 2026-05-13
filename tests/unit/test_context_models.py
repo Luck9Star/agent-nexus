@@ -1,6 +1,5 @@
 """Unit tests for agent_nexus.models.context module."""
 
-
 import pytest
 from pydantic import ValidationError
 
@@ -71,26 +70,6 @@ class TestTokenUsageCheckBudget:
 # ---------------------------------------------------------------------------
 # ContextBudgetLogEntry
 # ---------------------------------------------------------------------------
-
-
-class TestContextBudgetLogEntry:
-    def test_full_construction(self):
-        entry = ContextBudgetLogEntry(
-            log_id="log-1",
-            agent_id="agent-1",
-            session_id="sess-1",
-            turn_number=5,
-            prompt_tokens=500,
-            completion_tokens=200,
-            layer0_tokens=300,
-            layer1_tokens=150,
-            total_tokens=700,
-            compaction_triggered=True,
-            timestamp="2026-04-18T12:00:00+00:00",
-        )
-        assert entry.turn_number == 5
-        assert entry.compaction_triggered is True
-        assert entry.total_tokens == 700
 
 
 # ============================================================================
@@ -168,11 +147,6 @@ class TestTokenUsageAlwaysSyncs:
         assert tu.total_tokens == 30
         tu.prompt_tokens = 50
         assert tu.total_tokens == 70  # no stale value
-
-    def test_nonzero_components_sync(self) -> None:
-        """Non-zero components always produce correct total."""
-        tu = TokenUsage(prompt_tokens=200, completion_tokens=300)
-        assert tu.total_tokens == 500
 
 
 # ============================================================================

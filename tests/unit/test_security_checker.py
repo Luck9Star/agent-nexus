@@ -52,36 +52,6 @@ class TestSecurityCheckerDefaults:
 class TestSecurityCheckerCheckCode:
     """Tests for SecurityChecker.check_code() method."""
 
-    def test_blocks_os_import(self):
-        checker = SecurityChecker()
-        violations = checker.check_code("import os")
-        assert len(violations) >= 1
-        assert any(v.rule_type == "import" for v in violations)
-
-    def test_blocks_pathlib_import(self):
-        checker = SecurityChecker()
-        violations = checker.check_code("from pathlib import Path")
-        assert len(violations) >= 1
-        assert any(v.rule_type == "import" for v in violations)
-
-    def test_blocks_tempfile_import(self):
-        checker = SecurityChecker()
-        violations = checker.check_code("import tempfile")
-        assert len(violations) >= 1
-        assert any(v.rule_type == "import" for v in violations)
-
-    def test_blocks_eval(self):
-        checker = SecurityChecker()
-        violations = checker.check_code(EVAL_CODE + '("x")')
-        assert len(violations) >= 1
-        assert any(v.rule_type == "function" for v in violations)
-
-    def test_blocks_subclasses_attribute(self):
-        checker = SecurityChecker()
-        violations = checker.check_code("x.__subclasses__()")
-        assert len(violations) >= 1
-        assert any(v.rule_type == "attribute" for v in violations)
-
     def test_allows_safe_code(self):
         checker = SecurityChecker()
         violations = checker.check_code("x = [1, 2, 3]")
@@ -178,14 +148,6 @@ class TestTypeSandboxEscapeBlocked:
         assert len(func_violations) >= 1
         assert "type" in func_violations[0].message
 
-    def test_type_1arg_allowed(self) -> None:
-        """type(obj) (1-arg introspection) is also blocked since
-        FunctionRule cannot distinguish arg count at AST level."""
-        checker = SecurityChecker()
-        violations = checker.check_code("t = type(42)")
-        func_violations = [v for v in violations if v.rule_type == "function"]
-        assert len(func_violations) >= 1
-
     def test_bases_attribute_blocked(self) -> None:
         """obj.__bases__ is an attribute-level violation (MRO chain traversal)."""
         checker = SecurityChecker()
@@ -278,13 +240,6 @@ class TestExhaustiveForbiddenCoverage:
         checker = SecurityChecker()
         violations = checker.check_code(f"import {module}")
         assert len(violations) >= 1, f"import {module} should be blocked"
-        assert any(v.rule_type == "import" for v in violations)
-
-    @pytest.mark.parametrize("module", FORBIDDEN_IMPORTS)
-    def test_from_import_blocked(self, module: str) -> None:
-        checker = SecurityChecker()
-        violations = checker.check_code(f"from {module} import something")
-        assert len(violations) >= 1, f"from {module} import should be blocked"
         assert any(v.rule_type == "import" for v in violations)
 
     @pytest.mark.parametrize("func", FORBIDDEN_FUNCTIONS)

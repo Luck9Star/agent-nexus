@@ -111,13 +111,18 @@ class SkillStore:
         total_completions, total_fallbacks) are **preserved** — they
         are managed atomically via :meth:`increment_counters` and
         :meth:`record_analysis`.
+
+        Raises:
+            ValueError: If another active skill with the same name already
+                exists (enforced by unique index on ``name WHERE is_active=1``).
         """
         with self._conn(immediate=True) as conn:
             lin = record.lineage
             snapshot_json = json.dumps(lin.content_snapshot or {}, ensure_ascii=False)
             diff_json = lin.content_diff or ""
-            conn.execute(
-                """
+            try:
+                conn.execute(
+                    """
                 INSERT INTO skill_records (
                     id, name, version,
                     lineage_origin, lineage_generation,
@@ -142,24 +147,31 @@ class SkillStore:
                     total_fallbacks = total_fallbacks,
                     updated_at = excluded.updated_at
                 """,
-                (
-                    record.id,
-                    record.name,
-                    record.version,
-                    lin.origin.value,
-                    lin.generation,
-                    diff_json,
-                    snapshot_json,
-                    record.directory,
-                    int(record.is_active),
-                    record.total_selections,
-                    record.total_applied,
-                    record.total_completions,
-                    record.total_fallbacks,
-                    record.first_seen.isoformat(),
-                    record.last_updated.isoformat(),
-                ),
-            )
+                    (
+                        record.id,
+                        record.name,
+                        record.version,
+                        lin.origin.value,
+                        lin.generation,
+                        diff_json,
+                        snapshot_json,
+                        record.directory,
+                        int(record.is_active),
+                        record.total_selections,
+                        record.total_applied,
+                        record.total_completions,
+                        record.total_fallbacks,
+                        record.first_seen.isoformat(),
+                        record.last_updated.isoformat(),
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                if "unique" in str(exc).lower() and "name" in str(exc).lower():
+                    raise ValueError(
+                        f"Duplicate active skill name: skill '{record.name}' "
+                        f"(id={record.id}) conflicts with existing active skill"
+                    ) from exc
+                raise
             # Sync lineage parents
             conn.execute(
                 "DELETE FROM skill_lineage_parents WHERE skill_id = ?",
@@ -816,8 +828,7 @@ class SkillStore:
             return loaded
         non_str = [k for k, v in loaded.items() if not isinstance(v, str)]
         logger.warning(
-            "content_snapshot for skill '%s' has non-string "
-            "values in keys %s, discarding snapshot",
+            "content_snapshot for skill '%s' has non-string values in keys %s, discarding snapshot",
             skill_id,
             non_str,
         )

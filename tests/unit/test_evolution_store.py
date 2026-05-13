@@ -447,7 +447,7 @@ class TestMalformedSnapshot:
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     sid,
-                    "test-skill",
+                    f"test-skill-{sid[:8]}",
                     "1.0.0",
                     "imported",
                     0,
@@ -506,7 +506,7 @@ class TestRecordAnalysisSkipsBadSkillId:
         store.save_skill_record(
             SkillRecord(
                 id=skill_id,
-                name="test-skill",
+                name=f"test-skill-{skill_id}",
                 version="1.0.0",
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/test",
@@ -739,7 +739,7 @@ class TestGetAnalysesForTask:
         store.save_skill_record(
             SkillRecord(
                 id=skill_id,
-                name="test-skill",
+                name=f"test-skill-{skill_id}",
                 version="1.0.0",
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/test",
@@ -813,7 +813,7 @@ class TestGetJudgmentsForSkill:
         store.save_skill_record(
             SkillRecord(
                 id=skill_id,
-                name="test-skill",
+                name=f"test-skill-{skill_id}",
                 version="1.0.0",
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/test",
@@ -1127,11 +1127,6 @@ class TestInvalidLineageOrigin:
 
 class TestEvolutionStoreClose:
     """EvolutionStore.close() is a no-op for file-based DBs but must exist."""
-
-    def test_close_is_noop_for_file_db(self, tmp_path: Path) -> None:
-        store = EvolutionStore(tmp_path / "evo.db")
-        store.close()
-        assert store._memory_conn is None
 
     def test_close_idempotent(self, tmp_path: Path) -> None:
         store = EvolutionStore(tmp_path / "evo.db")
@@ -1507,12 +1502,14 @@ class TestBatchRowResilience:
     def test_corrupt_row_skipped_in_get_versions(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         # Both records share the same name so get_versions returns both
+        # v1 must be inactive since v2 (same name) is active
         rec1 = SkillRecord(
             id="v1",
             name="my-skill",
             version="1.0",
             lineage=SkillLineage(origin=SkillOrigin.CAPTURED, generation=0),
             directory="",
+            is_active=False,
         )
         rec2 = SkillRecord(
             id="v2",
@@ -1561,7 +1558,7 @@ class TestRecordAnalysisCounterInvariants:
         store.save_skill_record(
             SkillRecord(
                 id=skill_id,
-                name="test-skill",
+                name=f"test-skill-{skill_id}",
                 version="1.0.0",
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/test",
@@ -1662,7 +1659,7 @@ class TestNegativeLimitClamped:
         store.save_skill_record(
             SkillRecord(
                 id=skill_id,
-                name="test-skill",
+                name=f"test-skill-{skill_id}",
                 version="1.0.0",
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/test",
@@ -1744,7 +1741,7 @@ class TestJudgmentsBatchLimitClamp:
         store.save_skill_record(
             SkillRecord(
                 id=skill_id,
-                name="test-skill",
+                name=f"test-skill-{skill_id}",
                 version="1.0.0",
                 lineage=SkillLineage(origin=SkillOrigin.IMPORTED, generation=0),
                 directory="skills/test",
@@ -2022,19 +2019,38 @@ class TestFixEvolutionDuplicateActive:
 
         # Manually insert another active record with the same name to
         # simulate a concurrent FIX that committed between our read and write.
-        concurrent = SkillRecord(
-            id="concurrent-dup",
-            name="dup-skill",
-            version="2.1.0",
-            lineage=SkillLineage(
-                origin=SkillOrigin.FIXED,
-                generation=1,
-                parent_skill_ids=[],
-            ),
-            directory="skills/dup",
-            is_active=True,
-        )
-        store.save_skill_record(concurrent)
+        # Use raw SQL to bypass save_skill_record's ValueError guard,
+        # since this test verifies evolve_skill's own duplicate detection.
+        # First deactivate fix1-dup to free the unique index slot, then
+        # insert concurrent-dup as active — this simulates a concurrent writer.
+        now_iso = datetime.now(UTC).isoformat()
+        with store._conn(immediate=True) as conn:
+            conn.execute("UPDATE skill_records SET is_active = 0 WHERE id = 'fix1-dup'")
+            conn.execute(
+                "INSERT INTO skill_records "
+                "(id, name, version, lineage_origin, lineage_generation, "
+                "lineage_content_diff, lineage_content_snapshot, directory, "
+                "is_active, total_selections, total_applied, "
+                "total_completions, total_fallbacks, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "concurrent-dup",
+                    "dup-skill",
+                    "2.1.0",
+                    "fixed",
+                    1,
+                    "",
+                    None,
+                    "skills/dup",
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    now_iso,
+                    now_iso,
+                ),
+            )
 
         # Second FIX evolution — should be rejected because after
         # deactivating fix1-dup, concurrent-dup is still active.

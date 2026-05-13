@@ -289,6 +289,8 @@ class DeferredAgentRegistry:
 
             return self._parse_tool_response(info, response)
 
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             logger.warning(
                 "Failed to fetch tools from agent '%s': %s. "

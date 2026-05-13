@@ -621,9 +621,7 @@ class TaskComposer:
             task_completed=bool(result.qa_passed),
             skill_ids_used=agent_ids,
             execution_output=(
-                str(result.integrated.merged_sections)[:5000]
-                if result.integrated
-                else None
+                str(result.integrated.merged_sections)[:5000] if result.integrated else None
             ),
         )
 
@@ -636,9 +634,7 @@ class TaskComposer:
                 result.evolution_triggered = True
             logger.info(
                 "TaskComposer: evolution analysis completed (suggestions=%d)",
-                len(analysis.suggestions)
-                if isinstance(analysis, AnalysisResult)
-                else 0,
+                len(analysis.suggestions) if isinstance(analysis, AnalysisResult) else 0,
             )
         except Exception:
             logger.warning(

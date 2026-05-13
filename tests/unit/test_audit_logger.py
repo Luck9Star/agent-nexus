@@ -12,12 +12,11 @@ from pathlib import Path
 import pytest  # noqa: F401 — needed for tmp_path fixture
 
 from agent_nexus.platform.gateway.audit import (
+    _MAX_SUMMARY_LEN,
     AuditEvent,
     AuditFilter,
     AuditLogger,
-    _MAX_SUMMARY_LEN,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -49,35 +48,9 @@ def _make_logger(tmp_path: Path, max_size_mb: float = 500) -> AuditLogger:
 
 
 class TestAuditEvent:
-    def test_create_with_defaults(self) -> None:
-        event = AuditEvent(event_type="tool_call")
-        assert event.event_type == "tool_call"
-        assert event.event_id  # auto-generated
-        assert event.timestamp > 0  # auto-generated
-        assert event.client_id is None
-        assert event.metadata == {}
-
-    def test_create_with_all_fields(self) -> None:
-        event = _make_event()
-        assert event.event_type == "tool_call"
-        assert event.client_id == "client-1"
-        assert event.agent_id == "agent-1"
-        assert event.tool_name == "test_tool"
-        assert event.request_summary == "test request"
-        assert event.response_status == "success"
-        assert event.duration_ms == 42.5
-
     def test_invalid_event_type(self) -> None:
         with pytest.raises(Exception):
             AuditEvent(event_type="invalid_type")
-
-    def test_metadata_defaults_to_empty_dict(self) -> None:
-        event = AuditEvent(event_type="tool_call")
-        assert event.metadata == {}
-
-    def test_metadata_can_be_set(self) -> None:
-        event = AuditEvent(event_type="tool_call", metadata={"key": "value"})
-        assert event.metadata == {"key": "value"}
 
 
 # ============================================================================

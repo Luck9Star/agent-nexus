@@ -197,20 +197,14 @@ class SecurityCheck(BaseCheck):
             if isinstance(node, ast.Call):
                 func_name = self._get_call_name(node)
                 if func_name in _FORBIDDEN_CALLS:
-                    findings.append(
-                        f"{path.name}:{node.lineno} uses {func_name}()"
-                    )
+                    findings.append(f"{path.name}:{node.lineno} uses {func_name}()")
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == "subprocess":
-                        findings.append(
-                            f"{path.name}:{node.lineno} imports subprocess"
-                        )
+                        findings.append(f"{path.name}:{node.lineno} imports subprocess")
             elif isinstance(node, ast.ImportFrom):
                 if node.module == "subprocess":
-                    findings.append(
-                        f"{path.name}:{node.lineno} imports from subprocess"
-                    )
+                    findings.append(f"{path.name}:{node.lineno} imports from subprocess")
 
         return findings
 
@@ -292,9 +286,7 @@ class TestCoverageCheck(BaseCheck):
                 message="No tests/ directory found",
             )
 
-        test_files = list(tests_dir.rglob("test_*.py")) + list(
-            tests_dir.rglob("*_test.py")
-        )
+        test_files = list(tests_dir.rglob("test_*.py")) + list(tests_dir.rglob("*_test.py"))
         if not test_files:
             return CheckResult(
                 check_name=self.name,
@@ -360,7 +352,10 @@ class QualityGate:
                 result = check.run(agent_dir)
             except Exception as exc:
                 logger.warning(
-                    "Check %s raised %s: %s", check.name, type(exc).__name__, exc,
+                    "Check %s raised %s: %s",
+                    check.name,
+                    type(exc).__name__,
+                    exc,
                 )
                 result = CheckResult(
                     check_name=check.name or type(check).__name__,

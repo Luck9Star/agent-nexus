@@ -30,6 +30,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 
 from agent_nexus.models.agent import AgentManifest
 from agent_nexus.models.external_mcp import ExternalServerConfig
@@ -43,6 +44,7 @@ from agent_nexus.platform.gateway.tool_adapter import (
 )
 from agent_nexus.platform.orchestration.ipc import IPCError
 from agent_nexus.platform.orchestration.process_manager import ProcessManager
+from agent_nexus.platform.runtime.permission_checker import PermissionChecker
 from agent_nexus.platform.utils import IPC_FATAL_ERROR_TYPES
 
 if TYPE_CHECKING:
@@ -121,7 +123,9 @@ class MCPGateway:
         """
         # Security: activation is a write operation — require auth
         _, sec_err = await self._check_tool_access(
-            "search_and_activate", "gateway", _api_key,
+            "search_and_activate",
+            "gateway",
+            _api_key,
         )
         if sec_err:
             return sec_err
@@ -135,6 +139,8 @@ class MCPGateway:
                 schemas = await self._registry.activate_agent(manifest.name)
                 await self._register_agent_tools(manifest.name)
                 return f"- {manifest.name}: {manifest.description} ({len(schemas)} tools loaded)"
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 logger.error(
                     "Failed to activate agent '%s': %s",
@@ -149,12 +155,19 @@ class MCPGateway:
         header += "(tools now available):\n"
         return header + "\n".join(activated)
 
-    async def _list_agents(self) -> str:
+    async def _list_agents(self, _api_key: str | None = None) -> str:
         """List all registered agents with their status.
 
         Returns a formatted summary showing each agent's name, type,
         status (core / activated / available), and tool count.
         """
+        _, sec_err = await self._check_tool_access(
+            "list_agents",
+            "gateway",
+            _api_key,
+        )
+        if sec_err:
+            return sec_err
         lines: list[str] = ["## Registered Agents\n"]
 
         core_names = {ci.name for ci in self._registry.list_core_agents()}
@@ -180,7 +193,7 @@ class MCPGateway:
 
         return "\n".join(lines)
 
-    async def _agent_info(self, name: str) -> str:
+    async def _agent_info(self, name: str, _api_key: str | None = None) -> str:
         """Get detailed information about a specific agent.
 
         Args:
@@ -190,6 +203,13 @@ class MCPGateway:
             Detailed agent information including manifest metadata,
             activation status, and available tools.
         """
+        _, sec_err = await self._check_tool_access(
+            "agent_info",
+            "gateway",
+            _api_key,
+        )
+        if sec_err:
+            return sec_err
         info = self._registry.get_agent_info(name)
         if info is None:
             return f"Agent '{name}' not found."
@@ -403,7 +423,9 @@ class MCPGateway:
         if self._authenticator is not None:
             if api_key is None:
                 await self._log_audit(
-                    tool_name, agent_id, "auth_failed",
+                    tool_name,
+                    agent_id,
+                    "auth_failed",
                     "No API key provided",
                 )
                 return None, f"Error: authentication required for tool '{tool_name}'"
@@ -411,7 +433,9 @@ class MCPGateway:
                 client = self._authenticator.authenticate(api_key)
             except PermissionError:
                 await self._log_audit(
-                    tool_name, agent_id, "auth_failed",
+                    tool_name,
+                    agent_id,
+                    "auth_failed",
                     "Invalid API key",
                 )
                 return None, f"Error: authentication failed for tool '{tool_name}'"
@@ -419,13 +443,17 @@ class MCPGateway:
         if self._access_checker is not None:
             if not self._access_checker.is_tool_allowed(client, tool_name):
                 await self._log_audit(
-                    tool_name, agent_id, "denied",
+                    tool_name,
+                    agent_id,
+                    "denied",
                     f"Tool access denied by policy for client '{client.client_id}'",
                 )
                 return None, f"Error: access denied for tool '{tool_name}'"
             if not self._access_checker.check_rate_limit(client.client_id):
                 await self._log_audit(
-                    tool_name, agent_id, "rate_limited",
+                    tool_name,
+                    agent_id,
+                    "rate_limited",
                     f"Rate limit exceeded for client '{client.client_id}'",
                 )
                 return None, f"Error: rate limit exceeded for tool '{tool_name}'"
@@ -450,7 +478,8 @@ class MCPGateway:
                     agent_name,
                     exc_info=True,
                 )
-        return f"Error: {result.get('error', 'unknown failure')}"
+        msg = result.get("error", "unknown failure")
+        raise ToolError(msg)
 
     def _make_tool_func(
         self,
@@ -474,34 +503,60 @@ class MCPGateway:
         async def _invoke(**kwargs: Any) -> str:
             info, health_err = self._check_agent_health(adapter.agent_name, adapter)
             if health_err:
-                return health_err
+                raise ToolError(health_err.removeprefix("Error: "))
             assert info is not None  # guaranteed when health_err is None
 
             # Security: authenticate -> authorize -> rate-limit
             api_key = kwargs.pop("_api_key", None)
             _, sec_err = await self._check_tool_access(
-                display_name, adapter.agent_name, api_key,
+                display_name,
+                adapter.agent_name,
+                api_key,
             )
             if sec_err:
-                return sec_err
+                raise ToolError(sec_err.removeprefix("Error: "))
+
+            # Runtime permission check: agent manifest permissions
+            if info.manifest.permissions is not None:
+                checker = PermissionChecker(info.manifest.permissions)
+                decision = checker.check_tool(adapter.tool_name)
+                if not decision.allowed:
+                    await self._log_audit(
+                        display_name,
+                        adapter.agent_name,
+                        "denied",
+                        decision.reason,
+                    )
+                    raise ToolError(decision.reason)
 
             try:
                 result = await adapter.execute(info.handle, kwargs)
             except (TimeoutError, OSError, ConnectionError, IPCError) as exc:
                 self._cleanup_agent_registration(adapter.agent_name)
                 await self._log_audit(
-                    display_name, adapter.agent_name, "error",
+                    display_name,
+                    adapter.agent_name,
+                    "error",
                     f"IPC failed: {exc}",
                 )
-                return (
-                    f"Error: IPC failed for agent "
-                    f"'{adapter.agent_name}' [{type(exc).__name__}]: {exc}"
-                )
+                raise ToolError(
+                    f"IPC failed for agent '{adapter.agent_name}' [{type(exc).__name__}]: {exc}"
+                ) from exc
 
-            response = self._handle_ipc_result(result, adapter.agent_name)
-            status = "success" if result.get("success") else "error"
+            try:
+                response = self._handle_ipc_result(result, adapter.agent_name)
+            except ToolError:
+                await self._log_audit(
+                    display_name,
+                    adapter.agent_name,
+                    "error",
+                    result.get("error", "unknown failure")[:200],
+                )
+                raise
             await self._log_audit(
-                display_name, adapter.agent_name, status,
+                display_name,
+                adapter.agent_name,
+                "success",
                 response[:200],
             )
             return response
@@ -697,23 +752,40 @@ class MCPGateway:
             # Security: same chain as internal tools
             api_key = kwargs.pop("_api_key", None)
             _, sec_err = await self._check_tool_access(
-                display_name, "external", api_key,
+                display_name,
+                "external",
+                api_key,
             )
             if sec_err:
-                return sec_err
+                raise ToolError(sec_err.removeprefix("Error: "))
 
             try:
-                result = await adapter.call_tool(tool_name, kwargs)
+                text_output, raw_blocks, is_error = await adapter.call_tool(tool_name, kwargs)
+                if is_error:
+                    await self._log_audit(
+                        display_name,
+                        "external",
+                        "error",
+                        text_output[:200],
+                    )
+                    raise ToolError(text_output)
                 await self._log_audit(
-                    display_name, "external", "success",
-                    result[:200] if isinstance(result, str) else str(result)[:200],
+                    display_name,
+                    "external",
+                    "success",
+                    text_output[:200],
                 )
-                return result
+                return text_output
             except RuntimeError as exc:
                 await self._log_audit(
-                    display_name, "external", "error", str(exc),
+                    display_name,
+                    "external",
+                    "error",
+                    str(exc),
                 )
-                return f"Error: {exc}"
+                raise ToolError(str(exc)) from exc
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 logger.error(
                     "External tool '%s' call failed: %s [%s]",
@@ -722,10 +794,12 @@ class MCPGateway:
                     type(exc).__name__,
                 )
                 await self._log_audit(
-                    display_name, "external", "error",
+                    display_name,
+                    "external",
+                    "error",
                     f"{type(exc).__name__}: {exc}",
                 )
-                return f"Error: {type(exc).__name__}: {exc}"
+                raise ToolError(f"{type(exc).__name__}: {exc}") from exc
 
         return _invoke
 

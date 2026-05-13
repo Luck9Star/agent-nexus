@@ -15,6 +15,7 @@ unavailable.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -25,7 +26,7 @@ from mcp import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
-from mcp.types import TextContent
+from mcp.types import EmbeddedResource, ImageContent, TextContent
 
 from agent_nexus.models.external_mcp import (
     ExternalServerConfig,
@@ -67,42 +68,57 @@ class ExternalMcpAdapter:
     async def connect(self) -> None:
         """Establish connection and discover tools.
 
-        On failure, logs a warning and returns without raising.  The adapter
-        will remain in a disconnected state (``is_alive`` returns False).
+        Retries up to ``connect_retries`` times on failure with 1s backoff.
+        On final failure, logs a warning and returns without raising.
+        The adapter will remain in a disconnected state (``is_alive`` returns False).
         """
-        try:
-            self._exit_stack = AsyncExitStack()
-            await self._exit_stack.__aenter__()
+        max_attempts = 1 + self._config.connect_retries
+        for attempt in range(1, max_attempts + 1):
+            try:
+                self._exit_stack = AsyncExitStack()
+                await self._exit_stack.__aenter__()
 
-            read_stream, write_stream = await self._open_transport()
+                read_stream, write_stream = await self._open_transport()
 
-            self._session = ClientSession(read_stream, write_stream)
-            await self._exit_stack.enter_async_context(self._session)
+                self._session = ClientSession(read_stream, write_stream)
+                await self._exit_stack.enter_async_context(self._session)
 
-            await self._session.initialize()
-            await self._discover_tools()
+                await self._session.initialize()
+                await self._discover_tools()
 
-            logger.info(
-                "Connected to external MCP server '%s' (%s), discovered %d tool(s)",
-                self._config.name,
-                self._config.transport,
-                len(self._tool_schemas),
-            )
-        except Exception as exc:
-            logger.warning(
-                "Failed to connect to external MCP server '%s' (%s): %s [%s]",
-                self._config.name,
-                self._config.transport,
-                exc,
-                type(exc).__name__,
-            )
-            # Clean up partial state
-            await self._safe_disconnect()
-        except BaseException:
-            # CancelledError (or other BaseException) — clean up to prevent
-            # AsyncExitStack / stream resource leak, then re-raise.
-            await self._safe_disconnect()
-            raise
+                logger.info(
+                    "Connected to external MCP server '%s' (%s), discovered %d tool(s)",
+                    self._config.name,
+                    self._config.transport,
+                    len(self._tool_schemas),
+                )
+                return
+            except Exception as exc:
+                await self._safe_disconnect()
+                if attempt < max_attempts:
+                    logger.info(
+                        "Connection attempt %d/%d to '%s' failed: %s, retrying in 1s",
+                        attempt,
+                        max_attempts,
+                        self._config.name,
+                        exc,
+                    )
+                    await asyncio.sleep(1.0)
+                else:
+                    logger.warning(
+                        (
+                            "Failed to connect to external MCP server"
+                            " '%s' (%s) after %d attempt(s): %s [%s]"
+                        ),
+                        self._config.name,
+                        self._config.transport,
+                        max_attempts,
+                        exc,
+                        type(exc).__name__,
+                    )
+            except BaseException:
+                await self._safe_disconnect()
+                raise
 
     async def disconnect(self) -> None:
         """Disconnect from the external MCP Server."""
@@ -126,7 +142,9 @@ class ExternalMcpAdapter:
 
     # -- Tool invocation -----------------------------------------------------
 
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
+    async def call_tool(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> tuple[str, list[Any], bool]:
         """Call a tool on the external MCP Server.
 
         Args:
@@ -134,11 +152,14 @@ class ExternalMcpAdapter:
             arguments: Tool input arguments.
 
         Returns:
-            Concatenated text content from the tool result.
+            Tuple of (text_output, raw_content_blocks, is_error).
+            text_output: Concatenated text from TextContent blocks.
+            raw_content_blocks: All original content blocks (TextContent,
+                ImageContent, EmbeddedResource) for passthrough.
+            is_error: Whether the external server reported an error.
 
         Raises:
-            RuntimeError: If the adapter is not connected or the tool
-                returns an error response.
+            RuntimeError: If the adapter is not connected.
         """
         if self._session is None or not self.is_alive:
             raise RuntimeError(f"External MCP server '{self._config.name}' is not connected")
@@ -156,16 +177,31 @@ class ExternalMcpAdapter:
         if schema is not None:
             self._validate_arguments(tool_name, schema, arguments)
 
-        result = await self._session.call_tool(tool_name, arguments)
+        result = await asyncio.wait_for(
+            self._session.call_tool(tool_name, arguments),
+            timeout=self._config.tool_timeout,
+        )
 
-        # Extract text from content blocks; non-text blocks are represented
-        # as placeholders so callers know content was present but omitted.
+        # Extract text from TextContent blocks; preserve all content types
+        # for upstream passthrough.
         text_parts: list[str] = []
         for block in result.content:
             if isinstance(block, TextContent):
                 text_parts.append(block.text)
+            elif isinstance(block, (ImageContent, EmbeddedResource)):
+                logger.debug(
+                    "External MCP server '%s' tool '%s' returned %s content",
+                    self._config.name,
+                    tool_name,
+                    type(block).__name__,
+                )
             else:
-                text_parts.append(f"[{block.type} content omitted]")
+                logger.debug(
+                    "External MCP server '%s' tool '%s' returned unknown content type: %s",
+                    self._config.name,
+                    tool_name,
+                    block.type,
+                )
 
         output = "\n".join(text_parts) if text_parts else ""
 
@@ -176,12 +212,8 @@ class ExternalMcpAdapter:
                 tool_name,
                 output,
             )
-            raise RuntimeError(
-                f"External MCP server '{self._config.name}' "
-                f"tool '{tool_name}' returned error: {output}"
-            )
 
-        return output
+        return output, list(result.content), result.isError
 
     # -- Properties ----------------------------------------------------------
 
@@ -298,7 +330,9 @@ class ExternalMcpAdapter:
             auth: Any = None,
         ) -> httpx.AsyncClient:
             return httpx.AsyncClient(
-                headers=headers, timeout=timeout, auth=auth,
+                headers=headers,
+                timeout=timeout,
+                auth=auth,
                 verify=self._config.tls_verify,
             )
 
@@ -327,7 +361,9 @@ class ExternalMcpAdapter:
             auth: Any = None,
         ) -> httpx.AsyncClient:
             return httpx.AsyncClient(
-                headers=headers, timeout=timeout, auth=auth,
+                headers=headers,
+                timeout=timeout,
+                auth=auth,
                 verify=self._config.tls_verify,
             )
 
@@ -388,9 +424,7 @@ class ExternalMcpAdapter:
         # Missing required arguments
         missing = required - set(arguments.keys())
         if missing:
-            raise ValueError(
-                f"Tool '{tool_name}' missing required arguments: {sorted(missing)}"
-            )
+            raise ValueError(f"Tool '{tool_name}' missing required arguments: {sorted(missing)}")
 
         # Undeclared argument keys — warn but don't block (external servers
         # may accept additional properties).

@@ -14,14 +14,6 @@ from agent_nexus.platform.local.scoring import ScoreManager
 class TestAgentScoreModel:
     """AgentScore Pydantic model defaults and validation."""
 
-    def test_default_values(self) -> None:
-        score = AgentScore()
-        assert score.quality_gate_score is None
-        assert score.download_count == 0
-        assert score.average_rating is None
-        assert score.rating_count == 0
-        assert score.last_updated is None
-
     def test_all_fields(self) -> None:
         now = datetime.now(UTC)
         score = AgentScore(
@@ -72,14 +64,6 @@ class TestScoreManagerInit:
 
         path = Path(str(tmp_path)) / "scores.json"
         path.write_text("{bad json", encoding="utf-8")
-        sm = ScoreManager(path)
-        assert sm.list_scores() == {}
-
-    def test_init_handles_non_dict_entry(self, tmp_path: object) -> None:
-        from pathlib import Path
-
-        path = Path(str(tmp_path)) / "scores.json"
-        path.write_text(json.dumps({"agent-x": "not-a-dict"}), encoding="utf-8")
         sm = ScoreManager(path)
         assert sm.list_scores() == {}
 

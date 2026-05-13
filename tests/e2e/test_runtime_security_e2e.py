@@ -402,8 +402,7 @@ class TestAdditionalBypassVectors:
         """concurrent.futures.ProcessPoolExecutor bypass is blocked."""
         checker = SecurityChecker()
         violations = checker.check_code(
-            "from concurrent.futures import ProcessPoolExecutor\n"
-            "pool = ProcessPoolExecutor()"
+            "from concurrent.futures import ProcessPoolExecutor\npool = ProcessPoolExecutor()"
         )
         assert len(violations) >= 1
         types = {v.rule_type for v in violations}
@@ -436,9 +435,7 @@ class TestAdditionalBypassVectors:
         """IPythonExecutor rejects concurrent.futures import at execution time."""
         executor = IPythonExecutor()
         try:
-            result = await executor.execute(
-                "from concurrent.futures import ProcessPoolExecutor"
-            )
+            result = await executor.execute("from concurrent.futures import ProcessPoolExecutor")
             assert result.success is False
             assert result.error is not None and "security violation" in result.error.lower()
         finally:
@@ -535,17 +532,13 @@ class TestAdvancedBypassVectors:
     def test_importlib_import_module_bypass_blocked(self) -> None:
         """importlib.import_module('os') bypass attempt is blocked."""
         checker = SecurityChecker()
-        violations = checker.check_code(
-            "import importlib\nos = importlib.import_module('os')"
-        )
+        violations = checker.check_code("import importlib\nos = importlib.import_module('os')")
         assert len(violations) >= 1
 
     def test_compile_run_chain_blocked(self) -> None:
         """compile() is blocked by FunctionRule at AST level."""
         checker = SecurityChecker()
-        violations = checker.check_code(
-            "code_obj = compile('import os', '<string>', 'run')"
-        )
+        violations = checker.check_code("code_obj = compile('import os', '<string>', 'run')")
         assert len(violations) >= 1
         assert violations[0].rule_type == "function"
         assert "compile" in violations[0].message
@@ -553,9 +546,7 @@ class TestAdvancedBypassVectors:
     def test_base64_decode_exec_blocked(self) -> None:
         """Base64-decoded payload with exec() is blocked at function level."""
         checker = SecurityChecker()
-        violations = checker.check_code(
-            "import base64\nexec(base64.b64decode('aW1wb3J0IG9z'))"
-        )
+        violations = checker.check_code("import base64\nexec(base64.b64decode('aW1wb3J0IG9z'))")
         assert len(violations) >= 1
         types = {v.rule_type for v in violations}
         assert "function" in types  # exec() is caught by FunctionRule
@@ -598,9 +589,7 @@ class TestAdvancedBypassVectors:
         """Attempting to create and run code objects via compile is blocked."""
         executor = IPythonExecutor()
         try:
-            result = await executor.execute(
-                "code_obj = compile('x = 1', '<test>', 'exec')"
-            )
+            result = await executor.execute("code_obj = compile('x = 1', '<test>', 'exec')")
             assert result.success is False
             assert result.error is not None and "security violation" in result.error.lower()
         finally:
@@ -617,18 +606,14 @@ class TestAsyncIOBypassVectors:
 
     def test_ast_blocks_create_subprocess_exec(self) -> None:
         checker = SecurityChecker()
-        violations = checker.check_code(
-            "import asyncio\nasyncio.create_subprocess_exec('ls')"
-        )
+        violations = checker.check_code("import asyncio\nasyncio.create_subprocess_exec('ls')")
         assert len(violations) >= 1
         msgs = " ".join(v.message for v in violations)
         assert "create_subprocess_exec" in msgs
 
     def test_ast_blocks_create_subprocess_shell(self) -> None:
         checker = SecurityChecker()
-        violations = checker.check_code(
-            "import asyncio\nasyncio.create_subprocess_shell('ls')"
-        )
+        violations = checker.check_code("import asyncio\nasyncio.create_subprocess_shell('ls')")
         assert len(violations) >= 1
         msgs = " ".join(v.message for v in violations)
         assert "create_subprocess_shell" in msgs
@@ -636,9 +621,7 @@ class TestAsyncIOBypassVectors:
     def test_ast_allows_safe_asyncio_usage(self) -> None:
         """Non-subprocess asyncio calls (async def, gather, etc.) are allowed."""
         checker = SecurityChecker()
-        violations = checker.check_code(
-            "import asyncio\nasyncio.gather(asyncio.sleep(0.1))"
-        )
+        violations = checker.check_code("import asyncio\nasyncio.gather(asyncio.sleep(0.1))")
         assert all("asyncio" not in v.message for v in violations)
 
     @pytest.mark.asyncio
@@ -707,9 +690,7 @@ class TestExecutorTimeoutContamination:
         """Code that exceeds timeout marks executor as contaminated."""
         executor = IPythonExecutor()
         try:
-            result = await executor.execute(
-                "import time; time.sleep(3)", timeout=0.3
-            )
+            result = await executor.execute("import time; time.sleep(3)", timeout=0.3)
             assert result.success is False
             assert result.error is not None and "timed out" in result.error.lower()
         finally:
@@ -721,9 +702,7 @@ class TestExecutorTimeoutContamination:
         executor = IPythonExecutor()
         try:
             # Trigger timeout
-            await executor.execute(
-                "import time; time.sleep(3)", timeout=0.3
-            )
+            await executor.execute("import time; time.sleep(3)", timeout=0.3)
             # Subsequent call should fail (shell contaminated)
             result = await executor.execute("x = 1", timeout=5.0)
             assert result.success is False
@@ -736,9 +715,7 @@ class TestExecutorTimeoutContamination:
         """reset() clears contaminated state, allowing execution again."""
         executor = IPythonExecutor()
         try:
-            await executor.execute(
-                "import time; time.sleep(3)", timeout=0.3
-            )
+            await executor.execute("import time; time.sleep(3)", timeout=0.3)
             executor.reset()
             result = await executor.execute("x = 42", timeout=5.0)
             assert result.success is True
@@ -762,10 +739,7 @@ class TestExecutorConcurrentSerialization:
 
         executor = IPythonExecutor()
         try:
-            tasks = [
-                executor.execute(f"x{i} = {i}", timeout=5.0)
-                for i in range(5)
-            ]
+            tasks = [executor.execute(f"x{i} = {i}", timeout=5.0) for i in range(5)]
             results = await asyncio.gather(*tasks)
             assert all(r.success for r in results)
             # All variables should be set

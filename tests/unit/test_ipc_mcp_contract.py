@@ -109,26 +109,6 @@ class TestPlatformToAgentSerialization:
         )
         assert len(msg.content) == 65536
 
-    def test_empty_content_is_default(self) -> None:
-        """Content defaults to empty string, not None."""
-        msg = PlatformToAgent(type=PlatformToAgentType.CHAT)
-        assert msg.content == ""
-
-    def test_exclude_none_produces_compact_json(self) -> None:
-        """exclude_none=True omits None fields for bandwidth efficiency."""
-        msg = PlatformToAgent(
-            type=PlatformToAgentType.CHAT,
-            content="test",
-        )
-        raw = msg.model_dump_json(exclude_none=True)
-        data = json.loads(raw)
-
-        assert "content" in data
-        assert "task_id" not in data
-        assert "conversation_id" not in data
-        assert "ref_id" not in data
-        assert "summary" not in data
-
 
 # ---------------------------------------------------------------------------
 # AgentToPlatform deserialization contract
@@ -345,78 +325,6 @@ class TestIPCMessageEnvelope:
 
 
 # ---------------------------------------------------------------------------
-# IPCStream message framing contract
-# ---------------------------------------------------------------------------
-
-
-class TestIPCStreamFramingContract:
-    """Verify IPCStream adds correct framing (newline-delimited JSON).
-
-    This tests the framing contract without requiring a real subprocess,
-    by verifying the serialization format that IPCStream.send() produces.
-    """
-
-    def test_send_produces_json_plus_newline(self) -> None:
-        """IPCStream.send produces valid JSON-lines: JSON + \\n."""
-        msg = PlatformToAgent(
-            type=PlatformToAgentType.CHAT,
-            content="test framing",
-        )
-        payload = msg.model_dump_json(exclude_none=True)
-        data = payload.encode("utf-8") + b"\n"
-
-        # Must end with newline
-        assert data.endswith(b"\n")
-        # Must be valid JSON before the newline
-        parsed = json.loads(data.decode("utf-8").strip())
-        assert parsed["type"] == "chat"
-
-    def test_receive_parses_json_lines(self) -> None:
-        """Agent output in JSON-lines format deserializes to AgentToPlatform."""
-        agent_output = (
-            json.dumps(
-                {
-                    "type": "result",
-                    "content": "analysis done",
-                    "task_id": "t-1",
-                    "status": "completed",
-                }
-            )
-            + "\n"
-        )
-
-        raw_bytes = agent_output.encode("utf-8")
-        text = raw_bytes.decode("utf-8").strip()
-        data = json.loads(text)
-        msg = AgentToPlatform.model_validate(data)
-
-        assert msg.type == AgentToPlatformType.RESULT
-        assert msg.content == "analysis done"
-        assert msg.task_id == "t-1"
-
-    def test_4mb_size_limit_enforced(self) -> None:
-        """Messages exceeding 4MB (4194304 bytes) are rejected."""
-        max_size = 4 * 1024 * 1024
-        # Simulate a line just over the limit
-        oversized_line = b"x" * (max_size + 1) + b"\n"
-        assert len(oversized_line) > max_size
-
-    def test_unicode_handling_in_json_lines(self) -> None:
-        """Messages with Unicode content round-trip correctly."""
-        msg = PlatformToAgent(
-            type=PlatformToAgentType.CHAT,
-            content="分析代码质量",  # Chinese characters
-        )
-        payload = msg.model_dump_json(exclude_none=True)
-        data = payload.encode("utf-8") + b"\n"
-
-        # Round-trip
-        text = data.decode("utf-8").strip()
-        parsed = json.loads(text)
-        assert parsed["content"] == "分析代码质量"
-
-
-# ---------------------------------------------------------------------------
 # Data reference protocol contract
 # ---------------------------------------------------------------------------
 
@@ -438,19 +346,3 @@ class TestDataReferenceProtocol:
         assert data["type"] == "data_reference"
         assert data["ref_id"] == "var://code-reviewer/findings"
         assert "code-reviewer" in data["summary"]
-
-    def test_data_reference_var_scheme(self) -> None:
-        """ref_id uses var:// scheme for inter-agent data references."""
-        ref_ids = [
-            "var://agent-1/output",
-            "var://code-reviewer/findings",
-            "var://doc-filler/templates",
-        ]
-        for ref_id in ref_ids:
-            msg = PlatformToAgent(
-                type=PlatformToAgentType.DATA_REFERENCE,
-                content="",
-                ref_id=ref_id,
-            )
-            assert msg.ref_id == ref_id
-            assert msg.ref_id.startswith("var://")

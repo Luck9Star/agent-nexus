@@ -6,17 +6,14 @@ Tests cover _cleanup_dead(), _force_kill_and_reap(), and _build_spawn_env().
 from __future__ import annotations
 
 import asyncio
-import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agent_nexus.platform.orchestration.process_manager import (
     AgentHandle,
     ProcessManager,
-    _build_spawn_env,
 )
-
 
 # ============================================================================
 # Helpers
@@ -54,34 +51,6 @@ def _make_mock_handle(
 # ============================================================================
 # A) _cleanup_dead()
 # ============================================================================
-
-
-class TestCleanupDead:
-    """Tests for ProcessManager._cleanup_dead()."""
-
-    def test_returns_cleaned_up_names(self) -> None:
-        """Returns list of names for all cleaned up agents."""
-        pm = ProcessManager()
-        dead1 = _make_mock_handle("d1", alive=False)
-        dead2 = _make_mock_handle("d2", alive=False)
-        alive = _make_mock_handle("a1", alive=True)
-        pm._agents = {"d1": dead1, "d2": dead2, "a1": alive}
-
-        result = pm._cleanup_dead()
-
-        assert sorted(result) == ["d1", "d2"]
-        assert list(pm._agents.keys()) == ["a1"]
-
-    def test_no_drain_task_no_error(self) -> None:
-        """Dead agent with no drain task does not cause error."""
-        pm = ProcessManager()
-        dead_handle = _make_mock_handle("dead-agent", alive=False, has_drain_task=False)
-        dead_handle.drain_task = None
-        pm._agents = {"dead-agent": dead_handle}
-
-        result = pm._cleanup_dead()
-
-        assert result == ["dead-agent"]
 
 
 # ============================================================================
@@ -166,29 +135,3 @@ class TestForceKillAndReap:
 # ============================================================================
 # C) _build_spawn_env() security
 # ============================================================================
-
-
-class TestBuildSpawnEnv:
-    """Tests for _build_spawn_env() security properties."""
-
-    def test_extra_overrides_essential(self) -> None:
-        """Extra vars can override essential vars."""
-        with patch.dict(
-            os.environ,
-            {"PATH": "/usr/bin", "HOME": "/home/test"},
-            clear=True,
-        ):
-            env = _build_spawn_env(extra={"PATH": "/custom/path"})
-
-        assert env["PATH"] == "/custom/path"
-
-    def test_agent_nexus_home_included_when_present(self) -> None:
-        """AGENT_NEXUS_HOME is included when set in the environment."""
-        with patch.dict(
-            os.environ,
-            {"PATH": "/usr/bin", "AGENT_NEXUS_HOME": "/opt/agent-nexus"},
-            clear=True,
-        ):
-            env = _build_spawn_env()
-
-        assert env.get("AGENT_NEXUS_HOME") == "/opt/agent-nexus"

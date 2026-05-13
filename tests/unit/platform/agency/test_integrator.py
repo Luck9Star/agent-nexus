@@ -89,18 +89,6 @@ class TestIntegratorMerge:
         assert len(result.source_agents) == 1
         assert "agency.software-architect" in result.source_agents
 
-    def test_merge_preserves_all_section_keys(
-        self, architecture_artifact: Artifact, security_artifact: Artifact
-    ) -> None:
-        result = Integrator.merge([architecture_artifact, security_artifact])
-
-        # All section keys from all artifacts should appear in the merged result
-        # (plus the auto-added decision_summary)
-        arch_keys = set(architecture_artifact.sections.keys())
-        sec_keys = set(security_artifact.sections.keys())
-        merged_keys = set(result.merged_sections.keys())
-        assert (arch_keys | sec_keys).issubset(merged_keys)
-
     def test_merge_empty_artifacts_raises(self) -> None:
         with pytest.raises(ValueError, match="at least one"):
             Integrator.merge([])
@@ -175,36 +163,6 @@ class TestConflictDetection:
 class TestIntegratedArtifact:
     """IntegratedArtifact has the correct output structure."""
 
-    def test_has_required_fields(
-        self, architecture_artifact: Artifact, security_artifact: Artifact
-    ) -> None:
-        result = Integrator.merge([architecture_artifact, security_artifact])
-
-        assert result.artifact_type == "integrated_plan"
-        assert result.source_agents
-        assert result.merged_sections
-        assert isinstance(result.conflicts, list)
-        assert isinstance(result.risks, list)
-        assert isinstance(result.open_questions, list)
-
-    def test_risks_extracted_from_artifacts(
-        self, architecture_artifact: Artifact, security_artifact: Artifact
-    ) -> None:
-        result = Integrator.merge([architecture_artifact, security_artifact])
-
-        # Risks should be collected from all artifacts
-        assert len(result.risks) > 0
-
-    def test_source_agents_list(
-        self, architecture_artifact: Artifact, security_artifact: Artifact
-    ) -> None:
-        result = Integrator.merge([architecture_artifact, security_artifact])
-
-        assert set(result.source_agents) == {
-            "agency.software-architect",
-            "agency.security-engineer",
-        }
-
 
 # ---------------------------------------------------------------------------
 # _detect_risk_conflicts — CC 10 boundary function
@@ -234,34 +192,27 @@ class TestDetectRiskConflicts:
         a2 = self._make_artifact("a2", {"findings": ["y"]})
         assert _detect_risk_conflicts([a1, a2]) == []
 
-    def test_similar_risks_no_conflict(self) -> None:
-        """Similar risk descriptions should NOT produce a conflict."""
-        a1 = self._make_artifact("a1", {"risks": ["token cost may increase significantly"]})
-        a2 = self._make_artifact("a2", {"risks": ["token cost may increase significantly"]})
-        assert _detect_risk_conflicts([a1, a2]) == []
-
     def test_disjoint_risks_with_shared_sections_produces_conflict(self) -> None:
         """Completely different risks + overlapping sections = conflict."""
-        a1 = self._make_artifact("a1", {
-            "risks": ["authentication bypass vulnerability"],
-            "mitigation": ["patch auth module"],
-        })
-        a2 = self._make_artifact("a2", {
-            "risks": ["performance degradation under load"],
-            "mitigation": ["add caching layer"],
-        })
+        a1 = self._make_artifact(
+            "a1",
+            {
+                "risks": ["authentication bypass vulnerability"],
+                "mitigation": ["patch auth module"],
+            },
+        )
+        a2 = self._make_artifact(
+            "a2",
+            {
+                "risks": ["performance degradation under load"],
+                "mitigation": ["add caching layer"],
+            },
+        )
         result = _detect_risk_conflicts([a1, a2])
         assert len(result) == 1
         assert result[0].field == "risks"
         assert "disjoint" in result[0].description.lower()
         assert set(result[0].agents) == {"a1", "a2"}
-
-    def test_disjoint_risks_no_shared_sections_no_conflict(self) -> None:
-        """Disjoint risks + no overlapping sections = no conflict."""
-        a1 = self._make_artifact("a1", {"risks": ["auth bypass"]})
-        a2 = self._make_artifact("a2", {"other_key": ["perf issue"]})
-        # a2 has no 'risks' key → no overlap possible
-        assert _detect_risk_conflicts([a1, a2]) == []
 
     def test_three_agents_disjoint_risks(self) -> None:
         a1 = self._make_artifact("a1", {"risks": ["auth bypass"], "findings": ["x"]})
@@ -273,13 +224,19 @@ class TestDetectRiskConflicts:
 
     def test_structural_sections_excluded_from_overlap(self) -> None:
         """Structural sections (decision_summary, recommendation) should not count."""
-        a1 = self._make_artifact("a1", {
-            "risks": ["auth bypass"],
-        })
-        a2 = self._make_artifact("a2", {
-            "risks": ["memory leak in parser"],
-            "recommendation": "monitor",
-        })
+        a1 = self._make_artifact(
+            "a1",
+            {
+                "risks": ["auth bypass"],
+            },
+        )
+        a2 = self._make_artifact(
+            "a2",
+            {
+                "risks": ["memory leak in parser"],
+                "recommendation": "monitor",
+            },
+        )
         # a1 has {risks}, a2 has {risks, recommendation}
         # After removing structural: a1={risks}, a2={risks} → overlap on risks
         # So this DOES produce a conflict

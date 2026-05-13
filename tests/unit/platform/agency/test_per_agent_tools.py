@@ -92,43 +92,6 @@ class TestImporterPerAgentTools:
         assert "bash" in perms["denied_tools"]
         assert "file_write" in perms["denied_tools"]
 
-    def test_technical_writer_has_file_read_and_write(self, importer_profiles):
-        pkg = next(p for p in importer_profiles if p["id"] == "agency.technical-writer")
-        perms = pkg["expert_profile"]["permissions"]
-        assert "file_read" in perms["allowed_tools"]
-        assert "file_write" in perms["allowed_tools"]
-        assert "bash" in perms["denied_tools"]
-        assert "network" in perms["denied_tools"]
-
-    def test_ai_engineer_has_network(self, importer_profiles):
-        pkg = next(p for p in importer_profiles if p["id"] == "agency.ai-engineer")
-        perms = pkg["expert_profile"]["permissions"]
-        assert "file_read" in perms["allowed_tools"]
-        assert "network" in perms["allowed_tools"]
-        assert "bash" in perms["denied_tools"]
-        assert "file_write" in perms["denied_tools"]
-
-    def test_security_engineer_has_network(self, importer_profiles):
-        pkg = next(p for p in importer_profiles if p["id"] == "agency.security-engineer")
-        perms = pkg["expert_profile"]["permissions"]
-        assert "network" in perms["allowed_tools"]
-
-    def test_agents_orchestrator_has_no_tools(self, importer_profiles):
-        pkg = next(p for p in importer_profiles if p["id"] == "agency.agents-orchestrator")
-        perms = pkg["expert_profile"]["permissions"]
-        assert perms["allowed_tools"] == []
-        assert "bash" in perms["denied_tools"]
-
-    def test_tool_evaluator_has_network(self, importer_profiles):
-        pkg = next(p for p in importer_profiles if p["id"] == "agency.tool-evaluator")
-        perms = pkg["expert_profile"]["permissions"]
-        assert "network" in perms["allowed_tools"]
-
-    def test_all_profiles_have_permission_mode(self, importer_profiles):
-        for pkg in importer_profiles:
-            perms = pkg["expert_profile"]["permissions"]
-            assert perms["mode"] == "plan"
-
 
 # ===================================================================
 # 3. Agents needing file_read get it

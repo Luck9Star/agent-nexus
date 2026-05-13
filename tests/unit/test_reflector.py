@@ -17,13 +17,6 @@ from agent_nexus.platform.agency.reflector import (
 
 
 class TestReflection:
-    def test_creation(self):
-        r = Reflection(sufficient=True, reason="looks good")
-        assert r.sufficient is True
-        assert r.reason == "looks good"
-        assert r.feedback == ""
-        assert r.next_queries == []
-
     def test_with_feedback(self):
         r = Reflection(
             sufficient=False,

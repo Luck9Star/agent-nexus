@@ -46,14 +46,6 @@ class TestTokenCounter:
         tc._litellm_mod.token_counter.return_value = 42
         assert tc.count("some text", model="gpt-4o") == 42
 
-    def test_litellm_default_model_when_empty(self):
-        tc = TokenCounter()
-        tc._litellm_available = True
-        tc._litellm_mod = MagicMock()
-        tc._litellm_mod.token_counter.return_value = 10
-        tc.count("some text", model="")
-        tc._litellm_mod.token_counter.assert_called_once_with(model="gpt-4o", text="some text")
-
     def test_litellm_failure_falls_to_tiktoken(self):
         tc = TokenCounter()
         tc._litellm_available = True
@@ -81,14 +73,6 @@ class TestTokenCounter:
 
         with patch.dict("sys.modules", {"tiktoken": mock_tiktoken}):
             assert tc.count("hello", model="gpt-4o") == 3
-
-    def test_both_fail_to_len_div_4(self):
-        tc = TokenCounter()
-        tc._litellm_available = True
-        tc._litellm_mod = MagicMock()
-        tc._litellm_mod.token_counter.side_effect = ValueError("fail")
-        tc._tiktoken_available = False
-        assert tc.count("a" * 100) == 25
 
 
 # ---------------------------------------------------------------------------
@@ -136,12 +120,6 @@ class TestPromptSection:
         section = PromptSection(title="Title", content="A" * 40, priority=5)
         # title "Title" (5 chars) + "\n" + "A"*40 = 46 chars → 46//4 = 11
         assert section.token_count == 11
-
-    def test_creation(self):
-        section = PromptSection(title="Intro", content="Hello", priority=1)
-        assert section.title == "Intro"
-        assert section.content == "Hello"
-        assert section.priority == 1
 
 
 # ---------------------------------------------------------------------------

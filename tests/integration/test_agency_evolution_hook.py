@@ -69,9 +69,7 @@ def _seed_skill(store: EvolutionStore, skill_id: str = "test-skill__v1") -> None
 class TestTriggerEvolutionWithEngine:
     """Tests for the _trigger_evolution() -> EvolutionEngine.evolve() path."""
 
-    def test_trigger_evolution_with_engine_and_suggestions(
-        self, engine: EvolutionEngine
-    ) -> None:
+    def test_trigger_evolution_with_engine_and_suggestions(self, engine: EvolutionEngine) -> None:
         """When skill IDs match, analyzer produces suggestions for unhealthy skills.
 
         Note: The agency pipeline's agent_id format (e.g. 'agency.expert-a')
@@ -101,9 +99,7 @@ class TestTriggerEvolutionWithEngine:
         composer._trigger_evolution(result)
         assert result.evolution_triggered is True
 
-    def test_trigger_evolution_agent_id_format_mismatch(
-        self, engine: EvolutionEngine
-    ) -> None:
+    def test_trigger_evolution_agent_id_format_mismatch(self, engine: EvolutionEngine) -> None:
         """Agent IDs like 'agency.expert-a' won't fuzzy-match 'skill__v1' format.
 
         This documents the current behavior: the analyzer requires skill IDs to
@@ -175,9 +171,7 @@ class TestTriggerEvolutionWithEngine:
         composer._trigger_evolution(result)
         assert result.evolution_triggered is False
 
-    def test_trigger_evolution_no_suggestions(
-        self, engine: EvolutionEngine
-    ) -> None:
+    def test_trigger_evolution_no_suggestions(self, engine: EvolutionEngine) -> None:
         """When engine finds no suggestions, evolution_triggered stays False."""
         # Empty store, no skills to analyze -> no suggestions
         registry = ExpertRegistry()
@@ -235,9 +229,7 @@ class TestTriggerEvolutionWithEngine:
         assert isinstance(call_kwargs["ctx"], EvolutionContext)
         assert call_kwargs["ctx"].agent_id == "agency.x"
 
-    def test_run_method_triggers_evolution_with_engine(
-        self, engine: EvolutionEngine
-    ) -> None:
+    def test_run_method_triggers_evolution_with_engine(self, engine: EvolutionEngine) -> None:
         """Full run() path: when evolution_engine is injected, it's called.
 
         With an empty ExpertRegistry, no specialists are selected so the

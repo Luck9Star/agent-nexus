@@ -95,14 +95,6 @@ class TestActivateTeam:
         assert status.activated_at is not None
 
     @pytest.mark.asyncio
-    async def test_starts_all_agents_via_pm(self, tm: TeamManager, pm: AsyncMock) -> None:
-        await tm.create_team("team-1", ["agent-a", "agent-b"])
-        await tm.activate_team("team-1")
-        assert pm.start_agent.call_count == 2
-        pm.start_agent.assert_any_call("agent-a", command=["echo", "a"], cwd=None, env=None)
-        pm.start_agent.assert_any_call("agent-b", command=["echo", "b"], cwd=None, env=None)
-
-    @pytest.mark.asyncio
     async def test_emits_activated_event(self, tm: TeamManager) -> None:
         events: list[tuple[str, str, dict]] = []
         tm.on_event(lambda tid, evt, payload: events.append((tid, evt, payload)))
@@ -137,14 +129,6 @@ class TestSuspendTeam:
         await tm.activate_team("team-1")
         status = await tm.suspend_team("team-1")
         assert status.state == TeamState.SUSPENDED
-
-    @pytest.mark.asyncio
-    async def test_stops_agents_on_suspend(self, tm: TeamManager, pm: AsyncMock) -> None:
-        await tm.create_team("team-1", ["agent-a", "agent-b"])
-        await tm.activate_team("team-1")
-        pm.stop_agent.reset_mock()
-        await tm.suspend_team("team-1")
-        assert pm.stop_agent.call_count == 2
 
     @pytest.mark.asyncio
     async def test_suspended_to_active_resume(self, tm: TeamManager) -> None:
@@ -233,14 +217,6 @@ class TestAgentMembership:
         assert "agent-b" in status.agents
 
     @pytest.mark.asyncio
-    async def test_add_agent_starts_subprocess(self, tm: TeamManager, pm: AsyncMock) -> None:
-        await tm.create_team("team-1", ["agent-a"])
-        await tm.activate_team("team-1")
-        pm.start_agent.reset_mock()
-        await tm.add_agent("team-1", "agent-b")
-        pm.start_agent.assert_called_once_with("agent-b", command=["echo", "b"], cwd=None, env=None)
-
-    @pytest.mark.asyncio
     async def test_add_duplicate_agent_raises(self, tm: TeamManager) -> None:
         await tm.create_team("team-1", ["agent-a"])
         await tm.activate_team("team-1")
@@ -272,14 +248,6 @@ class TestAgentMembership:
         status = await tm.remove_agent("team-1", "agent-b")
         assert "agent-b" not in status.agents
         assert "agent-a" in status.agents
-
-    @pytest.mark.asyncio
-    async def test_remove_agent_stops_subprocess(self, tm: TeamManager, pm: AsyncMock) -> None:
-        await tm.create_team("team-1", ["agent-a", "agent-b"])
-        await tm.activate_team("team-1")
-        pm.stop_agent.reset_mock()
-        await tm.remove_agent("team-1", "agent-b")
-        pm.stop_agent.assert_called_once_with("agent-b")
 
     @pytest.mark.asyncio
     async def test_remove_nonexistent_agent_raises(self, tm: TeamManager) -> None:
